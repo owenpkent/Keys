@@ -43,6 +43,20 @@ Artifacts:
 - `build/Keys_artefacts/Release/VST3/Keys.vst3`
 - `build/Keys_artefacts/Release/Standalone/Keys.exe`
 
+## Tests
+
+Unit tests (JUCE UnitTest) cover the pure note-resolution logic. They build as a
+separate console target, so normal plugin builds stay fast:
+
+```powershell
+cmake --build build --config Release --target Keys_tests
+ctest --test-dir build -C Release --output-on-failure
+```
+
+CI builds and runs them on every push. The line's testing convention (what to test,
+how to keep it testable) is in
+[okstudio-juce-kit/docs/TESTING.md](../../okstudio-juce-kit/docs/TESTING.md).
+
 ## CMake options
 
 | Option | Default | Meaning |
