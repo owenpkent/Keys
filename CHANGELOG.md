@@ -19,4 +19,4 @@ All notable changes to Keys are documented here. Format follows
 - Fail-closed auto-updater from the shared kit (pinned OK Studio EV cert).
 - Build script, Inno Setup installer, and CI (Windows + macOS) off the OK Studio line.
 
-[Unreleased]: https://github.com/okstudio1/Keys
+[Unreleased]: https://github.com/owenpkent/Keys

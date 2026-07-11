@@ -23,10 +23,13 @@ jobs:
           ref: 8.0.8
           path: juce-sdk
 
+      # The kit is a private repo, so CI needs a token with read access to it.
+      # Add a repo secret KIT_REPO_TOKEN (a PAT that can read owenpkent/okstudio-juce-kit).
       - name: Checkout okstudio-juce-kit
         uses: actions/checkout@v4
         with:
-          repository: okstudio1/okstudio-juce-kit
+          repository: owenpkent/okstudio-juce-kit
+          token: ${{ secrets.KIT_REPO_TOKEN }}
           path: okstudio-juce-kit
 
       - name: Configure
