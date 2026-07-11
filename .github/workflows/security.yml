@@ -1,0 +1,37 @@
+name: Security scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '30 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  cppcheck:
+    name: cppcheck (static analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      # Advisory: surface warning / performance / portability findings (never fails).
+      - name: cppcheck (report)
+        run: >
+          cppcheck --enable=warning,performance,portability --inline-suppr
+          --suppress=missingInclude --suppress=missingIncludeSystem --suppress=unknownMacro
+          --std=c++20 --language=c++ src || true
+
+      # Gate: fail only on genuine error-severity bugs (out-of-bounds, null deref, ...).
+      # Parser noise from JUCE headers we don't compile here is suppressed.
+      - name: cppcheck (gate on errors)
+        run: >
+          cppcheck --error-exitcode=1 --quiet
+          --suppress=missingInclude --suppress=missingIncludeSystem --suppress=unknownMacro
+          --suppress=syntaxError --suppress=internalAstError --suppress=preprocessorErrorDirective
+          --std=c++20 --language=c++ src
