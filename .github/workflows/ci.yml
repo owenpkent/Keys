@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout JUCE
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.8
+          path: juce-sdk
+
+      - name: Checkout okstudio-juce-kit
+        uses: actions/checkout@v4
+        with:
+          repository: okstudio1/okstudio-juce-kit
+          path: okstudio-juce-kit
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DKEYS_JUCE_PATH="${{ github.workspace }}/juce-sdk"
+          -DOKSTUDIO_KIT_PATH="${{ github.workspace }}/okstudio-juce-kit"
+          -DKEYS_COPY_PLUGIN=OFF
+
+      - name: Build VST3
+        run: cmake --build build --config Release --target Keys_VST3
+
+      - name: Upload VST3 artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Keys-VST3-win64
+          path: build/Keys_artefacts/Release/VST3/Keys.vst3

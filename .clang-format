@@ -1,0 +1,18 @@
+# JUCE-flavored style, shared with the OK Studio line. Advisory, not CI-enforced.
+Language: Cpp
+Standard: c++20
+BasedOnStyle: LLVM
+BreakBeforeBraces: Allman
+IndentWidth: 4
+AccessModifierOffset: -4
+ColumnLimit: 120
+PointerAlignment: Left
+SpaceAfterLogicalNot: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+NamespaceIndentation: None
+FixNamespaceComments: true
+AlignConsecutiveAssignments: Consecutive
+IndentCaseLabels: true
+BinPackArguments: true
+BinPackParameters: true
