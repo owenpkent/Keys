@@ -43,6 +43,12 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --target Keys_VST3
 
+      - name: Build tests
+        run: cmake --build build --config Release --target Keys_tests
+
+      - name: Run tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Upload VST3 artifact
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4

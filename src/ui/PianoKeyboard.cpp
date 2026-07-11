@@ -1,4 +1,5 @@
 #include "PianoKeyboard.h"
+#include "../NoteMath.h"
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 #include <okstudio/Theme.h>
@@ -133,11 +134,7 @@ int PianoKeyboard::keyAt(juce::Point<float> pos) const
 
 int PianoKeyboard::outputNote(int drawnNote) const
 {
-    int n = drawnNote;
-    if (scaleLock)
-        n = okstudio::scales::snapToScale(n, rootPc, scaleIndex);
-    n += 12 * processor.octaveShift();
-    return juce::jlimit(0, 127, n);
+    return resolveOutputNote(drawnNote, scaleLock, rootPc, scaleIndex, processor.octaveShift());
 }
 
 void PianoKeyboard::refresh()

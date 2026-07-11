@@ -18,5 +18,8 @@ All notable changes to Keys are documented here. Format follows
   latch) persists with the DAW session.
 - Fail-closed auto-updater from the shared kit (pinned OK Studio EV cert).
 - Build script, Inno Setup installer, and CI (Windows + macOS) off the OK Studio line.
+- Unit tests (JUCE UnitTest + ctest) for note resolution; CI builds and runs them.
+- `src/NoteMath.h`: note-resolution logic factored out of the keyboard widget so it
+  is unit-testable without a UI.
 
 [Unreleased]: https://github.com/owenpkent/Keys
