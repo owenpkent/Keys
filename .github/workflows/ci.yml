@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: this workflow only reads source and uploads an artifact.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: ${{ matrix.os }}
@@ -14,23 +18,27 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Checkout JUCE
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: juce-framework/JUCE
           ref: 8.0.8
           path: juce-sdk
+          persist-credentials: false
 
       # The kit is a private repo, so CI needs a token with read access to it.
       # Add a repo secret KIT_REPO_TOKEN (a PAT that can read owenpkent/okstudio-juce-kit).
       - name: Checkout okstudio-juce-kit
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: owenpkent/okstudio-juce-kit
           token: ${{ secrets.KIT_REPO_TOKEN }}
           path: okstudio-juce-kit
+          persist-credentials: false
 
       - name: Configure
         run: >
@@ -51,7 +59,7 @@ jobs:
 
       - name: Upload VST3 artifact
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Keys-VST3-win64
           path: build/Keys_artefacts/Release/VST3/Keys.vst3
