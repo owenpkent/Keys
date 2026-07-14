@@ -8,14 +8,14 @@ disabilities: every control is a single click, a drag, or a scroll. No keyboard,
 right-clicks, no modifier keys.
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
-scale-lock, octave, channel, velocity, sustain and latch all save into the DAW
-project and come back when you reopen it. And it drops straight onto a track, with
-no loopMIDI to configure.
+scale-lock, octave, channel, velocity, sustain, latch, the Humanize settings, and
+your captured chord pads all save into the DAW project and come back when you reopen
+it. And it drops straight onto a track, with no loopMIDI to configure.
 
 Built with **JUCE 8** and **CMake**, on the shared
 [`okstudio-juce-kit`](../okstudio-juce-kit).
 
-<!-- ![Keys](assets/screenshots/keys.png) -->
+![Keys](assets/screenshots/keys.png)
 
 ## Playing it
 
@@ -24,7 +24,8 @@ Built with **JUCE 8** and **CMake**, on the shared
 | **Click** a key | Play that note |
 | **Click and drag** | Glide across keys (monophonic) |
 | **Latch on**, click keys | Toggle notes on and off to build and hold a chord |
-| **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; click **All Off** or turn Sustain off to release |
+| **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail; click **All Off** or turn Sustain off to release |
+| **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then click the pad to play it back |
 | **All Off** | Panic: stop every note on every channel |
 
 There is no right-click or keyboard shortcut for anything. Latch and Sustain are
@@ -42,6 +43,8 @@ on-screen toggles, not modifier keys, on purpose.
 | **MIDI Ch** | Output channel, 1–16 |
 | **Sustain** | Hold notes after release (pedal) |
 | **Latch** | Click to toggle notes on/off and hold them |
+| **Humanize** | Random velocity within a Min/Max range + micro-timing, so chords feel played |
+| **Chord pads** | Capture chords to eight pads and click to replay; **Excl** chokes the last chord, **Strum** spreads a pad's notes Up / Down / Random |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).

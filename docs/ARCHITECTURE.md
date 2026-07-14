@@ -8,9 +8,13 @@ on-screen piano into MIDI. Everything shared with the rest of the line comes fro
 
 ```
 src/
-├── PluginProcessor.{h,cpp}   # AudioProcessor: params, MIDI output, state
+├── PluginProcessor.{h,cpp}   # AudioProcessor: params, MIDI output, chord pads, state
 ├── PluginEditor.{h,cpp}      # controls + layout + updater button
-└── ui/PianoKeyboard.{h,cpp}  # the playable keyboard widget
+├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
+├── Chords.h                  # pure chord detector (names a note set), unit-tested
+└── ui/
+    ├── PianoKeyboard.{h,cpp} # the playable keyboard widget
+    └── ChordPads.{h,cpp}     # chord-pad row + live chord card (capture / recall)
 ```
 
 ## Threading: UI → audio note path
@@ -50,18 +54,43 @@ When a key starts sounding, `outputNote(drawnKey)` applies scale-lock
 result is stored in `sounding[drawnKey]`. Note-off uses that stored value, so a note
 turns off correctly even if you change octave or scale while it is held.
 
+## Humanize
+
+`KeysProcessor::noteOn` applies Humanize when it is on: it draws a uniform-random
+velocity in `[humanizeVelMin, humanizeVelMax]` per note and adds a random `0..humanizeTime`
+ms to the message timestamp, so simultaneous notes spread. Note-offs are never delayed,
+so a note can never release before it sounds. A `juce::Random`, touched only on the
+message thread, drives it.
+
+## Chord pads
+
+Eight pads live in the processor (`ChordPad { notes, name }`), so they persist and keep
+sounding independent of the editor; `ChordPads` is just the view. Build a chord on the
+keyboard (Latch), drag the live card onto a pad to `setChordPad` the sounding notes
+(named by `keys::chords::detect`), then click to `toggleChordPad` (play/stop, honouring
+the `chordExclusive` choke). Playback reuses `noteOn`, so Humanize colours each tone,
+and `chordStrum` / `chordStrumDir` order the notes and stagger their note-ons into a
+strum (via `noteOn`'s `delaySeconds`). Detection (`Chords.h`) rotates a pitch-class set
+over 12 candidate roots and scores each against a template library — root mandatory,
+3rd and 5th omittable — so it is unit-testable with no UI.
+
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
-`scaleLock`, `octave`, `channel`, `velocity`, `curve`, `sustain`, `latch`). The
-editor binds controls to them with attachments, and a 30 Hz timer pushes the derived
-config (range, scale-lock, sustain, latch) into the keyboard. `getStateInformation` /
-`setStateInformation` persist the APVTS via `okstudio::state`, so the whole setup
-saves with the DAW session.
+`scaleLock`, `octave`, `channel`, `velocity`, `curve`, `sustain`, `latch`, the Humanize
+set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, and the chord-pad
+settings `chordExclusive` / `chordStrum` / `chordStrumDir`). The editor binds controls
+with attachments — except the two-handle velocity range slider, which has no attachment
+(two values) and is synced to its two params by hand. A 30 Hz timer pushes derived
+config into the keyboard and the live chord into the pads. `getStateInformation` /
+`setStateInformation` persist the APVTS via `okstudio::state`, plus the captured chord
+pads as an extra state tree, so the whole setup saves with the DAW session.
 
 ## Editor
 
-`KeysEditor` owns the controls, the `PianoKeyboard`, and the update button. It sets
-the shared `LookAndFeel`, wires `keyboard.getVelocity` to the velocity+curve, and on
-construction fires `okstudio::updater::checkAsync` with the Keys config; if a newer
-signed release exists, a one-click "Update to vX.Y.Z" button appears.
+`KeysEditor` owns the controls, the `PianoKeyboard`, the `ChordPads` row, and the update
+button. It sets the shared `LookAndFeel` (retinted locally toward Octavium's neutral
+grey), wires both the keyboard and the pads to `KeysProcessor::baseVelocity01` (velocity
+slider through the curve), pushes the keyboard's sounding notes into the pads each timer
+tick, and on construction fires `okstudio::updater::checkAsync`; if a newer signed
+release exists, a one-click "Update to vX.Y.Z" button appears.

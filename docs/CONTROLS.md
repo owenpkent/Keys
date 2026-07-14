@@ -23,11 +23,17 @@ once, so those are how you stack notes.
 | **Scale** | dropdown | Scale used by Scale Lock (Major, Natural/Harmonic/Melodic Minor, the modes, pentatonics, Blues, Whole Tone, Chromatic) |
 | **Scale Lock** | toggle | On: each played note snaps to the nearest note in (Root, Scale); out-of-scale keys are dimmed so you see the shape. You cannot play a wrong note. |
 | **Octave** | inc/dec | Transpose the whole keyboard, -3..+3 octaves. Click the arrows or scroll. |
-| **Velocity** | slider | Base note velocity (1–127). Click or scroll. |
+| **Velocity** | slider | Base note velocity (1–127), used when Humanize is off. Click or scroll. |
 | **Curve** | dropdown | Shapes the velocity response: **Soft** (reach high velocities easily), **Linear**, **Hard** (stays quiet until you push) |
 | **MIDI Ch** | dropdown | Output channel, 1–16 |
-| **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. Turn off (or click All Off) to release them. |
+| **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail. Turn off (or click All Off) to release. |
 | **Latch** | toggle | On: clicking a key toggles it on or off and holds it. Drag to paint several on. Build and hold a chord with one finger. |
+| **Humanize** | toggle | On: each note gets a random velocity within the Humanize **Velocity** range plus a small timing offset, so repeats and chords don't sound machine-perfect. |
+| Humanize **Velocity** | two-handle slider | The Min/Max velocity each note is drawn from when Humanize is on (shown as "Velocity 64–88"). Grab either handle. |
+| Humanize **Timing** | slider | Micro-timing spread, 0–30 ms. |
+| **Excl** | toggle | Exclusive chord mode: playing a chord pad chokes the previously-playing pad, so only one pad chord sounds at a time. |
+| **Strum** | slider | Spread a chord pad's notes over 0–200 ms (a strum) instead of playing them together. |
+| **Dir** | dropdown | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. |
 | **All Off** | button | Panic. Stops every note on every channel. |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
@@ -39,3 +45,20 @@ once, so those are how you stack notes.
   Latch off clears the latched notes.
 
 Both persist with the DAW session, along with every other control here.
+
+## Chord pads
+
+A row of eight pads and a live chord card sit between the controls and the keyboard.
+They let you keep a palette of chords a single click away.
+
+1. **Build a chord.** Turn **Latch** on and click the notes you want. The card names
+   the chord it hears (for example `Cm7`).
+2. **Capture it.** Drag the card onto a pad. The pad stores that chord, auto-labelled.
+3. **Play it.** Click a filled pad to play the chord; click again to stop. Turn **Excl**
+   on so a new pad chokes the previous chord.
+4. **Rearrange or clear.** Drag a pad onto another to move it, or drag a pad off the
+   row to empty it.
+
+Pad chords play through the same output as the keys, so **Humanize** gives each chord
+tone its own velocity and the **Strum** control spreads them into a strum. The pads
+save with the DAW session.
