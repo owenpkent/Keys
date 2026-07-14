@@ -58,6 +58,7 @@ private:
     bool sustain = false, latch = false;
 
     std::vector<Key> keys;
+    float keysTop = 0.0f; // y of the top of the keybed (keys anchored to the bottom)
     std::set<int> pressed;      // drawn notes under the active mouse gesture
     std::set<int> latched;      // drawn notes toggled on
     std::set<int> sustained;    // drawn notes captured by the sustain pedal

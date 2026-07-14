@@ -42,12 +42,16 @@ private:
     juce::ToggleButton scaleLockButton { "Scale Lock" };
     juce::ToggleButton sustainButton { "Sustain" };
     juce::ToggleButton latchButton { "Latch" };
+    juce::ToggleButton humanizeButton { "Humanize" };
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
+    juce::Slider humanizeVelSlider, humanizeTimeSlider;
+    juce::Label humanizeVelLabel, humanizeTimeLabel;
+
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt;
-    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt;
-    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt;
+    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeVelAtt, humanizeTimeAtt;
+    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt;
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;

@@ -64,18 +64,37 @@ KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), proces
     addAndMakeVisible(velocitySlider);
     velocityAtt = std::make_unique<SliderAtt>(processor.apvts, "velocity", velocitySlider);
 
-    for (auto* b : { &scaleLockButton, &sustainButton, &latchButton })
+    for (auto* b : { &scaleLockButton, &sustainButton, &latchButton, &humanizeButton })
         addAndMakeVisible(*b);
     scaleLockAtt = std::make_unique<ButtonAtt>(processor.apvts, "scaleLock", scaleLockButton);
     sustainAtt = std::make_unique<ButtonAtt>(processor.apvts, "sustain", sustainButton);
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "latch", latchButton);
+    humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
+
+    // Humanize amounts: per-note velocity spread and micro-timing, active when Humanize is on.
+    styleLabel(humanizeVelLabel, "Vel Rand");
+    addAndMakeVisible(humanizeVelLabel);
+    humanizeVelSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    humanizeVelSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
+    humanizeVelSlider.setRange(0, 100, 1);
+    humanizeVelSlider.setTextValueSuffix("%");
+    addAndMakeVisible(humanizeVelSlider);
+    humanizeVelAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeVel", humanizeVelSlider);
+
+    styleLabel(humanizeTimeLabel, "Timing");
+    addAndMakeVisible(humanizeTimeLabel);
+    humanizeTimeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    humanizeTimeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
+    humanizeTimeSlider.setRange(0, 30, 1);
+    humanizeTimeSlider.setTextValueSuffix(" ms");
+    addAndMakeVisible(humanizeTimeSlider);
+    humanizeTimeAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeTime", humanizeTimeSlider);
 
     panicButton.onClick = [this] { keyboard.panic(); };
     addAndMakeVisible(panicButton);
 
-    updateButton.setVisible(false);
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
-    addAndMakeVisible(updateButton);
+    addChildComponent(updateButton); // hidden until the updater finds a newer release
 
     keyboard.getVelocity = [this] { return currentVelocity01(); };
     addAndMakeVisible(keyboard);
@@ -93,8 +112,8 @@ KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), proces
     });
 
     setResizable(true, true);
-    setResizeLimits(680, 300, 2200, 1000);
-    setSize(920, 380);
+    setResizeLimits(820, 300, 2200, 1000);
+    setSize(940, 330);
     startTimerHz(30);
 }
 
@@ -160,27 +179,42 @@ void KeysEditor::timerCallback()
                           (int) apvts.getRawParameterValue("scale")->load());
     keyboard.setSustain(apvts.getRawParameterValue("sustain")->load() > 0.5f);
     keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f);
+
+    // Grey the humanize amounts out when Humanize is off, so their state reads at a glance.
+    const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
+    humanizeVelSlider.setEnabled(hum);
+    humanizeTimeSlider.setEnabled(hum);
+    humanizeVelLabel.setEnabled(hum);
+    humanizeTimeLabel.setEnabled(hum);
 }
 
 void KeysEditor::paint(juce::Graphics& g)
 {
     g.fillAll(okstudio::theme::background);
     g.setColour(okstudio::theme::panel);
-    g.fillRect(getLocalBounds().removeFromTop(124));
+    g.fillRect(getLocalBounds().removeFromTop(162));
 }
 
 void KeysEditor::resized()
 {
     auto area = getLocalBounds().reduced(10);
 
-    auto header = area.removeFromTop(104);
-    title.setBounds(header.removeFromLeft(80).withTrimmedTop(30).withHeight(34));
+    // Give the keyboard a fixed height off the bottom, then let the three control rows
+    // take the space above. This keeps the keys piano-proportioned regardless of how
+    // tall the host makes the editor (extra height lands above the keys as body).
+    auto kb = area.removeFromBottom(150);
+    area.removeFromBottom(8);
+    auto header = area;
 
-    // Two rows of labelled controls. Each cell = a short label above its control.
-    auto rowA = header.removeFromTop(48);
-    auto rowB = header.removeFromTop(4).withHeight(0); // spacer only
-    juce::ignoreUnused(rowB);
-    auto rowTwo = header; // remaining ~48
+    const int rowH = 46;
+    title.setBounds(header.removeFromLeft(84).withTrimmedTop(header.getHeight() / 2 - 17).withHeight(34));
+    header.removeFromLeft(6);
+
+    auto rowA = header.removeFromTop(rowH);
+    header.removeFromTop(3);
+    auto rowB = header.removeFromTop(rowH);
+    header.removeFromTop(3);
+    auto rowC = header.removeFromTop(rowH);
 
     const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
     {
@@ -202,16 +236,19 @@ void KeysEditor::resized()
     cell(rowA, 120, octaveLabel, octaveSlider);
     toggleCell(rowA, 110, scaleLockButton);
 
-    cell(rowTwo, 210, velocityLabel, velocitySlider);
-    cell(rowTwo, 110, curveLabel, curveBox);
-    cell(rowTwo, 70, channelLabel, channelBox);
-    toggleCell(rowTwo, 90, sustainButton);
-    toggleCell(rowTwo, 80, latchButton);
-    toggleCell(rowTwo, 80, panicButton);
-    if (updateButton.isVisible())
-        updateButton.setBounds(rowTwo.removeFromLeft(150).withTrimmedTop(14));
+    cell(rowB, 210, velocityLabel, velocitySlider);
+    cell(rowB, 110, curveLabel, curveBox);
+    cell(rowB, 70, channelLabel, channelBox);
+    toggleCell(rowB, 100, sustainButton);
+    toggleCell(rowB, 90, latchButton);
+    toggleCell(rowB, 90, panicButton);
 
-    area.removeFromTop(8);
-    keyboard.setBounds(area);
+    toggleCell(rowC, 120, humanizeButton);
+    cell(rowC, 210, humanizeVelLabel, humanizeVelSlider);
+    cell(rowC, 210, humanizeTimeLabel, humanizeTimeSlider);
+    if (updateButton.isVisible())
+        updateButton.setBounds(rowC.removeFromLeft(150).withTrimmedTop(14));
+
+    keyboard.setBounds(kb);
 }
 } // namespace keys

@@ -54,6 +54,7 @@ private:
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     double currentSampleRate = 44100.0;
+    juce::Random rng; // humanize jitter; touched only on the message thread
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysProcessor)
 };

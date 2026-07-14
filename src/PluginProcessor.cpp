@@ -38,6 +38,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
                                                       juce::StringArray { "Soft", "Linear", "Hard" }, 1));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "sustain", 1 }, "Sustain", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", false));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVel", 1 }, "Velocity Randomize", 0, 100, 20));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeTime", 1 }, "Timing Spread", 0, 30, 8));
 
     return layout;
 }
@@ -62,8 +65,24 @@ void KeysProcessor::noteOn(int midiNote, float velocity01)
 {
     if (midiNote < 0 || midiNote > 127)
         return;
-    auto m = juce::MidiMessage::noteOn(midiChannel(), midiNote, juce::jlimit(0.0f, 1.0f, velocity01));
-    m.setTimeStamp(nowSeconds());
+
+    // Humanize: per note, jitter the velocity and nudge the note-on slightly late so
+    // simultaneous (latched/dragged) notes stop landing perfectly quantized. Note-offs
+    // are never delayed, so a note can never release before it has sounded.
+    double when = nowSeconds();
+    if (apvts.getRawParameterValue("humanize")->load() > 0.5f)
+    {
+        const float velAmt = apvts.getRawParameterValue("humanizeVel")->load() * 0.01f; // 0..1
+        if (velAmt > 0.0f)
+            velocity01 += (rng.nextFloat() * 2.0f - 1.0f) * velAmt * 0.5f; // +/- up to half-scale
+
+        const float spreadMs = apvts.getRawParameterValue("humanizeTime")->load();
+        if (spreadMs > 0.0f)
+            when += (double) (rng.nextFloat() * spreadMs) * 0.001; // 0..spread ms later
+    }
+
+    auto m = juce::MidiMessage::noteOn(midiChannel(), midiNote, juce::jlimit(0.04f, 1.0f, velocity01));
+    m.setTimeStamp(when);
     collector.addMessageToQueue(m);
 }
 

@@ -94,9 +94,13 @@ void PianoKeyboard::layoutKeys()
         return;
 
     const float ww = area.getWidth() / (float) whiteCount;
-    const float wh = area.getHeight();
-    const float bw = ww * 0.62f;
-    const float bh = wh * 0.62f;
+    // Cap the key height so keys stay piano-proportioned instead of stretching to fill
+    // a tall window; any extra height becomes instrument body above, keys anchored low.
+    const float wh = juce::jmin(area.getHeight(), 150.0f);
+    const float yTop = area.getBottom() - wh;
+    const float bw = ww * 0.64f; // Octavium proportions: black ~64% of white width,
+    const float bh = wh * 0.62f; // ~62% of its height.
+    keysTop = yTop;
 
     int whiteIndex = 0;
     for (int i = 0; i < numKeys; ++i)
@@ -104,7 +108,7 @@ void PianoKeyboard::layoutKeys()
         const int n = lowNote + i;
         if (isBlackNote(n))
             continue;
-        keys.push_back({ n, false, { area.getX() + (float) whiteIndex * ww, area.getY(), ww, wh } });
+        keys.push_back({ n, false, { area.getX() + (float) whiteIndex * ww, yTop, ww, wh } });
         ++whiteIndex;
     }
 
@@ -119,7 +123,7 @@ void PianoKeyboard::layoutKeys()
             continue;
         }
         const float x = area.getX() + (float) whiteIndex * ww - bw * 0.5f;
-        keys.push_back({ n, true, { x, area.getY(), bw, bh } });
+        keys.push_back({ n, true, { x, yTop, bw, bh } });
     }
 }
 
@@ -233,45 +237,105 @@ void PianoKeyboard::mouseUp(const juce::MouseEvent&)
 void PianoKeyboard::paint(juce::Graphics& g)
 {
     using namespace okstudio;
-    g.fillAll(theme::background);
+    const auto full = getLocalBounds().toFloat();
 
-    const juce::Colour whiteCol { 0xffe9eef5 };
-    const juce::Colour whiteDim { 0xff9aa7b6 };
-    const juce::Colour blackCol { 0xff10151d };
-    const juce::Colour blackDim { 0xff2a333f };
+    // Instrument bar behind the keys: subtle horizontal vignette, like Octavium.
+    juce::ColourGradient bar(juce::Colour(0xff1b1b1b), full.getX(), 0.0f,
+                             juce::Colour(0xff1b1b1b), full.getRight(), 0.0f, false);
+    bar.addColour(0.5, juce::Colour(0xff202020));
+    g.setGradientFill(bar);
+    g.fillRect(full);
 
     const auto inScale = [this](int note)
     { return ! scaleLock || scales::isInScale(note, rootPc, scaleIndex); };
 
-    // Whites first, then blacks on top (that is the order they sit in the vector).
+    // Three visual states, matching Octavium: momentary press (bright blue), held
+    // via latch/sustain (deeper blue), and resting.
+    enum class State { normal, active, held };
+    const auto stateOf = [this](int drawn) -> State
+    {
+        if (pressed.count(drawn))                       return State::active;
+        if (latched.count(drawn) || sustained.count(drawn)) return State::held;
+        return State::normal;
+    };
+    const auto vGrad = [](juce::Colour a, juce::Colour b, float top, float bot)
+    { return juce::ColourGradient(a, 0.0f, top, b, 0.0f, bot, false); };
+
+    // ---- White keys (drawn first; blacks sit on top) ----
     for (const auto& k : keys)
     {
         if (k.black)
             continue;
-        const bool on = sounding.count(k.note) > 0;
-        g.setColour(on ? theme::accent : (inScale(k.note) ? whiteCol : whiteDim));
-        g.fillRect(k.bounds.reduced(0.5f));
-        g.setColour(theme::background);
-        g.drawRect(k.bounds, 1.0f);
-        if ((((k.note % 12) + 12) % 12) == 0) // mark every C for orientation
+        const auto b = k.bounds;
+        const float top = b.getY(), bot = b.getBottom();
+        const State s = stateOf(k.note);
+        const bool dim = s == State::normal && ! inScale(k.note);
+
+        juce::ColourGradient grad = vGrad(juce::Colours::white, juce::Colour(0xffe7e7e7), top, bot);
+        if (s == State::active)      grad = vGrad(juce::Colour(0xff6bb8ff), juce::Colour(0xff2f82e6), top, bot);
+        else if (s == State::held)   grad = vGrad(juce::Colour(0xff5fb1ff), juce::Colour(0xff2b7ade), top, bot);
+        else if (dim)                grad = vGrad(juce::Colour(0xffc4cad2), juce::Colour(0xffa9b1bd), top, bot);
+        else { grad.addColour(0.25, juce::Colour(0xfffbfbfb)); grad.addColour(0.55, juce::Colour(0xfff3f3f3)); }
+        g.setGradientFill(grad);
+        g.fillRect(b);
+
+        // Bottom lip for depth (blue when active/held).
+        g.setColour(s == State::normal ? (dim ? juce::Colour(0xff8f97a2) : juce::Colour(0xffbbbbbb))
+                                       : juce::Colour(0xff1b64c7));
+        g.fillRect(b.getX(), bot - 2.0f, b.getWidth(), 2.0f);
+
+        // Thin seam on the right edge reads as the gap to the next key.
+        g.setColour(juce::Colour(0xff0e0e0e).withAlpha(0.55f));
+        g.fillRect(b.getRight() - 1.0f, top, 1.0f, b.getHeight());
+
+        if ((((k.note % 12) + 12) % 12) == 0) // subtle C marker for orientation
         {
-            auto labelArea = k.bounds;
-            g.setColour(theme::textDim);
+            g.setColour(juce::Colour(0xff70767d));
             g.setFont(juce::Font(juce::FontOptions(10.0f)));
-            g.drawText("C" + juce::String(k.note / 12 - 1), labelArea.removeFromBottom(14.0f),
-                       juce::Justification::centred);
+            g.drawText("C" + juce::String(k.note / 12 - 1),
+                       b.withTrimmedBottom(4.0f).removeFromBottom(14.0f), juce::Justification::centred);
         }
     }
 
+    // ---- Black keys (glossy, rounded, on top) ----
     for (const auto& k : keys)
     {
         if (! k.black)
             continue;
-        const bool on = sounding.count(k.note) > 0;
-        g.setColour(on ? theme::accent.darker(0.2f) : (inScale(k.note) ? blackCol : blackDim));
-        g.fillRoundedRectangle(k.bounds.reduced(0.5f), 2.0f);
-        g.setColour(theme::outline);
-        g.drawRoundedRectangle(k.bounds.reduced(0.5f), 2.0f, 1.0f);
+        const auto b = k.bounds;
+        const float top = b.getY(), bot = b.getBottom();
+        const State s = stateOf(k.note);
+        const bool dim = s == State::normal && ! inScale(k.note);
+
+        juce::ColourGradient grad = vGrad(juce::Colour(0xff3a3a3a), juce::Colour(0xff050505), top, bot);
+        if (s == State::active)      grad = vGrad(juce::Colour(0xff4aa3ff), juce::Colour(0xff2f82e6), top, bot);
+        else if (s == State::held)   grad = vGrad(juce::Colour(0xff3f9cff), juce::Colour(0xff2b7ade), top, bot);
+        else if (dim)                grad = vGrad(juce::Colour(0xff4a5460), juce::Colour(0xff20262e), top, bot);
+        else { grad.addColour(0.12, juce::Colour(0xff2a2a2a)); grad.addColour(0.5, juce::Colour(0xff121212)); }
+
+        // Soft drop shadow onto the white keys below.
+        g.setColour(juce::Colours::black.withAlpha(0.28f));
+        g.fillRoundedRectangle(b.translated(0.0f, 1.5f).expanded(0.6f, 0.0f), 3.0f);
+
+        g.setGradientFill(grad);
+        g.fillRoundedRectangle(b, 3.0f);
+
+        // Glossy top reflection.
+        if (s == State::normal && ! dim)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.07f));
+            g.fillRoundedRectangle(b.withHeight(b.getHeight() * 0.30f).reduced(2.0f, 2.0f), 2.0f);
+        }
+
+        g.setColour(juce::Colour(0xff222222));
+        g.drawRoundedRectangle(b, 3.0f, 1.0f);
     }
+
+    // Fallboard rail at the top of the keybed, with a soft shadow onto the keys.
+    g.setColour(juce::Colour(0xff141414));
+    g.fillRect(full.getX(), keysTop, full.getWidth(), 3.0f);
+    g.setGradientFill(vGrad(juce::Colours::black.withAlpha(0.35f), juce::Colours::transparentBlack,
+                            keysTop + 3.0f, keysTop + 12.0f));
+    g.fillRect(full.getX(), keysTop + 3.0f, full.getWidth(), 9.0f);
 }
 } // namespace keys
