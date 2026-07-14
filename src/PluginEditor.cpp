@@ -30,11 +30,26 @@ namespace
         l.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
         l.setColour(juce::Label::textColourId, okstudio::theme::textDim);
     }
+
+    // Octavium-neutral chrome (local to Keys; the shared kit palette is blue-tinted).
+    const juce::Colour neutralBg      { 0xff1a1c20 };
+    const juce::Colour neutralPanel   { 0xff23262c };
+    const juce::Colour neutralControl { 0xff2b2f36 };
+    const juce::Colour neutralOutline { 0xff3b4148 };
+    const juce::Colour neutralGroove  { 0xff3a3f46 };
 } // namespace
 
 KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), processor(p), keyboard(p)
 {
     setLookAndFeel(&lnf);
+    // Retint the kit chrome toward Octavium's neutral grey. Overrides live on this
+    // editor's own LookAndFeel instance, so sibling plugins are untouched.
+    lnf.setColour(juce::ResizableWindow::backgroundColourId, neutralBg);
+    lnf.setColour(juce::ComboBox::backgroundColourId, neutralControl);
+    lnf.setColour(juce::ComboBox::outlineColourId, neutralOutline);
+    lnf.setColour(juce::PopupMenu::backgroundColourId, neutralPanel);
+    lnf.setColour(juce::TextButton::buttonColourId, neutralControl);
+    lnf.setColour(juce::Slider::backgroundColourId, neutralGroove);
     okstudio::ui::makeMouseOnly(*this);
 
     title.setText("Keys", juce::dontSendNotification);
@@ -190,8 +205,8 @@ void KeysEditor::timerCallback()
 
 void KeysEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(okstudio::theme::background);
-    g.setColour(okstudio::theme::panel);
+    g.fillAll(neutralBg);
+    g.setColour(neutralPanel);
     g.fillRect(getLocalBounds().removeFromTop(162));
 }
 
