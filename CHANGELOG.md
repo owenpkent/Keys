@@ -5,6 +5,8 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-14
+
 ### Added
 - Initial Keys plugin: mouse-only playable MIDI keyboard, VST3 + Standalone.
 - On-screen piano at 25 / 49 / 61 / 73 / 76 / 88 keys; click to play, drag to glide.
@@ -22,4 +24,5 @@ All notable changes to Keys are documented here. Format follows
 - `src/NoteMath.h`: note-resolution logic factored out of the keyboard widget so it
   is unit-testable without a UI.
 
-[Unreleased]: https://github.com/owenpkent/Keys
+[Unreleased]: https://github.com/owenpkent/Keys/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/owenpkent/Keys/releases/tag/v0.1.0
