@@ -15,8 +15,9 @@ All notable changes to Keys are documented here. Format follows
 - **Scale Lock**: snap played notes to the nearest note in a chosen root and scale;
   out-of-scale keys dimmed.
 - Octave shift (-3..+3), velocity with Soft / Linear / Hard curve, MIDI channel 1–16.
-- **Humanize**: per-note velocity randomization and micro-timing spread, an on-screen
-  toggle with amount controls, so latched or dragged chords feel played, not quantized.
+- **Humanize**: each note gets a random velocity within a Min/Max range plus a
+  micro-timing offset, an on-screen toggle, so latched or dragged chords feel played
+  rather than quantized. With the pedal down, a glide leaves a sustained trail.
 - **All Off** panic across every channel.
 - State (size, scale-lock, root, scale, octave, channel, velocity, curve, sustain,
   latch) persists with the DAW session.

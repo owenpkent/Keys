@@ -214,7 +214,11 @@ void PianoKeyboard::mouseDrag(const juce::MouseEvent& e)
     }
     else
     {
-        // Glide: monophonic, the previous key releases as the next sounds.
+        // Glide: monophonic, the previous key releases as the next sounds. With the
+        // pedal down the note you glide off is caught and keeps ringing, so a sustained
+        // run leaves a trail (matching Octavium, where every note sounds until sustain off).
+        if (sustain)
+            sustained.insert(dragDrawn);
         pressed.erase(dragDrawn);
         pressed.insert(d);
         dragDrawn = d;

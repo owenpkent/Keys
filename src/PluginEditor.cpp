@@ -86,15 +86,23 @@ KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), proces
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "latch", latchButton);
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
 
-    // Humanize amounts: per-note velocity spread and micro-timing, active when Humanize is on.
-    styleLabel(humanizeVelLabel, "Vel Rand");
-    addAndMakeVisible(humanizeVelLabel);
-    humanizeVelSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    humanizeVelSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
-    humanizeVelSlider.setRange(0, 100, 1);
-    humanizeVelSlider.setTextValueSuffix("%");
-    addAndMakeVisible(humanizeVelSlider);
-    humanizeVelAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeVel", humanizeVelSlider);
+    // Humanize amounts: each note picks a random velocity in [Vel Min, Vel Max] and a
+    // micro-timing offset up to Timing ms. Active only when Humanize is on.
+    styleLabel(humanizeVelMinLabel, "Vel Min");
+    addAndMakeVisible(humanizeVelMinLabel);
+    humanizeVelMinSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    humanizeVelMinSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 26);
+    humanizeVelMinSlider.setRange(1, 127, 1);
+    addAndMakeVisible(humanizeVelMinSlider);
+    humanizeVelMinAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeVelMin", humanizeVelMinSlider);
+
+    styleLabel(humanizeVelMaxLabel, "Vel Max");
+    addAndMakeVisible(humanizeVelMaxLabel);
+    humanizeVelMaxSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    humanizeVelMaxSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 26);
+    humanizeVelMaxSlider.setRange(1, 127, 1);
+    addAndMakeVisible(humanizeVelMaxSlider);
+    humanizeVelMaxAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeVelMax", humanizeVelMaxSlider);
 
     styleLabel(humanizeTimeLabel, "Timing");
     addAndMakeVisible(humanizeTimeLabel);
@@ -197,9 +205,11 @@ void KeysEditor::timerCallback()
 
     // Grey the humanize amounts out when Humanize is off, so their state reads at a glance.
     const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
-    humanizeVelSlider.setEnabled(hum);
+    humanizeVelMinSlider.setEnabled(hum);
+    humanizeVelMaxSlider.setEnabled(hum);
     humanizeTimeSlider.setEnabled(hum);
-    humanizeVelLabel.setEnabled(hum);
+    humanizeVelMinLabel.setEnabled(hum);
+    humanizeVelMaxLabel.setEnabled(hum);
     humanizeTimeLabel.setEnabled(hum);
 }
 
@@ -258,9 +268,10 @@ void KeysEditor::resized()
     toggleCell(rowB, 90, latchButton);
     toggleCell(rowB, 90, panicButton);
 
-    toggleCell(rowC, 120, humanizeButton);
-    cell(rowC, 210, humanizeVelLabel, humanizeVelSlider);
-    cell(rowC, 210, humanizeTimeLabel, humanizeTimeSlider);
+    toggleCell(rowC, 110, humanizeButton);
+    cell(rowC, 160, humanizeVelMinLabel, humanizeVelMinSlider);
+    cell(rowC, 160, humanizeVelMaxLabel, humanizeVelMaxSlider);
+    cell(rowC, 170, humanizeTimeLabel, humanizeTimeSlider);
     if (updateButton.isVisible())
         updateButton.setBounds(rowC.removeFromLeft(150).withTrimmedTop(14));
 

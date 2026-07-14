@@ -46,11 +46,11 @@ private:
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
-    juce::Slider humanizeVelSlider, humanizeTimeSlider;
-    juce::Label humanizeVelLabel, humanizeTimeLabel;
+    juce::Slider humanizeVelMinSlider, humanizeVelMaxSlider, humanizeTimeSlider;
+    juce::Label humanizeVelMinLabel, humanizeVelMaxLabel, humanizeTimeLabel;
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt;
-    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeVelAtt, humanizeTimeAtt;
+    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeVelMinAtt, humanizeVelMaxAtt, humanizeTimeAtt;
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt;
 
     okstudio::updater::Config updaterConfig;
