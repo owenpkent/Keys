@@ -39,7 +39,8 @@ namespace
     const juce::Colour neutralGroove  { 0xff3a3f46 };
 } // namespace
 
-KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), processor(p), keyboard(p)
+KeysEditor::KeysEditor(KeysProcessor& p)
+    : juce::AudioProcessorEditor(p), processor(p), keyboard(p), chordPads(p)
 {
     setLookAndFeel(&lnf);
     // Retint the kit chrome toward Octavium's neutral grey. Overrides live on this
@@ -79,12 +80,13 @@ KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), proces
     addAndMakeVisible(velocitySlider);
     velocityAtt = std::make_unique<SliderAtt>(processor.apvts, "velocity", velocitySlider);
 
-    for (auto* b : { &scaleLockButton, &sustainButton, &latchButton, &humanizeButton })
+    for (auto* b : { &scaleLockButton, &sustainButton, &latchButton, &humanizeButton, &chordExclusiveButton })
         addAndMakeVisible(*b);
     scaleLockAtt = std::make_unique<ButtonAtt>(processor.apvts, "scaleLock", scaleLockButton);
     sustainAtt = std::make_unique<ButtonAtt>(processor.apvts, "sustain", sustainButton);
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "latch", latchButton);
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
+    chordExclusiveAtt = std::make_unique<ButtonAtt>(processor.apvts, "chordExclusive", chordExclusiveButton);
 
     // Humanize amounts: each note picks a random velocity in [Vel Min, Vel Max] and a
     // micro-timing offset up to Timing ms. Active only when Humanize is on.
@@ -119,8 +121,9 @@ KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), proces
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
     addChildComponent(updateButton); // hidden until the updater finds a newer release
 
-    keyboard.getVelocity = [this] { return currentVelocity01(); };
+    keyboard.getVelocity = [this] { return processor.baseVelocity01(); };
     addAndMakeVisible(keyboard);
+    addAndMakeVisible(chordPads);
 
     // Auto-update: check the pinned releases repo once, surface a button if newer.
     updaterConfig.productName = "Keys";
@@ -135,8 +138,8 @@ KeysEditor::KeysEditor(KeysProcessor& p) : juce::AudioProcessorEditor(p), proces
     });
 
     setResizable(true, true);
-    setResizeLimits(820, 300, 2200, 1000);
-    setSize(940, 330);
+    setResizeLimits(820, 376, 2200, 1000);
+    setSize(940, 386);
     startTimerHz(30);
 }
 
@@ -155,18 +158,6 @@ void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::S
     box.addItemList(items, 1);
     addAndMakeVisible(box);
     att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
-}
-
-float KeysEditor::currentVelocity01() const
-{
-    const float v = processor.apvts.getRawParameterValue("velocity")->load();
-    const float pos = juce::jlimit(0.0f, 1.0f, (v - 1.0f) / 126.0f);
-    switch ((int) processor.apvts.getRawParameterValue("curve")->load())
-    {
-        case 0: return std::pow(pos, 0.6f);  // Soft: easier to reach high velocities
-        case 2: return std::pow(pos, 1.7f);  // Hard: leans quiet until you push
-        default: return pos;                 // Linear
-    }
 }
 
 void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
@@ -211,25 +202,37 @@ void KeysEditor::timerCallback()
     humanizeVelMinLabel.setEnabled(hum);
     humanizeVelMaxLabel.setEnabled(hum);
     humanizeTimeLabel.setEnabled(hum);
+
+    // Feed the pads the chord currently sounding on the keyboard (drives the live card
+    // and reflects any pad-active changes).
+    chordPads.setCurrentChord(keyboard.soundingOutputNotes());
+    chordPads.repaint();
 }
 
 void KeysEditor::paint(juce::Graphics& g)
 {
     g.fillAll(neutralBg);
     g.setColour(neutralPanel);
-    g.fillRect(getLocalBounds().removeFromTop(162));
+    g.fillRect(getLocalBounds().removeFromTop(164));
 }
 
 void KeysEditor::resized()
 {
     auto area = getLocalBounds().reduced(10);
 
-    // Give the keyboard a fixed height off the bottom, then let the three control rows
-    // take the space above. This keeps the keys piano-proportioned regardless of how
-    // tall the host makes the editor (extra height lands above the keys as body).
+    // Give the keyboard a fixed height off the bottom, then the chord-pad row above it,
+    // then let the three control rows take the space that's left on top. Keeping the keys
+    // a fixed height stops them stretching when the host makes the editor taller.
     auto kb = area.removeFromBottom(150);
     area.removeFromBottom(8);
+    auto padRow = area.removeFromBottom(48);
+    area.removeFromBottom(6);
     auto header = area;
+
+    // Chord pads: an Exclusive toggle on the left, then the pad strip.
+    chordExclusiveButton.setBounds(padRow.removeFromLeft(74).withSizeKeepingCentre(70, 26));
+    padRow.removeFromLeft(4);
+    chordPads.setBounds(padRow);
 
     const int rowH = 46;
     title.setBounds(header.removeFromLeft(84).withTrimmedTop(header.getHeight() / 2 - 17).withHeight(34));

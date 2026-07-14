@@ -2,6 +2,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <array>
+#include <vector>
 
 namespace keys
 {
@@ -44,17 +46,40 @@ public:
     void allNotesOff();
 
     // Live settings read by the editor / keyboard widget.
-    int midiChannel() const;  // 1..16
-    int octaveShift() const;  // -3..+3, in octaves
+    int midiChannel() const;   // 1..16
+    int octaveShift() const;   // -3..+3, in octaves
+    float baseVelocity01() const; // velocity slider through the curve, 0..1 (Humanize aside)
+
+    // Chord pads: capture a chord's notes into a slot, click to play/stop it. The pad
+    // definitions persist with the session; playback goes through the same note path.
+    struct ChordPad
+    {
+        std::vector<int> notes; // absolute MIDI notes captured for this pad
+        juce::String name;      // detected label, e.g. "Cm7"
+    };
+    static constexpr int numChordPads = 8;
+
+    const ChordPad& chordPad(int i) const { return chordPads[(size_t) i]; }
+    bool chordPadActive(int i) const;
+    void setChordPad(int i, const std::vector<int>& notes, const juce::String& name);
+    void clearChordPad(int i);
+    void moveChordPad(int from, int to); // swap two slots
+    void toggleChordPad(int i);          // play if off / stop if on; honours Exclusive
+    void stopAllChordPads();
 
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
+    void stopChordPad(int i);
+
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     double currentSampleRate = 44100.0;
     juce::Random rng; // humanize jitter; touched only on the message thread
+
+    std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
+    std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysProcessor)
 };

@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "ui/PianoKeyboard.h"
+#include "ui/ChordPads.h"
 #include <okstudio/Theme.h>
 #include <okstudio/Updater.h>
 
@@ -23,7 +24,6 @@ private:
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     void timerCallback() override;
-    float currentVelocity01() const;
     void addCombo(juce::ComboBox&, juce::Label&, const juce::String& text, const juce::StringArray& items,
                   const juce::String& paramID, std::unique_ptr<ComboAtt>&);
     void showUpdate(const okstudio::updater::UpdateInfo&);
@@ -33,6 +33,7 @@ private:
 
     juce::Label title;
     PianoKeyboard keyboard;
+    ChordPads chordPads;
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, curveLabel;
@@ -43,6 +44,7 @@ private:
     juce::ToggleButton sustainButton { "Sustain" };
     juce::ToggleButton latchButton { "Latch" };
     juce::ToggleButton humanizeButton { "Humanize" };
+    juce::ToggleButton chordExclusiveButton { "Excl" };
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
@@ -51,7 +53,7 @@ private:
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt;
     std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeVelMinAtt, humanizeVelMaxAtt, humanizeTimeAtt;
-    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt;
+    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;

@@ -2,6 +2,8 @@
 #include "PluginEditor.h"
 #include <okstudio/Scales.h>
 #include <okstudio/StateHelpers.h>
+#include <cmath>
+#include <utility>
 
 namespace keys
 {
@@ -42,6 +44,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 1, 127, 64));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 1, 127, 88));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeTime", 1 }, "Timing Spread", 0, 30, 8));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chordExclusive", 1 }, "Chord Exclusive", false));
 
     return layout;
 }
@@ -60,6 +63,86 @@ int KeysProcessor::midiChannel() const
 int KeysProcessor::octaveShift() const
 {
     return (int) apvts.getRawParameterValue("octave")->load();
+}
+
+float KeysProcessor::baseVelocity01() const
+{
+    const float v = apvts.getRawParameterValue("velocity")->load();
+    const float pos = juce::jlimit(0.0f, 1.0f, (v - 1.0f) / 126.0f);
+    switch ((int) apvts.getRawParameterValue("curve")->load())
+    {
+        case 0:  return std::pow(pos, 0.6f); // Soft: easier to reach high velocities
+        case 2:  return std::pow(pos, 1.7f); // Hard: leans quiet until you push
+        default: return pos;                 // Linear
+    }
+}
+
+bool KeysProcessor::chordPadActive(int i) const
+{
+    return i >= 0 && i < numChordPads && ! chordPadOn[(size_t) i].empty();
+}
+
+void KeysProcessor::setChordPad(int i, const std::vector<int>& notes, const juce::String& name)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    chordPads[(size_t) i] = { notes, name };
+}
+
+void KeysProcessor::clearChordPad(int i)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    stopChordPad(i);
+    chordPads[(size_t) i] = {};
+}
+
+void KeysProcessor::moveChordPad(int from, int to)
+{
+    if (from < 0 || from >= numChordPads || to < 0 || to >= numChordPads || from == to)
+        return;
+    stopChordPad(from);
+    stopChordPad(to);
+    std::swap(chordPads[(size_t) from], chordPads[(size_t) to]);
+}
+
+void KeysProcessor::stopChordPad(int i)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    for (int n : chordPadOn[(size_t) i])
+        noteOff(n);
+    chordPadOn[(size_t) i].clear();
+}
+
+void KeysProcessor::stopAllChordPads()
+{
+    for (int i = 0; i < numChordPads; ++i)
+        stopChordPad(i);
+}
+
+void KeysProcessor::toggleChordPad(int i)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    const bool wasOn = ! chordPadOn[(size_t) i].empty();
+    if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
+        stopAllChordPads();      // choke every pad (incl. this one) before the new chord
+    else if (wasOn)
+    {
+        stopChordPad(i);         // non-exclusive: clicking a sounding pad turns it off
+        return;
+    }
+    if (wasOn)
+        return;                  // exclusive path already turned this pad off
+
+    const auto& notes = chordPads[(size_t) i].notes;
+    if (notes.empty())
+        return;
+    const float vel = baseVelocity01();
+    for (int n : notes)
+        noteOn(n, vel);          // noteOn adds Humanize (per-note velocity + micro-timing)
+    chordPadOn[(size_t) i] = notes;
 }
 
 void KeysProcessor::noteOn(int midiNote, float velocity01)
@@ -133,12 +216,47 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
 
 void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    okstudio::state::save(apvts, "KEYS", destData);
+    juce::ValueTree pads { "chordPads" };
+    for (int i = 0; i < numChordPads; ++i)
+    {
+        const auto& p = chordPads[(size_t) i];
+        if (p.notes.empty())
+            continue;
+        juce::StringArray ns;
+        for (int n : p.notes)
+            ns.add(juce::String(n));
+        juce::ValueTree pad { "pad" };
+        pad.setProperty("slot", i, nullptr);
+        pad.setProperty("notes", ns.joinIntoString(","), nullptr);
+        pad.setProperty("name", p.name, nullptr);
+        pads.appendChild(pad, nullptr);
+    }
+    okstudio::state::save(apvts, "KEYS", destData, { pads });
 }
 
 void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    okstudio::state::load(apvts, data, sizeInBytes);
+    okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
+    {
+        stopAllChordPads();
+        for (auto& p : chordPads)
+            p = {};
+        const auto pads = root.getChildWithName("chordPads");
+        if (! pads.isValid())
+            return;
+        for (int c = 0; c < pads.getNumChildren(); ++c)
+        {
+            const auto pad = pads.getChild(c);
+            const int slot = (int) pad.getProperty("slot", -1);
+            if (slot < 0 || slot >= numChordPads)
+                continue;
+            std::vector<int> notes;
+            for (const auto& s : juce::StringArray::fromTokens(pad.getProperty("notes").toString(), ",", ""))
+                if (s.trim().isNotEmpty())
+                    notes.push_back(s.trim().getIntValue());
+            chordPads[(size_t) slot] = { notes, pad.getProperty("name").toString() };
+        }
+    });
 }
 
 juce::AudioProcessorEditor* KeysProcessor::createEditor()

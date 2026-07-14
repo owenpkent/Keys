@@ -35,6 +35,9 @@ public:
     void setLatch(bool on);
     void panic(); // stop everything
 
+    // The MIDI notes currently sounding (post scale-lock + octave), sorted, for chord capture.
+    std::vector<int> soundingOutputNotes() const;
+
     // Supplied by the editor: current note velocity, 0..1.
     std::function<float()> getVelocity;
 

@@ -18,6 +18,10 @@ All notable changes to Keys are documented here. Format follows
 - **Humanize**: each note gets a random velocity within a Min/Max range plus a
   micro-timing offset, an on-screen toggle, so latched or dragged chords feel played
   rather than quantized. With the pedal down, a glide leaves a sustained trail.
+- **Chord pads**: build a chord (Latch on, click the notes), drag the live chord card
+  onto one of eight pads to capture it (auto-named, e.g. `Cm7`), then click a pad to
+  play or stop it. Drag a pad to rearrange, or off the row to clear. Exclusive mode
+  chokes the previous chord; pads persist with the session.
 - **All Off** panic across every channel.
 - State (size, scale-lock, root, scale, octave, channel, velocity, curve, sustain,
   latch) persists with the DAW session.

@@ -1,5 +1,6 @@
 #include "PianoKeyboard.h"
 #include "../NoteMath.h"
+#include <algorithm>
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 #include <okstudio/Theme.h>
@@ -139,6 +140,16 @@ int PianoKeyboard::keyAt(juce::Point<float> pos) const
 int PianoKeyboard::outputNote(int drawnNote) const
 {
     return resolveOutputNote(drawnNote, scaleLock, rootPc, scaleIndex, processor.octaveShift());
+}
+
+std::vector<int> PianoKeyboard::soundingOutputNotes() const
+{
+    std::vector<int> out;
+    for (const auto& kv : sounding)
+        out.push_back(kv.second);
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
 }
 
 void PianoKeyboard::refresh()

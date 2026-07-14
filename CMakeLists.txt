@@ -35,7 +35,8 @@ okstudio_add_plugin(Keys
 target_sources(Keys PRIVATE
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
-    src/ui/PianoKeyboard.cpp)
+    src/ui/PianoKeyboard.cpp
+    src/ui/ChordPads.cpp)
 
 target_compile_definitions(Keys PUBLIC
     JUCE_WEB_BROWSER=0
