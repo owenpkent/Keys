@@ -21,7 +21,9 @@ All notable changes to Keys are documented here. Format follows
 - **Chord pads**: build a chord (Latch on, click the notes), drag the live chord card
   onto one of eight pads to capture it (auto-named, e.g. `Cm7`), then click a pad to
   play or stop it. Drag a pad to rearrange, or off the row to clear. Exclusive mode
-  chokes the previous chord; pads persist with the session.
+  chokes the previous chord; pads persist with the session. A Strum control (Octavium
+  "Drift") spreads a pad's notes over 0-200ms, Up / Down / Random.
+- Humanize velocity is a two-handle Min/Max range slider (was two separate sliders).
 - **All Off** panic across every channel.
 - State (size, scale-lock, root, scale, octave, channel, velocity, curve, sustain,
   latch) persists with the DAW session.

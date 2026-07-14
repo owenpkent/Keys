@@ -88,23 +88,32 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
     chordExclusiveAtt = std::make_unique<ButtonAtt>(processor.apvts, "chordExclusive", chordExclusiveButton);
 
-    // Humanize amounts: each note picks a random velocity in [Vel Min, Vel Max] and a
-    // micro-timing offset up to Timing ms. Active only when Humanize is on.
-    styleLabel(humanizeVelMinLabel, "Vel Min");
-    addAndMakeVisible(humanizeVelMinLabel);
-    humanizeVelMinSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    humanizeVelMinSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 26);
-    humanizeVelMinSlider.setRange(1, 127, 1);
-    addAndMakeVisible(humanizeVelMinSlider);
-    humanizeVelMinAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeVelMin", humanizeVelMinSlider);
-
-    styleLabel(humanizeVelMaxLabel, "Vel Max");
-    addAndMakeVisible(humanizeVelMaxLabel);
-    humanizeVelMaxSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    humanizeVelMaxSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 26);
-    humanizeVelMaxSlider.setRange(1, 127, 1);
-    addAndMakeVisible(humanizeVelMaxSlider);
-    humanizeVelMaxAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeVelMax", humanizeVelMaxSlider);
+    // Humanize amounts: each note picks a random velocity in the [min, max] range (a
+    // two-handle slider) and a micro-timing offset up to Timing ms. The range slider has
+    // no APVTS attachment (two values), so it is synced to the params by hand.
+    styleLabel(humanizeVelLabel, "Velocity");
+    addAndMakeVisible(humanizeVelLabel);
+    humanizeVelSlider.setSliderStyle(juce::Slider::TwoValueHorizontal);
+    humanizeVelSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    humanizeVelSlider.setRange(1, 127, 1);
+    humanizeVelSlider.setMinAndMaxValues(processor.apvts.getRawParameterValue("humanizeVelMin")->load(),
+                                         processor.apvts.getRawParameterValue("humanizeVelMax")->load(),
+                                         juce::dontSendNotification);
+    humanizeVelSlider.onValueChange = [this]
+    {
+        const auto write = [this](const char* id, double value)
+        {
+            if (auto* p = processor.apvts.getParameter(id))
+            {
+                const float norm = p->convertTo0to1((float) value);
+                if (std::abs(p->getValue() - norm) > 1.0e-6f)
+                    p->setValueNotifyingHost(norm);
+            }
+        };
+        write("humanizeVelMin", humanizeVelSlider.getMinValue());
+        write("humanizeVelMax", humanizeVelSlider.getMaxValue());
+    };
+    addAndMakeVisible(humanizeVelSlider);
 
     styleLabel(humanizeTimeLabel, "Timing");
     addAndMakeVisible(humanizeTimeLabel);
@@ -114,6 +123,18 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     humanizeTimeSlider.setTextValueSuffix(" ms");
     addAndMakeVisible(humanizeTimeSlider);
     humanizeTimeAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeTime", humanizeTimeSlider);
+
+    // Chord-pad strum (Octavium "Drift"): spread a pad's note-ons over N ms, in a direction.
+    styleLabel(chordStrumLabel, "Strum");
+    addAndMakeVisible(chordStrumLabel);
+    chordStrumSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    chordStrumSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
+    chordStrumSlider.setRange(0, 200, 1);
+    chordStrumSlider.setTextValueSuffix(" ms");
+    addAndMakeVisible(chordStrumSlider);
+    chordStrumAtt = std::make_unique<SliderAtt>(processor.apvts, "chordStrum", chordStrumSlider);
+
+    addCombo(chordStrumDirBox, chordStrumDirLabel, "Dir", { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
 
     panicButton.onClick = [this] { keyboard.panic(); };
     addAndMakeVisible(panicButton);
@@ -196,12 +217,17 @@ void KeysEditor::timerCallback()
 
     // Grey the humanize amounts out when Humanize is off, so their state reads at a glance.
     const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
-    humanizeVelMinSlider.setEnabled(hum);
-    humanizeVelMaxSlider.setEnabled(hum);
+    humanizeVelSlider.setEnabled(hum);
     humanizeTimeSlider.setEnabled(hum);
-    humanizeVelMinLabel.setEnabled(hum);
-    humanizeVelMaxLabel.setEnabled(hum);
+    humanizeVelLabel.setEnabled(hum);
     humanizeTimeLabel.setEnabled(hum);
+
+    // Keep the two-handle velocity range synced to its params and show the numbers.
+    const int vmin = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
+    const int vmax = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
+    humanizeVelSlider.setMinAndMaxValues(vmin, vmax, juce::dontSendNotification);
+    humanizeVelLabel.setText("Velocity  " + juce::String(vmin) + "-" + juce::String(vmax),
+                             juce::dontSendNotification);
 
     // Feed the pads the chord currently sounding on the keyboard (drives the live card
     // and reflects any pad-active changes).
@@ -263,6 +289,8 @@ void KeysEditor::resized()
     cell(rowA, 150, scaleLabel, scaleBox);
     cell(rowA, 120, octaveLabel, octaveSlider);
     toggleCell(rowA, 110, scaleLockButton);
+    if (updateButton.isVisible())
+        updateButton.setBounds(rowA.removeFromLeft(150).withTrimmedTop(14));
 
     cell(rowB, 210, velocityLabel, velocitySlider);
     cell(rowB, 110, curveLabel, curveBox);
@@ -271,12 +299,11 @@ void KeysEditor::resized()
     toggleCell(rowB, 90, latchButton);
     toggleCell(rowB, 90, panicButton);
 
-    toggleCell(rowC, 110, humanizeButton);
-    cell(rowC, 160, humanizeVelMinLabel, humanizeVelMinSlider);
-    cell(rowC, 160, humanizeVelMaxLabel, humanizeVelMaxSlider);
-    cell(rowC, 170, humanizeTimeLabel, humanizeTimeSlider);
-    if (updateButton.isVisible())
-        updateButton.setBounds(rowC.removeFromLeft(150).withTrimmedTop(14));
+    toggleCell(rowC, 96, humanizeButton);
+    cell(rowC, 208, humanizeVelLabel, humanizeVelSlider);
+    cell(rowC, 130, humanizeTimeLabel, humanizeTimeSlider);
+    cell(rowC, 150, chordStrumLabel, chordStrumSlider);
+    cell(rowC, 100, chordStrumDirLabel, chordStrumDirBox);
 
     keyboard.setBounds(kb);
 }

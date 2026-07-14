@@ -35,10 +35,10 @@ private:
     PianoKeyboard keyboard;
     ChordPads chordPads;
 
-    juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox;
-    juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, curveLabel;
-    juce::Slider velocitySlider, octaveSlider;
-    juce::Label velocityLabel, octaveLabel;
+    juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox, chordStrumDirBox;
+    juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, curveLabel, chordStrumDirLabel;
+    juce::Slider velocitySlider, octaveSlider, chordStrumSlider;
+    juce::Label velocityLabel, octaveLabel, chordStrumLabel;
 
     juce::ToggleButton scaleLockButton { "Scale Lock" };
     juce::ToggleButton sustainButton { "Sustain" };
@@ -48,11 +48,11 @@ private:
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
-    juce::Slider humanizeVelMinSlider, humanizeVelMaxSlider, humanizeTimeSlider;
-    juce::Label humanizeVelMinLabel, humanizeVelMaxLabel, humanizeTimeLabel;
+    juce::Slider humanizeVelSlider, humanizeTimeSlider; // velocity is a two-value range
+    juce::Label humanizeVelLabel, humanizeTimeLabel;
 
-    std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt;
-    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeVelMinAtt, humanizeVelMaxAtt, humanizeTimeAtt;
+    std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt, chordStrumDirAtt;
+    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeTimeAtt, chordStrumAtt;
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;

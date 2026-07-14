@@ -41,7 +41,8 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     // Note I/O — called from the UI thread; queued and drained on the audio thread.
-    void noteOn(int midiNote, float velocity01);
+    // delaySeconds nudges the note-on later (used for chord-pad strum).
+    void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0);
     void noteOff(int midiNote);
     void allNotesOff();
 

@@ -2,6 +2,7 @@
 #include "PluginEditor.h"
 #include <okstudio/Scales.h>
 #include <okstudio/StateHelpers.h>
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -45,6 +46,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 1, 127, 88));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeTime", 1 }, "Timing Spread", 0, 30, 8));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chordExclusive", 1 }, "Chord Exclusive", false));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrum", 1 }, "Chord Strum", 0, 200, 0));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chordStrumDir", 1 }, "Chord Strum Dir",
+                                                      juce::StringArray { "Up", "Down", "Random" }, 0));
 
     return layout;
 }
@@ -140,12 +144,29 @@ void KeysProcessor::toggleChordPad(int i)
     if (notes.empty())
         return;
     const float vel = baseVelocity01();
-    for (int n : notes)
-        noteOn(n, vel);          // noteOn adds Humanize (per-note velocity + micro-timing)
+
+    // Strum (Octavium "Drift"): spread the note-ons over `chordStrum` ms in a direction.
+    std::vector<int> order = notes; // captured low -> high
+    const int dir = (int) apvts.getRawParameterValue("chordStrumDir")->load();
+    if (dir == 1)
+        std::reverse(order.begin(), order.end());              // Down: high -> low
+    else if (dir == 2)
+        for (int k = (int) order.size() - 1; k > 0; --k)       // Random: Fisher-Yates
+            std::swap(order[(size_t) k], order[(size_t) rng.nextInt(k + 1)]);
+
+    const double strumMs = apvts.getRawParameterValue("chordStrum")->load();
+    const int count = (int) order.size();
+    for (int k = 0; k < count; ++k)
+    {
+        const double delay = (count > 1 && strumMs > 0.0)
+                                 ? (strumMs * (double) k / (double) (count - 1)) * 0.001
+                                 : 0.0;
+        noteOn(order[(size_t) k], vel, delay); // noteOn also adds Humanize per note
+    }
     chordPadOn[(size_t) i] = notes;
 }
 
-void KeysProcessor::noteOn(int midiNote, float velocity01)
+void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds)
 {
     if (midiNote < 0 || midiNote > 127)
         return;
@@ -153,8 +174,8 @@ void KeysProcessor::noteOn(int midiNote, float velocity01)
     // Humanize (Octavium logic): pick a uniform-random velocity within the [min, max]
     // range per note, and nudge the note-on slightly late so simultaneous (latched or
     // dragged) notes stop landing perfectly quantized. Note-offs are never delayed, so
-    // a note can never release before it has sounded.
-    double when = nowSeconds();
+    // a note can never release before it has sounded. delaySeconds adds the strum offset.
+    double when = nowSeconds() + delaySeconds;
     if (apvts.getRawParameterValue("humanize")->load() > 0.5f)
     {
         const int a = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
