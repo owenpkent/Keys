@@ -14,6 +14,10 @@ Nothing needs the keyboard, a right-click, a double-click, or a modifier key.
 Chords come from Latch or Sustain, below — a single mouse can't hold several keys at
 once, so those are how you stack notes.
 
+To the **left of the keyboard** are two performance wheels: **Mod** sends CC1 and stays
+where you leave it; **Pitch** bends and springs back to centre when you let go. Both are
+transient (they don't save with the session) and send on the current MIDI channel.
+
 ## Top bar
 
 | Control | Type | What it does |
@@ -22,7 +26,8 @@ once, so those are how you stack notes.
 | **Root** | dropdown | Tonic used by Scale Lock (C … B) |
 | **Scale** | dropdown | Scale used by Scale Lock (Major, Natural/Harmonic/Melodic Minor, the modes, pentatonics, Blues, Whole Tone, Chromatic) |
 | **Scale Lock** | toggle | On: each played note snaps to the nearest note in (Root, Scale); out-of-scale keys are dimmed so you see the shape. You cannot play a wrong note. |
-| **Octave** | inc/dec | Transpose the whole keyboard, -3..+3 octaves. Click the arrows or scroll. |
+| **Octave** | inc/dec | Transpose the whole keyboard, -5..+5 octaves. Click the arrows or scroll. |
+| **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. |
 | **Velocity** | slider | Base note velocity (1–127), used when Humanize is off. Click or scroll. |
 | **Curve** | dropdown | Shapes the velocity response: **Soft** (reach high velocities easily), **Linear**, **Hard** (stays quiet until you push) |
 | **MIDI Ch** | dropdown | Output channel, 1–16 |

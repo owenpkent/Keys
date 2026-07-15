@@ -33,8 +33,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "scale", 1 }, "Scale",
                                                        okstudio::scales::names(), 0));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "scaleLock", 1 }, "Scale Lock", false));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "octave", 1 }, "Octave", -3, 3, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "octave", 1 }, "Octave", -5, 5, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "size", 1 }, "Keyboard Size", sizeNames(), 2));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "polyphony", 1 }, "Polyphony",
+                                                      juce::StringArray { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "channel", 1 }, "MIDI Channel", channelNames(), 0));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "curve", 1 }, "Velocity Curve",
@@ -69,16 +71,21 @@ int KeysProcessor::octaveShift() const
     return (int) apvts.getRawParameterValue("octave")->load();
 }
 
-float KeysProcessor::baseVelocity01() const
+float KeysProcessor::curved(float pos01) const
 {
-    const float v = apvts.getRawParameterValue("velocity")->load();
-    const float pos = juce::jlimit(0.0f, 1.0f, (v - 1.0f) / 126.0f);
+    const float pos = juce::jlimit(0.0f, 1.0f, pos01);
     switch ((int) apvts.getRawParameterValue("curve")->load())
     {
         case 0:  return std::pow(pos, 0.6f); // Soft: easier to reach high velocities
         case 2:  return std::pow(pos, 1.7f); // Hard: leans quiet until you push
         default: return pos;                 // Linear
     }
+}
+
+float KeysProcessor::baseVelocity01() const
+{
+    const float v = apvts.getRawParameterValue("velocity")->load();
+    return curved((v - 1.0f) / 126.0f);
 }
 
 bool KeysProcessor::chordPadActive(int i) const
@@ -181,7 +188,8 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds)
         const int a = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
         const int b = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
         const int lo = juce::jmin(a, b), hi = juce::jmax(a, b);
-        velocity01 = (float) rng.nextInt(juce::Range<int>(lo, hi + 1)) / 127.0f;
+        const int rnd = rng.nextInt(juce::Range<int>(lo, hi + 1));
+        velocity01 = curved((float) (rnd - 1) / 126.0f); // same curve as the fixed velocity
 
         const float spreadMs = apvts.getRawParameterValue("humanizeTime")->load();
         if (spreadMs > 0.0f)
@@ -211,6 +219,20 @@ void KeysProcessor::allNotesOff()
         m.setTimeStamp(t);
         collector.addMessageToQueue(m);
     }
+}
+
+void KeysProcessor::sendCC(int controller, int value)
+{
+    auto m = juce::MidiMessage::controllerEvent(midiChannel(), controller, juce::jlimit(0, 127, value));
+    m.setTimeStamp(nowSeconds());
+    collector.addMessageToQueue(m);
+}
+
+void KeysProcessor::sendPitchBend(int value14)
+{
+    auto m = juce::MidiMessage::pitchWheel(midiChannel(), juce::jlimit(0, 16383, value14));
+    m.setTimeStamp(nowSeconds());
+    collector.addMessageToQueue(m);
 }
 
 void KeysProcessor::prepareToPlay(double sampleRate, int)

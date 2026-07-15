@@ -38,9 +38,11 @@ on-screen toggles, not modifier keys, on purpose.
 | **Size** | 25 / 49 / 61 / 73 / 76 / 88 keys |
 | **Root** + **Scale** | The key and scale used by Scale Lock |
 | **Scale Lock** | Snap every played note to the nearest note in (Root, Scale) — you can't hit a wrong note. Out-of-scale keys are dimmed. |
-| **Octave** | Transpose the whole keyboard by -3..+3 octaves |
+| **Octave** | Transpose the whole keyboard by -5..+5 octaves |
 | **Velocity** + **Curve** | Note velocity, shaped by a Soft / Linear / Hard response |
 | **MIDI Ch** | Output channel, 1–16 |
+| **Voices** | Polyphony limit: Off (unlimited) or 1–8 notes, stealing the oldest |
+| **Mod / Pitch wheels** | Left of the keyboard: Mod sends CC1 and holds; Pitch bends and springs back to centre |
 | **Sustain** | Hold notes after release (pedal) |
 | **Latch** | Click to toggle notes on/off and hold them |
 | **Humanize** | Random velocity within a Min/Max range + micro-timing, so chords feel played |

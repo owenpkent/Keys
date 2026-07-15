@@ -14,7 +14,10 @@ All notable changes to Keys are documented here. Format follows
   on-screen toggles, not modifier keys.
 - **Scale Lock**: snap played notes to the nearest note in a chosen root and scale;
   out-of-scale keys dimmed.
-- Octave shift (-3..+3), velocity with Soft / Linear / Hard curve, MIDI channel 1–16.
+- Octave shift (-5..+5), velocity with Soft / Linear / Hard curve, MIDI channel 1–16.
+- **Mod wheel** (CC1) and **Pitch bend** wheels left of the keyboard; the pitch wheel
+  springs back to centre when released.
+- **Polyphony** limit (Off / 1–8 voices) with oldest-note voice stealing.
 - **Humanize**: each note gets a random velocity within a Min/Max range plus a
   micro-timing offset, an on-screen toggle, so latched or dragged chords feel played
   rather than quantized. With the pedal down, a glide leaves a sustained trail.

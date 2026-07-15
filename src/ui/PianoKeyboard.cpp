@@ -65,11 +65,20 @@ void PianoKeyboard::setLatch(bool on)
     latch = on;
 }
 
+void PianoKeyboard::setPolyphony(int cap)
+{
+    if (cap == polyphonyCap)
+        return;
+    polyphonyCap = cap;
+    refresh(); // lowering the cap steals oldest voices immediately
+}
+
 void PianoKeyboard::panic()
 {
     pressed.clear();
     latched.clear();
     sustained.clear();
+    voiceOrder.clear();
     dragDrawn = -1;
     refresh();
     processor.allNotesOff(); // belt-and-braces across all channels
@@ -159,6 +168,27 @@ void PianoKeyboard::refresh()
     want.insert(latched.begin(), latched.end());
     want.insert(sustained.begin(), sustained.end());
 
+    // Polyphony cap: steal the oldest sounding voices (FIFO) so the total fits. Stealing
+    // removes them from the source sets so they don't come straight back next refresh.
+    if (polyphonyCap > 0 && (int) want.size() > polyphonyCap)
+    {
+        for (const int d : voiceOrder) // oldest first
+        {
+            if ((int) want.size() <= polyphonyCap)
+                break;
+            if (want.erase(d) > 0)
+            {
+                pressed.erase(d);
+                latched.erase(d);
+                sustained.erase(d);
+            }
+        }
+        // Any still over are brand-new notes not yet in voiceOrder (a big chord added at
+        // once); drop the highest-pitched drawn notes until it fits, keeping the lowest.
+        while ((int) want.size() > polyphonyCap)
+            want.erase(std::prev(want.end()));
+    }
+
     for (auto it = sounding.begin(); it != sounding.end();)
     {
         if (want.find(it->first) == want.end())
@@ -182,6 +212,18 @@ void PianoKeyboard::refresh()
             sounding[drawn] = out;
         }
     }
+
+    // Rebuild the FIFO voice order: keep still-sounding notes in their existing order,
+    // then append any newly-sounding ones.
+    std::vector<int> next;
+    next.reserve(sounding.size());
+    for (const int d : voiceOrder)
+        if (sounding.count(d) > 0)
+            next.push_back(d);
+    for (const auto& kv : sounding)
+        if (std::find(next.begin(), next.end(), kv.first) == next.end())
+            next.push_back(kv.first);
+    voiceOrder.swap(next);
 
     repaint();
 }

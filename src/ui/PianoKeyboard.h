@@ -33,6 +33,7 @@ public:
     void setScaleLock(bool on, int rootPitchClass, int scaleIndex);
     void setSustain(bool on);
     void setLatch(bool on);
+    void setPolyphony(int cap); // 0 = unlimited, else steal oldest beyond `cap` voices
     void panic(); // stop everything
 
     // The MIDI notes currently sounding (post scale-lock + octave), sorted, for chord capture.
@@ -59,13 +60,15 @@ private:
     bool scaleLock = false;
     int rootPc = 0, scaleIndex = 0;
     bool sustain = false, latch = false;
+    int polyphonyCap = 0; // 0 = unlimited
 
     std::vector<Key> keys;
     float keysTop = 0.0f; // y of the top of the keybed (keys anchored to the bottom)
     std::set<int> pressed;      // drawn notes under the active mouse gesture
     std::set<int> latched;      // drawn notes toggled on
     std::set<int> sustained;    // drawn notes captured by the sustain pedal
-    std::map<int, int> sounding; // drawn note -> output note currently on
+    std::map<int, int> sounding;  // drawn note -> output note currently on
+    std::vector<int> voiceOrder;  // drawn notes in the order they started sounding (FIFO, for stealing)
     int dragDrawn = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoKeyboard)

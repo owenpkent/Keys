@@ -1,7 +1,6 @@
 #include "PluginEditor.h"
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
-#include <cmath>
 
 namespace keys
 {
@@ -63,12 +62,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addCombo(scaleBox, scaleLabel, "Scale", okstudio::scales::names(), "scale", scaleAtt);
     addCombo(channelBox, channelLabel, "MIDI Ch", channelItems(), "channel", channelAtt);
     addCombo(curveBox, curveLabel, "Curve", { "Soft", "Linear", "Hard" }, "curve", curveAtt);
+    addCombo(polyphonyBox, polyphonyLabel, "Voices",
+             { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, "polyphony", polyphonyAtt);
 
     styleLabel(octaveLabel, "Octave");
     addAndMakeVisible(octaveLabel);
     octaveSlider.setSliderStyle(juce::Slider::IncDecButtons);
     octaveSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 46, 26);
-    octaveSlider.setRange(-3, 3, 1);
+    octaveSlider.setRange(-5, 5, 1);
     addAndMakeVisible(octaveSlider);
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "octave", octaveSlider);
 
@@ -135,6 +136,29 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     chordStrumAtt = std::make_unique<SliderAtt>(processor.apvts, "chordStrum", chordStrumSlider);
 
     addCombo(chordStrumDirBox, chordStrumDirLabel, "Dir", { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
+
+    // Performance wheels, left of the keyboard. Transient (no params/persistence): Mod
+    // holds its value (CC1); Pitch bend springs back to centre when you let go.
+    modWheel.setSliderStyle(juce::Slider::LinearVertical);
+    modWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    modWheel.setRange(0, 127, 1);
+    modWheel.setValue(0, juce::dontSendNotification);
+    modWheel.onValueChange = [this] { processor.sendCC(1, (int) modWheel.getValue()); };
+    addAndMakeVisible(modWheel);
+    styleLabel(modLabel, "Mod");
+    modLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(modLabel);
+
+    pitchWheel.setSliderStyle(juce::Slider::LinearVertical);
+    pitchWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    pitchWheel.setRange(0, 16383, 1);
+    pitchWheel.setValue(8192, juce::dontSendNotification); // centre
+    pitchWheel.onValueChange = [this] { processor.sendPitchBend((int) pitchWheel.getValue()); };
+    pitchWheel.onDragEnd = [this] { pitchWheel.setValue(8192, juce::sendNotificationSync); };
+    addAndMakeVisible(pitchWheel);
+    styleLabel(pitchLabel, "Pitch");
+    pitchLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(pitchLabel);
 
     panicButton.onClick = [this] { keyboard.panic(); };
     addAndMakeVisible(panicButton);
@@ -214,6 +238,20 @@ void KeysEditor::timerCallback()
                           (int) apvts.getRawParameterValue("scale")->load());
     keyboard.setSustain(apvts.getRawParameterValue("sustain")->load() > 0.5f);
     keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f);
+    keyboard.setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
+
+    // Changing MIDI channel while notes sound would strand them on the old channel
+    // (note-off goes to the new one), so panic on any channel change.
+    const int ch = (int) apvts.getRawParameterValue("channel")->load();
+    if (ch != lastChannel)
+    {
+        if (lastChannel >= 0)
+        {
+            processor.stopAllChordPads();
+            keyboard.panic();
+        }
+        lastChannel = ch;
+    }
 
     // Grey the humanize amounts out when Humanize is off, so their state reads at a glance.
     const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
@@ -289,6 +327,7 @@ void KeysEditor::resized()
     cell(rowA, 150, scaleLabel, scaleBox);
     cell(rowA, 120, octaveLabel, octaveSlider);
     toggleCell(rowA, 110, scaleLockButton);
+    cell(rowA, 90, polyphonyLabel, polyphonyBox);
     if (updateButton.isVisible())
         updateButton.setBounds(rowA.removeFromLeft(150).withTrimmedTop(14));
 
@@ -304,6 +343,17 @@ void KeysEditor::resized()
     cell(rowC, 130, humanizeTimeLabel, humanizeTimeSlider);
     cell(rowC, 150, chordStrumLabel, chordStrumSlider);
     cell(rowC, 100, chordStrumDirLabel, chordStrumDirBox);
+
+    // Performance wheels occupy a narrow column at the left of the keyboard area.
+    auto wheels = kb.removeFromLeft(84);
+    kb.removeFromLeft(6);
+    auto modCol = wheels.removeFromLeft(40);
+    wheels.removeFromLeft(4);
+    auto pitchCol = wheels;
+    modLabel.setBounds(modCol.removeFromBottom(15));
+    modWheel.setBounds(modCol.reduced(3, 2));
+    pitchLabel.setBounds(pitchCol.removeFromBottom(15));
+    pitchWheel.setBounds(pitchCol.reduced(3, 2));
 
     keyboard.setBounds(kb);
 }

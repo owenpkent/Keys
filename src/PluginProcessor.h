@@ -45,6 +45,8 @@ public:
     void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0);
     void noteOff(int midiNote);
     void allNotesOff();
+    void sendCC(int controller, int value); // e.g. mod wheel = CC1
+    void sendPitchBend(int value14);         // 0..16383, centre 8192
 
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
@@ -74,6 +76,7 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     void stopChordPad(int i);
+    float curved(float pos01) const; // shape a 0..1 velocity position by the Curve param
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     double currentSampleRate = 44100.0;

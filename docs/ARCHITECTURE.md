@@ -45,7 +45,9 @@ sets of **drawn** key numbers:
 `sounding` (drawn note → the output MIDI note currently on), and emits exactly the
 delta: note-offs for keys that left `want`, note-ons for keys that entered it. Every
 gesture mutates the sets then calls `refresh()`, so notes never double-fire or stick,
-and panic is just "clear all three, refresh".
+and panic is just "clear all three, refresh". When a polyphony limit is set, `refresh()`
+first steals the oldest voices (FIFO `voiceOrder`) until `want` fits the cap. Changing
+MIDI channel panics, so a note can't stick on the channel it was played on.
 
 ## Note resolution: snap then transpose, remembered
 
@@ -77,9 +79,11 @@ over 12 candidate roots and scores each against a template library — root mand
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
-`scaleLock`, `octave`, `channel`, `velocity`, `curve`, `sustain`, `latch`, the Humanize
-set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, and the chord-pad
-settings `chordExclusive` / `chordStrum` / `chordStrumDir`). The editor binds controls
+`scaleLock`, `octave`, `channel`, `velocity`, `curve`, `polyphony`, `sustain`, `latch`,
+the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, and
+the chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir`). The Mod and
+Pitch wheels are transient performance controls with no parameters (they don't persist);
+Pitch springs back to centre on release. The editor binds controls
 with attachments — except the two-handle velocity range slider, which has no attachment
 (two values) and is synced to its two params by hand. A 30 Hz timer pushes derived
 config into the keyboard and the live chord into the pads. `getStateInformation` /

@@ -35,10 +35,12 @@ private:
     PianoKeyboard keyboard;
     ChordPads chordPads;
 
-    juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox, chordStrumDirBox;
-    juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, curveLabel, chordStrumDirLabel;
+    juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox, chordStrumDirBox, polyphonyBox;
+    juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, curveLabel, chordStrumDirLabel, polyphonyLabel;
     juce::Slider velocitySlider, octaveSlider, chordStrumSlider;
     juce::Label velocityLabel, octaveLabel, chordStrumLabel;
+    juce::Slider modWheel, pitchWheel;  // transient performance wheels (no persistence)
+    juce::Label modLabel, pitchLabel;
 
     juce::ToggleButton scaleLockButton { "Scale Lock" };
     juce::ToggleButton sustainButton { "Sustain" };
@@ -51,12 +53,13 @@ private:
     juce::Slider humanizeVelSlider, humanizeTimeSlider; // velocity is a two-value range
     juce::Label humanizeVelLabel, humanizeTimeLabel;
 
-    std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt, chordStrumDirAtt;
+    std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt, chordStrumDirAtt, polyphonyAtt;
     std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeTimeAtt, chordStrumAtt;
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;
+    int lastChannel = -1; // to panic on MIDI-channel change (avoids notes stuck on the old channel)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysEditor)
 };
