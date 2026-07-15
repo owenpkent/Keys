@@ -85,7 +85,17 @@ process. Screenshots live in `assets/screenshots/`, referenced from README and d
 
 ## Sibling projects (same owner, same conventions)
 
-`../okstudio-juce-kit` (shared code), `../Undertow` (bass), `../Beatform` (drums),
-`../alpha-osk` (on-screen keyboard), `../Octavium` (the original Python controller
-these plugins are being carved out of). Installer/CI/signing mirror Undertow and
-Beatform; EV signing uses the same OK Studio eToken thumbprint.
+`../okstudio-juce-kit` (shared code), `../Contour` (drawn melodic contours),
+`../Lattice` (mouse-only polyphonic piano roll), `../Undertow` (bass), `../Beatform`
+(drums), `../alpha-osk` (on-screen keyboard), `../Octavium` (the original Python
+controller these plugins are being carved out of). Installer/CI/signing mirror Undertow
+and Beatform; EV signing uses the same OK Studio eToken thumbprint.
+
+Keys is the kit's **reference consumer**: its `CMakeLists.txt`, test setup and updater
+wiring get copied into every new line plugin. Changes here propagate by imitation, so a
+structural fix is worth landing in the kit's `docs/USAGE.md` too, not only here.
+
+**Keys is played; Contour and Lattice are authored.** Keys drains a
+`MidiMessageCollector` fed by UI clicks and never reads the playhead. The generators
+author their whole outgoing stream from the host `ppqPosition` and schedule note on/off
+at sample offsets. Do not copy Keys' `processBlock` into a generator; copy Contour's.
