@@ -60,6 +60,7 @@ private:
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;
     int lastChannel = -1; // to panic on MIDI-channel change (avoids notes stuck on the old channel)
+    bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysEditor)
 };

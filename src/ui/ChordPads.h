@@ -39,6 +39,7 @@ private:
     juce::String currentName;
 
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
+    int playing = -1;      // pad held down and sounding (beat-pad momentary play)
     bool dragging = false;
     juce::Point<float> downPos, dragPos;
 

@@ -132,24 +132,19 @@ void KeysProcessor::stopAllChordPads()
         stopChordPad(i);
 }
 
-void KeysProcessor::toggleChordPad(int i)
+void KeysProcessor::pressChordPad(int i)
 {
     if (i < 0 || i >= numChordPads)
         return;
-    const bool wasOn = ! chordPadOn[(size_t) i].empty();
-    if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
-        stopAllChordPads();      // choke every pad (incl. this one) before the new chord
-    else if (wasOn)
-    {
-        stopChordPad(i);         // non-exclusive: clicking a sounding pad turns it off
-        return;
-    }
-    if (wasOn)
-        return;                  // exclusive path already turned this pad off
-
     const auto& notes = chordPads[(size_t) i].notes;
     if (notes.empty())
         return;
+
+    if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
+        stopAllChordPads();      // choke every pad before the new chord
+    else
+        stopChordPad(i);         // re-pressing a sounding pad re-triggers it
+
     const float vel = baseVelocity01();
 
     // Strum (Octavium "Drift"): spread the note-ons over `chordStrum` ms in a direction.
@@ -171,6 +166,15 @@ void KeysProcessor::toggleChordPad(int i)
         noteOn(order[(size_t) k], vel, delay); // noteOn also adds Humanize per note
     }
     chordPadOn[(size_t) i] = notes;
+}
+
+void KeysProcessor::releaseChordPad(int i)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    if (apvts.getRawParameterValue("sustain")->load() > 0.5f)
+        return;                  // pedal down: leave the chord ringing until Sustain lifts
+    stopChordPad(i);
 }
 
 void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds)

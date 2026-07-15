@@ -59,8 +59,9 @@ They let you keep a palette of chords a single click away.
 1. **Build a chord.** Turn **Latch** on and click the notes you want. The card names
    the chord it hears (for example `Cm7`).
 2. **Capture it.** Drag the card onto a pad. The pad stores that chord, auto-labelled.
-3. **Play it.** Click a filled pad to play the chord; click again to stop. Turn **Excl**
-   on so a new pad chokes the previous chord.
+3. **Play it, beat-pad style.** Press and hold a filled pad to sound its chord; release
+   to stop. Turn **Sustain** on to keep it ringing after you let go, and **Excl** on so
+   a new pad chokes the previous chord.
 4. **Rearrange or clear.** Drag a pad onto another to move it, or drag a pad off the
    row to empty it.
 

@@ -25,7 +25,7 @@ Built with **JUCE 8** and **CMake**, on the shared
 | **Click and drag** | Glide across keys (monophonic) |
 | **Latch on**, click keys | Toggle notes on and off to build and hold a chord |
 | **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail; click **All Off** or turn Sustain off to release |
-| **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then click the pad to play it back |
+| **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it) |
 | **All Off** | Panic: stop every note on every channel |
 
 There is no right-click or keyboard shortcut for anything. Latch and Sustain are

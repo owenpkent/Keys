@@ -67,7 +67,8 @@ public:
     void setChordPad(int i, const std::vector<int>& notes, const juce::String& name);
     void clearChordPad(int i);
     void moveChordPad(int from, int to); // swap two slots
-    void toggleChordPad(int i);          // play if off / stop if on; honours Exclusive
+    void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive
+    void releaseChordPad(int i);         // stop it, unless Sustain is holding
     void stopAllChordPads();
 
     juce::AudioProcessorValueTreeState apvts;

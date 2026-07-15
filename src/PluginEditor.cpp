@@ -236,9 +236,15 @@ void KeysEditor::timerCallback()
     keyboard.setScaleLock(apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
                           (int) apvts.getRawParameterValue("root")->load(),
                           (int) apvts.getRawParameterValue("scale")->load());
-    keyboard.setSustain(apvts.getRawParameterValue("sustain")->load() > 0.5f);
+    const bool sus = apvts.getRawParameterValue("sustain")->load() > 0.5f;
+    keyboard.setSustain(sus);
     keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f);
     keyboard.setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
+
+    // Lifting the sustain pedal releases any pad chords left ringing by it.
+    if (! sus && lastSustain)
+        processor.stopAllChordPads();
+    lastSustain = sus;
 
     // Changing MIDI channel while notes sound would strand them on the old channel
     // (note-off goes to the new one), so panic on any channel change.

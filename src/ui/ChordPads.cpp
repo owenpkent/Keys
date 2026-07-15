@@ -91,7 +91,8 @@ void ChordPads::paint(juce::Graphics& g)
         const auto& pad = processor.chordPad(i);
         const bool filled = ! pad.notes.empty();
         const bool active = processor.chordPadActive(i);
-        const bool dropHere = dragging && dragSource == -2 && hovered == i && isChord(currentNotes);
+        const bool dropHere = dragging && hovered == i
+                              && ((dragSource == -2 && isChord(currentNotes)) || (dragSource >= 0 && dragSource != i));
 
         g.setColour(active ? accent.withAlpha(0.85f) : padBg);
         g.fillRoundedRectangle(b, kRadius);
@@ -140,7 +141,16 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     downPos = e.position;
     dragPos = e.position;
     dragging = false;
+    playing = -1;
     dragSource = cellAt(e.position);
+
+    // Beat-pad: a filled pad fires the instant you press it (release stops it below).
+    if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
+    {
+        processor.pressChordPad(dragSource);
+        playing = dragSource;
+    }
+    repaint();
 }
 
 void ChordPads::mouseDrag(const juce::MouseEvent& e)
@@ -148,10 +158,21 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
     dragPos = e.position;
     if (! dragging && e.position.getDistanceFrom(downPos) > 6.0f)
     {
-        if (sourceIsDraggable())
-            dragging = true;
+        if (playing >= 0)
+        {
+            // A press that turns into a drag becomes a rearrange: stop the note first.
+            processor.releaseChordPad(playing);
+            playing = -1;
+            dragging = true; // dragSource is already this pad
+        }
+        else if (dragSource == -2 && isChord(currentNotes))
+        {
+            dragging = true; // dragging the live card to capture it
+        }
         else
+        {
             dragSource = -1; // nothing grabbable under the press
+        }
     }
     if (dragging)
         repaint();
@@ -159,22 +180,23 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
 
 void ChordPads::mouseUp(const juce::MouseEvent& e)
 {
-    const int target = cellAt(e.position);
-    if (! dragging)
+    if (playing >= 0)
     {
-        if (dragSource >= 0)
-            processor.toggleChordPad(dragSource); // a tap plays/stops a pad
+        processor.releaseChordPad(playing); // beat-pad: release stops it (Sustain holds it)
+        playing = -1;
     }
-    else if (dragSource == -2 && target >= 0 && isChord(currentNotes))
+    else if (dragging)
     {
-        processor.setChordPad(target, currentNotes, currentName); // capture the live chord
-    }
-    else if (dragSource >= 0)
-    {
-        if (target >= 0 && target != dragSource)
-            processor.moveChordPad(dragSource, target); // rearrange
-        else if (target == -1)
-            processor.clearChordPad(dragSource);         // dragged off the row = clear
+        const int target = cellAt(e.position);
+        if (dragSource == -2 && target >= 0 && isChord(currentNotes))
+            processor.setChordPad(target, currentNotes, currentName); // capture the live chord
+        else if (dragSource >= 0)
+        {
+            if (target >= 0 && target != dragSource)
+                processor.moveChordPad(dragSource, target); // rearrange
+            else if (target == -1)
+                processor.clearChordPad(dragSource);         // dragged off the row = clear
+        }
     }
     dragging = false;
     dragSource = -1;
