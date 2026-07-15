@@ -46,7 +46,7 @@ on-screen toggles, not modifier keys, on purpose.
 | **Sustain** | Hold notes after release (pedal) |
 | **Latch** | Click to toggle notes on/off and hold them |
 | **Humanize** | Random velocity within a Min/Max range + micro-timing, so chords feel played |
-| **Chord pads** | Capture chords to eight pads and click to replay; **Excl** chokes the last chord, **Strum** spreads a pad's notes Up / Down / Random |
+| **Chord pads** | Capture chords to eight pads and press beat-pad style to play (Sustain holds); **Excl** chokes the last chord, **Strum** spreads a pad's notes Up / Down / Random |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).

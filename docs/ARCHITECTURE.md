@@ -69,8 +69,10 @@ message thread, drives it.
 Eight pads live in the processor (`ChordPad { notes, name }`), so they persist and keep
 sounding independent of the editor; `ChordPads` is just the view. Build a chord on the
 keyboard (Latch), drag the live card onto a pad to `setChordPad` the sounding notes
-(named by `keys::chords::detect`), then click to `toggleChordPad` (play/stop, honouring
-the `chordExclusive` choke). Playback reuses `noteOn`, so Humanize colours each tone,
+(named by `keys::chords::detect`), then play it beat-pad style: mouse-down calls
+`pressChordPad` (fire, honouring the `chordExclusive` choke) and mouse-up calls
+`releaseChordPad` (stop, unless Sustain is holding it — the editor releases held pad
+chords when the pedal lifts). Playback reuses `noteOn`, so Humanize colours each tone,
 and `chordStrum` / `chordStrumDir` order the notes and stagger their note-ons into a
 strum (via `noteOn`'s `delaySeconds`). Detection (`Chords.h`) rotates a pitch-class set
 over 12 candidate roots and scores each against a template library — root mandatory,
