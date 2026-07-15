@@ -160,8 +160,25 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     pitchLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(pitchLabel);
 
-    panicButton.onClick = [this] { keyboard.panic(); };
+    panicButton.onClick = [this]
+    {
+        processor.stopAllChordPads(); // else pads keep rendering active after the silence
+        keyboard.panic();
+        panicFlash = 1.0f; // blue flash, only on an explicit click (Octavium behaviour)
+    };
     addAndMakeVisible(panicButton);
+
+    // Chord-pad pages: four pages of eight, so a session can hold several keys' worth of
+    // chords without the strip shrinking below a comfortable target.
+    pagePrevButton.onClick = [this] { stepPadPage(-1); };
+    pageNextButton.onClick = [this] { stepPadPage(1); };
+    chordsButton.onClick = [this] { toggleGenPanel(); };
+    chordsButton.setTooltip("Generate chords for this page, and find what could follow them.");
+    for (auto* b : { &pagePrevButton, &pageNextButton, &chordsButton })
+        addAndMakeVisible(*b);
+    styleLabel(pageLabel, "1/4");
+    pageLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(pageLabel);
 
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
     addChildComponent(updateButton); // hidden until the updater finds a newer release
@@ -203,6 +220,35 @@ void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::S
     box.addItemList(items, 1);
     addAndMakeVisible(box);
     att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
+}
+
+void KeysEditor::stepPadPage(int delta)
+{
+    if (auto* p = processor.apvts.getParameter("padPage"))
+    {
+        const int next = juce::jlimit(0, KeysProcessor::numPadPages - 1, processor.padPage() + delta);
+        p->setValueNotifyingHost(p->convertTo0to1((float) next));
+    }
+}
+
+void KeysEditor::toggleGenPanel()
+{
+    if (genPanel != nullptr)
+    {
+        genPanel.reset();
+        return;
+    }
+    // The generator carries far more controls than the player, and every one of them has to
+    // stay at a full-size target. Grow the editor to fit rather than shrink the targets.
+    setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 590));
+
+    genPanel = std::make_unique<ChordGenPanel>(processor);
+    genPanel->onClose = [this] { genPanel.reset(); };
+    // An emotion preset moves Root and Scale as well as the generator's own key; the
+    // combos are APVTS-attached and follow on their own, so this is just the repaint.
+    genPanel->onKeyChanged = [this] { repaint(); };
+    addAndMakeVisible(*genPanel);
+    genPanel->setBounds(getLocalBounds());
 }
 
 void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
@@ -273,6 +319,22 @@ void KeysEditor::timerCallback()
     humanizeVelLabel.setText("Velocity  " + juce::String(vmin) + "-" + juce::String(vmax),
                              juce::dontSendNotification);
 
+    // Pad page: label and the ends of the range.
+    const int page = processor.padPage();
+    pageLabel.setText(juce::String(page + 1) + "/" + juce::String(KeysProcessor::numPadPages),
+                      juce::dontSendNotification);
+    pagePrevButton.setEnabled(page > 0);
+    pageNextButton.setEnabled(page < KeysProcessor::numPadPages - 1);
+
+    // Panic flash: decay the blue behind All Off (Octavium fires this on click only, never
+    // on the internal clears, so it always means "you just did that").
+    if (panicFlash > 0.0f)
+    {
+        panicFlash = juce::jmax(0.0f, panicFlash - 0.08f); // ~400 ms at 30 Hz
+        panicButton.setColour(juce::TextButton::buttonColourId,
+                              neutralControl.interpolatedWith(okstudio::theme::accent, panicFlash));
+    }
+
     // Feed the pads the chord currently sounding on the keyboard (drives the live card
     // and reflects any pad-active changes).
     chordPads.setCurrentChord(keyboard.soundingOutputNotes());
@@ -288,6 +350,9 @@ void KeysEditor::paint(juce::Graphics& g)
 
 void KeysEditor::resized()
 {
+    if (genPanel != nullptr)
+        genPanel->setBounds(getLocalBounds()); // the overlay always covers the whole editor
+
     auto area = getLocalBounds().reduced(10);
 
     // Give the keyboard a fixed height off the bottom, then the chord-pad row above it,
@@ -299,9 +364,15 @@ void KeysEditor::resized()
     area.removeFromBottom(6);
     auto header = area;
 
-    // Chord pads: an Exclusive toggle on the left, then the pad strip.
-    chordExclusiveButton.setBounds(padRow.removeFromLeft(74).withSizeKeepingCentre(70, 26));
+    // Chord-pad row: Exclusive and the page/generator controls on the left, then the strip.
+    chordExclusiveButton.setBounds(padRow.removeFromLeft(60).withSizeKeepingCentre(56, 26));
     padRow.removeFromLeft(4);
+    chordsButton.setBounds(padRow.removeFromLeft(66).withSizeKeepingCentre(66, 34));
+    padRow.removeFromLeft(4);
+    pagePrevButton.setBounds(padRow.removeFromLeft(34).withSizeKeepingCentre(34, 34));
+    pageLabel.setBounds(padRow.removeFromLeft(28));
+    pageNextButton.setBounds(padRow.removeFromLeft(34).withSizeKeepingCentre(34, 34));
+    padRow.removeFromLeft(6);
     chordPads.setBounds(padRow);
 
     const int rowH = 46;

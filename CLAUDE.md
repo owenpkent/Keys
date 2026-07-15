@@ -41,6 +41,16 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   the delta. All state changes go through it, so notes never double-fire or stick.
 - **The played note is resolved at press time** (scale-lock snap, then octave) and
   remembered, so note-off matches even if octave/scale change while it sounds.
+- **Chord generation is a weighted pool.** `ChordGen.h` builds candidate chords in
+  tiers (diatonic → borrowed → secondary dominants → chromatic); Scale Compliance
+  decides which tiers enter it, Lock Influence re-weights it toward the families of
+  locked chords. `ScaleModes.h` is deliberately *not* the kit's scale table: that one
+  answers "is this note in the scale", generation also needs a quality per degree.
+  All of it (plus `ChordSuggest.h`) is UI-free so it unit-tests.
+- **Ports from Octavium are not transcriptions.** Two of its generator bugs were fixed
+  rather than reproduced (non-diatonic Sus2/Add9 at 100% compliance; regenerate
+  dropping the note-count filter), and its right-click affordances had to be rebuilt as
+  on-screen buttons. Check ported logic against the invariants before trusting it.
 
 ## Invariants (don't break)
 

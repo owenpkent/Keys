@@ -5,6 +5,58 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Chord generator** (`Chords` button): fills the chord pads for a key and mode,
+  ported from Octavium's Autofill and Options dialogs. Everything Octavium reached by
+  right-click is an on-screen button, so it stays mouse-only.
+  - 12 **scale modes** with a chord quality per degree (Ionian, Dorian, Phrygian,
+    Lydian, Mixolydian, Aeolian, Locrian, Harmonic/Melodic Minor, Blues, and both
+    pentatonics), each showing the character it carries.
+  - 10 **Feel presets** (Happy, Sad, Dreamy, Dark, Jazzy, Bluesy, Epic, Chill,
+    Mysterious, Smooth): one click sets the generator's key and mode *and* moves Root
+    and Scale to match, so Scale Lock agrees with the pads.
+  - **Scale Compliance** (0-100%): how far outside the key the generator may reach.
+    100% stays diatonic; lower opens up modal interchange, then secondary dominants,
+    then any chromatic root.
+  - **Lock** a pad to keep it through a regenerate. **Lock Influence** (0-100%) steers
+    new chords toward the character of what you locked.
+  - **New** gives a pad a different chord for the same scale degree; **Next** offers
+    chords that could follow it (Neo-Riemannian P/L/R/N/S/H, circle-of-fifths moves,
+    diatonic degrees, and chromatic substitutions) and drops the pick into the next
+    free pad.
+  - Note-count filter (triads / 7ths / 9ths), inversions (root / 1st / 2nd / 3rd),
+    and a generator octave. Press a chord in the grid to audition it.
+- **Chord pad pages**: four pages of eight pads (was a single row of eight), with
+  `<` / `>` navigation. Chords left ringing on another page keep sounding.
+- **All Off** flashes blue when clicked, matching Octavium.
+
+### Fixed
+- **All Off** left the chord pads drawn as active: it silenced the notes but never
+  cleared the pads' own state.
+- Chord pads ignored the **Voices** limit entirely, since voice stealing lived only in
+  the keyboard. A pad now drops its highest notes to fit the cap, keeping the lowest.
+- The chord generator's diatonic tier is genuinely diatonic. Octavium offers Sus2 and
+  Add9 on every major/minor degree without checking the added note is in the key (E
+  Sus2 in C major wants F#), so its "strictly diatonic" setting was not. Ported with
+  that filtered, since Keys is built on never playing a wrong note.
+- Regenerating a chord no longer breaks the note-count filter. Octavium drops the
+  filter when a degree has no alternative, which could return a chord of the wrong size
+  or the same chord it was asked to replace.
+
+### Changed
+- **Parameter layout changed**: 13 parameters added (`padPage`, and the `gen*` set for
+  the generator). Sessions saved with 0.1.0 load and keep their settings; the new
+  parameters take their defaults.
+- Unit tests now print their failures. JUCE's default logger writes to the debugger,
+  so a failing test used to exit non-zero and say nothing.
+- `src/ScaleModes.h`, `src/ChordGen.h`, `src/ChordSuggest.h`: generation and suggestion
+  logic kept free of UI, so it unit-tests like `NoteMath.h` and `Chords.h`.
+
+### Not ported
+- Octavium's **MIDI Library** and **Markov** chord sources. Both read its external
+  ~30 MB MIDI chord pack, which a plugin has no business shipping or hunting for on
+  disk. The algorithmic source needs nothing and is the one here.
+
 ## [0.1.0] - 2026-07-14
 
 ### Added

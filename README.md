@@ -26,6 +26,7 @@ Built with **JUCE 8** and **CMake**, on the shared
 | **Latch on**, click keys | Toggle notes on and off to build and hold a chord |
 | **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail; click **All Off** or turn Sustain off to release |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it) |
+| **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next |
 | **All Off** | Panic: stop every note on every channel |
 
 There is no right-click or keyboard shortcut for anything. Latch and Sustain are
@@ -46,10 +47,35 @@ on-screen toggles, not modifier keys, on purpose.
 | **Sustain** | Hold notes after release (pedal) |
 | **Latch** | Click to toggle notes on/off and hold them |
 | **Humanize** | Random velocity within a Min/Max range + micro-timing, so chords feel played |
-| **Chord pads** | Capture chords to eight pads and press beat-pad style to play (Sustain holds); **Excl** chokes the last chord, **Strum** spreads a pad's notes Up / Down / Random |
+| **Chord pads** | Capture chords to eight pads and press beat-pad style to play (Sustain holds); **Excl** chokes the last chord, **Strum** spreads a pad's notes Up / Down / Random. `<` / `>` move between four pages of pads |
+| **Chords** | The chord generator — see below |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).
+
+## The chord generator
+
+**Chords** opens a panel that fills the current page of pads for a key and mode, so you
+can have a progression to play with before you know any theory.
+
+![The chord generator](assets/screenshots/chord-generator.png)
+
+The fastest way in is a **Feel** preset: Happy, Sad, Dreamy, Dark, Jazzy, Bluesy, Epic,
+Chill, Mysterious, Smooth. One click sets the key and mode, and moves Root and Scale to
+match so Scale Lock agrees. Then **Fill Page**.
+
+| Control | What it does |
+|---------|--------------|
+| **Key** + **Mode** | 12 modes, each showing the character it carries (Dorian is "Jazzy, Sophisticated, Chill") |
+| **Scale Compliance** | How far outside the key it may go. 100% stays in the key; lower borrows from related modes, then reaches for secondary dominants, then anything |
+| **Lock** | Keep a chord when you regenerate |
+| **Lock Influence** | How much new chords copy the character of the ones you locked |
+| **New** | A different chord for that pad's place in the scale |
+| **Next** | Chords that could follow this one — smooth voice-leading moves, circle-of-fifths, diatonic degrees, jazz substitutions — dropped into the next free pad |
+| **Notes** / **Inversions** | Generate triads, 7ths and/or 9ths; allow root position and inversions |
+
+Press any chord in the grid to hear it. Every action is an on-screen button: there is no
+right-click here either.
 
 ## Using it in Ableton Live
 

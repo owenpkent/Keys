@@ -23,22 +23,22 @@ juce::Rectangle<float> ChordPads::cardBounds() const
     return getLocalBounds().toFloat().reduced(2.0f).removeFromLeft(kCardW);
 }
 
-juce::Rectangle<float> ChordPads::padBounds(int i) const
+juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
     r.removeFromLeft(kCardW + 10.0f); // card + separation
-    const int n = KeysProcessor::numChordPads;
+    const int n = KeysProcessor::padsPerPage;
     const float w = (r.getWidth() - kGap * (float) (n - 1)) / (float) n;
-    return { r.getX() + (float) i * (w + kGap), r.getY(), w, r.getHeight() };
+    return { r.getX() + (float) visibleIndex * (w + kGap), r.getY(), w, r.getHeight() };
 }
 
 int ChordPads::cellAt(juce::Point<float> pos) const
 {
     if (cardBounds().contains(pos))
         return -2;
-    for (int i = 0; i < KeysProcessor::numChordPads; ++i)
+    for (int i = 0; i < KeysProcessor::padsPerPage; ++i)
         if (padBounds(i).contains(pos))
-            return i;
+            return processor.padPageOffset() + i; // absolute slot, so drags survive a page flip
     return -1;
 }
 
@@ -82,12 +82,13 @@ void ChordPads::paint(juce::Graphics& g)
                    juce::Justification::centred);
     }
 
-    // Pads.
-    const int n = KeysProcessor::numChordPads;
+    // Pads: the current page's slice, drawn left to right.
+    const int offset = processor.padPageOffset();
     const int hovered = dragging ? cellAt(dragPos) : -1;
-    for (int i = 0; i < n; ++i)
+    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
     {
-        const auto b = padBounds(i);
+        const int i = offset + v;
+        const auto b = padBounds(v);
         const auto& pad = processor.chordPad(i);
         const bool filled = ! pad.notes.empty();
         const bool active = processor.chordPadActive(i);
@@ -114,6 +115,14 @@ void ChordPads::paint(juce::Graphics& g)
             juce::PathStrokeType(1.0f).createDashedStroke(dashed, outline, dashes, 2);
             g.setColour(line.withAlpha(0.7f));
             g.fillPath(dashed);
+        }
+
+        // Locked pads carry a corner dot. It is an indicator, not a target: the toggle
+        // lives in the Chords panel, where it can be a full-size button.
+        if (filled && pad.locked)
+        {
+            g.setColour(active ? juce::Colours::black.withAlpha(0.7f) : theme::good);
+            g.fillEllipse(b.getRight() - 10.0f, b.getY() + 4.0f, 5.0f, 5.0f);
         }
 
         if (dropHere)

@@ -12,9 +12,13 @@ src/
 ├── PluginEditor.{h,cpp}      # controls + layout + updater button
 ├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
 ├── Chords.h                  # pure chord detector (names a note set), unit-tested
+├── ScaleModes.h              # 12 modes + a chord quality per degree; Feel presets
+├── ChordGen.h                # pure chord generation (weighted pool), unit-tested
+├── ChordSuggest.h            # pure "what could follow this chord", unit-tested
 └── ui/
     ├── PianoKeyboard.{h,cpp} # the playable keyboard widget
-    └── ChordPads.{h,cpp}     # chord-pad row + live chord card (capture / recall)
+    ├── ChordPads.{h,cpp}     # chord-pad row + live chord card (capture / recall)
+    └── ChordGenPanel.{h,cpp} # the chord generator overlay
 ```
 
 ## Threading: UI → audio note path
@@ -66,8 +70,11 @@ message thread, drives it.
 
 ## Chord pads
 
-Eight pads live in the processor (`ChordPad { notes, name }`), so they persist and keep
-sounding independent of the editor; `ChordPads` is just the view. Build a chord on the
+Pads live in the processor (`ChordPad`), so they persist and keep
+sounding independent of the editor; `ChordPads` is just the view. They are arranged as
+four pages of eight (`padsPerPage` × `numPadPages`); the strip shows the page `padPage`
+selects and indexes by **absolute slot**, so a chord left ringing on another page keeps
+sounding and a drag can't land on the wrong pad. Build a chord on the
 keyboard (Latch), drag the live card onto a pad to `setChordPad` the sounding notes
 (named by `keys::chords::detect`), then play it beat-pad style: mouse-down calls
 `pressChordPad` (fire, honouring the `chordExclusive` choke) and mouse-up calls
@@ -78,19 +85,72 @@ strum (via `noteOn`'s `delaySeconds`). Detection (`Chords.h`) rotates a pitch-cl
 over 12 candidate roots and scores each against a template library — root mandatory,
 3rd and 5th omittable — so it is unit-testable with no UI.
 
+A pad fires as one gesture, so there is no "oldest" voice within it: `pressChordPad`
+honours the Voices cap by dropping its highest notes and keeping the lowest, which is
+how `refresh()` resolves a too-big simultaneous chord on the keyboard. The cap applies
+per source — a pad and the keyboard each fit under it separately.
+
+## Chord generation
+
+`ChordGen.h` builds a **weighted pool** of candidate chords for a key and mode, then
+samples it. That one idea carries both sliders in the generator:
+
+- **Scale Compliance** decides which tiers enter the pool: diatonic (always, weight 1),
+  then borrowed from parallel modes, then secondary dominants, then any chromatic root,
+  each fading in as compliance drops and weighted by how far it opened.
+- **Lock Influence** re-weights the whole pool toward the *families* (triad / seventh /
+  sixth / add / extended) of the chords you locked — so regenerating keeps their
+  character without copying them.
+
+A fill seeds the plain diatonic chord on each degree in order, then weighted-samples the
+rest and shuffles only that tail. Each chord remembers the `degree` it came from, which
+is what lets **New** hand back a different chord *for the same degree*.
+
+The modes (`ScaleModes.h`) are deliberately **not** the kit's `okstudio::scales`. That
+table answers "is this note in the scale", which is all Scale Lock needs; generation also
+needs a chord quality per degree. They stay separate rather than one pretending to be the
+other, and `kitScaleIndex` pairs them by comparing intervals — so a rename on either side
+cannot silently mis-pair them. That mapping is what lets a Feel preset move Root and
+Scale along with the generator's own key.
+
+`ChordSuggest.h` answers "what could follow this chord". Octavium writes each transform
+as its own function; they are all the same shape (shift the root by an interval, maybe
+flip the quality), so here they are one table. Whether a transform lands on major or
+minor is read off the source chord's third rather than a name list, so it stays right as
+types are added.
+
+Both headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
+
+## Chord generator panel
+
+`ChordGenPanel` is an overlay, not a dialog: a plugin editor has no business opening OS
+windows, and an overlay keeps every target inside the surface the mouse is already in.
+It fills the **current page**, so the four pages can hold four different keys.
+
+Its pad grid repeats the strip at full size on purpose. Everything Octavium reached by
+right-click (lock, regenerate, suggest) is a real on-screen button here, and at strip
+size those targets would be far under the 34 px minimum. Opening the panel grows the
+editor to fit rather than shrinking them. Auditioning a chord in the grid reuses
+`pressChordPad` / `releaseChordPad`, so it is the same code path as playing the strip.
+
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
 `scaleLock`, `octave`, `channel`, `velocity`, `curve`, `polyphony`, `sustain`, `latch`,
-the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, and
-the chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir`). The Mod and
+the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, the
+chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir` / `padPage`, and the
+generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the note-count and inversion
+toggles, `genCompliance`, `genLockInfluence`). The Mod and
 Pitch wheels are transient performance controls with no parameters (they don't persist);
 Pitch springs back to centre on release. The editor binds controls
 with attachments — except the two-handle velocity range slider, which has no attachment
 (two values) and is synced to its two params by hand. A 30 Hz timer pushes derived
 config into the keyboard and the live chord into the pads. `getStateInformation` /
 `setStateInformation` persist the APVTS via `okstudio::state`, plus the captured chord
-pads as an extra state tree, so the whole setup saves with the DAW session.
+pads as an extra state tree (notes, name, lock, and the generator metadata a pad carries),
+so the whole setup saves with the DAW session. Pads saved before the generator existed
+load fine: the missing metadata reads back as -1, which means "hand-captured", and the
+suggestion menu works the chord out from its notes instead.
 
 ## Editor
 

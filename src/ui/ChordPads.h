@@ -30,8 +30,8 @@ public:
 
 private:
     juce::Rectangle<float> cardBounds() const;
-    juce::Rectangle<float> padBounds(int i) const;
-    int cellAt(juce::Point<float>) const; // -2 = card, 0..N-1 = pad, -1 = none
+    juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1, left to right
+    int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;
 
     KeysProcessor& processor;

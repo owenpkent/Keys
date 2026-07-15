@@ -66,5 +66,62 @@ They let you keep a palette of chords a single click away.
    row to empty it.
 
 Pad chords play through the same output as the keys, so **Humanize** gives each chord
-tone its own velocity and the **Strum** control spreads them into a strum. The pads
-save with the DAW session.
+tone its own velocity and the **Strum** control spreads them into a strum. A pad also
+respects the **Voices** limit: if a chord has more notes than the cap allows, its lowest
+notes are the ones that sound. The pads save with the DAW session.
+
+There are **four pages** of eight pads. `<` and `>` move between them, and the label
+between shows where you are. A chord left ringing on one page keeps sounding while you
+work on another, so you can hold a bass chord on page 1 and play page 2 over it.
+
+## Chord generator
+
+**Chords** opens the generator over the plugin. It works on the page of pads you are
+looking at, so each page can be a different key. **Close** puts it away.
+
+### Filling a page
+
+1. **Pick a feel.** The **Feel** row (Happy, Sad, Dreamy, Dark, Jazzy, Bluesy, Epic,
+   Chill, Mysterious, Smooth) sets a key and mode in one click, and moves **Root** and
+   **Scale** to match so **Scale Lock** agrees with the chords you're about to get.
+   Or set **Key** and **Mode** yourself — each mode shows the character it carries.
+2. **Fill Page.** Every unlocked pad gets a chord. The seven chords that belong to the
+   key come first, in order, then the remaining pads get something richer from the key.
+3. **Play them.** Press a chord in the grid to hear it, or close the panel and play the
+   pads.
+
+### Shaping what you get
+
+| Control | What it does |
+|---------|--------------|
+| **Scale Compliance** | How adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows chords from related modes, then reaches for secondary dominants, then for anything at all. |
+| **Notes** | Which chord sizes to build: **3** triads, **4** 7ths and 6ths, **5** 9ths and extensions. |
+| **Inversions** | **R** is root position; **1st** / **2nd** / **3rd** let a chord sit with its lower notes moved up an octave, so a progression moves less. |
+| **Octave** | Which register the generated chords land in. |
+
+### Keeping what you like
+
+**Lock** a chord you want to keep. **Regen Unlocked** gives every other pad a new chord;
+locked ones stay. **Clear Page** empties the unlocked pads.
+
+**Lock Influence** decides how much the locked chords steer the new ones. At a high
+setting, locking three 7th chords biases what you get toward 7ths — it copies the
+*character* of what you kept, not the chords themselves.
+
+### Finding the next chord
+
+**New** on a pad gives you a different chord for that pad's place in the scale — same
+role in the key, different colour.
+
+**Next** asks what could follow that chord, and offers four kinds of answer:
+
+- **Neo-Riemannian** — the moves that change as little as possible: swap major for minor
+  (P), or slide to a chord that shares two of its notes (L, R, N, S, H).
+- **Circle of Fifths** — the dominant and subdominant, the pulls that make a progression
+  feel like it's going somewhere.
+- **Diatonic** — the other chords of the key (ii, iii, vi, vii).
+- **Chromatic** — the borrowed and jazz moves (tritone substitution, minor plagal,
+  Neapolitan, augmented sixth).
+
+Your pick goes into the next empty pad on the page, so you can build a progression left
+to right by asking for one chord at a time.

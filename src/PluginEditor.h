@@ -1,10 +1,12 @@
 #pragma once
 
 #include "PluginProcessor.h"
-#include "ui/PianoKeyboard.h"
+#include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
+#include "ui/PianoKeyboard.h"
 #include <okstudio/Theme.h>
 #include <okstudio/Updater.h>
+#include <memory>
 
 namespace keys
 {
@@ -27,6 +29,8 @@ private:
     void addCombo(juce::ComboBox&, juce::Label&, const juce::String& text, const juce::StringArray& items,
                   const juce::String& paramID, std::unique_ptr<ComboAtt>&);
     void showUpdate(const okstudio::updater::UpdateInfo&);
+    void stepPadPage(int delta);
+    void toggleGenPanel();
 
     KeysProcessor& processor;
     okstudio::theme::LookAndFeel lnf;
@@ -50,6 +54,11 @@ private:
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
+    // Chord-pad page navigation, and the door to the generator overlay.
+    juce::TextButton pagePrevButton { "<" }, pageNextButton { ">" }, chordsButton { "Chords" };
+    juce::Label pageLabel;
+    std::unique_ptr<ChordGenPanel> genPanel; // only alive while the overlay is open
+
     juce::Slider humanizeVelSlider, humanizeTimeSlider; // velocity is a two-value range
     juce::Label humanizeVelLabel, humanizeTimeLabel;
 
@@ -61,6 +70,7 @@ private:
     okstudio::updater::UpdateInfo pendingUpdate;
     int lastChannel = -1; // to panic on MIDI-channel change (avoids notes stuck on the old channel)
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
+    float panicFlash = 0.0f;  // 1 -> 0 decay behind the All Off button, on an explicit click only
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysEditor)
 };

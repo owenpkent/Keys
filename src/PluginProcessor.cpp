@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "ScaleModes.h"
 #include <okstudio/Scales.h>
 #include <okstudio/StateHelpers.h>
 #include <algorithm>
@@ -51,6 +52,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrum", 1 }, "Chord Strum", 0, 200, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chordStrumDir", 1 }, "Chord Strum Dir",
                                                       juce::StringArray { "Up", "Down", "Random" }, 0));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padPage", 1 }, "Chord Pad Page",
+                                                      juce::StringArray { "1", "2", "3", "4" }, 0));
+
+    // Chord generator settings. Key/mode are the generator's own, separate from the Root
+    // and Scale that drive Scale Lock: those come from the kit's scale table, which has no
+    // per-degree chord qualities to generate from. The emotion presets set both, so they
+    // agree when it matters.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genRoot", 1 }, "Generator Key",
+                                                      okstudio::scales::noteNames(), 0));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genMode", 1 }, "Generator Mode",
+                                                      modes::names(), 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctave", 1 }, "Generator Octave", 2, 6, 4));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genTriads", 1 }, "Generate Triads", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genSevenths", 1 }, "Generate 7ths", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genNinths", 1 }, "Generate 9ths", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv0", 1 }, "Inversion Root", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv1", 1 }, "Inversion 1st", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv2", 1 }, "Inversion 2nd", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv3", 1 }, "Inversion 3rd", false));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genCompliance", 1 }, "Scale Compliance", 0, 100, 100));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genLockInfluence", 1 }, "Lock Influence", 0, 100, 50));
 
     return layout;
 }
@@ -69,6 +91,16 @@ int KeysProcessor::midiChannel() const
 int KeysProcessor::octaveShift() const
 {
     return (int) apvts.getRawParameterValue("octave")->load();
+}
+
+int KeysProcessor::polyphonyCap() const
+{
+    return (int) apvts.getRawParameterValue("polyphony")->load(); // 0 = unlimited
+}
+
+int KeysProcessor::padPage() const
+{
+    return juce::jlimit(0, numPadPages - 1, (int) apvts.getRawParameterValue("padPage")->load());
 }
 
 float KeysProcessor::curved(float pos01) const
@@ -97,7 +129,20 @@ void KeysProcessor::setChordPad(int i, const std::vector<int>& notes, const juce
 {
     if (i < 0 || i >= numChordPads)
         return;
-    chordPads[(size_t) i] = { notes, name };
+    // A hand-captured chord: keep the lock, drop any generator metadata the slot carried,
+    // since the notes no longer come from that degree.
+    const bool wasLocked = chordPads[(size_t) i].locked;
+    chordPads[(size_t) i] = {};
+    chordPads[(size_t) i].notes = notes;
+    chordPads[(size_t) i].name = name;
+    chordPads[(size_t) i].locked = wasLocked;
+}
+
+void KeysProcessor::setChordPad(int i, const ChordPad& pad)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    chordPads[(size_t) i] = pad;
 }
 
 void KeysProcessor::clearChordPad(int i)
@@ -106,6 +151,13 @@ void KeysProcessor::clearChordPad(int i)
         return;
     stopChordPad(i);
     chordPads[(size_t) i] = {};
+}
+
+void KeysProcessor::setChordPadLocked(int i, bool locked)
+{
+    if (i < 0 || i >= numChordPads)
+        return;
+    chordPads[(size_t) i].locked = locked;
 }
 
 void KeysProcessor::moveChordPad(int from, int to)
@@ -136,8 +188,7 @@ void KeysProcessor::pressChordPad(int i)
 {
     if (i < 0 || i >= numChordPads)
         return;
-    const auto& notes = chordPads[(size_t) i].notes;
-    if (notes.empty())
+    if (chordPads[(size_t) i].notes.empty())
         return;
 
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
@@ -145,10 +196,20 @@ void KeysProcessor::pressChordPad(int i)
     else
         stopChordPad(i);         // re-pressing a sounding pad re-triggers it
 
+    // Honour the Voices cap. The keyboard steals oldest-first across its own notes; a pad
+    // fires as one gesture, so there is no "oldest" within it — drop the highest notes and
+    // keep the lowest, matching how the keyboard resolves a too-big simultaneous chord.
+    // (The cap applies per source: a pad and the keyboard each fit under it separately.)
+    std::vector<int> notes = chordPads[(size_t) i].notes;
+    std::sort(notes.begin(), notes.end());
+    const int cap = polyphonyCap();
+    if (cap > 0 && (int) notes.size() > cap)
+        notes.resize((size_t) cap);
+
     const float vel = baseVelocity01();
 
     // Strum (Octavium "Drift"): spread the note-ons over `chordStrum` ms in a direction.
-    std::vector<int> order = notes; // captured low -> high
+    std::vector<int> order = notes; // low -> high
     const int dir = (int) apvts.getRawParameterValue("chordStrumDir")->load();
     if (dir == 1)
         std::reverse(order.begin(), order.end());              // Down: high -> low
@@ -241,7 +302,6 @@ void KeysProcessor::sendPitchBend(int value14)
 
 void KeysProcessor::prepareToPlay(double sampleRate, int)
 {
-    currentSampleRate = sampleRate;
     collector.reset(sampleRate);
 }
 
@@ -276,6 +336,10 @@ void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
         pad.setProperty("slot", i, nullptr);
         pad.setProperty("notes", ns.joinIntoString(","), nullptr);
         pad.setProperty("name", p.name, nullptr);
+        pad.setProperty("locked", p.locked, nullptr);
+        pad.setProperty("rootPc", p.rootPc, nullptr);
+        pad.setProperty("type", p.type, nullptr);
+        pad.setProperty("degree", p.degree, nullptr);
         pads.appendChild(pad, nullptr);
     }
     okstudio::state::save(apvts, "KEYS", destData, { pads });
@@ -297,11 +361,16 @@ void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
             const int slot = (int) pad.getProperty("slot", -1);
             if (slot < 0 || slot >= numChordPads)
                 continue;
-            std::vector<int> notes;
+            ChordPad p;
             for (const auto& s : juce::StringArray::fromTokens(pad.getProperty("notes").toString(), ",", ""))
                 if (s.trim().isNotEmpty())
-                    notes.push_back(s.trim().getIntValue());
-            chordPads[(size_t) slot] = { notes, pad.getProperty("name").toString() };
+                    p.notes.push_back(s.trim().getIntValue());
+            p.name = pad.getProperty("name").toString();
+            p.locked = (bool) pad.getProperty("locked", false);
+            p.rootPc = (int) pad.getProperty("rootPc", -1); // absent in pre-pages sessions
+            p.type = (int) pad.getProperty("type", -1);
+            p.degree = (int) pad.getProperty("degree", -1);
+            chordPads[(size_t) slot] = p;
         }
     });
 }

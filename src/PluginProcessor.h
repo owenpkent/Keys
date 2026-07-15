@@ -50,26 +50,42 @@ public:
 
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
-    int octaveShift() const;   // -3..+3, in octaves
+    int octaveShift() const;   // -5..+5, in octaves
     float baseVelocity01() const; // velocity slider through the curve, 0..1 (Humanize aside)
+    int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes
 
     // Chord pads: capture a chord's notes into a slot, click to play/stop it. The pad
     // definitions persist with the session; playback goes through the same note path.
+    //
+    // Pads are arranged in pages of `padsPerPage`; the editor shows one page at a time and
+    // indexes by absolute slot, so a chord left ringing on another page keeps sounding.
     struct ChordPad
     {
         std::vector<int> notes; // absolute MIDI notes captured for this pad
         juce::String name;      // detected label, e.g. "Cm7"
+        bool locked = false;    // locked pads survive Regenerate and bias what it produces
+        // What the generator made this chord out of. Hand-captured pads leave these at -1;
+        // the suggestion UI works them out from the notes on demand.
+        int rootPc = -1;
+        int type = -1;
+        int degree = -1;        // scale degree, so regenerating gives a new chord for the same degree
     };
-    static constexpr int numChordPads = 8;
+    static constexpr int padsPerPage = 8;
+    static constexpr int numPadPages = 4;
+    static constexpr int numChordPads = padsPerPage * numPadPages;
 
     const ChordPad& chordPad(int i) const { return chordPads[(size_t) i]; }
     bool chordPadActive(int i) const;
     void setChordPad(int i, const std::vector<int>& notes, const juce::String& name);
+    void setChordPad(int i, const ChordPad& pad);
     void clearChordPad(int i);
+    void setChordPadLocked(int i, bool locked);
     void moveChordPad(int from, int to); // swap two slots
     void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive
     void releaseChordPad(int i);         // stop it, unless Sustain is holding
     void stopAllChordPads();
+    int padPage() const;                 // 0-based; the page the editor is showing
+    int padPageOffset() const { return padPage() * padsPerPage; }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -80,7 +96,6 @@ private:
     float curved(float pos01) const; // shape a 0..1 velocity position by the Curve param
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
-    double currentSampleRate = 44100.0;
     juce::Random rng; // humanize jitter; touched only on the message thread
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
