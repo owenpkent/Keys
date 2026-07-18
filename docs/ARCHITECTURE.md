@@ -9,16 +9,24 @@ on-screen piano into MIDI. Everything shared with the rest of the line comes fro
 ```
 src/
 ├── PluginProcessor.{h,cpp}   # AudioProcessor: params, MIDI output, chord pads, state
-├── PluginEditor.{h,cpp}      # controls + layout + updater button
+├── PluginEditor.{h,cpp}      # controls + surface tabs + layout + updater button
 ├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
 ├── Chords.h                  # pure chord detector (names a note set), unit-tested
 ├── ScaleModes.h              # 12 modes + a chord quality per degree; Feel presets
 ├── ChordGen.h                # pure chord generation (weighted pool), unit-tested
 ├── ChordSuggest.h            # pure "what could follow this chord", unit-tested
+├── ChordMarkov.h             # pure Markov progression source, unit-tested
+├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 └── ui/
-    ├── PianoKeyboard.{h,cpp} # the playable keyboard widget
-    ├── ChordPads.{h,cpp}     # chord-pad row + live chord card (capture / recall)
-    └── ChordGenPanel.{h,cpp} # the chord generator overlay
+    ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
+    ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface)
+    ├── HarmonicTable.{h,cpp} # the isomorphic hex surface (Octavium's Harmonic Table)
+    ├── PadGrid.{h,cpp}       # 4x4 note pads on their own channel (drums)
+    ├── FaderBank.{h,cpp}     # eight assignable CC faders
+    ├── XYPad.{h,cpp}         # two assignable CCs on one drag surface
+    ├── CCMenu.h              # the one-click CC picker Faders and XY share
+    ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
+    └── ChordGenPanel.{h,cpp} # the chord generator overlay (algorithmic + Markov)
 ```
 
 ## Threading: UI → audio note path
@@ -36,22 +44,45 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 The audio thread does nothing else: `buffer.clear()` (silence) then drain the
 collector. No allocation, no locks.
 
-## Note bookkeeping: one union, one diff
+## Playing surfaces: one model, five views
 
-Chords and holds make "which notes should sound" non-trivial. The widget keeps three
-sets of **drawn** key numbers:
+The editor shows one of five surfaces, picked by the `surface` parameter's tab row:
+**Keys**, **Hex**, **Pads**, **Faders**, **XY**. The first three are *note* surfaces
+and derive from `NoteSurface`; Faders and XY only send CCs and stand alone. All five
+stay constructed; the tabs only choose visibility, and switching away from a note
+surface panics it so nothing rings on an unseen view (chord pads live outside the
+tabs and keep sounding on purpose).
+
+## Note bookkeeping: one union, one diff (NoteSurface)
+
+Chords and holds make "which notes should sound" non-trivial. `NoteSurface` keeps
+three sets of **drawn** ids (a MIDI note for the piano, a cell index for the grids):
 
 - `pressed` — under the active mouse gesture (a click, or the current key in a glide),
-- `latched` — toggled on in Latch mode,
+- `latched` — toggled on in Latch mode, or by right-click,
 - `sustained` — captured by the Sustain pedal when the mouse released.
 
 `refresh()` computes `want = pressed ∪ latched ∪ sustained`, diffs it against
-`sounding` (drawn note → the output MIDI note currently on), and emits exactly the
+`sounding` (drawn id → the output MIDI note currently on), and emits exactly the
 delta: note-offs for keys that left `want`, note-ons for keys that entered it. Every
 gesture mutates the sets then calls `refresh()`, so notes never double-fire or stick,
 and panic is just "clear all three, refresh". When a polyphony limit is set, `refresh()`
 first steals the oldest voices (FIFO `voiceOrder`) until `want` fits the cap. Changing
 MIDI channel panics, so a note can't stick on the channel it was played on.
+
+**Right-click latch** is an optional accelerator on every note surface (the on-screen
+Latch toggle remains the left-click path, per the accessibility contract): it toggles
+the drawn id in the same `latched` set, so Latch-off and panic clear it. Octavium kept
+right-click latches in a private set no panic ever cleared; that was its worst stuck-
+note bug, not a behaviour to keep.
+
+A subclass provides only geometry: `drawnAt` (hit test), `outputNote` (resolution),
+and optionally `noteChannel` — the Pad Grid returns the `padChannel` parameter
+(default 10) so drums land on their own channel, and the editor panics it when that
+channel changes, same as the global one. The Hex surface maps cells with Octavium's
+exact formula (odd columns half a hex lower; up +7, upper-right +4, upper-left +3
+from any hex) and lights every cell resolving to a sounding note, so duplicates
+glow together.
 
 ## Note resolution: snap then transpose, remembered
 
@@ -72,14 +103,20 @@ message thread, drives it.
 
 Pads live in the processor (`ChordPad`), so they persist and keep
 sounding independent of the editor; `ChordPads` is just the view. They are arranged as
-four pages of eight (`padsPerPage` × `numPadPages`); the strip shows the page `padPage`
+four pages of sixteen (`padsPerPage` × `numPadPages`, Octavium's 4x4 per page; the
+strip draws each page as two rows of eight). The strip shows the page `padPage`
 selects and indexes by **absolute slot**, so a chord left ringing on another page keeps
-sounding and a drag can't land on the wrong pad. Build a chord on the
+sounding and a drag can't land on the wrong pad. Sessions saved when pages held eight
+carry a `padsPerPage` marker (absent = 8) and each slot is re-based on load, so every
+pad stays on the page it was on. Build a chord on the
 keyboard (Latch), drag the live card onto a pad to `setChordPad` the sounding notes
 (named by `keys::chords::detect`), then play it beat-pad style: mouse-down calls
 `pressChordPad` (fire, honouring the `chordExclusive` choke) and mouse-up calls
 `releaseChordPad` (stop, unless Sustain is holding it — the editor releases held pad
-chords when the pedal lifts). Playback reuses `noteOn`, so Humanize colours each tone,
+chords when the pedal lifts). Dropping a pad on the live card runs the other
+direction: `onRecall` hands its notes to the active note surface, which latches the
+drawn keys that produce them (`recallOutputNotes`), so a stored chord comes back for
+editing. Playback reuses `noteOn`, so Humanize colours each tone,
 and `chordStrum` / `chordStrumDir` order the notes and stagger their note-ons into a
 strum (via `noteOn`'s `delaySeconds`). Detection (`Chords.h`) rotates a pitch-class set
 over 12 candidate roots and scores each against a template library — root mandatory,
@@ -119,7 +156,18 @@ flip the quality), so here they are one table. Whether a transform lands on majo
 minor is read off the source chord's third rather than a name list, so it stays right as
 types are added.
 
-Both headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
+`ChordMarkov.h` is the second generator source: bigram transition tables built from
+`MarkovData.h`'s progression corpus per mode (Major / Minor / Modal), sampled with a
+temperature (`count^(1/T)`, clamped 0.3-2.0), an optional mood pre-filter, and an
+optional start token; the walk repeats-and-truncates to fill the page. Per-pad
+regeneration follows the chain from the previous pad's roman numeral (stored on the
+pad as `numeral`), avoiding the chord it replaces when alternatives exist. The
+algorithm is Octavium's, verified line-by-line; the corpus is authored for Keys,
+because Octavium's was never in its repo or installer — its shipped Markov source
+degenerated to I-I-I-I for every user. Realisation is root-position through
+`chordgen::chordNotes` at the generator octave (Octavium hardcoded octave 4).
+
+All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
 
 ## Chord generator panel
 
@@ -138,25 +186,35 @@ editor to fit rather than shrinking them. Auditioning a chord in the grid reuses
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
 `scaleLock`, `octave`, `channel`, `velocity`, `curve`, `polyphony`, `sustain`, `latch`,
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, the
-chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir` / `padPage`, and the
+chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir` / `padPage`, the
 generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the note-count and inversion
-toggles, `genCompliance`, `genLockInfluence`). The Mod and
-Pitch wheels are transient performance controls with no parameters (they don't persist);
-Pitch springs back to centre on release. The editor binds controls
+toggles, `genCompliance`, `genLockInfluence` — plus the surface set: `surface`,
+`padChannel`, `faderCC1`-`faderCC8`, `xyCCX` / `xyCCY`, and the Markov set `genSource`,
+`markovMode`, `markovTemp`, `markovLength`). The Mod and
+Pitch wheels, fader positions, XY knob position and axis locks, and the Markov Mood and
+Start pickers are transient performance controls with no parameters (they don't
+persist); Pitch glides back to centre over ~160 ms on release, and the wheels and
+faders move by relative drag only (no click-jump), Octavium's deliberate feel. The
+editor binds controls
 with attachments — except the two-handle velocity range slider, which has no attachment
 (two values) and is synced to its two params by hand. A 30 Hz timer pushes derived
-config into the keyboard and the live chord into the pads. `getStateInformation` /
+config into every note surface and the live chord into the pads. `getStateInformation` /
 `setStateInformation` persist the APVTS via `okstudio::state`, plus the captured chord
-pads as an extra state tree (notes, name, lock, and the generator metadata a pad carries),
+pads as an extra state tree (notes, name, lock, the generator metadata a pad carries,
+and the Markov `numeral` when it has one),
 so the whole setup saves with the DAW session. Pads saved before the generator existed
 load fine: the missing metadata reads back as -1, which means "hand-captured", and the
 suggestion menu works the chord out from its notes instead.
 
 ## Editor
 
-`KeysEditor` owns the controls, the `PianoKeyboard`, the `ChordPads` row, and the update
+`KeysEditor` owns the controls, the surface tab row and all five surfaces, the
+`ChordPads` rows, and the update
 button. It sets the shared `LookAndFeel` (retinted locally toward Octavium's neutral
-grey), wires both the keyboard and the pads to `KeysProcessor::baseVelocity01` (velocity
-slider through the curve), pushes the keyboard's sounding notes into the pads each timer
-tick, and on construction fires `okstudio::updater::checkAsync`; if a newer signed
-release exists, a one-click "Update to vX.Y.Z" button appears.
+grey), wires every note surface and the pads to `KeysProcessor::baseVelocity01` (velocity
+slider through the curve), pushes the active note surface's sounding notes into the pads
+each timer tick, panics surfaces on channel or surface changes (so notes can't strand),
+animates the pitch wheel home after release, and on construction fires
+`okstudio::updater::checkAsync`; if a newer signed
+release exists, a one-click "Update to vX.Y.Z" button appears. The wheels column shows
+only for the Keys and Hex surfaces, as in Octavium.

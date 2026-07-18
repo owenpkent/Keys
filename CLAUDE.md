@@ -59,8 +59,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   failure is silent-looking ("This VST3 plug-in could not be opened") and pluginval
   passes without the bus, so only a real Live load test catches it.
 - **Mouse-only UI**: single left-click or drag; targets ≥ ~34 px; no
-  keyboard/right-click/double-click/modifiers. Latch and Sustain are on-screen
-  toggles by design, never modifier keys. The feature-request template requires an
+  keyboard/double-click/modifiers, and nothing may *require* right-click. Latch and
+  Sustain are on-screen toggles by design, never modifier keys. Right-click exists
+  only as an optional accelerator with a left-click equivalent (per-note latch on the
+  note surfaces, at Owen's request). The feature-request template requires an
   accessibility answer — hold PRs to it.
 - **Audio thread**: no allocation, no locks. It only drains the collector.
 - Parameter-layout changes break saved sessions — changelog loudly.

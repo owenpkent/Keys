@@ -1,7 +1,9 @@
 # Controls
 
 Every control is operated with a single left-click, a drag, or the scroll wheel.
-Nothing needs the keyboard, a right-click, a double-click, or a modifier key.
+Nothing needs the keyboard, a double-click, or a modifier key, and nothing *requires*
+a right-click: the one right-click gesture below is an optional shortcut with an
+on-screen equivalent.
 
 ## The keyboard
 
@@ -9,14 +11,33 @@ Nothing needs the keyboard, a right-click, a double-click, or a modifier key.
 |---------|--------|
 | Click a key | Play that note (velocity from the Velocity control + Curve) |
 | Click and drag | Glide across keys; the previous note releases as the next sounds (monophonic) |
+| Right-click a key *(optional)* | Toggle that one note held, without turning Latch mode on — Octavium's per-note latch. Works on the piano, hex grid, and pad grid. **All Off**, or turning **Latch** off, releases it. |
 | Click a **C** | Every C is labelled (C1, C2, …) to help you orient |
 
-Chords come from Latch or Sustain, below — a single mouse can't hold several keys at
-once, so those are how you stack notes.
+Chords come from Latch, Sustain, or right-click — a single mouse can't hold several
+keys at once, so those are how you stack notes.
 
-To the **left of the keyboard** are two performance wheels: **Mod** sends CC1 and stays
-where you leave it; **Pitch** bends and springs back to centre when you let go. Both are
+To the **left of the keyboard** (and the hex grid) are two performance wheels: **Mod**
+sends CC1 and stays where you leave it; **Pitch** bends and glides back to centre over
+a moment when you let go. Both move by **relative drag** — clicking never jumps the
+value, so a stray click can't slam a bend. They are
 transient (they don't save with the session) and send on the current MIDI channel.
+
+## Surfaces
+
+The tab row above the playing area picks what you play:
+
+| Surface | What it is |
+|---------|------------|
+| **Keys** | The piano above |
+| **Hex** | The Harmonic Table: a hex grid where up a row is a fifth, upper-right a major third, upper-left a minor third. A chord is the same *shape* wherever you put it, and every hex sharing a sounding note lights up. Scale Lock snaps and dims here too. |
+| **Pads** | A 4x4 grid of single-note pads rising from C1, on its **own** MIDI channel (**Pad Ch**, default 10) so it drives drum instruments while the keyboard plays something else. Follows Octave; ignores Scale Lock on purpose (snapping would swap which drum you hit). |
+| **Faders** | Eight CC faders, centred at 64. The button under each fader shows its CC and reassigns it in one click. Positions send only while you drag (relative drag, no click-jump), and nothing is sent until you move one. |
+| **XY** | One drag sends two CCs: X (default CC1 Mod) and Y (default CC74 Cutoff), up = more. **Lock X** / **Lock Y** freeze an axis; **Reset** recentres to 64/64 and sends it. |
+
+Latch, Sustain, Voices, Octave, Humanize, and All Off apply to whichever note surface
+is up. Switching away from a surface silences it, so nothing keeps ringing on a view
+you can't see; chord pads sit above the tabs and keep sounding on purpose.
 
 ## Top bar
 
@@ -30,7 +51,7 @@ transient (they don't save with the session) and send on the current MIDI channe
 | **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. |
 | **Velocity** | slider | Base note velocity (1–127), used when Humanize is off. Click or scroll. |
 | **Curve** | dropdown | Shapes the velocity response: **Soft** (reach high velocities easily), **Linear**, **Hard** (stays quiet until you push) |
-| **MIDI Ch** | dropdown | Output channel, 1–16 |
+| **MIDI Ch** | dropdown | Output channel, 1–16 (the Pad Grid surface sends on its own **Pad Ch** instead, default 10) |
 | **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail. Turn off (or click All Off) to release. |
 | **Latch** | toggle | On: clicking a key toggles it on or off and holds it. Drag to paint several on. Build and hold a chord with one finger. |
 | **Humanize** | toggle | On: each note gets a random velocity within the Humanize **Velocity** range plus a small timing offset, so repeats and chords don't sound machine-perfect. |
@@ -39,7 +60,7 @@ transient (they don't save with the session) and send on the current MIDI channe
 | **Excl** | toggle | Exclusive chord mode: playing a chord pad chokes the previously-playing pad, so only one pad chord sounds at a time. |
 | **Strum** | slider | Spread a chord pad's notes over 0–200 ms (a strum) instead of playing them together. |
 | **Dir** | dropdown | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. |
-| **All Off** | button | Panic. Stops every note on every channel. |
+| **All Off** | button | Panic. Stops every note on every channel (per-note offs, then CC120 All Sound Off + CC123 All Notes Off). |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
 ## Notes on Sustain vs Latch
@@ -53,8 +74,8 @@ Both persist with the DAW session, along with every other control here.
 
 ## Chord pads
 
-A row of eight pads and a live chord card sit between the controls and the keyboard.
-They let you keep a palette of chords a single click away.
+Two rows of eight pads (sixteen a page) and a live chord card sit between the controls
+and the playing area. They let you keep a palette of chords a single click away.
 
 1. **Build a chord.** Turn **Latch** on and click the notes you want. The card names
    the chord it hears (for example `Cm7`).
@@ -62,15 +83,16 @@ They let you keep a palette of chords a single click away.
 3. **Play it, beat-pad style.** Press and hold a filled pad to sound its chord; release
    to stop. Turn **Sustain** on to keep it ringing after you let go, and **Excl** on so
    a new pad chokes the previous chord.
-4. **Rearrange or clear.** Drag a pad onto another to move it, or drag a pad off the
-   row to empty it.
+4. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
+   the rows to empty it, or drag a pad onto the live card to bring its notes back onto
+   the keyboard (latched) for editing — capture in reverse.
 
 Pad chords play through the same output as the keys, so **Humanize** gives each chord
 tone its own velocity and the **Strum** control spreads them into a strum. A pad also
 respects the **Voices** limit: if a chord has more notes than the cap allows, its lowest
 notes are the ones that sound. The pads save with the DAW session.
 
-There are **four pages** of eight pads. `<` and `>` move between them, and the label
+There are **four pages** of sixteen pads. `<` and `>` move between them, and the label
 between shows where you are. A chord left ringing on one page keeps sounding while you
 work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
@@ -123,5 +145,25 @@ role in the key, different colour.
 - **Chromatic** — the borrowed and jazz moves (tritone substitution, minor plagal,
   Neapolitan, augmented sixth).
 
-Your pick goes into the next empty pad on the page, so you can build a progression left
+Every suggestion row has a **play** button that auditions it for a moment without
+closing the menu, so you can shop by ear. Clicking the row itself takes it: your pick
+goes into the next empty pad on the page, so you can build a progression left
 to right by asking for one chord at a time.
+
+### The Markov source
+
+Switch **Source** from **Algorithmic** to **Markov** and Fill walks chains learned
+from real progressions instead of weighting a candidate pool:
+
+| Control | What it does |
+|---------|--------------|
+| **Chain** | Major, Minor, or Modal chain tables |
+| **Temperature** | 0.30–2.00. Low sticks to the most common moves (conservative); high flattens toward anything the corpus has ever done (adventurous). |
+| **Length** | How many unique chords are generated (4–16) before the sequence loops to fill the page. |
+| **Mood** | Only learn from progressions tagged with this mood (or **Any**). |
+| **Start** | Force the first chord (I, i, IV, V, vi, …) or let it pick. |
+
+**New** on a Markov pad steps the chain again from the pad to its left, avoiding the
+chord it replaces. The note-count, inversion, compliance, and lock-influence controls
+don't apply to Markov chords and grey out (Octavium left them clickable and silently
+ignored them). Locked pads are never overwritten, same as the algorithmic source.
