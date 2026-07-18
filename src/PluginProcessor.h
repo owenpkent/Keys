@@ -42,14 +42,17 @@ public:
 
     // Note I/O — called from the UI thread; queued and drained on the audio thread.
     // delaySeconds nudges the note-on later (used for chord-pad strum).
-    void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0);
-    void noteOff(int midiNote);
+    // channelOverride 1..16 sends on that channel instead of the global param (0 = global);
+    // the Pad Grid surface uses it so drums land on their own channel.
+    void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0);
+    void noteOff(int midiNote, int channelOverride = 0);
     void allNotesOff();
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
+    int padGridChannel() const; // 1..16; the Pad Grid's own channel (defaults to 10, drums)
     int octaveShift() const;   // -5..+5, in octaves
     float baseVelocity01() const; // velocity slider through the curve, 0..1 (Humanize aside)
     int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes
@@ -69,8 +72,10 @@ public:
         int rootPc = -1;
         int type = -1;
         int degree = -1;        // scale degree, so regenerating gives a new chord for the same degree
+        juce::String numeral;   // Markov roman numeral ("" = not from the Markov source);
+                                // regeneration walks the chain from the previous pad's numeral
     };
-    static constexpr int padsPerPage = 8;
+    static constexpr int padsPerPage = 16; // Octavium's 4x4 grid per page
     static constexpr int numPadPages = 4;
     static constexpr int numChordPads = padsPerPage * numPadPages;
 

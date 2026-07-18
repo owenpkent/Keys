@@ -1,7 +1,5 @@
 #include "PianoKeyboard.h"
 #include "../NoteMath.h"
-#include <algorithm>
-#include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 #include <okstudio/Theme.h>
 
@@ -16,9 +14,8 @@ namespace
     }
 } // namespace
 
-PianoKeyboard::PianoKeyboard(KeysProcessor& p) : processor(p)
+PianoKeyboard::PianoKeyboard(KeysProcessor& p) : NoteSurface(p)
 {
-    okstudio::ui::makeMouseOnly(*this);
 }
 
 void PianoKeyboard::setRange(int newLow, int newCount)
@@ -29,59 +26,6 @@ void PianoKeyboard::setRange(int newLow, int newCount)
     numKeys = newCount;
     layoutKeys();
     repaint();
-}
-
-void PianoKeyboard::setScaleLock(bool on, int rootPitchClass, int scale)
-{
-    if (on == scaleLock && rootPitchClass == rootPc && scale == scaleIndex)
-        return;
-    scaleLock = on;
-    rootPc = rootPitchClass;
-    scaleIndex = scale;
-    repaint();
-}
-
-void PianoKeyboard::setSustain(bool on)
-{
-    if (on == sustain)
-        return;
-    sustain = on;
-    if (! sustain)
-    {
-        sustained.clear();
-        refresh();
-    }
-}
-
-void PianoKeyboard::setLatch(bool on)
-{
-    if (on == latch)
-        return;
-    if (latch && ! on) // leaving latch mode clears held toggles
-    {
-        latched.clear();
-        refresh();
-    }
-    latch = on;
-}
-
-void PianoKeyboard::setPolyphony(int cap)
-{
-    if (cap == polyphonyCap)
-        return;
-    polyphonyCap = cap;
-    refresh(); // lowering the cap steals oldest voices immediately
-}
-
-void PianoKeyboard::panic()
-{
-    pressed.clear();
-    latched.clear();
-    sustained.clear();
-    voiceOrder.clear();
-    dragDrawn = -1;
-    refresh();
-    processor.allNotesOff(); // belt-and-braces across all channels
 }
 
 void PianoKeyboard::resized()
@@ -137,7 +81,7 @@ void PianoKeyboard::layoutKeys()
     }
 }
 
-int PianoKeyboard::keyAt(juce::Point<float> pos) const
+int PianoKeyboard::drawnAt(juce::Point<float> pos) const
 {
     // Black keys are appended last, so a reverse scan checks them first.
     for (auto it = keys.rbegin(); it != keys.rend(); ++it)
@@ -151,144 +95,12 @@ int PianoKeyboard::outputNote(int drawnNote) const
     return resolveOutputNote(drawnNote, scaleLock, rootPc, scaleIndex, processor.octaveShift());
 }
 
-std::vector<int> PianoKeyboard::soundingOutputNotes() const
+int PianoKeyboard::drawnForOutputNote(int note) const
 {
-    std::vector<int> out;
-    for (const auto& kv : sounding)
-        out.push_back(kv.second);
-    std::sort(out.begin(), out.end());
-    out.erase(std::unique(out.begin(), out.end()), out.end());
-    return out;
-}
-
-void PianoKeyboard::refresh()
-{
-    std::set<int> want;
-    want.insert(pressed.begin(), pressed.end());
-    want.insert(latched.begin(), latched.end());
-    want.insert(sustained.begin(), sustained.end());
-
-    // Polyphony cap: steal the oldest sounding voices (FIFO) so the total fits. Stealing
-    // removes them from the source sets so they don't come straight back next refresh.
-    if (polyphonyCap > 0 && (int) want.size() > polyphonyCap)
-    {
-        for (const int d : voiceOrder) // oldest first
-        {
-            if ((int) want.size() <= polyphonyCap)
-                break;
-            if (want.erase(d) > 0)
-            {
-                pressed.erase(d);
-                latched.erase(d);
-                sustained.erase(d);
-            }
-        }
-        // Any still over are brand-new notes not yet in voiceOrder (a big chord added at
-        // once); drop the highest-pitched drawn notes until it fits, keeping the lowest.
-        while ((int) want.size() > polyphonyCap)
-            want.erase(std::prev(want.end()));
-    }
-
-    for (auto it = sounding.begin(); it != sounding.end();)
-    {
-        if (want.find(it->first) == want.end())
-        {
-            processor.noteOff(it->second);
-            it = sounding.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
-
-    const float vel = getVelocity ? getVelocity() : 0.79f;
-    for (const int drawn : want)
-    {
-        if (sounding.find(drawn) == sounding.end())
-        {
-            const int out = outputNote(drawn);
-            processor.noteOn(out, vel);
-            sounding[drawn] = out;
-        }
-    }
-
-    // Rebuild the FIFO voice order: keep still-sounding notes in their existing order,
-    // then append any newly-sounding ones.
-    std::vector<int> next;
-    next.reserve(sounding.size());
-    for (const int d : voiceOrder)
-        if (sounding.count(d) > 0)
-            next.push_back(d);
-    for (const auto& kv : sounding)
-        if (std::find(next.begin(), next.end(), kv.first) == next.end())
-            next.push_back(kv.first);
-    voiceOrder.swap(next);
-
-    repaint();
-}
-
-void PianoKeyboard::mouseDown(const juce::MouseEvent& e)
-{
-    const int d = keyAt(e.position);
-    if (d < 0)
-        return;
-
-    if (latch)
-    {
-        if (latched.count(d))
-            latched.erase(d);
-        else
-            latched.insert(d);
-        dragDrawn = d;
-        refresh();
-    }
-    else
-    {
-        pressed.insert(d);
-        dragDrawn = d;
-        refresh();
-    }
-}
-
-void PianoKeyboard::mouseDrag(const juce::MouseEvent& e)
-{
-    const int d = keyAt(e.position);
-    if (d < 0 || d == dragDrawn)
-        return;
-
-    if (latch)
-    {
-        // Paint latches on: every new key the drag enters turns on.
-        if (! latched.count(d))
-            latched.insert(d);
-        dragDrawn = d;
-        refresh();
-    }
-    else
-    {
-        // Glide: monophonic, the previous key releases as the next sounds. With the
-        // pedal down the note you glide off is caught and keeps ringing, so a sustained
-        // run leaves a trail (matching Octavium, where every note sounds until sustain off).
-        if (sustain)
-            sustained.insert(dragDrawn);
-        pressed.erase(dragDrawn);
-        pressed.insert(d);
-        dragDrawn = d;
-        refresh();
-    }
-}
-
-void PianoKeyboard::mouseUp(const juce::MouseEvent&)
-{
-    if (! latch && dragDrawn >= 0)
-    {
-        pressed.erase(dragDrawn);
-        if (sustain)
-            sustained.insert(dragDrawn); // pedal catches the released note
-        refresh();
-    }
-    dragDrawn = -1;
+    // Undo the octave shift; the key must be on the keybed. With Scale Lock on, an
+    // out-of-scale recalled tone re-snaps on press, which is what the lock promises.
+    const int drawn = note - processor.octaveShift() * 12;
+    return (drawn >= lowNote && drawn < lowNote + numKeys) ? drawn : -1;
 }
 
 void PianoKeyboard::paint(juce::Graphics& g)

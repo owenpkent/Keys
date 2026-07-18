@@ -3,9 +3,14 @@
 #include "PluginProcessor.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
+#include "ui/FaderBank.h"
+#include "ui/HarmonicTable.h"
+#include "ui/PadGrid.h"
 #include "ui/PianoKeyboard.h"
+#include "ui/XYPad.h"
 #include <okstudio/Theme.h>
 #include <okstudio/Updater.h>
+#include <array>
 #include <memory>
 
 namespace keys
@@ -31,12 +36,22 @@ private:
     void showUpdate(const okstudio::updater::UpdateInfo&);
     void stepPadPage(int delta);
     void toggleGenPanel();
+    int surfaceIndex() const; // 0 Keys, 1 Hex, 2 Pads, 3 Faders, 4 XY
+    void applySurfaceVisibility();
 
     KeysProcessor& processor;
     okstudio::theme::LookAndFeel lnf;
 
     juce::Label title;
+
+    // The five playing surfaces; the Surface tabs pick which one fills the playing area.
     PianoKeyboard keyboard;
+    HarmonicTable hexTable;
+    PadGrid padGrid;
+    FaderBank faderBank;
+    XYPad xyPad;
+    std::array<juce::TextButton, 5> surfaceButtons;
+
     ChordPads chordPads;
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox, chordStrumDirBox, polyphonyBox;
@@ -68,8 +83,11 @@ private:
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;
-    int lastChannel = -1; // to panic on MIDI-channel change (avoids notes stuck on the old channel)
+    int lastChannel = -1;    // to panic on MIDI-channel change (avoids notes stuck on the old channel)
+    int lastPadChannel = -1; // same idea for the Pad Grid's own channel
+    int lastSurface = -1;    // to silence a surface as you switch away from it
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
+    bool pitchReturning = false; // pitch wheel is gliding back to centre (Octavium's ~160 ms ease)
     float panicFlash = 0.0f;  // 1 -> 0 decay behind the All Off button, on an explicit click only
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysEditor)

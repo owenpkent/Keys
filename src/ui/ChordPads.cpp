@@ -10,6 +10,7 @@ namespace
     constexpr float kCardW = 108.0f;
     constexpr float kGap = 6.0f;
     constexpr float kRadius = 6.0f;
+    constexpr int kRows = 2; // two rows of eight, Octavium parity
     bool isChord(const std::vector<int>& n) { return n.size() >= 2; }
 } // namespace
 
@@ -27,9 +28,12 @@ juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
     r.removeFromLeft(kCardW + 10.0f); // card + separation
-    const int n = KeysProcessor::padsPerPage;
-    const float w = (r.getWidth() - kGap * (float) (n - 1)) / (float) n;
-    return { r.getX() + (float) visibleIndex * (w + kGap), r.getY(), w, r.getHeight() };
+    const int cols = KeysProcessor::padsPerPage / kRows; // 16 / 2 = 8 across
+    const int row = visibleIndex / cols;
+    const int col = visibleIndex % cols;
+    const float w = (r.getWidth() - kGap * (float) (cols - 1)) / (float) cols;
+    const float h = (r.getHeight() - kGap * (float) (kRows - 1)) / (float) kRows;
+    return { r.getX() + (float) col * (w + kGap), r.getY() + (float) row * (h + kGap), w, h };
 }
 
 int ChordPads::cellAt(juce::Point<float> pos) const
@@ -68,10 +72,15 @@ void ChordPads::paint(juce::Graphics& g)
     const juce::Colour padBg { 0xff191d23 };
     const juce::Colour line { 0xff3b4148 };
 
-    // Live chord card.
+    const int offset = processor.padPageOffset();
+    const int hovered = dragging ? cellAt(dragPos) : -1;
+
+    // Live chord card. While a filled pad is being dragged over it, it highlights to offer
+    // the recall gesture (drop to pull that pad's chord back for editing).
     {
         const auto b = cardBounds();
         const bool has = isChord(currentNotes);
+        const bool recallHover = dragging && dragSource >= 0 && hovered == -2;
         g.setColour(cardBg);
         g.fillRoundedRectangle(b, kRadius);
         g.setColour(has ? accent : line);
@@ -80,11 +89,14 @@ void ChordPads::paint(juce::Graphics& g)
         g.setFont(juce::Font(juce::FontOptions(has ? 15.0f : 11.0f, has ? juce::Font::bold : juce::Font::plain)));
         g.drawText(has ? currentName : juce::String("hold a chord"), b.reduced(6.0f),
                    juce::Justification::centred);
+        if (recallHover)
+        {
+            g.setColour(accent.withAlpha(0.6f));
+            g.drawRoundedRectangle(b, kRadius, 2.0f);
+        }
     }
 
-    // Pads: the current page's slice, drawn left to right.
-    const int offset = processor.padPageOffset();
-    const int hovered = dragging ? cellAt(dragPos) : -1;
+    // Pads: the current page's slice, drawn two rows of eight.
     for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
     {
         const int i = offset + v;
@@ -201,7 +213,14 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
             processor.setChordPad(target, currentNotes, currentName); // capture the live chord
         else if (dragSource >= 0)
         {
-            if (target >= 0 && target != dragSource)
+            if (target == -2)
+            {
+                // Dropped a filled pad onto the live card: recall its chord for editing.
+                // Not a move and not a clear - the pad stays exactly where it was.
+                if (onRecall)
+                    onRecall(processor.chordPad(dragSource).notes);
+            }
+            else if (target >= 0 && target != dragSource)
                 processor.moveChordPad(dragSource, target); // rearrange
             else if (target == -1)
                 processor.clearChordPad(dragSource);         // dragged off the row = clear

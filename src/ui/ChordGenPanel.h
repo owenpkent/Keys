@@ -62,6 +62,18 @@ private:
     int genRoot() const;
     int genMode() const;
 
+    // The Markov source (Source: Markov). Same page mechanics, different brain.
+    bool markovActive() const;
+    juce::String moodArg() const;  // "" = Any
+    juce::String startArg() const; // "" = Any
+    void fillPageMarkov(bool onlyUnlocked);
+    void regeneratePadMarkov(int slot);
+    void refreshMoodItems();
+
+    // Suggestion audition: play a chord for a moment without closing the menu.
+    void previewChord(const std::vector<int>& notes);
+    void stopPreview();
+
     KeysProcessor& processor;
     juce::Random rng;
 
@@ -84,12 +96,24 @@ private:
     juce::TextButton regenButton { "Regen Unlocked" };
     juce::TextButton clearButton { "Clear Page" };
 
+    // The Markov source's controls; visible only while Source is Markov. Mood and
+    // Start are transient (like the wheels): performance choices, not session state.
+    juce::ComboBox sourceBox, chainBox, moodBox, startBox;
+    juce::Label sourceLabel, chainLabel, moodLabel, startLabel;
+    juce::Slider tempSlider, lengthSlider;
+    juce::Label tempLabel, lengthLabel;
+
     std::array<std::unique_ptr<PadRow>, KeysProcessor::padsPerPage> padRows;
 
-    std::unique_ptr<ComboAtt> rootAtt, modeAtt;
-    std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt;
+    std::unique_ptr<ComboAtt> rootAtt, modeAtt, sourceAtt, chainAtt;
+    std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt, tempAtt, lengthAtt;
     std::unique_ptr<ButtonAtt> triadsAtt, seventhsAtt, ninthsAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;
+
+    int lastChainMode = -1;      // rebuild the Mood list when the chain mode changes
+    bool markovShown = false;    // last visibility applied, to relayout on source change
+    std::vector<int> previewNotes; // suggestion audition currently sounding
+    juce::uint32 previewEndMs = 0; // when to stop it (0 = nothing playing)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenPanel)
 };

@@ -23,6 +23,8 @@ namespace
         return out;
     }
 
+    const char* surfaceNames[] = { "Keys", "Hex", "Pads", "Faders", "XY" };
+
     void styleLabel(juce::Label& l, const juce::String& text)
     {
         l.setText(text, juce::dontSendNotification);
@@ -39,7 +41,8 @@ namespace
 } // namespace
 
 KeysEditor::KeysEditor(KeysProcessor& p)
-    : juce::AudioProcessorEditor(p), processor(p), keyboard(p), chordPads(p)
+    : juce::AudioProcessorEditor(p), processor(p),
+      keyboard(p), hexTable(p), padGrid(p), faderBank(p), xyPad(p), chordPads(p)
 {
     setLookAndFeel(&lnf);
     // Retint the kit chrome toward Octavium's neutral grey. Overrides live on this
@@ -104,11 +107,11 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     {
         const auto write = [this](const char* id, double value)
         {
-            if (auto* p = processor.apvts.getParameter(id))
+            if (auto* param = processor.apvts.getParameter(id))
             {
-                const float norm = p->convertTo0to1((float) value);
-                if (std::abs(p->getValue() - norm) > 1.0e-6f)
-                    p->setValueNotifyingHost(norm);
+                const float norm = param->convertTo0to1((float) value);
+                if (std::abs(param->getValue() - norm) > 1.0e-6f)
+                    param->setValueNotifyingHost(norm);
             }
         };
         write("humanizeVelMin", humanizeVelSlider.getMinValue());
@@ -138,11 +141,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addCombo(chordStrumDirBox, chordStrumDirLabel, "Dir", { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
 
     // Performance wheels, left of the keyboard. Transient (no params/persistence): Mod
-    // holds its value (CC1); Pitch bend springs back to centre when you let go.
+    // holds its value (CC1); Pitch bend glides back to centre when you let go.
     modWheel.setSliderStyle(juce::Slider::LinearVertical);
     modWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
     modWheel.setRange(0, 127, 1);
     modWheel.setValue(0, juce::dontSendNotification);
+    modWheel.setSliderSnapsToMousePosition(false); // relative drag; a stray click can't slam it
     modWheel.onValueChange = [this] { processor.sendCC(1, (int) modWheel.getValue()); };
     addAndMakeVisible(modWheel);
     styleLabel(modLabel, "Mod");
@@ -153,8 +157,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     pitchWheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
     pitchWheel.setRange(0, 16383, 1);
     pitchWheel.setValue(8192, juce::dontSendNotification); // centre
+    pitchWheel.setSliderSnapsToMousePosition(false); // relative drag, like a real wheel
     pitchWheel.onValueChange = [this] { processor.sendPitchBend((int) pitchWheel.getValue()); };
-    pitchWheel.onDragEnd = [this] { pitchWheel.setValue(8192, juce::sendNotificationSync); };
+    pitchWheel.onDragStart = [this] { pitchReturning = false; };
+    pitchWheel.onDragEnd = [this] { pitchReturning = true; }; // eased return, in timerCallback
     addAndMakeVisible(pitchWheel);
     styleLabel(pitchLabel, "Pitch");
     pitchLabel.setJustificationType(juce::Justification::centred);
@@ -164,12 +170,36 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     {
         processor.stopAllChordPads(); // else pads keep rendering active after the silence
         keyboard.panic();
+        hexTable.panic();
+        padGrid.panic();
         panicFlash = 1.0f; // blue flash, only on an explicit click (Octavium behaviour)
     };
     addAndMakeVisible(panicButton);
 
-    // Chord-pad pages: four pages of eight, so a session can hold several keys' worth of
-    // chords without the strip shrinking below a comfortable target.
+    // The playing surfaces and their tabs. Every surface stays constructed (a chord
+    // latched on the hex grid keeps ringing while you ride the faders); the tabs only
+    // choose what is visible.
+    for (int i = 0; i < (int) surfaceButtons.size(); ++i)
+    {
+        auto& b = surfaceButtons[(size_t) i];
+        b.setButtonText(surfaceNames[i]);
+        b.setColour(juce::TextButton::buttonOnColourId, okstudio::theme::accent.withAlpha(0.85f));
+        b.onClick = [this, i]
+        {
+            if (auto* param = processor.apvts.getParameter("surface"))
+                param->setValueNotifyingHost(param->convertTo0to1((float) i));
+        };
+        addAndMakeVisible(b);
+    }
+    addAndMakeVisible(keyboard);
+    addChildComponent(hexTable);
+    addChildComponent(padGrid);
+    addChildComponent(faderBank);
+    addChildComponent(xyPad);
+
+    // Chord-pad pages: four pages of sixteen (Octavium's 4x4 per page), so a session can
+    // hold several keys' worth of chords without the strip shrinking below a comfortable
+    // target.
     pagePrevButton.onClick = [this] { stepPadPage(-1); };
     pageNextButton.onClick = [this] { stepPadPage(1); };
     chordsButton.onClick = [this] { toggleGenPanel(); };
@@ -183,9 +213,29 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
     addChildComponent(updateButton); // hidden until the updater finds a newer release
 
-    keyboard.getVelocity = [this] { return processor.baseVelocity01(); };
-    addAndMakeVisible(keyboard);
+    const auto velocity = [this] { return processor.baseVelocity01(); };
+    keyboard.getVelocity = velocity;
+    hexTable.getVelocity = velocity;
+    padGrid.getVelocity = velocity;
     addAndMakeVisible(chordPads);
+
+    // Dropping a pad on the live card latches its notes back onto a note surface for
+    // editing (Octavium's drag-to-edit). If a non-note surface is up, hop to the piano
+    // first so the recalled chord is actually visible.
+    chordPads.onRecall = [this](const std::vector<int>& notes)
+    {
+        int surf = surfaceIndex();
+        if (surf != 0 && surf != 1)
+        {
+            if (auto* param = processor.apvts.getParameter("surface"))
+                param->setValueNotifyingHost(param->convertTo0to1(0.0f));
+            surf = 0;
+        }
+        if (surf == 1)
+            hexTable.recallOutputNotes(notes);
+        else
+            keyboard.recallOutputNotes(notes);
+    };
 
     // Auto-update: check the pinned releases repo once, surface a button if newer.
     updaterConfig.productName = "Keys";
@@ -200,8 +250,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     });
 
     setResizable(true, true);
-    setResizeLimits(820, 376, 2200, 1000);
-    setSize(940, 386);
+    setResizeLimits(820, 480, 2200, 1200);
+    setSize(960, 600);
+    applySurfaceVisibility();
     startTimerHz(30);
 }
 
@@ -222,12 +273,35 @@ void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::S
     att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
 }
 
+int KeysEditor::surfaceIndex() const
+{
+    return juce::jlimit(0, 4, (int) processor.apvts.getRawParameterValue("surface")->load());
+}
+
+void KeysEditor::applySurfaceVisibility()
+{
+    const int surf = surfaceIndex();
+    keyboard.setVisible(surf == 0);
+    hexTable.setVisible(surf == 1);
+    padGrid.setVisible(surf == 2);
+    faderBank.setVisible(surf == 3);
+    xyPad.setVisible(surf == 4);
+    // Wheels ride with the note surfaces only, as in Octavium (piano + harmonic table).
+    const bool wheels = surf == 0 || surf == 1;
+    modWheel.setVisible(wheels);
+    modLabel.setVisible(wheels);
+    pitchWheel.setVisible(wheels);
+    pitchLabel.setVisible(wheels);
+    for (int i = 0; i < (int) surfaceButtons.size(); ++i)
+        surfaceButtons[(size_t) i].setToggleState(i == surf, juce::dontSendNotification);
+}
+
 void KeysEditor::stepPadPage(int delta)
 {
-    if (auto* p = processor.apvts.getParameter("padPage"))
+    if (auto* param = processor.apvts.getParameter("padPage"))
     {
         const int next = juce::jlimit(0, KeysProcessor::numPadPages - 1, processor.padPage() + delta);
-        p->setValueNotifyingHost(p->convertTo0to1((float) next));
+        param->setValueNotifyingHost(param->convertTo0to1((float) next));
     }
 }
 
@@ -240,7 +314,7 @@ void KeysEditor::toggleGenPanel()
     }
     // The generator carries far more controls than the player, and every one of them has to
     // stay at a full-size target. Grow the editor to fit rather than shrink the targets.
-    setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 590));
+    setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 640));
 
     genPanel = std::make_unique<ChordGenPanel>(processor);
     genPanel->onClose = [this] { genPanel.reset(); };
@@ -279,13 +353,20 @@ void KeysEditor::timerCallback()
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());
     keyboard.setRange(sizeSpecs[sizeIdx].low, sizeSpecs[sizeIdx].count);
-    keyboard.setScaleLock(apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
-                          (int) apvts.getRawParameterValue("root")->load(),
-                          (int) apvts.getRawParameterValue("scale")->load());
+
+    // Push shared performance config into every note surface; each ignores what it
+    // doesn't use (the pad grid reads no scale, but keeping one loop keeps them honest).
+    NoteSurface* noteSurfaces[] = { &keyboard, &hexTable, &padGrid };
     const bool sus = apvts.getRawParameterValue("sustain")->load() > 0.5f;
-    keyboard.setSustain(sus);
-    keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f);
-    keyboard.setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
+    for (auto* s : noteSurfaces)
+    {
+        s->setScaleLock(apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
+                        (int) apvts.getRawParameterValue("root")->load(),
+                        (int) apvts.getRawParameterValue("scale")->load());
+        s->setSustain(sus);
+        s->setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f);
+        s->setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
+    }
 
     // Lifting the sustain pedal releases any pad chords left ringing by it.
     if (! sus && lastSustain)
@@ -293,7 +374,8 @@ void KeysEditor::timerCallback()
     lastSustain = sus;
 
     // Changing MIDI channel while notes sound would strand them on the old channel
-    // (note-off goes to the new one), so panic on any channel change.
+    // (note-off goes to the new one), so panic on any channel change. The Pad Grid has
+    // its own channel and its own equivalent below.
     const int ch = (int) apvts.getRawParameterValue("channel")->load();
     if (ch != lastChannel)
     {
@@ -301,8 +383,30 @@ void KeysEditor::timerCallback()
         {
             processor.stopAllChordPads();
             keyboard.panic();
+            hexTable.panic();
         }
         lastChannel = ch;
+    }
+    const int padCh = (int) apvts.getRawParameterValue("padChannel")->load();
+    if (padCh != lastPadChannel)
+    {
+        if (lastPadChannel >= 0)
+            padGrid.panic();
+        lastPadChannel = padCh;
+    }
+
+    // Switching surfaces silences the one you left, so nothing rings on unseen views;
+    // latched chords you *want* to keep belong to the chord pads, which live below the
+    // tabs and keep sounding regardless.
+    const int surf = surfaceIndex();
+    if (surf != lastSurface)
+    {
+        if (lastSurface == 0)      keyboard.panic();
+        else if (lastSurface == 1) hexTable.panic();
+        else if (lastSurface == 2) padGrid.panic();
+        lastSurface = surf;
+        applySurfaceVisibility();
+        resized();
     }
 
     // Grey the humanize amounts out when Humanize is off, so their state reads at a glance.
@@ -326,6 +430,23 @@ void KeysEditor::timerCallback()
     pagePrevButton.setEnabled(page > 0);
     pageNextButton.setEnabled(page < KeysProcessor::numPadPages - 1);
 
+    // Pitch wheel gliding home after release: exponential ease, ~160 ms to centre
+    // (Octavium animates this; hardware springs, it doesn't snap).
+    if (pitchReturning)
+    {
+        const double v = pitchWheel.getValue();
+        const double next = v + (8192.0 - v) * 0.45;
+        if (std::abs(next - 8192.0) < 24.0)
+        {
+            pitchWheel.setValue(8192, juce::sendNotificationSync);
+            pitchReturning = false;
+        }
+        else
+        {
+            pitchWheel.setValue(next, juce::sendNotificationSync);
+        }
+    }
+
     // Panic flash: decay the blue behind All Off (Octavium fires this on click only, never
     // on the internal clears, so it always means "you just did that").
     if (panicFlash > 0.0f)
@@ -335,9 +456,19 @@ void KeysEditor::timerCallback()
                               neutralControl.interpolatedWith(okstudio::theme::accent, panicFlash));
     }
 
-    // Feed the pads the chord currently sounding on the keyboard (drives the live card
-    // and reflects any pad-active changes).
-    chordPads.setCurrentChord(keyboard.soundingOutputNotes());
+    // Keep the CC assignment labels current (they are parameters; automation or another
+    // editor instance can move them).
+    faderBank.refreshAssignments();
+    xyPad.refreshAssignments();
+
+    // Feed the pads the chord sounding on the active note surface (drives the live card
+    // and capture). The pad grid is drums on its own channel, so it doesn't feed the card.
+    if (surf == 0)
+        chordPads.setCurrentChord(keyboard.soundingOutputNotes());
+    else if (surf == 1)
+        chordPads.setCurrentChord(hexTable.soundingOutputNotes());
+    else
+        chordPads.setCurrentChord({});
     chordPads.repaint();
 }
 
@@ -345,7 +476,7 @@ void KeysEditor::paint(juce::Graphics& g)
 {
     g.fillAll(neutralBg);
     g.setColour(neutralPanel);
-    g.fillRect(getLocalBounds().removeFromTop(164));
+    g.fillRect(getLocalBounds().removeFromTop(168)); // behind the three control rows
 }
 
 void KeysEditor::resized()
@@ -355,27 +486,19 @@ void KeysEditor::resized()
 
     auto area = getLocalBounds().reduced(10);
 
-    // Give the keyboard a fixed height off the bottom, then the chord-pad row above it,
-    // then let the three control rows take the space that's left on top. Keeping the keys
-    // a fixed height stops them stretching when the host makes the editor taller.
-    auto kb = area.removeFromBottom(150);
-    area.removeFromBottom(8);
-    auto padRow = area.removeFromBottom(48);
-    area.removeFromBottom(6);
-    auto header = area;
-
-    // Chord-pad row: Exclusive and the page/generator controls on the left, then the strip.
-    chordExclusiveButton.setBounds(padRow.removeFromLeft(60).withSizeKeepingCentre(56, 26));
-    padRow.removeFromLeft(4);
-    chordsButton.setBounds(padRow.removeFromLeft(66).withSizeKeepingCentre(66, 34));
-    padRow.removeFromLeft(4);
-    pagePrevButton.setBounds(padRow.removeFromLeft(34).withSizeKeepingCentre(34, 34));
-    pageLabel.setBounds(padRow.removeFromLeft(28));
-    pageNextButton.setBounds(padRow.removeFromLeft(34).withSizeKeepingCentre(34, 34));
-    padRow.removeFromLeft(6);
-    chordPads.setBounds(padRow);
-
+    // Top: three control rows. Bottom: surface tabs, then the playing area takes all
+    // remaining height (the piano anchors its keys to the bottom of it, so extra height
+    // reads as instrument body; the grids and faders use the room).
     const int rowH = 46;
+    auto header = area.removeFromTop(14 + rowH * 3 + 6);
+    auto tabs = area.removeFromTop(34);
+    area.removeFromTop(4);
+
+    // Chord pads: two rows of eight between the tabs and the playing surface.
+    auto padRows = area.removeFromTop(96);
+    area.removeFromTop(6);
+    auto play = area;
+
     title.setBounds(header.removeFromLeft(84).withTrimmedTop(header.getHeight() / 2 - 17).withHeight(34));
     header.removeFromLeft(6);
 
@@ -421,17 +544,43 @@ void KeysEditor::resized()
     cell(rowC, 150, chordStrumLabel, chordStrumSlider);
     cell(rowC, 100, chordStrumDirLabel, chordStrumDirBox);
 
-    // Performance wheels occupy a narrow column at the left of the keyboard area.
-    auto wheels = kb.removeFromLeft(84);
-    kb.removeFromLeft(6);
-    auto modCol = wheels.removeFromLeft(40);
-    wheels.removeFromLeft(4);
-    auto pitchCol = wheels;
-    modLabel.setBounds(modCol.removeFromBottom(15));
-    modWheel.setBounds(modCol.reduced(3, 2));
-    pitchLabel.setBounds(pitchCol.removeFromBottom(15));
-    pitchWheel.setBounds(pitchCol.reduced(3, 2));
+    // Surface tabs on the left of their row; the chord-pad page/generator controls share it.
+    for (auto& b : surfaceButtons)
+    {
+        b.setBounds(tabs.removeFromLeft(72));
+        tabs.removeFromLeft(4);
+    }
+    tabs.removeFromLeft(12);
+    chordExclusiveButton.setBounds(tabs.removeFromLeft(60).withSizeKeepingCentre(56, 26));
+    tabs.removeFromLeft(4);
+    chordsButton.setBounds(tabs.removeFromLeft(66));
+    tabs.removeFromLeft(4);
+    pagePrevButton.setBounds(tabs.removeFromLeft(34));
+    pageLabel.setBounds(tabs.removeFromLeft(28));
+    pageNextButton.setBounds(tabs.removeFromLeft(34));
 
-    keyboard.setBounds(kb);
+    chordPads.setBounds(padRows);
+
+    // Wheels sit left of the note surfaces; other surfaces take the full width.
+    const int surf = surfaceIndex();
+    auto playArea = play;
+    if (surf == 0 || surf == 1)
+    {
+        auto wheels = playArea.removeFromLeft(84);
+        playArea.removeFromLeft(6);
+        auto modCol = wheels.removeFromLeft(40);
+        wheels.removeFromLeft(4);
+        auto pitchCol = wheels;
+        modLabel.setBounds(modCol.removeFromBottom(15));
+        modWheel.setBounds(modCol.reduced(3, 2));
+        pitchLabel.setBounds(pitchCol.removeFromBottom(15));
+        pitchWheel.setBounds(pitchCol.reduced(3, 2));
+    }
+
+    keyboard.setBounds(playArea);
+    hexTable.setBounds(playArea);
+    padGrid.setBounds(playArea);
+    faderBank.setBounds(play);
+    xyPad.setBounds(play);
 }
 } // namespace keys

@@ -119,6 +119,23 @@ struct ChordGenTests : juce::UnitTest
             expectEquals(seven[(size_t) i].degree, i); // degree is tracked, so Regen can reuse it
         }
 
+        beginTest("a 16-slot page fill is the same seven degrees in order, then nine more");
+        // Octavium parity: a full page is 16 pads. The seed is degree-order regardless of
+        // page size; only the sampled tail's length follows `count`.
+        const auto full = keys::chordgen::generate(0, cIonian, 16, strict, {}, rng);
+        expectEquals((int) full.size(), 16);
+        for (int i = 0; i < 7; ++i)
+        {
+            expectEquals(keys::chords::detect(full[(size_t) i].notes), juce::String(want[i]));
+            expectEquals(full[(size_t) i].degree, i);
+        }
+        std::set<std::pair<int, int>> fillSeen;
+        for (const auto& c : full)
+        {
+            expect(! c.notes.empty(), "every fill slot is a valid chord");
+            expect(fillSeen.insert({ c.rootPc, c.type }).second, "duplicate chord in a 16-slot fill");
+        }
+
         beginTest("full compliance never leaves the key");
         const std::vector<int> cMajorPcs { 0, 2, 4, 5, 7, 9, 11 };
         const auto filled = keys::chordgen::generate(0, cIonian, 16, strict, {}, rng);

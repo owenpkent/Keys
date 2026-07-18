@@ -35,7 +35,12 @@ okstudio_add_plugin(Keys
 target_sources(Keys PRIVATE
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
+    src/ui/NoteSurface.cpp
     src/ui/PianoKeyboard.cpp
+    src/ui/HarmonicTable.cpp
+    src/ui/PadGrid.cpp
+    src/ui/FaderBank.cpp
+    src/ui/XYPad.cpp
     src/ui/ChordPads.cpp
     src/ui/ChordGenPanel.cpp)
 
@@ -62,7 +67,7 @@ target_link_libraries(Keys
 # Unit tests (console, JUCE UnitTest). Not built by the plugin targets; build and run
 # with: cmake --build build --target Keys_tests && ctest --test-dir build -C Release
 enable_testing()
-add_executable(Keys_tests tests/KeysTests.cpp)
+add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
 target_link_libraries(Keys_tests PRIVATE okstudio_kit)
 add_test(NAME Keys_tests COMMAND Keys_tests)

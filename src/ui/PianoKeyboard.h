@@ -1,46 +1,32 @@
 #pragma once
 
-#include "../PluginProcessor.h"
-#include <juce_gui_basics/juce_gui_basics.h>
-#include <functional>
-#include <map>
-#include <set>
-#include <vector>
+#include "NoteSurface.h"
 
 namespace keys
 {
 // The on-screen piano. Mouse-only: click a key to play it, drag to glide across
-// keys. Chords come from Latch (click keys to toggle them on/off) or Sustain (hold
-// the pedal, click several notes). No keyboard, right-click, or modifiers.
+// keys. Chords come from Latch (click keys to toggle them on/off), Sustain (hold
+// the pedal, click several notes), or right-click (optional per-note latch).
 //
 // Which MIDI note a key sends is resolved at press time: scale-lock snaps it to the
 // nearest in-scale note, then the octave shift transposes it. The note actually
 // sent is remembered so its note-off always matches, even if you change octave or
-// scale while it sounds.
-class PianoKeyboard : public juce::Component
+// scale while it sounds. All of that lives in NoteSurface; this class is the piano
+// geometry and paint.
+class PianoKeyboard : public NoteSurface
 {
 public:
     explicit PianoKeyboard(KeysProcessor&);
 
     void paint(juce::Graphics&) override;
     void resized() override;
-    void mouseDown(const juce::MouseEvent&) override;
-    void mouseDrag(const juce::MouseEvent&) override;
-    void mouseUp(const juce::MouseEvent&) override;
 
-    // Config pushed from the editor when the matching parameters change.
     void setRange(int lowNote, int numKeys);
-    void setScaleLock(bool on, int rootPitchClass, int scaleIndex);
-    void setSustain(bool on);
-    void setLatch(bool on);
-    void setPolyphony(int cap); // 0 = unlimited, else steal oldest beyond `cap` voices
-    void panic(); // stop everything
 
-    // The MIDI notes currently sounding (post scale-lock + octave), sorted, for chord capture.
-    std::vector<int> soundingOutputNotes() const;
-
-    // Supplied by the editor: current note velocity, 0..1.
-    std::function<float()> getVelocity;
+protected:
+    int drawnAt(juce::Point<float>) const override;  // drawn note under the point, or -1
+    int outputNote(int drawnNote) const override;    // scale-lock + octave applied, clamped
+    int drawnForOutputNote(int note) const override; // undo the octave; -1 if off the keybed
 
 private:
     struct Key
@@ -51,25 +37,10 @@ private:
     };
 
     void layoutKeys();
-    int keyAt(juce::Point<float>) const; // drawn note under the point, or -1
-    int outputNote(int drawnNote) const; // scale-lock + octave applied, clamped
-    void refresh();                      // diff the sounding set, emit note on/off
 
-    KeysProcessor& processor;
     int lowNote = 36, numKeys = 61;
-    bool scaleLock = false;
-    int rootPc = 0, scaleIndex = 0;
-    bool sustain = false, latch = false;
-    int polyphonyCap = 0; // 0 = unlimited
-
     std::vector<Key> keys;
     float keysTop = 0.0f; // y of the top of the keybed (keys anchored to the bottom)
-    std::set<int> pressed;      // drawn notes under the active mouse gesture
-    std::set<int> latched;      // drawn notes toggled on
-    std::set<int> sustained;    // drawn notes captured by the sustain pedal
-    std::map<int, int> sounding;  // drawn note -> output note currently on
-    std::vector<int> voiceOrder;  // drawn notes in the order they started sounding (FIFO, for stealing)
-    int dragDrawn = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoKeyboard)
 };
