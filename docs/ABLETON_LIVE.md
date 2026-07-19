@@ -3,6 +3,10 @@
 Keys is an instrument that outputs MIDI. It goes on one track; the instrument it
 drives goes on another, fed from the Keys track.
 
+**Keys Host** is the one-window variant: it hosts a (third-party) instrument VST3
+*inside* itself, so keyboard and synth live on a single track with no routing. See
+"Keys Host" below for how it fits with everything on this page.
+
 ## Routing
 
 1. Create a MIDI track (call it **Keys**) and drop the **Keys** device on it.
@@ -21,6 +25,23 @@ You do not have to rewire routing per song. Keep one **Keys** track loaded
 permanently, then on each synth track set **MIDI From → Keys** and **Monitor → In**.
 Now the clicked keys play whichever synth track is selected/armed — one keyboard, any
 instrument, no re-patching. Switching instruments is just clicking a different track.
+
+## Set it up once: save a template
+
+Do the routing above once, then **File → Save Live Set As Template…** (or set it as
+the default set in Options → Preferences → File/Folder → "Save Current Set as
+Default"). Every new project then opens with the Keys track, the routing, and the
+monitor settings already in place. Nothing to rewire, ever.
+
+## Faders, XY pad, and CC mappings persist too
+
+The FaderBank and XY pad send MIDI CCs down the same routing as the notes. To tie a
+fader to a knob on your instrument, use the **instrument's own MIDI Learn** (most
+synths: right-click the knob → Learn, then move the Keys fader). That mapping is
+stored in the instrument's plugin state, which Live saves inside the set — so it
+comes back with the project. Assign once per project (or once in your template) and
+it stays. Unlike an external controller app, there is no virtual MIDI cable and
+nothing to reassign after a restart.
 
 ## Why Keys can't sit *before* an instrument on one track
 
@@ -63,6 +84,33 @@ Reference](https://www.ableton.com/en/manual/live-midi-effect-reference/) and [M
 Live manual](https://www.ableton.com/en/manual/max-for-live/); the wrapper technique is
 described at [AudioSwift, MIDI Effects Wrapper for VST/AU using Max for
 Live](http://audioswiftapp.com/midi-effects-wrapper-for-vst-au-plugins-using-max-for-live/).*
+
+## Keys Host: one window for VST3 instruments
+
+Drop **Keys Host** on a MIDI track and click **Load Instrument…**: an in-window list
+of every installed VST3 (the same folders Live's browser scans), grouped by
+publisher, one click to load. The synth's UI opens in its **own floating window**
+above the keyboard — two windows, not one stack; the top bar's **Show/Hide
+Instrument** controls it (the window's close button just hides it). Audio comes out
+of the Keys Host track. The
+instrument's complete state — including its own MIDI Learn mappings for the Keys
+faders/XY — is saved inside the Live set. Dragging a `.vst3` file from Windows
+Explorer onto the Keys Host window also works; dragging from **Live's own browser**
+does not — Live's browser drags are internal and never reach a plugin's window
+(true for every hosting plugin, not just Keys Host), which is exactly why the picker
+brings the list inside instead.
+
+**Ableton's own instruments (Operator, Wavetable, Simpler, Drum Rack…) cannot be
+loaded inside Keys Host** — or inside any plugin host. They are not plugins; they
+exist only inside Live. To play them from the same keyboard, use the same routing as
+plain Keys: on the Ableton-instrument track set **MIDI From → Keys Host** (and
+**Monitor → In**). Keys Host always sends the played notes out of its track, even
+while it is also playing its hosted VST3 — so one Keys Host can drive its own synth
+*and* Ableton devices on other tracks; arm/monitor per track decides who listens.
+
+Recording note: what you play into the *hosted* instrument stays inside the plugin,
+so Live doesn't capture it as a MIDI clip on the Keys Host track itself. To record,
+use a listener track ("MIDI From: Keys Host"), exactly like the routing above.
 
 ## Channels
 

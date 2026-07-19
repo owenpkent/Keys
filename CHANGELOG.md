@@ -5,6 +5,71 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added — Layouts, auto-assigned faders, Hex Host
+- **Named UI layouts** via a new Layout combo (and `uiLayout` parameter, saved with
+  the session): **Classic** is the existing arrangement; **Performer** keeps the
+  8 CC faders and the XY pad in a permanent control strip between the header and
+  the keyboard, hardware-controller style (their surface tabs disappear since they
+  are always up). New layouts get appended over time; existing ones never change
+  meaning. Top-level editors grow to fit Performer; inside Keys Host the host
+  window grows instead.
+- **Auto-assigned faders (Keys Host / Hex Host):** loading an instrument scans its
+  parameter list and binds the 8 faders to the likeliest targets by name (cutoff,
+  resonance, attack, decay, sustain, release, reverb/wet, drive). A bound fader
+  drives that parameter directly (its label shows the target) while still sending
+  its CC. Bindings are recomputed on every load, deliberately not persisted.
+- **Hex Host**, a third product (`KyHx`): the Keys Host engine with the Harmonic
+  Table as the default surface, so a hex-grid instrument and a piano instrument can
+  each live on their own track.
+- UI polish: the Mod and Pitch wheels are now wide hardware-style wheels with a
+  chunky grab bar; the chord-pad "Excl" toggle is labeled **Exclusive** and no
+  longer truncates; Keys Host opens at its compact size instead of needing an
+  immediate resize.
+- Performer refinements from first real use: taller fader strip and a bigger XY pad
+  (room to breathe), and the chord pads become a **4x4 grid beside the keyboard**
+  (capture card on top, **All Off** parked underneath).
+- **All Off is no longer harsh**: it now sends per-note note-offs on every channel
+  plus CC123, so everything ends through its release envelope. CC120 (All Sound
+  Off), which choked releasing tails dead, is gone.
+
+### Added — Keys Host (keyboard + your instrument in one window)
+- A third product, **Keys Host**: the full Keys UI with one hosted instrument VST3
+  above it, in a single plugin on a single track. From Live's point of view it is just
+  an instrument that makes sound, which sidesteps the "no plugin MIDI effects before
+  an instrument" rule without any track routing. Design notes:
+  `docs/KEYS_HOST_DESIGN.md`.
+  - **Load Instrument…** opens an in-window, mouse-only list of every installed VST3
+    from the folders Live scans, **grouped by publisher** (read from the bundle's
+    `moduleinfo.json` or the DLL's version resource — metadata only, so no plugin is
+    instantiated until clicked, listing can't crash, and no scanner is needed), with
+    a file-browser fallback for odd install locations. Dropping a `.vst3` from
+    Explorer onto the window also loads it. (Dragging from Live's own browser is
+    impossible for any plugin — Live's browser drags never leave Live.) **Eject**
+    and **Show/Hide Instrument** live on the same top bar.
+  - The hosted instrument's GUI opens in its **own floating window** above the
+    keyboard (two windows, not one stacked editor). Show/Hide Instrument toggles it;
+    the window's close button only hides, never ejects.
+  - Clicked notes, chord pads, faders, and the XY pad all feed the hosted instrument
+    directly. The instrument's **complete state (including its own MIDI Learn
+    mappings) is saved inside the Live set**, so CC assignments persist with the
+    project — assign once, keep forever.
+  - Sessions share the same `KEYS` state root as plain Keys, so pads and settings are
+    interchangeable between the two products.
+  - Playing inside Keys Host is internal to the plugin: Live doesn't record it as
+    MIDI clips on the same track (add a listener track with "MIDI From: Keys Host" to
+    capture it). The two-track workflow in `docs/ABLETON_LIVE.md` still records
+    natively.
+  - Keys Host always emits the played notes as track MIDI output, even with an
+    instrument loaded (the hosted synth gets its own copy of the MIDI, so it can't
+    eat the track's). "MIDI From: Keys Host" therefore drives Ableton's own
+    instruments on other tracks — native Live devices can't be hosted inside any
+    plugin, so that routing is the supported way to play them from Keys Host.
+  - Built by default (`-DKEYS_BUILD_HOST=OFF` to skip). New plugin code `KyHo`;
+    plain Keys' parameter layout and sessions are untouched.
+- Internal: `KeysProcessor`'s chord-pad serialization is now the protected
+  `chordPadsToTree()`/`chordPadsFromTree()` pair (no format change), and the
+  auto-updater check is compiled out of the editor when embedded in Keys Host.
+
 ### Added — Keys FX (experimental MIDI-effect variant, off by default)
 - A second product, **Keys FX**, built from the same UI and logic but classified as a
   **MIDI effect** (VST3 sub-category `Fx`) instead of an instrument. The intent was a

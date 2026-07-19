@@ -17,7 +17,24 @@ it. And it drops straight onto a track, with no loopMIDI to configure.
 Built with **JUCE 8** and **CMake**, on the shared
 [`okstudio-juce-kit`](../okstudio-juce-kit).
 
+**Three products build from this repo:**
+
+- **Keys**: the keyboard itself, driving a downstream instrument over MIDI.
+- **Keys Host**: the keyboard *plus one hosted instrument VST3* in a single plugin
+  on a single track. Pick the synth from an in-window, publisher-grouped list; its
+  GUI opens in its own floating window; its complete state (including MIDI Learn
+  mappings) saves inside the DAW project. The 8 faders auto-bind to the synth's
+  likeliest parameters (cutoff, resonance, envelope, and so on) by name. See
+  [docs/ABLETON_LIVE.md](docs/ABLETON_LIVE.md) for how it fits Live.
+- **Hex Host**: the same host with the Harmonic Table as its default surface.
+
+Two named UI layouts (a **Layout** combo, saved per session): **Classic**, and
+**Performer**, which keeps the faders, XY pad, and a 4x4 chord-pad grid visible
+around the keyboard, hardware-controller style.
+
 ![Keys](assets/screenshots/keys.png)
+
+![Keys Host](assets/screenshots/keys-host.png)
 
 ## Playing it
 
@@ -31,7 +48,7 @@ Built with **JUCE 8** and **CMake**, on the shared
 | **Surface tabs** | Swap the playing area: **Keys** (piano), **Hex** (isomorphic hex grid: up a row is a fifth, diagonals are thirds, so chord shapes repeat everywhere), **Pads** (4x4 note grid on its own channel, drums by default), **Faders** (eight assignable CCs), **XY** (two CCs on one drag) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
 | **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next |
-| **All Off** | Panic: stop every note on every channel (note-offs plus CC120 + CC123) |
+| **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Latch and Sustain
 are on-screen toggles, not modifier keys, on purpose; right-click exists only as the
