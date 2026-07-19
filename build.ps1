@@ -45,15 +45,16 @@ function Invoke-Sign {
 }
 
 function Copy-Vst3ToDaw {
-    $src = "$PSScriptRoot\build\Keys_artefacts\$Config\VST3\Keys.vst3"
-    $dst = "$VstCopyDir\Keys.vst3"
+    param([string]$Artefacts, [string]$Bundle)
+    $src = "$PSScriptRoot\build\$Artefacts\$Config\VST3\$Bundle"
+    $dst = "$VstCopyDir\$Bundle"
     try {
         Copy-Item $src $VstCopyDir -Recurse -Force -ErrorAction Stop
         Write-Host "Installed VST3 -> $dst" -ForegroundColor Green
         return $true
     } catch {
         Write-Host "WARNING: could not update $dst" -ForegroundColor Yellow
-        Write-Host "  The DAW has Keys loaded (file locked). Unload it (or close the DAW), then rerun." -ForegroundColor Yellow
+        Write-Host "  The DAW has it loaded (file locked). Unload it (or close the DAW), then rerun." -ForegroundColor Yellow
         return $false
     }
 }
@@ -63,21 +64,29 @@ function Copy-Vst3ToDaw {
 cmake -B build -G "Visual Studio 17 2022" -A x64 "-DKEYS_COPY_PLUGIN=OFF"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-cmake --build build --config $Config --target Keys_VST3
+cmake --build build --config $Config --target Keys_VST3 KeysHost_VST3 HexHost_VST3
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 if ($Standalone) {
-    cmake --build build --config $Config --target Keys_Standalone
+    cmake --build build --config $Config --target Keys_Standalone KeysHost_Standalone HexHost_Standalone
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
 if ($doSign) {
-    $toSign = @("$PSScriptRoot\build\Keys_artefacts\$Config\VST3\Keys.vst3\Contents\x86_64-win\Keys.vst3")
-    if ($Standalone) { $toSign += "$PSScriptRoot\build\Keys_artefacts\$Config\Standalone\Keys.exe" }
+    $toSign = @("$PSScriptRoot\build\Keys_artefacts\$Config\VST3\Keys.vst3\Contents\x86_64-win\Keys.vst3",
+                "$PSScriptRoot\build\KeysHost_artefacts\$Config\VST3\Keys Host.vst3\Contents\x86_64-win\Keys Host.vst3",
+                "$PSScriptRoot\build\HexHost_artefacts\$Config\VST3\Hex Host.vst3\Contents\x86_64-win\Hex Host.vst3")
+    if ($Standalone) {
+        $toSign += "$PSScriptRoot\build\Keys_artefacts\$Config\Standalone\Keys.exe"
+        $toSign += "$PSScriptRoot\build\KeysHost_artefacts\$Config\Standalone\Keys Host.exe"
+        $toSign += "$PSScriptRoot\build\HexHost_artefacts\$Config\Standalone\Hex Host.exe"
+    }
     Invoke-Sign -Files $toSign
 }
 
-$copied = Copy-Vst3ToDaw
+$copied = Copy-Vst3ToDaw -Artefacts "Keys_artefacts" -Bundle "Keys.vst3"
+$copied = (Copy-Vst3ToDaw -Artefacts "KeysHost_artefacts" -Bundle "Keys Host.vst3") -and $copied
+$copied = (Copy-Vst3ToDaw -Artefacts "HexHost_artefacts" -Bundle "Hex Host.vst3") -and $copied
 
 if ($Installer) {
     $version = (Select-String -Path "$PSScriptRoot\CMakeLists.txt" -Pattern 'project\(Keys VERSION ([0-9.]+)').Matches[0].Groups[1].Value
@@ -102,7 +111,7 @@ if ($Installer) {
 Write-Host ""
 $state = if ($doSign) { "signed" } else { "unsigned" }
 if ($copied) {
-    Write-Host "Done ($state). VST3 installed to $VstCopyDir\Keys.vst3" -ForegroundColor Green
+    Write-Host "Done ($state). Keys.vst3 and Keys Host.vst3 installed to $VstCopyDir" -ForegroundColor Green
 } else {
-    Write-Host "Done ($state), but VST3 NOT installed - unload it in the DAW and rerun." -ForegroundColor Yellow
+    Write-Host "Done ($state), but at least one VST3 NOT installed - unload it in the DAW and rerun." -ForegroundColor Yellow
 }

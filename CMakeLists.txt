@@ -93,6 +93,47 @@ if (KEYS_BUILD_MIDI_EFFECT)
     target_compile_definitions(KeysFX PUBLIC KEYS_MIDI_EFFECT=1)
 endif()
 
+# Keys Host: the keyboard plus one hosted instrument VST3 in the same window, on one
+# track. Sidesteps Live's "no plugin MIDI effects before an instrument" rule because
+# Live just sees one instrument that makes sound. Design: docs/KEYS_HOST_DESIGN.md.
+option(KEYS_BUILD_HOST "Build Keys Host (hosts an instrument VST3 inside Keys)" ON)
+if (KEYS_BUILD_HOST)
+    okstudio_add_plugin(KeysHost
+        PRODUCT_NAME  "Keys Host"
+        PLUGIN_CODE   KyHo
+        BUNDLE_SUFFIX keyshost
+        ${_keysCopy})
+    keys_configure_target(KeysHost)
+    target_sources(KeysHost PRIVATE
+        src/host/KeysHostProcessor.cpp
+        src/host/KeysHostEditor.cpp)
+    # KEYS_HOST gates createPluginFilter and the embedded editor's updater;
+    # JUCE_PLUGINHOST_VST3 turns on JUCE's bundled VST3 hosting.
+    target_compile_definitions(KeysHost PUBLIC
+        KEYS_HOST=1
+        JUCE_PLUGINHOST_VST3=1)
+endif()
+
+# Hex Host: the same engine as Keys Host, shipped as its own product with the
+# Harmonic Table as the default surface, so a hex-grid instrument and a piano
+# instrument can each live on their own track.
+option(KEYS_BUILD_HEX_HOST "Build Hex Host (Harmonic Table variant of Keys Host)" ON)
+if (KEYS_BUILD_HEX_HOST)
+    okstudio_add_plugin(HexHost
+        PRODUCT_NAME  "Hex Host"
+        PLUGIN_CODE   KyHx
+        BUNDLE_SUFFIX hexhost
+        ${_keysCopy})
+    keys_configure_target(HexHost)
+    target_sources(HexHost PRIVATE
+        src/host/KeysHostProcessor.cpp
+        src/host/KeysHostEditor.cpp)
+    target_compile_definitions(HexHost PUBLIC
+        KEYS_HOST=1
+        KEYS_HEX=1
+        JUCE_PLUGINHOST_VST3=1)
+endif()
+
 # Unit tests (console, JUCE UnitTest). Not built by the plugin targets; build and run
 # with: cmake --build build --target Keys_tests && ctest --test-dir build -C Release
 enable_testing()
