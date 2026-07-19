@@ -21,7 +21,11 @@ cmake -B build -G "Visual Studio 17 2022" -A x64 -DKEYS_COPY_PLUGIN=OFF
 cmake --build build --config Release --target Keys_VST3 Keys_Standalone
 ```
 
-Artifacts: `build/Keys_artefacts/Release/{VST3,Standalone}/`. `build.ps1` wraps
+Artifacts: `build/Keys_artefacts/Release/{VST3,Standalone}/`. Note the snippet above
+passes `-DKEYS_COPY_PLUGIN=OFF`, so it builds but does **not** install to the DAW
+folder — Ableton keeps loading the previously installed binary. If Owen reports "the
+VST didn't update," this is the usual cause: run `build.ps1` (or copy the bundle
+yourself, then have him rescan in Live). `build.ps1` wraps
 build → (sign) → copy-to-Ableton → (installer). Local test install: `build.ps1`
 copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 `%USERPROFILE%\VST3` is NOT scanned). Needs JUCE at `../JUCE` and the kit at

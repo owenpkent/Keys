@@ -43,6 +43,20 @@ Artifacts:
 - `build/Keys_artefacts/Release/VST3/Keys.vst3`
 - `build/Keys_artefacts/Release/Standalone/Keys.exe`
 
+> **This does not install the plugin.** `-DKEYS_COPY_PLUGIN=OFF` disables the copy
+> into the DAW folder, so the build tree gets a fresh `Keys.vst3` but Ableton keeps
+> loading the last *installed* one. This is the usual cause of "I built but the VST
+> didn't update." To install, either run `./build.ps1` instead, or copy the bundle
+> yourself:
+>
+> ```powershell
+> Remove-Item -Recurse -Force "$env:USERPROFILE\Ableton\vst3\Keys.vst3" -ErrorAction SilentlyContinue
+> Copy-Item -Recurse -Force build\Keys_artefacts\Release\VST3\Keys.vst3 "$env:USERPROFILE\Ableton\vst3"
+> ```
+>
+> Drop `-DKEYS_COPY_PLUGIN=OFF` (it defaults `ON`) if you want plain CMake to install
+> on every build too.
+
 ## Tests
 
 Unit tests (JUCE UnitTest) cover the pure note-resolution logic. They build as a
@@ -73,8 +87,16 @@ how to keep it testable) is in
   `add_subdirectory(okstudio-juce-kit)`.
 - **Kit or JUCE not found** — check the sibling paths above, or pass
   `-DKEYS_JUCE_PATH=...` / `-DOKSTUDIO_KIT_PATH=...`.
-- **Copy step fails / plugin not updating** — the DAW has Keys loaded and the file
-  is locked. Unload it or close the DAW, then rerun. The built binary is still in the
-  build tree regardless.
+- **Built, but the VST didn't update** — two causes. (1) You built with plain CMake
+  and `-DKEYS_COPY_PLUGIN=OFF`, so nothing was copied to the DAW folder; see the note
+  under [Plain CMake](#plain-cmake). (2) The copy ran but Live is still showing the
+  old plugin because it caches its scan — rescan (Preferences → Plug-Ins → Rescan) or
+  restart Live, and re-add the instance if one was already on a track. To confirm which
+  binary Ableton will load, compare timestamps of
+  `build\Keys_artefacts\Release\VST3\Keys.vst3\Contents\x86_64-win\Keys.vst3` and the
+  copy under `%USERPROFILE%\Ableton\vst3\Keys.vst3\...`.
+- **Copy step fails** — the DAW has Keys loaded and the file is locked. `build.ps1`
+  warns and carries on rather than failing the build. Unload it or close the DAW, then
+  rerun. The built binary is still in the build tree regardless.
 - **First build is slow** — JUCE compiles from source once; later builds are
   incremental.
