@@ -14,6 +14,11 @@ namespace keys
 //
 // Octavium hid reassignment in a menu-bar dialog; here the label under each fader is
 // a button that opens the CC picker, so it stays one click and mouse-only.
+//
+// A fader move also calls processor.faderMoved(), a no-op on plain Keys; Keys Host
+// overrides it to drive an auto-assigned hosted-instrument parameter directly. When
+// such a binding exists, processor.faderTargetName() supplies the button's label
+// instead of the CC name, refreshed alongside the CC label in refreshAssignments().
 class FaderBank : public juce::Component
 {
 public:

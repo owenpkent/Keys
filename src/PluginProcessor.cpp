@@ -76,8 +76,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
 
     // Playing surfaces (Octavium's separate windows, here one switchable view). The Pad
     // Grid keeps its own channel so drums land on 10 while the keyboard plays elsewhere.
+    // Hex Host is the same engine shipped with the Harmonic Table up by default.
+   #if defined(KEYS_HEX) && KEYS_HEX
+    constexpr int defaultSurface = 1;
+   #else
+    constexpr int defaultSurface = 0;
+   #endif
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "surface", 1 }, "Surface",
-                                                      juce::StringArray { "Keys", "Hex", "Pads", "Faders", "XY" }, 0));
+                                                      juce::StringArray { "Keys", "Hex", "Pads", "Faders", "XY" }, defaultSurface));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padChannel", 1 }, "Pad Grid Channel",
                                                       channelNames(), 9));
 
@@ -101,6 +107,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "markovTemp", 1 }, "Markov Temperature",
                                                      NormalisableRange<float>(0.3f, 2.0f, 0.01f), 1.0f));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "markovLength", 1 }, "Markov Length", 4, 16, 4));
+
+    // Named UI layouts, versioned by name: new arrangements get appended, existing
+    // ones never change meaning, and the session remembers the pick. "Performer"
+    // keeps the faders and XY pad visible in a strip above the keyboard.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "uiLayout", 1 }, "Layout",
+                                                      StringArray { "Classic", "Performer" }, 0));
 
     return layout;
 }
@@ -317,15 +329,20 @@ void KeysProcessor::noteOff(int midiNote, int channelOverride)
 
 void KeysProcessor::allNotesOff()
 {
-    // All Sound Off then All Notes Off, every channel (Octavium's chord-pad panic sends
-    // both): CC120 silences even envelopes a synth is still releasing, CC123 is the
-    // conventional note cut, and per-note offs from refresh() already preceded us.
+    // Per-note offs for every note on every channel, then CC123 (All Notes Off) for
+    // synths that prefer the controller form. Notes end through their normal release
+    // envelopes. Octavium also sent CC120 (All Sound Off), but that chokes tails
+    // that are still releasing, which reads as a glitch rather than a stop, so it
+    // is deliberately gone.
     const double t = nowSeconds();
     for (int ch = 1; ch <= 16; ++ch)
     {
-        auto off = juce::MidiMessage::controllerEvent(ch, 120, 0);
-        off.setTimeStamp(t);
-        collector.addMessageToQueue(off);
+        for (int note = 0; note < 128; ++note)
+        {
+            auto off = juce::MidiMessage::noteOff(ch, note);
+            off.setTimeStamp(t);
+            collector.addMessageToQueue(off);
+        }
         auto m = juce::MidiMessage::allNotesOff(ch);
         m.setTimeStamp(t);
         collector.addMessageToQueue(m);
@@ -372,7 +389,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
 }
 
-void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
+juce::ValueTree KeysProcessor::chordPadsToTree() const
 {
     juce::ValueTree pads { "chordPads" };
     // Written since pads went 16-a-page; loaders remap older 8-a-page slots by it.
@@ -397,42 +414,52 @@ void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
             pad.setProperty("numeral", p.numeral, nullptr);
         pads.appendChild(pad, nullptr);
     }
-    okstudio::state::save(apvts, "KEYS", destData, { pads });
+    return pads;
+}
+
+void KeysProcessor::chordPadsFromTree(const juce::ValueTree& root)
+{
+    stopAllChordPads();
+    for (auto& p : chordPads)
+        p = {};
+    const auto pads = root.getChildWithName("chordPads");
+    if (! pads.isValid())
+        return;
+    // Sessions saved when pages held 8 pads store slots in 8-a-page terms; keep each
+    // pad on the page it was on by re-basing its slot into the current page width.
+    const int savedPerPage = (int) pads.getProperty("padsPerPage", 8);
+    for (int c = 0; c < pads.getNumChildren(); ++c)
+    {
+        const auto pad = pads.getChild(c);
+        int slot = (int) pad.getProperty("slot", -1);
+        if (slot >= 0 && savedPerPage > 0 && savedPerPage != padsPerPage)
+            slot = (slot / savedPerPage) * padsPerPage + (slot % savedPerPage);
+        if (slot < 0 || slot >= numChordPads)
+            continue;
+        ChordPad p;
+        for (const auto& s : juce::StringArray::fromTokens(pad.getProperty("notes").toString(), ",", ""))
+            if (s.trim().isNotEmpty())
+                p.notes.push_back(s.trim().getIntValue());
+        p.name = pad.getProperty("name").toString();
+        p.locked = (bool) pad.getProperty("locked", false);
+        p.rootPc = (int) pad.getProperty("rootPc", -1); // absent in pre-pages sessions
+        p.type = (int) pad.getProperty("type", -1);
+        p.degree = (int) pad.getProperty("degree", -1);
+        p.numeral = pad.getProperty("numeral").toString(); // absent in pre-Markov sessions
+        chordPads[(size_t) slot] = p;
+    }
+}
+
+void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
+{
+    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree() });
 }
 
 void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
     {
-        stopAllChordPads();
-        for (auto& p : chordPads)
-            p = {};
-        const auto pads = root.getChildWithName("chordPads");
-        if (! pads.isValid())
-            return;
-        // Sessions saved when pages held 8 pads store slots in 8-a-page terms; keep each
-        // pad on the page it was on by re-basing its slot into the current page width.
-        const int savedPerPage = (int) pads.getProperty("padsPerPage", 8);
-        for (int c = 0; c < pads.getNumChildren(); ++c)
-        {
-            const auto pad = pads.getChild(c);
-            int slot = (int) pad.getProperty("slot", -1);
-            if (slot >= 0 && savedPerPage > 0 && savedPerPage != padsPerPage)
-                slot = (slot / savedPerPage) * padsPerPage + (slot % savedPerPage);
-            if (slot < 0 || slot >= numChordPads)
-                continue;
-            ChordPad p;
-            for (const auto& s : juce::StringArray::fromTokens(pad.getProperty("notes").toString(), ",", ""))
-                if (s.trim().isNotEmpty())
-                    p.notes.push_back(s.trim().getIntValue());
-            p.name = pad.getProperty("name").toString();
-            p.locked = (bool) pad.getProperty("locked", false);
-            p.rootPc = (int) pad.getProperty("rootPc", -1); // absent in pre-pages sessions
-            p.type = (int) pad.getProperty("type", -1);
-            p.degree = (int) pad.getProperty("degree", -1);
-            p.numeral = pad.getProperty("numeral").toString(); // absent in pre-Markov sessions
-            chordPads[(size_t) slot] = p;
-        }
+        chordPadsFromTree(root);
     });
 }
 
@@ -442,7 +469,11 @@ juce::AudioProcessorEditor* KeysProcessor::createEditor()
 }
 } // namespace keys
 
+// The Keys Host target compiles these same sources with KEYS_HOST=1 and provides its
+// own createPluginFilter (returning KeysHostProcessor) in src/host.
+#if ! (defined(KEYS_HOST) && KEYS_HOST)
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new keys::KeysProcessor();
 }
+#endif

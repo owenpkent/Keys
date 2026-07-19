@@ -139,6 +139,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     chordStrumAtt = std::make_unique<SliderAtt>(processor.apvts, "chordStrum", chordStrumSlider);
 
     addCombo(chordStrumDirBox, chordStrumDirLabel, "Dir", { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
+    addCombo(layoutBox, layoutLabel, "Layout", { "Classic", "Performer" }, "uiLayout", layoutAtt);
 
     // Performance wheels, left of the keyboard. Transient (no params/persistence): Mod
     // holds its value (CC1); Pitch bend glides back to centre when you let go.
@@ -148,6 +149,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     modWheel.setValue(0, juce::dontSendNotification);
     modWheel.setSliderSnapsToMousePosition(false); // relative drag; a stray click can't slam it
     modWheel.onValueChange = [this] { processor.sendCC(1, (int) modWheel.getValue()); };
+    modWheel.setLookAndFeel(&wheelLnf);
     addAndMakeVisible(modWheel);
     styleLabel(modLabel, "Mod");
     modLabel.setJustificationType(juce::Justification::centred);
@@ -161,6 +163,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     pitchWheel.onValueChange = [this] { processor.sendPitchBend((int) pitchWheel.getValue()); };
     pitchWheel.onDragStart = [this] { pitchReturning = false; };
     pitchWheel.onDragEnd = [this] { pitchReturning = true; }; // eased return, in timerCallback
+    pitchWheel.setLookAndFeel(&wheelLnf);
     addAndMakeVisible(pitchWheel);
     styleLabel(pitchLabel, "Pitch");
     pitchLabel.setJustificationType(juce::Justification::centred);
@@ -237,7 +240,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
             keyboard.recallOutputNotes(notes);
     };
 
+   #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
+    // Skipped when this editor is embedded inside Keys Host, which is a different
+    // product and will get its own release channel.
     updaterConfig.productName = "Keys";
     updaterConfig.releasesRepo = "okstudio1/keys-releases";
     updaterConfig.currentVersion = juce::String(KEYS_VERSION);
@@ -248,6 +254,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         if (auto* e = safe.getComponent())
             e->showUpdate(info);
     });
+   #endif
 
     setResizable(true, true);
     setResizeLimits(820, 480, 2200, 1200);
@@ -259,7 +266,30 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 KeysEditor::~KeysEditor()
 {
     stopTimer();
+    modWheel.setLookAndFeel(nullptr);
+    pitchWheel.setLookAndFeel(nullptr);
     setLookAndFeel(nullptr);
+}
+
+void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
+                                                    float sliderPos, float, float,
+                                                    juce::Slider::SliderStyle, juce::Slider& s)
+{
+    // Groove the full component width, thumb as a chunky grab bar. No value fill —
+    // hardware wheels don't show one, and it would read oddly on the centred pitch wheel.
+    const auto groove = juce::Rectangle<float>((float) x, (float) y, (float) w, (float) h)
+                            .reduced((float) w * 0.15f, 6.0f);
+    const float corner = groove.getWidth() * 0.35f;
+    g.setColour(s.findColour(juce::Slider::backgroundColourId));
+    g.fillRoundedRectangle(groove, corner);
+    g.setColour(s.findColour(juce::Slider::trackColourId));
+    g.drawRoundedRectangle(groove, corner, 1.0f);
+
+    const float thumbH = 18.0f;
+    const float thumbY = juce::jlimit(groove.getY(), groove.getBottom() - thumbH, sliderPos - thumbH * 0.5f);
+    g.setColour(s.findColour(juce::Slider::thumbColourId));
+    g.fillRoundedRectangle(groove.expanded(3.0f, 0.0f).getX(), thumbY,
+                           groove.getWidth() + 6.0f, thumbH, 4.0f);
 }
 
 void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::String& text,
@@ -278,14 +308,24 @@ int KeysEditor::surfaceIndex() const
     return juce::jlimit(0, 4, (int) processor.apvts.getRawParameterValue("surface")->load());
 }
 
+int KeysEditor::layoutIndex() const
+{
+    return juce::jlimit(0, 1, (int) processor.apvts.getRawParameterValue("uiLayout")->load());
+}
+
 void KeysEditor::applySurfaceVisibility()
 {
-    const int surf = surfaceIndex();
+    const bool performer = layoutIndex() == 1;
+    int surf = surfaceIndex();
+    // In Performer the faders and XY are always up in the strip, so those tabs are
+    // gone; a session saved on one of them falls back to the piano.
+    if (performer && (surf == 3 || surf == 4))
+        surf = 0;
     keyboard.setVisible(surf == 0);
     hexTable.setVisible(surf == 1);
     padGrid.setVisible(surf == 2);
-    faderBank.setVisible(surf == 3);
-    xyPad.setVisible(surf == 4);
+    faderBank.setVisible(performer || surf == 3);
+    xyPad.setVisible(performer || surf == 4);
     // Wheels ride with the note surfaces only, as in Octavium (piano + harmonic table).
     const bool wheels = surf == 0 || surf == 1;
     modWheel.setVisible(wheels);
@@ -293,7 +333,10 @@ void KeysEditor::applySurfaceVisibility()
     pitchWheel.setVisible(wheels);
     pitchLabel.setVisible(wheels);
     for (int i = 0; i < (int) surfaceButtons.size(); ++i)
+    {
+        surfaceButtons[(size_t) i].setVisible(! (performer && i >= 3));
         surfaceButtons[(size_t) i].setToggleState(i == surf, juce::dontSendNotification);
+    }
 }
 
 void KeysEditor::stepPadPage(int delta)
@@ -313,8 +356,10 @@ void KeysEditor::toggleGenPanel()
         return;
     }
     // The generator carries far more controls than the player, and every one of them has to
-    // stay at a full-size target. Grow the editor to fit rather than shrink the targets.
-    setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 640));
+    // stay at a full-size target. Grow the editor to fit rather than shrink the targets
+    // (unless embedded, where the parent owns geometry and the overlay makes do).
+    if (! embedded)
+        setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 640));
 
     genPanel = std::make_unique<ChordGenPanel>(processor);
     genPanel->onClose = [this] { genPanel.reset(); };
@@ -406,6 +451,16 @@ void KeysEditor::timerCallback()
         else if (lastSurface == 2) padGrid.panic();
         lastSurface = surf;
         applySurfaceVisibility();
+    }
+
+    if (const int lay = layoutIndex(); lay != lastLayout)
+    {
+        lastLayout = lay;
+        applySurfaceVisibility();
+        // Performer needs room for the control strip. A top-level editor grows
+        // itself; an embedded one leaves geometry to Keys Host.
+        if (! embedded && lay == 1)
+            setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 720));
         resized();
     }
 
@@ -491,12 +546,29 @@ void KeysEditor::resized()
     // reads as instrument body; the grids and faders use the room).
     const int rowH = 46;
     auto header = area.removeFromTop(14 + rowH * 3 + 6);
+
+    // Performer layout: the faders and XY pad live in a permanent control strip
+    // between the header and the tabs, hardware-controller style.
+    const bool performer = layoutIndex() == 1;
+    chordPads.setGridLayout(performer);
+    juce::Rectangle<int> strip;
+    if (performer)
+    {
+        strip = area.removeFromTop(156);
+        area.removeFromTop(4);
+    }
+
     auto tabs = area.removeFromTop(34);
     area.removeFromTop(4);
 
-    // Chord pads: two rows of eight between the tabs and the playing surface.
-    auto padRows = area.removeFromTop(96);
-    area.removeFromTop(6);
+    // Chord pads: two rows of eight between the tabs and the playing surface. In
+    // Performer they move to a 4x4 column beside the keyboard instead.
+    juce::Rectangle<int> padRows;
+    if (! performer)
+    {
+        padRows = area.removeFromTop(96);
+        area.removeFromTop(6);
+    }
     auto play = area;
 
     title.setBounds(header.removeFromLeft(84).withTrimmedTop(header.getHeight() / 2 - 17).withHeight(34));
@@ -536,13 +608,15 @@ void KeysEditor::resized()
     cell(rowB, 70, channelLabel, channelBox);
     toggleCell(rowB, 100, sustainButton);
     toggleCell(rowB, 90, latchButton);
-    toggleCell(rowB, 90, panicButton);
+    if (! performer)
+        toggleCell(rowB, 90, panicButton); // Performer parks All Off by the pads column
 
     toggleCell(rowC, 96, humanizeButton);
     cell(rowC, 208, humanizeVelLabel, humanizeVelSlider);
     cell(rowC, 130, humanizeTimeLabel, humanizeTimeSlider);
     cell(rowC, 150, chordStrumLabel, chordStrumSlider);
     cell(rowC, 100, chordStrumDirLabel, chordStrumDirBox);
+    cell(rowC, 110, layoutLabel, layoutBox);
 
     // Surface tabs on the left of their row; the chord-pad page/generator controls share it.
     for (auto& b : surfaceButtons)
@@ -551,7 +625,7 @@ void KeysEditor::resized()
         tabs.removeFromLeft(4);
     }
     tabs.removeFromLeft(12);
-    chordExclusiveButton.setBounds(tabs.removeFromLeft(60).withSizeKeepingCentre(56, 26));
+    chordExclusiveButton.setBounds(tabs.removeFromLeft(112).withSizeKeepingCentre(110, 26));
     tabs.removeFromLeft(4);
     chordsButton.setBounds(tabs.removeFromLeft(66));
     tabs.removeFromLeft(4);
@@ -559,28 +633,50 @@ void KeysEditor::resized()
     pageLabel.setBounds(tabs.removeFromLeft(28));
     pageNextButton.setBounds(tabs.removeFromLeft(34));
 
-    chordPads.setBounds(padRows);
+    if (performer)
+    {
+        auto xyBox = strip.removeFromRight(230);
+        strip.removeFromRight(8);
+        faderBank.setBounds(strip);
+        xyPad.setBounds(xyBox);
+    }
+    else
+    {
+        chordPads.setBounds(padRows);
+    }
 
-    // Wheels sit left of the note surfaces; other surfaces take the full width.
+    // Wheels sit left of the note surfaces; other surfaces take the full width. In
+    // Performer the chord pads (4x4, card on top, All Off underneath) come first.
     const int surf = surfaceIndex();
     auto playArea = play;
+    if (performer)
+    {
+        auto padsCol = playArea.removeFromLeft(250);
+        playArea.removeFromLeft(8);
+        panicButton.setBounds(padsCol.removeFromBottom(34));
+        padsCol.removeFromBottom(6);
+        chordPads.setBounds(padsCol);
+    }
     if (surf == 0 || surf == 1)
     {
-        auto wheels = playArea.removeFromLeft(84);
+        auto wheels = playArea.removeFromLeft(112);
         playArea.removeFromLeft(6);
-        auto modCol = wheels.removeFromLeft(40);
+        auto modCol = wheels.removeFromLeft(54);
         wheels.removeFromLeft(4);
         auto pitchCol = wheels;
         modLabel.setBounds(modCol.removeFromBottom(15));
-        modWheel.setBounds(modCol.reduced(3, 2));
+        modWheel.setBounds(modCol.reduced(2, 2));
         pitchLabel.setBounds(pitchCol.removeFromBottom(15));
-        pitchWheel.setBounds(pitchCol.reduced(3, 2));
+        pitchWheel.setBounds(pitchCol.reduced(2, 2));
     }
 
     keyboard.setBounds(playArea);
     hexTable.setBounds(playArea);
     padGrid.setBounds(playArea);
-    faderBank.setBounds(play);
-    xyPad.setBounds(play);
+    if (! performer)
+    {
+        faderBank.setBounds(play);
+        xyPad.setBounds(play);
+    }
 }
 } // namespace keys

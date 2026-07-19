@@ -20,7 +20,13 @@ FaderBank::FaderBank(KeysProcessor& p) : processor(p)
         // the click point, so a stray click can't slam a CC to an extreme.
         fader->setSliderSnapsToMousePosition(false);
         fader->onValueChange = [this, i]
-        { processor.sendCC(assignedCC(i), (int) faders[(size_t) i]->getValue()); };
+        {
+            const float value = (float) faders[(size_t) i]->getValue();
+            processor.sendCC(assignedCC(i), (int) value);
+            // Also drives a hosted instrument's parameter directly, if Keys Host has
+            // bound this fader to one; a no-op on plain Keys.
+            processor.faderMoved(i, value / 127.0f);
+        };
         addAndMakeVisible(*fader);
 
         auto& button = ccButtons[(size_t) i];
@@ -47,7 +53,10 @@ void FaderBank::refreshAssignments()
 {
     for (int i = 0; i < numFaders; ++i)
     {
-        const auto text = cc::label(assignedCC(i));
+        // A hosted instrument's bound parameter name takes over the label when
+        // present (Keys Host auto-assignment); otherwise fall back to the CC label.
+        const auto target = processor.faderTargetName(i);
+        const auto text = target.isNotEmpty() ? target : cc::label(assignedCC(i));
         if (ccButtons[(size_t) i]->getButtonText() != text)
             ccButtons[(size_t) i]->setButtonText(text);
     }

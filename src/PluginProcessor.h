@@ -54,6 +54,13 @@ public:
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
+    // Hooks for a hosted-instrument subclass (Keys Host): empty defaults, so plain
+    // Keys (no hosted instrument) is unaffected. faderMoved is called on every fader
+    // move with the position normalized 0..1; faderTargetName lets the fader bank
+    // show what a fader is bound to, instead of (or alongside) its CC label.
+    virtual void faderMoved(int faderIndex, float value01) { juce::ignoreUnused(faderIndex, value01); }
+    virtual juce::String faderTargetName(int faderIndex) const { juce::ignoreUnused(faderIndex); return {}; }
+
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
     int padGridChannel() const; // 1..16; the Pad Grid's own channel (defaults to 10, drums)
@@ -97,6 +104,13 @@ public:
     int padPageOffset() const { return padPage() * padsPerPage; }
 
     juce::AudioProcessorValueTreeState apvts;
+
+protected:
+    // Chord-pad state as a "chordPads" ValueTree, shared with subclasses (Keys Host
+    // nests it next to its own hosted-instrument tree under the same "KEYS" root, so
+    // sessions stay interchangeable between Keys and Keys Host).
+    juce::ValueTree chordPadsToTree() const;
+    void chordPadsFromTree(const juce::ValueTree& root); // clears pads, then loads the "chordPads" child if present
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();

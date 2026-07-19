@@ -31,6 +31,11 @@ public:
     // The keyboard's currently-sounding notes, pushed from the editor's timer.
     void setCurrentChord(const std::vector<int>& notes);
 
+    // false: the classic strip (card on the left, two rows of eight).
+    // true: the Performer column (card on top, four by four grid), sized to sit
+    // beside the keyboard.
+    void setGridLayout(bool fourByFour);
+
     // Fired when a filled pad is dropped onto the live chord card: hands back that pad's
     // notes so the editor can recall it for editing. The pad itself is left untouched.
     std::function<void(const std::vector<int>&)> onRecall;
@@ -44,6 +49,7 @@ private:
     KeysProcessor& processor;
     std::vector<int> currentNotes;
     juce::String currentName;
+    bool grid = false; // see setGridLayout()
 
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
     int playing = -1;      // pad held down and sounding (beat-pad momentary play)
