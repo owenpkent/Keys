@@ -106,7 +106,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
 }
 
 KeysProcessor::KeysProcessor()
+   #if defined(KEYS_MIDI_EFFECT) && KEYS_MIDI_EFFECT
+    // MIDI-effect variant: JUCE requires a MIDI effect to declare no audio buses.
+    : AudioProcessor(BusesProperties()),
+   #else
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+   #endif
       apvts(*this, nullptr, "PARAMS", createLayout())
 {
 }
@@ -348,8 +353,13 @@ void KeysProcessor::prepareToPlay(double sampleRate, int)
 
 bool KeysProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
+   #if defined(KEYS_MIDI_EFFECT) && KEYS_MIDI_EFFECT
+    juce::ignoreUnused(layouts); // no audio buses in the MIDI-effect variant
+    return true;
+   #else
     const auto& out = layouts.getMainOutputChannelSet();
     return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
+   #endif
 }
 
 void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)

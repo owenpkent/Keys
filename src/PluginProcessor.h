@@ -28,7 +28,11 @@ public:
     const juce::String getName() const override { return "Keys"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
+   #if defined(KEYS_MIDI_EFFECT) && KEYS_MIDI_EFFECT
+    bool isMidiEffect() const override { return true; }
+   #else
     bool isMidiEffect() const override { return false; }
+   #endif
     double getTailLengthSeconds() const override { return 0.0; }
 
     int getNumPrograms() override { return 1; }

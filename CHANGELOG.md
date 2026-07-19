@@ -5,6 +5,24 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added — Keys FX (experimental MIDI-effect variant, off by default)
+- A second product, **Keys FX**, built from the same UI and logic but classified as a
+  **MIDI effect** (VST3 sub-category `Fx`) instead of an instrument. The intent was a
+  build that sits *before* an instrument in the device chain (drop it in front of a
+  synth and play that synth with it) rather than taking the single instrument slot and
+  replacing the synth.
+  - Enabled by an optional `MIDI_EFFECT` flag on the kit's `okstudio_add_plugin`
+    (flips `IS_SYNTH`/`IS_MIDI_EFFECT` and the VST3 category). The processor drops its
+    audio output bus and reports `isMidiEffect()` when built with `KEYS_MIDI_EFFECT=1`.
+  - **Ableton Live rejects it.** Live classifies a third-party VST3 MIDI effect as an
+    *audio* effect and refuses to place it before an instrument ("insert audio effects
+    after instruments") — that slot is reserved for native and Max for Live devices.
+    Keys FX therefore has no use in Live today; it remains valid for DAWs that allow
+    VST3 MIDI effects (Bitwig, Cubase, Reaper). See `docs/ABLETON_LIVE.md` for the full
+    findings and the same-track workarounds.
+  - Off by default (`-DKEYS_BUILD_MIDI_EFFECT=ON` to build it) so dev builds don't drop
+    a dead audio effect into Live.
+
 ### Added — Octavium parity overhaul
 - **Five playing surfaces**, switchable by an on-screen tab row, replacing Octavium's
   separate windows: **Keys** (the piano), **Hex** (the Harmonic Table), **Pads** (4x4
