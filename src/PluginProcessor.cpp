@@ -114,6 +114,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "uiLayout", 1 }, "Layout",
                                                       StringArray { "Classic", "Performer" }, 0));
 
+    // Arpeggiator globals (docs/ARP_DESIGN.md). Dot/Trip are separate toggles rather
+    // than entries in the rate list so automating the rate stays on even divisions
+    // (Serum's documented rationale); Anchor picks bar-affixed vs free-running.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpOn", 1 }, "Arp", false));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRate", 1 }, "Arp Rate",
+                                                      StringArray { "16 bars", "8 bars", "4 bars", "2 bars", "1 bar",
+                                                                    "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" }, 8));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpDot", 1 }, "Arp Dotted", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrip", 1 }, "Arp Triplet", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpAnchor", 1 }, "Arp Anchor", true));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDirection", 1 }, "Arp Direction",
+                                                      StringArray { "Up", "Down", "Up-Down", "Down-Up",
+                                                                    "Up & Down", "Down & Up", "As Played", "Reversed" }, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOctaves", 1 }, "Arp Octaves", 1, 4, 1));
+    layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "arpSwing", 1 }, "Arp Swing",
+                                                     NormalisableRange<float>(0.0f, 0.75f, 0.01f), 0.0f));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLatch", 1 }, "Arp Latch", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpRetrigger", 1 }, "Arp Retrigger", true));
+
     return layout;
 }
 
@@ -366,6 +385,8 @@ void KeysProcessor::sendPitchBend(int value14)
 void KeysProcessor::prepareToPlay(double sampleRate, int)
 {
     collector.reset(sampleRate);
+    arp.prepare(sampleRate);
+    arpScratch.ensureSize(8192);
 }
 
 bool KeysProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -387,6 +408,56 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     // Drain queued UI note events into the outgoing buffer. Anything already on the
     // track's MIDI (a clip, another device) is left in place and passes through.
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
+
+    // Arp stage: consumes the note stream, emits its own; CCs pass through. The
+    // engine reads the host playhead (the one deliberate exception to Keys' old
+    // never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-runs on an
+    // internal clock at the last-known tempo when the transport is stopped.
+    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
+    if (arpOn != lastArpOn)
+    {
+        lastArpOn = arpOn;
+        if (arpOn)
+            arp.hardReset();
+        else
+            arp.flushInto(midi); // nothing may ring after bypassing
+    }
+    if (arpOn)
+    {
+        ArpEngine::Params ap;
+        ap.enabled = true;
+        ap.rateIndex = (int) apvts.getRawParameterValue("arpRate")->load();
+        ap.dotted = apvts.getRawParameterValue("arpDot")->load() > 0.5f;
+        ap.triplet = apvts.getRawParameterValue("arpTrip")->load() > 0.5f;
+        ap.anchored = apvts.getRawParameterValue("arpAnchor")->load() > 0.5f;
+        ap.direction = (ArpEngine::Direction) (int) apvts.getRawParameterValue("arpDirection")->load();
+        ap.octaveRange = (int) apvts.getRawParameterValue("arpOctaves")->load();
+        ap.swing = apvts.getRawParameterValue("arpSwing")->load();
+        ap.latch = apvts.getRawParameterValue("arpLatch")->load() > 0.5f;
+        ap.retrigger = apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
+
+        ArpEngine::HostClock hc;
+        if (auto* playHead = getPlayHead())
+            if (auto pos = playHead->getPosition())
+            {
+                hc.playing = pos->getIsPlaying();
+                if (auto bpm = pos->getBpm())
+                {
+                    hc.bpm = *bpm;
+                    lastKnownBpm = *bpm;
+                }
+                if (auto ppq = pos->getPpqPosition())
+                {
+                    hc.ppq = *ppq;
+                    hc.hasPpq = true;
+                }
+            }
+        ap.fallbackBpm = lastKnownBpm;
+
+        arpScratch.clear();
+        arp.process(ap, hc, buffer.getNumSamples(), midi, arpScratch);
+        midi.swapWith(arpScratch);
+    }
 }
 
 juce::ValueTree KeysProcessor::chordPadsToTree() const
@@ -450,9 +521,128 @@ void KeysProcessor::chordPadsFromTree(const juce::ValueTree& root)
     }
 }
 
+void KeysProcessor::storeActiveArpPattern()
+{
+    auto& pat = arpPatterns[(size_t) activeArpPattern];
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        for (int s = 0; s < ArpEngine::maxSteps; ++s)
+            pat.value[(size_t) l][(size_t) s] = arp.lanes.value[(size_t) l][(size_t) s].load();
+        pat.length[(size_t) l] = arp.lanes.length[(size_t) l].load();
+        pat.clockDiv[(size_t) l] = arp.lanes.clockDiv[(size_t) l].load();
+    }
+}
+
+void KeysProcessor::recallArpPattern(int index)
+{
+    if (index < 0 || index >= numArpPatterns)
+        return;
+    storeActiveArpPattern();
+    activeArpPattern = index;
+    const auto& pat = arpPatterns[(size_t) index];
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        for (int s = 0; s < ArpEngine::maxSteps; ++s)
+            arp.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
+        arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
+        arp.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+    }
+}
+
+void KeysProcessor::copyArpPattern(int from, int to)
+{
+    if (from < 0 || from >= numArpPatterns || to < 0 || to >= numArpPatterns || from == to)
+        return;
+    storeActiveArpPattern();
+    arpPatterns[(size_t) to] = arpPatterns[(size_t) from];
+    if (to == activeArpPattern)
+        recallArpPattern(to);
+}
+
+void KeysProcessor::randomizeActiveArpPattern()
+{
+    // Musical randomize, not white noise: mostly direction-following steps, gentle
+    // octave jumps, occasional ratchets and rests.
+    for (int s = 0; s < ArpEngine::maxSteps; ++s)
+    {
+        arp.lanes.value[ArpEngine::laneNote][(size_t) s].store(rng.nextInt(10) == 0 ? -1 : 0);
+        arp.lanes.value[ArpEngine::laneOctave][(size_t) s].store(rng.nextInt(5) == 0 ? rng.nextInt(3) - 1 : 0);
+        arp.lanes.value[ArpEngine::laneVelocity][(size_t) s].store(70 + rng.nextInt(60));
+        arp.lanes.value[ArpEngine::laneGate][(size_t) s].store(40 + rng.nextInt(80));
+        arp.lanes.value[ArpEngine::laneRatchet][(size_t) s].store(rng.nextInt(8) == 0 ? 2 : 1);
+        arp.lanes.value[ArpEngine::laneProbability][(size_t) s].store(rng.nextInt(6) == 0 ? 60 : 100);
+    }
+}
+
+juce::ValueTree KeysProcessor::arpToTree() const
+{
+    // The live lanes are the active pattern; snapshot them so the tree is current.
+    const_cast<KeysProcessor*>(this)->storeActiveArpPattern();
+    juce::ValueTree tree { "arp" };
+    tree.setProperty("active", activeArpPattern, nullptr);
+    for (int pIndex = 0; pIndex < numArpPatterns; ++pIndex)
+    {
+        const auto& pat = arpPatterns[(size_t) pIndex];
+        juce::ValueTree pt { "pattern" };
+        pt.setProperty("index", pIndex, nullptr);
+        for (int l = 0; l < ArpEngine::numLanes; ++l)
+        {
+            juce::StringArray vals;
+            for (int s = 0; s < ArpEngine::maxSteps; ++s)
+                vals.add(juce::String(pat.value[(size_t) l][(size_t) s]));
+            juce::ValueTree lt { "lane" };
+            lt.setProperty("index", l, nullptr);
+            lt.setProperty("values", vals.joinIntoString(","), nullptr);
+            lt.setProperty("length", pat.length[(size_t) l], nullptr);
+            lt.setProperty("clockDiv", pat.clockDiv[(size_t) l], nullptr);
+            pt.appendChild(lt, nullptr);
+        }
+        tree.appendChild(pt, nullptr);
+    }
+    return tree;
+}
+
+void KeysProcessor::arpFromTree(const juce::ValueTree& root)
+{
+    const auto tree = root.getChildWithName("arp");
+    if (! tree.isValid())
+        return; // sessions from before the arp: defaults stand
+    for (int c = 0; c < tree.getNumChildren(); ++c)
+    {
+        const auto pt = tree.getChild(c);
+        const int pIndex = (int) pt.getProperty("index", -1);
+        if (pIndex < 0 || pIndex >= numArpPatterns)
+            continue;
+        auto& pat = arpPatterns[(size_t) pIndex];
+        for (int lc = 0; lc < pt.getNumChildren(); ++lc)
+        {
+            const auto lt = pt.getChild(lc);
+            const int l = (int) lt.getProperty("index", -1);
+            if (l < 0 || l >= ArpEngine::numLanes)
+                continue;
+            const auto vals = juce::StringArray::fromTokens(lt.getProperty("values").toString(), ",", "");
+            for (int s = 0; s < ArpEngine::maxSteps && s < vals.size(); ++s)
+                pat.value[(size_t) l][(size_t) s] = vals[s].getIntValue();
+            pat.length[(size_t) l] = (int) lt.getProperty("length", 8);
+            pat.clockDiv[(size_t) l] = (int) lt.getProperty("clockDiv", 0);
+        }
+    }
+    // Recall the active pattern by hand (recallArpPattern would first snapshot the
+    // live lanes over the data we just loaded).
+    activeArpPattern = juce::jlimit(0, numArpPatterns - 1, (int) tree.getProperty("active", 0));
+    const auto& pat = arpPatterns[(size_t) activeArpPattern];
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        for (int s = 0; s < ArpEngine::maxSteps; ++s)
+            arp.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
+        arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
+        arp.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+    }
+}
+
 void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree() });
+    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree() });
 }
 
 void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -460,6 +650,7 @@ void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
     okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
     {
         chordPadsFromTree(root);
+        arpFromTree(root);
     });
 }
 

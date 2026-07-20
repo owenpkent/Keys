@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ArpEngine.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <array>
@@ -105,7 +106,21 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // The arpeggiator (docs/ARP_DESIGN.md). The editor writes lane atomics directly;
+    // globals live in the APVTS ("arpOn", "arpRate", "arpDot", "arpTrip",
+    // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
+    // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
+    ArpEngine arp;
+    static constexpr int numArpPatterns = 8;
+    int arpActivePattern() const { return activeArpPattern; }
+    void storeActiveArpPattern();          // lanes -> snapshot slot (call before switching)
+    void recallArpPattern(int index);      // snapshot slot -> lanes, becomes active
+    void copyArpPattern(int from, int to); // whole-pattern copy (the no-modifier answer)
+    void randomizeActiveArpPattern();
+
 protected:
+    juce::ValueTree arpToTree() const;              // all patterns + the live lanes
+    void arpFromTree(const juce::ValueTree& root);
     // Chord-pad state as a "chordPads" ValueTree, shared with subclasses (Keys Host
     // nests it next to its own hosted-instrument tree under the same "KEYS" root, so
     // sessions stay interchangeable between Keys and Keys Host).
@@ -120,6 +135,18 @@ private:
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread
+
+    struct ArpPattern
+    {
+        std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
+        std::array<int, ArpEngine::numLanes> length {};
+        std::array<int, ArpEngine::numLanes> clockDiv {};
+    };
+    std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
+    int activeArpPattern = 0;                            // message thread only
+    juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
+    bool lastArpOn = false;        // audio thread; to flush cleanly on bypass
+    double lastKnownBpm = 120.0;   // audio thread; feeds the internal-clock fallback
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

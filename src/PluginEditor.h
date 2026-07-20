@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "ui/ArpPanel.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
 #include "ui/FaderBank.h"
@@ -41,6 +42,7 @@ private:
     void showUpdate(const okstudio::updater::UpdateInfo&);
     void stepPadPage(int delta);
     void toggleGenPanel();
+    void toggleArpPanel();
     int surfaceIndex() const; // 0 Keys, 1 Hex, 2 Pads, 3 Faders, 4 XY
     int layoutIndex() const;  // 0 Classic, 1 Performer (uiLayout param)
     void applySurfaceVisibility();
@@ -90,6 +92,11 @@ private:
     juce::TextButton pagePrevButton { "<" }, pageNextButton { ">" }, chordsButton { "Chords" };
     juce::Label pageLabel;
     std::unique_ptr<ChordGenPanel> genPanel; // only alive while the overlay is open
+
+    // The arpeggiator overlay's door (docs/ARP_DESIGN.md); only one overlay is ever
+    // open at a time, see toggleGenPanel()/toggleArpPanel().
+    juce::TextButton arpButton { "Arp" };
+    std::unique_ptr<ArpPanel> arpPanel;
 
     juce::Slider humanizeVelSlider, humanizeTimeSlider; // velocity is a two-value range
     juce::Label humanizeVelLabel, humanizeTimeLabel;

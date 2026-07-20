@@ -36,7 +36,8 @@ set(KEYS_SOURCES
     src/ui/FaderBank.cpp
     src/ui/XYPad.cpp
     src/ui/ChordPads.cpp
-    src/ui/ChordGenPanel.cpp)
+    src/ui/ChordGenPanel.cpp
+    src/ui/ArpPanel.cpp)
 
 # Sources, compile defs and links are identical for the instrument and the MIDI-effect
 # variant; only the plugin classification (set by okstudio_add_plugin) and the
@@ -137,7 +138,9 @@ endif()
 # Unit tests (console, JUCE UnitTest). Not built by the plugin targets; build and run
 # with: cmake --build build --target Keys_tests && ctest --test-dir build -C Release
 enable_testing()
-add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp)
+add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
-target_link_libraries(Keys_tests PRIVATE okstudio_kit)
+# juce_audio_basics is for ArpEngine's MidiBuffer/MidiMessage; the kit does not
+# re-export it.
+target_link_libraries(Keys_tests PRIVATE okstudio_kit juce::juce_audio_basics)
 add_test(NAME Keys_tests COMMAND Keys_tests)

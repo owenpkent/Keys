@@ -288,7 +288,7 @@ void KeysHostProcessor::getStateInformation(juce::MemoryBlock& destData)
         instrument->getStateInformation(blob);
         hosted.setProperty("state", blob.toBase64Encoding(), nullptr);
     }
-    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), hosted });
+    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree(), hosted });
 }
 
 void KeysHostProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -296,6 +296,7 @@ void KeysHostProcessor::setStateInformation(const void* data, int sizeInBytes)
     okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
     {
         chordPadsFromTree(root);
+        arpFromTree(root);
 
         const auto hosted = root.getChildWithName("hostedInstrument");
         if (! hosted.isValid() || hosted.getProperty("file").toString().isEmpty())

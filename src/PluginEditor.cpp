@@ -207,7 +207,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     pageNextButton.onClick = [this] { stepPadPage(1); };
     chordsButton.onClick = [this] { toggleGenPanel(); };
     chordsButton.setTooltip("Generate chords for this page, and find what could follow them.");
-    for (auto* b : { &pagePrevButton, &pageNextButton, &chordsButton })
+    arpButton.onClick = [this] { toggleArpPanel(); };
+    arpButton.setTooltip("Arpeggiator: per-step lanes for note, octave, velocity, gate, ratchet, probability.");
+    for (auto* b : { &pagePrevButton, &pageNextButton, &chordsButton, &arpButton })
         addAndMakeVisible(*b);
     styleLabel(pageLabel, "1/4");
     pageLabel.setJustificationType(juce::Justification::centred);
@@ -355,6 +357,9 @@ void KeysEditor::toggleGenPanel()
         genPanel.reset();
         return;
     }
+    if (arpPanel != nullptr)
+        arpPanel.reset(); // only one overlay at a time
+
     // The generator carries far more controls than the player, and every one of them has to
     // stay at a full-size target. Grow the editor to fit rather than shrink the targets
     // (unless embedded, where the parent owns geometry and the overlay makes do).
@@ -368,6 +373,27 @@ void KeysEditor::toggleGenPanel()
     genPanel->onKeyChanged = [this] { repaint(); };
     addAndMakeVisible(*genPanel);
     genPanel->setBounds(getLocalBounds());
+}
+
+void KeysEditor::toggleArpPanel()
+{
+    if (arpPanel != nullptr)
+    {
+        arpPanel.reset();
+        return;
+    }
+    if (genPanel != nullptr)
+        genPanel.reset(); // only one overlay at a time
+
+    // Six lane grids plus globals and pattern rows need more room than the player;
+    // grow to fit, same rule as the chord generator (never shrink when embedded).
+    if (! embedded)
+        setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 780));
+
+    arpPanel = std::make_unique<ArpPanel>(processor);
+    arpPanel->onClose = [this] { arpPanel.reset(); };
+    addAndMakeVisible(*arpPanel);
+    arpPanel->setBounds(getLocalBounds());
 }
 
 void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
@@ -538,6 +564,8 @@ void KeysEditor::resized()
 {
     if (genPanel != nullptr)
         genPanel->setBounds(getLocalBounds()); // the overlay always covers the whole editor
+    if (arpPanel != nullptr)
+        arpPanel->setBounds(getLocalBounds());
 
     auto area = getLocalBounds().reduced(10);
 
@@ -628,6 +656,8 @@ void KeysEditor::resized()
     chordExclusiveButton.setBounds(tabs.removeFromLeft(112).withSizeKeepingCentre(110, 26));
     tabs.removeFromLeft(4);
     chordsButton.setBounds(tabs.removeFromLeft(66));
+    tabs.removeFromLeft(4);
+    arpButton.setBounds(tabs.removeFromLeft(64));
     tabs.removeFromLeft(4);
     pagePrevButton.setBounds(tabs.removeFromLeft(34));
     pageLabel.setBounds(tabs.removeFromLeft(28));
