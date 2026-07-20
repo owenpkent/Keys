@@ -5,6 +5,19 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: MCP (Claude can drive Keys directly)
+- Keys now embeds an MCP server (`okstudio::mcp::Server`, from the kit) so Claude
+  Code or any local MCP client can read and drive it: set parameters, play notes or
+  a whole timed phrase, capture/fire/clear chord pads, and read/write arp patterns
+  (`src/mcp/KeysMcp.h`/`.cpp`, `docs/MCP.md`). A new `keys-mcp` stdio bridge exe
+  (`KEYS_BUILD_MCP_SHIM`, on by default) serves all three products; the in-plugin
+  server binds loopback only, on an OS-assigned port, and starts automatically (no
+  new UI, no session/state changes).
+- `KeysProcessor::noteOff` gained an optional `delaySeconds` parameter (mirroring
+  `noteOn`), used to schedule MCP-triggered note-offs through the same collector
+  timestamp mechanism as everything else; existing call sites are unaffected
+  (defaulted to 0).
+
 ### Added — Arpeggiator (all three products)
 - A pattern-lane arpeggiator in the MIDI path (keyboard/pads -> **arp** -> hosted
   instrument or MIDI out), designed from a verified research pass over Cthulhu,

@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "ScaleModes.h"
+#include "mcp/KeysMcp.h"
 #include <okstudio/Scales.h>
 #include <okstudio/StateHelpers.h>
 #include <algorithm>
@@ -145,6 +146,15 @@ KeysProcessor::KeysProcessor()
    #endif
       apvts(*this, nullptr, "PARAMS", createLayout())
 {
+    // Last thing the constructor does: everything else this processor owns already
+    // exists by the time the MCP bridge can be reached from another thread.
+    mcpBridge = std::make_unique<KeysMcp>(*this);
+}
+
+KeysProcessor::~KeysProcessor()
+{
+    // Stop taking MCP calls before anything else tears down.
+    mcpBridge.reset();
 }
 
 int KeysProcessor::midiChannel() const
@@ -336,13 +346,13 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     collector.addMessageToQueue(m);
 }
 
-void KeysProcessor::noteOff(int midiNote, int channelOverride)
+void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySeconds)
 {
     if (midiNote < 0 || midiNote > 127)
         return;
     const int channel = (channelOverride >= 1 && channelOverride <= 16) ? channelOverride : midiChannel();
     auto m = juce::MidiMessage::noteOff(channel, midiNote);
-    m.setTimeStamp(nowSeconds());
+    m.setTimeStamp(nowSeconds() + delaySeconds);
     collector.addMessageToQueue(m);
 }
 
@@ -557,6 +567,33 @@ void KeysProcessor::copyArpPattern(int from, int to)
     arpPatterns[(size_t) to] = arpPatterns[(size_t) from];
     if (to == activeArpPattern)
         recallArpPattern(to);
+}
+
+const KeysProcessor::ArpPattern& KeysProcessor::arpPatternSlot(int index) const
+{
+    static const ArpPattern empty {};
+    if (index < 0 || index >= numArpPatterns)
+        return empty;
+    return arpPatterns[(size_t) index];
+}
+
+void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern)
+{
+    if (index < 0 || index >= numArpPatterns)
+        return;
+    arpPatterns[(size_t) index] = pattern;
+    if (index != activeArpPattern)
+        return;
+    // Refresh the live lanes from the slot just written. Not recallArpPattern(index):
+    // that snapshots the live lanes into arpPatterns[activeArpPattern] first, which
+    // would clobber the pattern we just wrote before reading it back.
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        for (int s = 0; s < ArpEngine::maxSteps; ++s)
+            arp.lanes.value[(size_t) l][(size_t) s].store(pattern.value[(size_t) l][(size_t) s]);
+        arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pattern.length[(size_t) l]));
+        arp.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pattern.clockDiv[(size_t) l]));
+    }
 }
 
 void KeysProcessor::randomizeActiveArpPattern()

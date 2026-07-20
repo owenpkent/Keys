@@ -51,6 +51,12 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   locked chords. `ScaleModes.h` is deliberately *not* the kit's scale table: that one
   answers "is this note in the scale", generation also needs a quality per degree.
   All of it (plus `ChordSuggest.h`) is UI-free so it unit-tests.
+- **MCP bridge.** Keys embeds an MCP server (`okstudio::mcp::Server`, transport in
+  the kit at `okstudio/Mcp.h`) so Claude Code or any local MCP client can drive it.
+  Tools are registered in `src/mcp/KeysMcp.cpp`; every handler runs on the message
+  thread (the server marshals it there), so tool bodies call the processor/APVTS the
+  same way the UI does. The stdio bridge processes connect through is `keys-mcp.exe`
+  (`KEYS_BUILD_MCP_SHIM`). See `docs/MCP.md`.
 - **Ports from Octavium are not transcriptions.** Two of its generator bugs were fixed
   rather than reproduced (non-diatonic Sus2/Add9 at 100% compliance; regenerate
   dropping the note-count filter), and its right-click affordances had to be rebuilt as

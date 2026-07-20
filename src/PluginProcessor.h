@@ -4,10 +4,13 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <array>
+#include <memory>
 #include <vector>
 
 namespace keys
 {
+class KeysMcp; // src/mcp/KeysMcp.h; only PluginProcessor.cpp needs the full type.
+
 // Keys is a played instrument, not a generator: it makes no sound and emits no
 // notes on its own. You click the on-screen piano; it sends MIDI note on/off to
 // the track output, to drive whatever instrument sits downstream. All settings
@@ -17,6 +20,7 @@ class KeysProcessor : public juce::AudioProcessor
 {
 public:
     KeysProcessor();
+    ~KeysProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -45,12 +49,15 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    // Note I/O — called from the UI thread; queued and drained on the audio thread.
-    // delaySeconds nudges the note-on later (used for chord-pad strum).
+    // Note I/O: called from the UI thread; queued and drained on the audio thread.
+    // delaySeconds nudges the note-on (or, on noteOff, the note-off) later; noteOn
+    // uses it for chord-pad strum, noteOff for MCP-scheduled note durations
+    // (src/mcp/KeysMcp.cpp). A delayed note-off can never race the note-on it
+    // matches, since both stamp off the same collector clock.
     // channelOverride 1..16 sends on that channel instead of the global param (0 = global);
     // the Pad Grid surface uses it so drums land on their own channel.
     void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0);
-    void noteOff(int midiNote, int channelOverride = 0);
+    void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0);
     void allNotesOff();
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
@@ -118,6 +125,19 @@ public:
     void copyArpPattern(int from, int to); // whole-pattern copy (the no-modifier answer)
     void randomizeActiveArpPattern();
 
+    // A stored pattern slot (A-H), independent of whichever pattern is currently
+    // active/live. Public so the MCP bridge can read or write an arbitrary slot
+    // without disturbing the live lanes (unless it happens to be the active one) -
+    // the editor never needs this, it only ever touches the live lanes directly.
+    struct ArpPattern
+    {
+        std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
+        std::array<int, ArpEngine::numLanes> length {};
+        std::array<int, ArpEngine::numLanes> clockDiv {};
+    };
+    const ArpPattern& arpPatternSlot(int index) const;
+    void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
+
 protected:
     juce::ValueTree arpToTree() const;              // all patterns + the live lanes
     void arpFromTree(const juce::ValueTree& root);
@@ -136,12 +156,6 @@ private:
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread
 
-    struct ArpPattern
-    {
-        std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
-        std::array<int, ArpEngine::numLanes> length {};
-        std::array<int, ArpEngine::numLanes> clockDiv {};
-    };
     std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
@@ -150,6 +164,11 @@ private:
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad
+
+    // Declared last so it tears down first: it binds an ephemeral loopback MCP server
+    // (src/mcp/KeysMcp.h) letting Claude Code or any local MCP client drive Keys
+    // directly. Harmless during plugin scans (loopback-only, OS-assigned port).
+    std::unique_ptr<KeysMcp> mcpBridge;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysProcessor)
 };

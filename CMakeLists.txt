@@ -29,6 +29,7 @@ endif()
 set(KEYS_SOURCES
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
+    src/mcp/KeysMcp.cpp
     src/ui/NoteSurface.cpp
     src/ui/PianoKeyboard.cpp
     src/ui/HarmonicTable.cpp
@@ -133,6 +134,15 @@ if (KEYS_BUILD_HEX_HOST)
         KEYS_HOST=1
         KEYS_HEX=1
         JUCE_PLUGINHOST_VST3=1)
+endif()
+
+# The keys-mcp stdio bridge: a small process Claude Code (or any local MCP client)
+# launches that discovers the live plugin instance's loopback server and speaks MCP
+# stdio to it. One shim serves all three products (Keys, Keys Host, Hex Host); it has
+# no PRODUCT filter, so instance discovery just picks whichever is live (see docs/MCP.md).
+option(KEYS_BUILD_MCP_SHIM "Build the keys-mcp stdio bridge exe" ON)
+if (KEYS_BUILD_MCP_SHIM)
+    okstudio_add_mcp_shim(keys-mcp)
 endif()
 
 # Unit tests (console, JUCE UnitTest). Not built by the plugin targets; build and run

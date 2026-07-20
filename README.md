@@ -100,6 +100,12 @@ match so Scale Lock agrees. Then **Fill Page**.
 Press any chord in the grid to hear it. Every action is an on-screen button: nothing
 here needs a right-click either.
 
+## Driving it with Claude
+
+Keys embeds an MCP server, so Claude Code (or any local MCP client) can set
+parameters, play notes and phrases, write and fire chord pads, and edit arp
+patterns directly. See [docs/MCP.md](docs/MCP.md).
+
 ## Using it in Ableton Live
 
 Keys loads as an instrument on a MIDI track and outputs MIDI, which Live routes into
