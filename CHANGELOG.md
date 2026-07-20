@@ -5,6 +5,23 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added — Arpeggiator (all three products)
+- A pattern-lane arpeggiator in the MIDI path (keyboard/pads -> **arp** -> hosted
+  instrument or MIDI out), designed from a verified research pass over Cthulhu,
+  Kirnu Cream, Stepic, and Serum's manuals (`docs/ARP_DESIGN.md`). Six per-step
+  lanes (note/order, octave, velocity, gate, ratchet, probability), each with its
+  own length and clock divider for polymeter; 8 directional modes; 1..4 octave
+  range; swing; latch; retrigger; rate 16 bars..1/64 with separate Dot/Trip
+  toggles and a bar-Anchor switch (Serum's clock model). Keeps playing on an
+  internal clock when the transport is stopped. Patterns A-H with on-screen
+  Copy/Paste/Randomize (no modifier gestures anywhere, unlike Cthulhu/Serum).
+  Engine is pure and unit-tested (`ArpEngine.h`, `tests/ArpTests.cpp`).
+- **Parameter layout gained the `arp*` parameters and the earlier `uiLayout`** -
+  new sessions save fine either way, but sessions saved with this build will not
+  fully restore in older builds. Upgrade all instances together.
+- Contract note: the arp stage is now the one place Keys reads the host playhead
+  (tempo sync); `CLAUDE.md` amended.
+
 ### Added — Layouts, auto-assigned faders, Hex Host
 - **Named UI layouts** via a new Layout combo (and `uiLayout` parameter, saved with
   the session): **Classic** is the existing arrangement; **Performer** keeps the

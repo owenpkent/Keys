@@ -102,6 +102,10 @@ wiring get copied into every new line plugin. Changes here propagate by imitatio
 structural fix is worth landing in the kit's `docs/USAGE.md` too, not only here.
 
 **Keys is played; Contour and Lattice are authored.** Keys drains a
-`MidiMessageCollector` fed by UI clicks and never reads the playhead. The generators
-author their whole outgoing stream from the host `ppqPosition` and schedule note on/off
-at sample offsets. Do not copy Keys' `processBlock` into a generator; copy Contour's.
+`MidiMessageCollector` fed by UI clicks. The generators author their whole outgoing
+stream from the host `ppqPosition` and schedule note on/off at sample offsets. Do not
+copy Keys' `processBlock` into a generator; copy Contour's. **One deliberate
+exception:** the arpeggiator stage (`ArpEngine.h`, after the collector drain) reads
+the playhead for tempo-synced scheduling, Contour-style, and free-runs on an internal
+clock when the transport is stopped. It is the only playhead consumer in Keys; see
+`docs/ARP_DESIGN.md`.
