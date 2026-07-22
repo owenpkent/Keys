@@ -5,6 +5,31 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: one view, no tabs — the Faders and XY surfaces are now eight knobs
+- **Keys collapsed from five tabbed surfaces (Keys/Hex/Pads/Faders/XY) to one view:**
+  header controls, eight rotary CC knobs, the chord-pad strip, then the playing
+  surface. No more surface tabs, and the **Classic**/**Performer** layout switch is
+  gone with them.
+- **The knob row (`src/ui/KnobBank.{h,cpp}`) replaces the Faders and XY surfaces.**
+  Same CC assignments (`faderCC1`-`faderCC8`) and the same auto-assign-to-hosted-
+  instrument-parameter behaviour on Keys Host / Hex Host, just eight
+  `okstudio::RotaryKnob`s in a row above the keyboard instead of a separate tab. XY's
+  two-CC drag pad has no equivalent — reassign the two knobs it used (Mod/Cutoff by
+  default) instead.
+- **The Pad Grid is gone outright** (`src/ui/PadGrid.{h,cpp}` deleted): the 4x4 drum
+  grid belongs to Beatform, not Keys.
+- **The Hex surface is exclusive to Hex Host now.** Keys and Keys Host build the
+  piano only; Hex Host builds the Harmonic Table only. Which one a product builds is
+  now a compile-time choice (`KEYS_HEX`), not a runtime tab.
+- **Sessions load fine either way.** The `surface`, `uiLayout`, `padChannel`, and
+  `xyCCX`/`xyCCY` parameters are still registered — dropping them would break older
+  saved sessions that carry them — but nothing in the UI reads them any more.
+- **Hex Host moved out to its own repo (`../Hex`).** Now that a product builds only
+  one playing surface, there is no reason to keep the Harmonic Table variant in this
+  repo: it ships from `../Hex` instead, unchanged (`KyHx` plugin code, same engine).
+  Keys no longer builds `HexHost`, `KEYS_BUILD_HEX_HOST`, or `src/ui/HarmonicTable.*`;
+  `KEYS_HEX` is gone from the remaining two targets.
+
 ### Added: MCP (Claude can drive Keys directly)
 - Keys now embeds an MCP server (`okstudio::mcp::Server`, from the kit) so Claude
   Code or any local MCP client can read and drive it: set parameters, play notes or

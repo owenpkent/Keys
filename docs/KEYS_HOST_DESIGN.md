@@ -23,7 +23,7 @@ instrument. So this is a one-slot host, not a chainer.
 
 ## Processor: `KeysHostProcessor : KeysProcessor` (new files `src/host/`)
 
-Subclassing works because the surfaces take a concrete `KeysProcessor&`
+Subclassing works because the playing surface takes a concrete `KeysProcessor&`
 (`src/ui/NoteSurface.h`), and `KeysProcessor` already declares a real stereo output
 bus that it clears every block (`PluginProcessor.cpp` ~113, ~368). The subclass fills
 that bus with the hosted instrument's audio.
@@ -141,11 +141,15 @@ nothing in the kit assumes one plugin per repo.
 - Multi-out instruments (Kontakt 16-out): v1 takes the main stereo pair only.
 - Direct fader binding shipped as **auto-assign** (2026-07-19): on every instrument
   load, `assignFaderParams()` keyword-matches `instrument->getParameters()` names
-  and binds the 8 faders (cutoff, resonance, attack, decay, sustain, release,
+  and binds the 8 knobs (cutoff, resonance, attack, decay, sustain, release,
   reverb/wet, drive). `KeysProcessor` gained virtual `faderMoved`/`faderTargetName`
-  hooks; FaderBank calls them and shows the bound name. Bindings are message-thread
-  state, recomputed per load, deliberately not persisted. Owen: instrument control
-  matters; DAW-wide control does not (decided 2026-07-19).
-- **UI layouts** are versioned by name through the `uiLayout` parameter (Classic,
-  Performer); see CHANGELOG. **Hex Host** (`KEYS_HEX=1`, plugin code `KyHx`) is the
-  same host with the Harmonic Table as default surface and its own product name.
+  hooks; `KnobBank` (formerly `FaderBank`) calls them and shows the bound name.
+  Bindings are message-thread state, recomputed per load, deliberately not
+  persisted. Owen: instrument control matters; DAW-wide control does not (decided
+  2026-07-19).
+- **Single view, no tabs** (see CHANGELOG): Keys dropped the five tabbed surfaces
+  and the `uiLayout`-selected Classic/Performer arrangement for one fixed layout —
+  header, knob row, chord pads, playing surface. Keys and Keys Host build the piano
+  only; the Harmonic Table and Hex Host moved out to their own repo (`../Hex`).
+  `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session compatibility
+  but are no longer read by the UI.

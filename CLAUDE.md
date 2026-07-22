@@ -99,8 +99,9 @@ process. Screenshots live in `assets/screenshots/`, referenced from README and d
 
 `../okstudio-juce-kit` (shared code), `../Contour` (drawn melodic contours),
 `../Lattice` (mouse-only polyphonic piano roll), `../Undertow` (bass), `../Beatform`
-(drums), `../alpha-osk` (on-screen keyboard), `../Octavium` (the original Python
-controller these plugins are being carved out of). Installer/CI/signing mirror Undertow
+(drums), `../alpha-osk` (on-screen keyboard), `../Hex` (the hex-grid Harmonic Table
+products, carved out of this repo), `../Octavium` (the original Python controller
+these plugins are being carved out of). Installer/CI/signing mirror Undertow
 and Beatform; EV signing uses the same OK Studio eToken thumbprint.
 
 Keys is the kit's **reference consumer**: its `CMakeLists.txt`, test setup and updater

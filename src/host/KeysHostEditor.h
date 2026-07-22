@@ -60,8 +60,7 @@ private:
 // mouse-only like everything else: single left-click, targets >= 34 px.
 class KeysHostEditor : public juce::AudioProcessorEditor,
                        public juce::FileDragAndDropTarget,
-                       private juce::ChangeListener,
-                       private juce::Timer
+                       private juce::ChangeListener
 {
 public:
     explicit KeysHostEditor(KeysHostProcessor&);
@@ -75,7 +74,6 @@ public:
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
-    void timerCallback() override; // grows the window when the Performer layout needs room
 
     void openPicker();
     void closePicker();
@@ -102,7 +100,6 @@ private:
 
     std::unique_ptr<InstrumentPicker> picker; // only alive while the overlay is open
     std::unique_ptr<juce::FileChooser> chooser;
-    int lastLayout = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysHostEditor)
 };

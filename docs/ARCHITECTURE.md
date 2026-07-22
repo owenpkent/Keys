@@ -19,12 +19,10 @@ src/
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 └── ui/
     ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
-    ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface)
-    ├── HarmonicTable.{h,cpp} # the isomorphic hex surface (Octavium's Harmonic Table)
-    ├── PadGrid.{h,cpp}       # 4x4 note pads on their own channel (drums)
-    ├── FaderBank.{h,cpp}     # eight assignable CC faders
-    ├── XYPad.{h,cpp}         # two assignable CCs on one drag surface
-    ├── CCMenu.h              # the one-click CC picker Faders and XY share
+    ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
+    │                         # built by Keys and Keys Host
+    ├── KnobBank.{h,cpp}      # eight assignable CC rotary knobs above the playing surface
+    ├── CCMenu.h              # the one-click CC picker the knob row uses
     ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
     └── ChordGenPanel.{h,cpp} # the chord generator overlay (algorithmic + Markov)
 ```
@@ -44,14 +42,16 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 The audio thread does nothing else: `buffer.clear()` (silence) then drain the
 collector. No allocation, no locks.
 
-## Playing surfaces: one model, five views
+## Playing surface: one view, the piano
 
-The editor shows one of five surfaces, picked by the `surface` parameter's tab row:
-**Keys**, **Hex**, **Pads**, **Faders**, **XY**. The first three are *note* surfaces
-and derive from `NoteSurface`; Faders and XY only send CCs and stand alone. All five
-stay constructed; the tabs only choose visibility, and switching away from a note
-surface panics it so nothing rings on an unseen view (chord pads live outside the
-tabs and keep sounding on purpose).
+Keys is one view, no tabs: header controls, the knob row, the chord-pad strip, then
+the playing surface — `KeysEditor` builds a `PianoKeyboard`, which derives from
+`NoteSurface`. There used to be five tabbed surfaces (Keys/Hex/Pads/Faders/XY,
+switched by a `surface` parameter); the Pad Grid was cut outright (drums belong to
+Beatform), the Faders and XY surfaces were replaced by the knob row below, and the
+Hex surface moved out to its own repo (`../Hex`) along with Hex Host. The `surface`,
+`uiLayout`, `padChannel`, and `xyCC*` parameters are still registered so old sessions
+load without error, but nothing in the UI reads them any more.
 
 ## Note bookkeeping: one union, one diff (NoteSurface)
 
@@ -77,12 +77,9 @@ right-click latches in a private set no panic ever cleared; that was its worst s
 note bug, not a behaviour to keep.
 
 A subclass provides only geometry: `drawnAt` (hit test), `outputNote` (resolution),
-and optionally `noteChannel` — the Pad Grid returns the `padChannel` parameter
-(default 10) so drums land on their own channel, and the editor panics it when that
-channel changes, same as the global one. The Hex surface maps cells with Octavium's
-exact formula (odd columns half a hex lower; up +7, upper-right +4, upper-left +3
-from any hex) and lights every cell resolving to a sounding note, so duplicates
-glow together.
+and optionally `noteChannel` (defaults to the global channel param; no built-in
+surface overrides it any more since the Pad Grid was cut, and the Hex surface moved
+to its own repo).
 
 ## Note resolution: snap then transpose, remembered
 
@@ -188,13 +185,15 @@ All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `sca
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir` / `padPage`, the
 generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the note-count and inversion
-toggles, `genCompliance`, `genLockInfluence` — plus the surface set: `surface`,
-`padChannel`, `faderCC1`-`faderCC8`, `xyCCX` / `xyCCY`, and the Markov set `genSource`,
-`markovMode`, `markovTemp`, `markovLength`). The Mod and
-Pitch wheels, fader positions, XY knob position and axis locks, and the Markov Mood and
+toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`faderCC8`
+CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
+`markovLength`. `surface`, `uiLayout`, `padChannel`, `xyCCX` / `xyCCY` are also still
+registered — they named the old five-tab arrangement — but are dead weight now, kept
+only so a session saved with them loads without error. The Mod and
+Pitch wheels, knob positions, and the Markov Mood and
 Start pickers are transient performance controls with no parameters (they don't
 persist); Pitch glides back to centre over ~160 ms on release, and the wheels and
-faders move by relative drag only (no click-jump), Octavium's deliberate feel. The
+knobs move by relative drag only (no click-jump), Octavium's deliberate feel. The
 editor binds controls
 with attachments — except the two-handle velocity range slider, which has no attachment
 (two values) and is synced to its two params by hand. A 30 Hz timer pushes derived
@@ -208,13 +207,13 @@ suggestion menu works the chord out from its notes instead.
 
 ## Editor
 
-`KeysEditor` owns the controls, the surface tab row and all five surfaces, the
+`KeysEditor` owns the controls, the knob row, the playing surface, the
 `ChordPads` rows, and the update
 button. It sets the shared `LookAndFeel` (retinted locally toward Octavium's neutral
-grey), wires every note surface and the pads to `KeysProcessor::baseVelocity01` (velocity
-slider through the curve), pushes the active note surface's sounding notes into the pads
-each timer tick, panics surfaces on channel or surface changes (so notes can't strand),
+grey), wires the playing surface and the pads to `KeysProcessor::baseVelocity01` (velocity
+slider through the curve), pushes the surface's sounding notes into the pads
+each timer tick, panics the surface on a channel change (so notes can't strand),
 animates the pitch wheel home after release, and on construction fires
 `okstudio::updater::checkAsync`; if a newer signed
-release exists, a one-click "Update to vX.Y.Z" button appears. The wheels column shows
-only for the Keys and Hex surfaces, as in Octavium.
+release exists, a one-click "Update to vX.Y.Z" button appears. The wheels column
+always shows, next to the playing surface, as in Octavium.

@@ -10,27 +10,27 @@ accelerator exists: it latches a note, and the on-screen Latch toggle does the s
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain, latch, the Humanize settings, the
-active surface and its CC assignments, and
+eight knob CC assignments, and
 your captured chord pads all save into the DAW project and come back when you reopen
 it. And it drops straight onto a track, with no loopMIDI to configure.
 
 Built with **JUCE 8** and **CMake**, on the shared
 [`okstudio-juce-kit`](../okstudio-juce-kit).
 
-**Three products build from this repo:**
+**Two products build from this repo:**
 
 - **Keys**: the keyboard itself, driving a downstream instrument over MIDI.
 - **Keys Host**: the keyboard *plus one hosted instrument VST3* in a single plugin
   on a single track. Pick the synth from an in-window, publisher-grouped list; its
   GUI opens in its own floating window; its complete state (including MIDI Learn
-  mappings) saves inside the DAW project. The 8 faders auto-bind to the synth's
+  mappings) saves inside the DAW project. The 8 knobs auto-bind to the synth's
   likeliest parameters (cutoff, resonance, envelope, and so on) by name. See
   [docs/ABLETON_LIVE.md](docs/ABLETON_LIVE.md) for how it fits Live.
-- **Hex Host**: the same host with the Harmonic Table as its default surface.
 
-Two named UI layouts (a **Layout** combo, saved per session): **Classic**, and
-**Performer**, which keeps the faders, XY pad, and a 4x4 chord-pad grid visible
-around the keyboard, hardware-controller style.
+The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex).
+
+One view, no tabs: header controls, eight rotary CC knobs, the chord-pad strip, then
+the playing surface.
 
 ![Keys](assets/screenshots/keys.png)
 
@@ -45,7 +45,7 @@ around the keyboard, hardware-controller style.
 | **Latch on**, click keys | Toggle notes on and off to build and hold a chord |
 | **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail; click **All Off** or turn Sustain off to release |
 | **Right-click** a key (optional) | Toggle that one note held, without touching the Latch mode — the Octavium accelerator; All Off always clears it |
-| **Surface tabs** | Swap the playing area: **Keys** (piano), **Hex** (isomorphic hex grid: up a row is a fifth, diagonals are thirds, so chord shapes repeat everywhere), **Pads** (4x4 note grid on its own channel, drums by default), **Faders** (eight assignable CCs), **XY** (two CCs on one drag) |
+| **Knob row** | Eight rotary CC knobs above the keyboard, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
 | **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
@@ -63,12 +63,13 @@ optional shortcut above.
 | **Scale Lock** | Snap every played note to the nearest note in (Root, Scale) — you can't hit a wrong note. Out-of-scale keys are dimmed. |
 | **Octave** | Transpose the whole keyboard by -5..+5 octaves |
 | **Velocity** + **Curve** | Note velocity, shaped by a Soft / Linear / Hard response |
-| **MIDI Ch** | Output channel, 1–16 (the Pad Grid surface has its own **Pad Ch**, default 10, so drums stay put) |
+| **MIDI Ch** | Output channel, 1–16 |
 | **Voices** | Polyphony limit: Off (unlimited) or 1–8 notes, stealing the oldest |
-| **Mod / Pitch wheels** | Left of the piano and hex surfaces: Mod sends CC1 and holds; Pitch bends and glides back to centre. Both move by relative drag, never jumping to a click |
+| **Mod / Pitch wheels** | Left of the keyboard: Mod sends CC1 and holds; Pitch bends and glides back to centre. Both move by relative drag, never jumping to a click |
 | **Sustain** | Hold notes after release (pedal) |
 | **Latch** | Click to toggle notes on/off and hold them |
 | **Humanize** | Random velocity within a Min/Max range + micro-timing, so chords feel played |
+| **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
 | **Chord pads** | Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Excl** chokes the last chord, **Strum** spreads a pad's notes Up / Down / Random. `<` / `>` move between four pages |
 | **Chords** | The chord generator — see below |
 | **All Off** | Stop everything |

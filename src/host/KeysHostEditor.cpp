@@ -16,7 +16,10 @@ namespace
 {
     constexpr int barHeight = 44;
     constexpr int keysHeight = 640;      // the embedded editor's comfortable height (gen-panel floor)
-    constexpr int minKeysHeight = 520;
+    // Bumped from 520 when the knob row replaced the Faders/XY tabs: the single-view
+    // editor's fixed chrome (header + tool row + knob row + chord-pad strip) is
+    // taller than the old tabbed layout's, so the floor needs to grow with it.
+    constexpr int minKeysHeight = 620;
 
     juce::File defaultVst3Folder()
     {
@@ -305,7 +308,6 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     addAndMakeVisible(keysEditor);
     keysEditor.setResizable(false, false);
     keysEditor.setEmbedded(true);
-    startTimerHz(4);
 
     host.onInstrumentWillChange = [this] { closeInstrumentEditor(); };
     host.addChangeListener(this);
@@ -470,18 +472,6 @@ void KeysHostEditor::updateBar()
 void KeysHostEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     openInstrumentEditor();
-}
-
-void KeysHostEditor::timerCallback()
-{
-    // The embedded editor never resizes itself, so the host window reacts to the
-    // Layout param instead: Performer's control strip needs the extra height.
-    const int lay = (int) host.apvts.getRawParameterValue("uiLayout")->load();
-    if (lay == lastLayout)
-        return;
-    lastLayout = lay;
-    if (lay == 1)
-        setSize(getWidth(), juce::jmax(getHeight(), barHeight + 720));
 }
 
 void KeysHostEditor::paint(juce::Graphics& g)

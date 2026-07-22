@@ -22,11 +22,7 @@ public:
     KeysHostProcessor();
     ~KeysHostProcessor() override;
 
-   #if defined(KEYS_HEX) && KEYS_HEX
-    const juce::String getName() const override { return "Hex Host"; }
-   #else
     const juce::String getName() const override { return "Keys Host"; }
-   #endif
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;

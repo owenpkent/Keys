@@ -11,33 +11,33 @@ on-screen equivalent.
 |---------|--------|
 | Click a key | Play that note (velocity from the Velocity control + Curve) |
 | Click and drag | Glide across keys; the previous note releases as the next sounds (monophonic) |
-| Right-click a key *(optional)* | Toggle that one note held, without turning Latch mode on — Octavium's per-note latch. Works on the piano, hex grid, and pad grid. **All Off**, or turning **Latch** off, releases it. |
+| Right-click a key *(optional)* | Toggle that one note held, without turning Latch mode on — Octavium's per-note latch. **All Off**, or turning **Latch** off, releases it. |
 | Click a **C** | Every C is labelled (C1, C2, …) to help you orient |
 
 Chords come from Latch, Sustain, or right-click — a single mouse can't hold several
 keys at once, so those are how you stack notes.
 
-To the **left of the keyboard** (and the hex grid) are two performance wheels: **Mod**
+To the **left of the keyboard** are two performance wheels: **Mod**
 sends CC1 and stays where you leave it; **Pitch** bends and glides back to centre over
 a moment when you let go. Both move by **relative drag** — clicking never jumps the
 value, so a stray click can't slam a bend. They are
 transient (they don't save with the session) and send on the current MIDI channel.
 
-## Surfaces
+## Playing surface
 
-The tab row above the playing area picks what you play:
+Keys is one view, no tabs: the piano fills the playing area in both Keys and Keys
+Host. (The hex-grid Harmonic Table and Hex Host live in their own repo, `../Hex`.)
 
-| Surface | What it is |
-|---------|------------|
-| **Keys** | The piano above |
-| **Hex** | The Harmonic Table: a hex grid where up a row is a fifth, upper-right a major third, upper-left a minor third. A chord is the same *shape* wherever you put it, and every hex sharing a sounding note lights up. Scale Lock snaps and dims here too. |
-| **Pads** | A 4x4 grid of single-note pads rising from C1, on its **own** MIDI channel (**Pad Ch**, default 10) so it drives drum instruments while the keyboard plays something else. Follows Octave; ignores Scale Lock on purpose (snapping would swap which drum you hit). |
-| **Faders** | Eight CC faders, centred at 64. The button under each fader shows its CC and reassigns it in one click. Positions send only while you drag (relative drag, no click-jump), and nothing is sent until you move one. |
-| **XY** | One drag sends two CCs: X (default CC1 Mod) and Y (default CC74 Cutoff), up = more. **Lock X** / **Lock Y** freeze an axis; **Reset** recentres to 64/64 and sends it. |
+Latch, Sustain, Voices, Octave, and Humanize all apply to it, and All Off silences
+it. The 4x4 note pad grid and the XY pad from earlier builds are gone (drums belong
+to Beatform; the XY pad's two CCs are covered by the knob row below).
 
-Latch, Sustain, Voices, Octave, Humanize, and All Off apply to whichever note surface
-is up. Switching away from a surface silences it, so nothing keeps ringing on a view
-you can't see; chord pads sit above the tabs and keep sounding on purpose.
+## Knob row
+
+Eight rotary CC knobs sit above the playing area (Octavium's fader window and XY pad,
+collapsed into one strip): centred at 64, the button under each knob shows its CC and
+reassigns it in one click. Positions send only while you drag (relative drag, no
+click-jump), and nothing is sent until you move one.
 
 ## Top bar
 
@@ -51,7 +51,7 @@ you can't see; chord pads sit above the tabs and keep sounding on purpose.
 | **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. |
 | **Velocity** | slider | Base note velocity (1–127), used when Humanize is off. Click or scroll. |
 | **Curve** | dropdown | Shapes the velocity response: **Soft** (reach high velocities easily), **Linear**, **Hard** (stays quiet until you push) |
-| **MIDI Ch** | dropdown | Output channel, 1–16 (the Pad Grid surface sends on its own **Pad Ch** instead, default 10) |
+| **MIDI Ch** | dropdown | Output channel, 1–16 |
 | **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail. Turn off (or click All Off) to release. |
 | **Latch** | toggle | On: clicking a key toggles it on or off and holds it. Drag to paint several on. Build and hold a chord with one finger. |
 | **Humanize** | toggle | On: each note gets a random velocity within the Humanize **Velocity** range plus a small timing offset, so repeats and chords don't sound machine-perfect. |

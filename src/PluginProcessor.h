@@ -71,7 +71,6 @@ public:
 
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
-    int padGridChannel() const; // 1..16; the Pad Grid's own channel (defaults to 10, drums)
     int octaveShift() const;   // -5..+5, in octaves
     float baseVelocity01() const; // velocity slider through the curve, 0..1 (Humanize aside)
     int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes

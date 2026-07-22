@@ -9,7 +9,8 @@
 
 namespace keys
 {
-// Shared note bookkeeping for every playable surface (piano, hex grid, pad grid).
+// Shared note bookkeeping for the piano surface (the only playable surface Keys
+// builds; the base class is still generic since Keys Host reuses it unchanged).
 //
 // A surface draws "keys" identified by a drawn id (a MIDI note for the piano, a cell
 // index for grids). Which notes should sound is the union of three drawn-id sets:

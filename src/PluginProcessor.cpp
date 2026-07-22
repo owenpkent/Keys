@@ -75,27 +75,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genCompliance", 1 }, "Scale Compliance", 0, 100, 100));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genLockInfluence", 1 }, "Lock Influence", 0, 100, 50));
 
-    // Playing surfaces (Octavium's separate windows, here one switchable view). The Pad
-    // Grid keeps its own channel so drums land on 10 while the keyboard plays elsewhere.
-    // Hex Host is the same engine shipped with the Harmonic Table up by default.
-   #if defined(KEYS_HEX) && KEYS_HEX
-    constexpr int defaultSurface = 1;
-   #else
-    constexpr int defaultSurface = 0;
-   #endif
+    // Retained for session compatibility only: Keys went from five tabbed surfaces
+    // (Keys/Hex/Pads/Faders/XY) to one compile-time-selected playing surface plus the
+    // knob row below (CHANGELOG). Nothing in the UI reads these three any more, but
+    // dropping them would break older saved sessions that carry them.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "surface", 1 }, "Surface",
-                                                      juce::StringArray { "Keys", "Hex", "Pads", "Faders", "XY" }, defaultSurface));
+                                                      juce::StringArray { "Keys", "Hex", "Pads", "Faders", "XY" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padChannel", 1 }, "Pad Grid Channel",
                                                       channelNames(), 9));
 
-    // Fader bank + XY pad CC assignments (Octavium defaults: Mod, Volume, Cutoff, Pan,
-    // Resonance, Attack, Expression, Reverb; XY = Mod / Cutoff). Values are transient
-    // performance state like the wheels; only the assignments persist.
+    // Knob-row CC assignments (Octavium defaults: Mod, Volume, Cutoff, Pan, Resonance,
+    // Attack, Expression, Reverb). Values are transient performance state like the
+    // wheels; only the assignments persist. The parameter ids (faderCC*) predate the
+    // knob row and are unchanged so old sessions still bind to the right controller.
     static constexpr int faderDefaults[8] = { 1, 7, 74, 10, 71, 73, 11, 91 };
     for (int i = 0; i < 8; ++i)
         layout.add(std::make_unique<AudioParameterInt>(ParameterID { "faderCC" + juce::String(i + 1), 1 },
                                                        "Fader " + juce::String(i + 1) + " CC",
                                                        0, 127, faderDefaults[i]));
+    // Retained for session compatibility only, same as surface/padChannel above: the
+    // XY pad they belonged to is gone.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "xyCCX", 1 }, "XY Pad CC X", 0, 127, 1));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "xyCCY", 1 }, "XY Pad CC Y", 0, 127, 74));
 
@@ -109,9 +108,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
                                                      NormalisableRange<float>(0.3f, 2.0f, 0.01f), 1.0f));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "markovLength", 1 }, "Markov Length", 4, 16, 4));
 
-    // Named UI layouts, versioned by name: new arrangements get appended, existing
-    // ones never change meaning, and the session remembers the pick. "Performer"
-    // keeps the faders and XY pad visible in a strip above the keyboard.
+    // Retained for session compatibility only, same as surface/padChannel/xyCC*
+    // above: Keys is a single view now, so there is nothing left to switch between.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "uiLayout", 1 }, "Layout",
                                                       StringArray { "Classic", "Performer" }, 0));
 
@@ -160,11 +158,6 @@ KeysProcessor::~KeysProcessor()
 int KeysProcessor::midiChannel() const
 {
     return (int) apvts.getRawParameterValue("channel")->load() + 1;
-}
-
-int KeysProcessor::padGridChannel() const
-{
-    return (int) apvts.getRawParameterValue("padChannel")->load() + 1;
 }
 
 int KeysProcessor::octaveShift() const

@@ -33,15 +33,15 @@ the default set in Options → Preferences → File/Folder → "Save Current Set
 Default"). Every new project then opens with the Keys track, the routing, and the
 monitor settings already in place. Nothing to rewire, ever.
 
-## Faders, XY pad, and CC mappings persist too
+## The knob row and CC mappings persist too
 
-The FaderBank and XY pad send MIDI CCs down the same routing as the notes. To tie a
-fader to a knob on your instrument, use the **instrument's own MIDI Learn** (most
-synths: right-click the knob → Learn, then move the Keys fader). That mapping is
-stored in the instrument's plugin state, which Live saves inside the set — so it
-comes back with the project. Assign once per project (or once in your template) and
-it stays. Unlike an external controller app, there is no virtual MIDI cable and
-nothing to reassign after a restart.
+The eight knobs above the keyboard send MIDI CCs down the same routing as the notes.
+To tie a knob to a control on your instrument, use the **instrument's own MIDI
+Learn** (most synths: right-click the knob → Learn, then move the Keys knob). That
+mapping is stored in the instrument's plugin state, which Live saves inside the set —
+so it comes back with the project. Assign once per project (or once in your
+template) and it stays. Unlike an external controller app, there is no virtual MIDI
+cable and nothing to reassign after a restart.
 
 ## Why Keys can't sit *before* an instrument on one track
 
@@ -94,7 +94,7 @@ above the keyboard — two windows, not one stack; the top bar's **Show/Hide
 Instrument** controls it (the window's close button just hides it). Audio comes out
 of the Keys Host track. The
 instrument's complete state — including its own MIDI Learn mappings for the Keys
-faders/XY — is saved inside the Live set. Dragging a `.vst3` file from Windows
+knobs — is saved inside the Live set. Dragging a `.vst3` file from Windows
 Explorer onto the Keys Host window also works; dragging from **Live's own browser**
 does not — Live's browser drags are internal and never reach a plugin's window
 (true for every hosting plugin, not just Keys Host), which is exactly why the picker

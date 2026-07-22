@@ -108,9 +108,7 @@ KeysMcp::~KeysMcp()
 
 juce::String KeysMcp::productSlug()
 {
-   #if defined(KEYS_HEX) && KEYS_HEX
-    return "hex-host";
-   #elif defined(KEYS_HOST) && KEYS_HOST
+   #if defined(KEYS_HOST) && KEYS_HOST
     return "keys-host";
    #elif defined(KEYS_MIDI_EFFECT) && KEYS_MIDI_EFFECT
     return "keys-fx";
@@ -147,9 +145,9 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
     t.description = "Snapshot of Keys' current performance state: product and version, "
                      "the load-bearing controls (root, scale, scale lock, octave, sustain, "
                      "latch, velocity, arp on/rate/direction/octaves/latch, which arp "
-                     "pattern is active, which chord-pad page is showing, and the UI "
-                     "layout), plus how many chord pads currently hold a chord. Call this "
-                     "first to orient before changing anything.";
+                     "pattern is active, and which chord-pad page is showing), plus how "
+                     "many chord pads currently hold a chord. Call this first to orient "
+                     "before changing anything.";
     t.run = [this](const juce::var&, juce::String&) -> juce::var
     {
         auto text = [this](const char* id) { return processor.apvts.getParameter(id)->getCurrentValueAsText(); };
@@ -170,7 +168,6 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("arpLatch", text("arpLatch"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
         obj->setProperty("padPage", processor.padPage());
-        obj->setProperty("uiLayout", text("uiLayout"));
         int padCount = 0;
         for (int i = 0; i < KeysProcessor::numChordPads; ++i)
             if (! processor.chordPad(i).notes.empty())

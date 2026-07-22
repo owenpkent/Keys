@@ -32,10 +32,7 @@ set(KEYS_SOURCES
     src/mcp/KeysMcp.cpp
     src/ui/NoteSurface.cpp
     src/ui/PianoKeyboard.cpp
-    src/ui/HarmonicTable.cpp
-    src/ui/PadGrid.cpp
-    src/ui/FaderBank.cpp
-    src/ui/XYPad.cpp
+    src/ui/KnobBank.cpp
     src/ui/ChordPads.cpp
     src/ui/ChordGenPanel.cpp
     src/ui/ArpPanel.cpp)
@@ -116,30 +113,10 @@ if (KEYS_BUILD_HOST)
         JUCE_PLUGINHOST_VST3=1)
 endif()
 
-# Hex Host: the same engine as Keys Host, shipped as its own product with the
-# Harmonic Table as the default surface, so a hex-grid instrument and a piano
-# instrument can each live on their own track.
-option(KEYS_BUILD_HEX_HOST "Build Hex Host (Harmonic Table variant of Keys Host)" ON)
-if (KEYS_BUILD_HEX_HOST)
-    okstudio_add_plugin(HexHost
-        PRODUCT_NAME  "Hex Host"
-        PLUGIN_CODE   KyHx
-        BUNDLE_SUFFIX hexhost
-        ${_keysCopy})
-    keys_configure_target(HexHost)
-    target_sources(HexHost PRIVATE
-        src/host/KeysHostProcessor.cpp
-        src/host/KeysHostEditor.cpp)
-    target_compile_definitions(HexHost PUBLIC
-        KEYS_HOST=1
-        KEYS_HEX=1
-        JUCE_PLUGINHOST_VST3=1)
-endif()
-
 # The keys-mcp stdio bridge: a small process Claude Code (or any local MCP client)
 # launches that discovers the live plugin instance's loopback server and speaks MCP
-# stdio to it. One shim serves all three products (Keys, Keys Host, Hex Host); it has
-# no PRODUCT filter, so instance discovery just picks whichever is live (see docs/MCP.md).
+# stdio to it. One shim serves both products (Keys, Keys Host); it has no PRODUCT
+# filter, so instance discovery just picks whichever is live (see docs/MCP.md).
 option(KEYS_BUILD_MCP_SHIM "Build the keys-mcp stdio bridge exe" ON)
 if (KEYS_BUILD_MCP_SHIM)
     okstudio_add_mcp_shim(keys-mcp)

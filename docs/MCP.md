@@ -52,8 +52,7 @@ wherever your build (or the installer) put it.
 
 ## Multiple instances
 
-One `keys-mcp` shim serves Keys, Keys Host and Hex Host alike: it has no product
-filter. If more than one instance is loaded (several tracks, several DAW windows),
+One `keys-mcp` shim serves Keys and Keys Host alike: it has no product filter. If more than one instance is loaded (several tracks, several DAW windows),
 the shim connects to whichever advertised itself most recently; pass `--port=N` to
 pin it to a specific instance's port instead (read the port from that instance's
 discovery file if you need to find it).

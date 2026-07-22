@@ -8,7 +8,6 @@ namespace keys
 namespace
 {
     constexpr float kCardW = 108.0f;
-    constexpr float kCardHGrid = 46.0f; // card height when the pads are a 4x4 column
     constexpr float kGap = 6.0f;
     constexpr float kRadius = 6.0f;
     constexpr int kRows = 2; // two rows of eight, Octavium parity
@@ -20,37 +19,18 @@ ChordPads::ChordPads(KeysProcessor& p) : processor(p)
     okstudio::ui::makeMouseOnly(*this);
 }
 
-void ChordPads::setGridLayout(bool fourByFour)
-{
-    if (grid == fourByFour)
-        return;
-    grid = fourByFour;
-    repaint();
-}
-
 juce::Rectangle<float> ChordPads::cardBounds() const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
-    if (grid)
-        return r.removeFromTop(kCardHGrid);
     return r.removeFromLeft(kCardW);
 }
 
 juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
-    int rows = kRows;
-    int cols = KeysProcessor::padsPerPage / kRows; // 16 / 2 = 8 across
-    if (grid)
-    {
-        r.removeFromTop(kCardHGrid + 8.0f); // card + separation
-        rows = 4;
-        cols = 4;
-    }
-    else
-    {
-        r.removeFromLeft(kCardW + 10.0f); // card + separation
-    }
+    const int rows = kRows;
+    const int cols = KeysProcessor::padsPerPage / kRows; // 16 / 2 = 8 across
+    r.removeFromLeft(kCardW + 10.0f); // card + separation
     const int row = visibleIndex / cols;
     const int col = visibleIndex % cols;
     const float w = (r.getWidth() - kGap * (float) (cols - 1)) / (float) cols;
