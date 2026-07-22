@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "Chords.h"
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 
@@ -190,6 +191,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // editing (Octavium's drag-to-edit).
     chordPads.onRecall = [this](const std::vector<int>& notes) { keyboard.recallOutputNotes(notes); };
 
+    // Right-click "Edit on keyboard": the pad's notes latch onto the piano and every
+    // latch change writes straight back to the pad, name re-detected live.
+    chordPads.onEditToggle = [this](int slot) { toggleEditPad(slot); };
+
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
     // Skipped when this editor is embedded inside Keys Host, which is a different
@@ -353,9 +358,6 @@ void KeysEditor::toggleGenPanel()
 
     genPanel = std::make_unique<ChordGenPanel>(processor);
     genPanel->onClose = [this, syncDoors] { genPanel.reset(); syncDoors(); };
-    // An emotion preset moves Root and Scale as well as the generator's own key; the
-    // combos are APVTS-attached and follow on their own, so this is just the repaint.
-    genPanel->onKeyChanged = [this] { repaint(); };
     addAndMakeVisible(*genPanel);
     genPanel->setBounds(getLocalBounds());
     genPanel->sendLookAndFeelChange(); // its controls were configured pre-parenting
@@ -389,6 +391,30 @@ void KeysEditor::toggleArpPanel()
     arpPanel->setBounds(getLocalBounds());
     arpPanel->sendLookAndFeelChange(); // its controls were configured pre-parenting
     syncDoors();
+}
+
+void KeysEditor::toggleEditPad(int slot)
+{
+    if (editingPad == slot)
+    {
+        endPadEdit();
+        return;
+    }
+    editingPad = slot;
+    lastEditNotes = processor.chordPad(slot).notes;
+    keyboard.panic(); // clean slate, so the latched set mirrors exactly this pad
+    keyboard.recallOutputNotes(lastEditNotes);
+    chordPads.setEditingSlot(slot);
+}
+
+void KeysEditor::endPadEdit()
+{
+    if (editingPad < 0)
+        return;
+    editingPad = -1;
+    lastEditNotes.clear();
+    chordPads.setEditingSlot(-1);
+    keyboard.panic(); // the editing chord stops ringing; the pad keeps what it got
 }
 
 void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
@@ -426,7 +452,9 @@ void KeysEditor::timerCallback()
                           (int) apvts.getRawParameterValue("root")->load(),
                           (int) apvts.getRawParameterValue("scale")->load());
     keyboard.setSustain(sus);
-    keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f);
+    // While a pad is linked for editing, clicks must toggle notes, so Latch behaviour
+    // is forced on regardless of the parameter.
+    keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f || editingPad >= 0);
     keyboard.setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
 
     // Lifting the sustain pedal releases any pad chords left ringing by it.
@@ -467,6 +495,28 @@ void KeysEditor::timerCallback()
                       juce::dontSendNotification);
     pagePrevButton.setEnabled(page > 0);
     pageNextButton.setEnabled(page < KeysProcessor::numPadPages - 1);
+
+    // Keyboard-edit link: the edited pad follows the keyboard's sounding set. An
+    // all-notes-removed state is not written (Clear is the explicit wipe), and
+    // flipping to another page ends the edit.
+    if (editingPad >= 0)
+    {
+        const int offset = processor.padPageOffset();
+        if (editingPad < offset || editingPad >= offset + KeysProcessor::padsPerPage)
+        {
+            endPadEdit();
+        }
+        else
+        {
+            const auto now = keyboard.soundingOutputNotes();
+            if (now != lastEditNotes)
+            {
+                lastEditNotes = now;
+                if (! now.empty())
+                    processor.setChordPad(editingPad, now, chords::detect(now));
+            }
+        }
+    }
 
     // Pitch wheel gliding home after release: exponential ease, ~160 ms to centre
     // (Octavium animates this; hardware springs, it doesn't snap).

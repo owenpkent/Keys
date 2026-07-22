@@ -69,11 +69,15 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   failure is silent-looking ("This VST3 plug-in could not be opened") and pluginval
   passes without the bus, so only a real Live load test catches it.
 - **Mouse-only UI**: single left-click or drag; targets ≥ ~34 px; no
-  keyboard/double-click/modifiers, and nothing may *require* right-click. Latch and
-  Sustain are on-screen toggles by design, never modifier keys. Right-click exists
-  only as an optional accelerator with a left-click equivalent (per-note latch on the
-  note surfaces, at Owen's request). The feature-request template requires an
-  accessibility answer — hold PRs to it.
+  keyboard/double-click/modifiers. Latch and Sustain are on-screen toggles by design,
+  never modifier keys. Right-click is normally only an optional accelerator with a
+  left-click equivalent (per-note latch on the note surfaces, at Owen's request).
+  One owner-directed exception (2026-07-22): chord-pad card menus are right-click —
+  in the generator (Lock / New chord / Next, restoring Octavium's card menu; the
+  page-wide left-click Fill/Regen/Clear stay as the bulk path) and on the main-page
+  strip (Edit on keyboard / Clear). Do not add further right-click-only paths
+  without Owen's explicit say-so.
+  The feature-request template requires an accessibility answer — hold PRs to it.
 - **Audio thread**: no allocation, no locks. It only drains the collector.
 - Parameter-layout changes break saved sessions — changelog loudly.
 - **Updater contract** lives in the kit (`docs/AUTO_UPDATE.md`): releases repo is

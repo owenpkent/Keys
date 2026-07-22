@@ -14,6 +14,9 @@ namespace keys
 //   * Drag a filled pad onto the card to recall its chord for editing (onRecall).
 //   * Click a filled pad to play/stop its chord (Exclusive makes a new pad choke the old).
 //   * Drag a pad onto another to move it, or off the row to clear it.
+//   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad
+//     to the piano; every latch change writes back live) and Clear. Part of the
+//     owner-directed right-click exception in CLAUDE.md.
 //
 // Sixteen pads per page, laid out as two rows of eight (Octavium parity). The pad
 // definitions and playback live in the processor, so they persist with the session and
@@ -35,13 +38,20 @@ public:
     // notes so the editor can recall it for editing. The pad itself is left untouched.
     std::function<void(const std::vector<int>&)> onRecall;
 
+    // Fired from a pad's right-click menu: start or stop editing this slot on the
+    // keyboard. The editor owns the edit link; the strip only requests and paints it.
+    std::function<void(int)> onEditToggle;
+    void setEditingSlot(int slot); // absolute slot being edited, or -1
+
 private:
     juce::Rectangle<float> cardBounds() const;
     juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1: row = i/8, col = i%8
     int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;
+    void showPadMenu(int slot);
 
     KeysProcessor& processor;
+    int editingSlot = -1;
     std::vector<int> currentNotes;
     juce::String currentName;
 

@@ -5,6 +5,32 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: edit chord pads on the keyboard, and chord cards that show their notes
+- **Right-click a pad on the main page → "Edit on keyboard".** The pad's notes latch
+  onto the piano (latch behaviour is forced on while editing), clicking keys adds and
+  removes notes, and every change writes straight back to the pad with its name
+  re-detected live. The pad glows with an EDIT tag while linked; "Done editing" (or
+  flipping the pad page) ends the link and silences the editing chord. Removing every
+  note does not clear the pad — "Clear pad" in the same menu is the explicit wipe
+  (locked pads keep their lock through edits).
+- **The generator's chord cards are full cards now**: chord name, the note list with
+  octave numbers ("C4 E4 G4 B4"), and a mini two-octave keyboard with the held keys
+  lit, so you can see what a chord contains and how many notes it has before pressing it.
+
+### Changed: chord generator, first-pass redesign
+- **The per-pad Lock / New / Next buttons are gone; they live in each pad's
+  right-click menu now** (Lock/Unlock, New chord, and the Next suggestion families
+  with per-row preview), restoring Octavium's card menu at Owen's request. The pads
+  are plain full-size cards again — hold to audition, right-click for actions — and
+  the grid reclaims the button rows' space. An empty pad's menu offers New chord, so
+  single slots can be filled without a page fill. This is a deliberate, owner-directed
+  exception to the "right-click only as accelerator" rule; CLAUDE.md is amended, and
+  the page-wide Fill / Regen Unlocked / Clear buttons remain the left-click bulk path.
+- **The Feel preset row (Happy/Sad/Dreamy/...) is removed.** The emotion labels
+  weren't meaningful in practice; key and mode are set directly (the mode's emotion
+  line by the title stays). The preset table remains in `ScaleModes.h` (still
+  unit-tested) in case a future affordance wants it.
+
 ### Changed: the "Obsidian" skin — a full visual redesign
 - **Every surface is restyled by a new Keys-local LookAndFeel**
   (`src/ui/KeysLookAndFeel.{h,cpp}`, subclassing the kit theme): near-black neutral

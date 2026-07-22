@@ -30,6 +30,54 @@ namespace
         return *std::min_element(notes.begin(), notes.end()) / 12;
     }
 
+    // "C4  E4  G4" — the note list a card carries under its chord name.
+    juce::String noteListText(const std::vector<int>& notes)
+    {
+        const auto names = okstudio::scales::noteNames();
+        juce::String out;
+        for (const int n : notes)
+            out << (out.isEmpty() ? "" : "  ") << names[((n % 12) + 12) % 12] << juce::String(n / 12 - 1);
+        return out;
+    }
+
+    // A card's mini keyboard: two octaves (three when the chord spills over) from the
+    // low note's C, held keys lit in accent. Purely informative, not a target.
+    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes)
+    {
+        if (notes.empty())
+            return;
+        const int lo = *std::min_element(notes.begin(), notes.end());
+        const int hi = *std::max_element(notes.begin(), notes.end());
+        const int base = (lo / 12) * 12;
+        const int octaves = hi < base + 24 ? 2 : 3;
+        const auto held = [&notes](int n)
+        { return std::find(notes.begin(), notes.end(), n) != notes.end(); };
+
+        constexpr int whitePc[7] = { 0, 2, 4, 5, 7, 9, 11 };
+        const int whites = octaves * 7;
+        const float ww = r.getWidth() / (float) whites;
+        for (int i = 0; i < whites; ++i)
+        {
+            const int note = base + (i / 7) * 12 + whitePc[i % 7];
+            const auto key = juce::Rectangle<float>(r.getX() + ww * (float) i, r.getY(),
+                                                    ww, r.getHeight()).reduced(0.5f, 0.0f);
+            g.setColour(held(note) ? skin::accent : juce::Colours::white.withAlpha(0.30f));
+            g.fillRoundedRectangle(key, 1.0f);
+        }
+
+        constexpr int blackAfterWhite[5] = { 0, 1, 3, 4, 5 }; // C# D# F# G# A#
+        constexpr int blackPc[5] = { 1, 3, 6, 8, 10 };
+        const float bw = ww * 0.62f, bh = r.getHeight() * 0.62f;
+        for (int o = 0; o < octaves; ++o)
+            for (int b = 0; b < 5; ++b)
+            {
+                const int note = base + o * 12 + blackPc[b];
+                const float x = r.getX() + ww * (float) (o * 7 + blackAfterWhite[b] + 1) - bw * 0.5f;
+                g.setColour(held(note) ? skin::accentHot : juce::Colour(0xff101216));
+                g.fillRoundedRectangle(x, r.getY(), bw, bh, 1.0f);
+            }
+    }
+
     // One row of the Next menu: a play button that auditions without closing the menu
     // (Octavium's per-row preview), then the row itself places the chord. The whole
     // non-button area triggers, so the target stays huge.
@@ -77,6 +125,49 @@ namespace
         juce::TextButton play;
     };
 } // namespace
+
+void ChordGenPanel::PadButton::paintButton(juce::Graphics& g, bool over, bool down)
+{
+    // Chip background through the skin, then the card's own layout instead of the
+    // base class's single text line.
+    getLookAndFeel().drawButtonBackground(g, *this,
+                                          findColour(juce::TextButton::buttonColourId), over, down);
+
+    if (notes.empty())
+    {
+        g.setColour(skin::textFaint);
+        g.setFont(skin::ui(13.0f));
+        g.drawText("-", getLocalBounds(), juce::Justification::centred);
+        return;
+    }
+
+    auto r = getLocalBounds().toFloat().reduced(10.0f, 8.0f);
+    const float kbH = juce::jmin(26.0f, r.getHeight() * 0.34f);
+    const auto kb = r.removeFromBottom(kbH)
+                        .withSizeKeepingCentre(juce::jmin(170.0f, r.getWidth()), kbH);
+    r.removeFromBottom(3.0f);
+    const auto noteLine = r.removeFromBottom(14.0f);
+
+    g.setColour(skin::text);
+    g.setFont(skin::uiSemi(17.0f));
+    g.drawText(getButtonText(), r, juce::Justification::centred, true);
+
+    g.setColour(skin::textDim);
+    g.setFont(skin::micro(10.0f));
+    g.drawText(noteListText(notes), noteLine.toNearestInt(), juce::Justification::centred, true);
+
+    drawMiniKeyboard(g, kb, notes);
+
+    if (locked)
+    {
+        const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
+                             .withCentre({ (float) getWidth() - 10.0f, 10.0f });
+        g.setColour(okstudio::theme::good.withAlpha(0.4f));
+        g.fillEllipse(dot.expanded(2.0f));
+        g.setColour(okstudio::theme::good);
+        g.fillEllipse(dot);
+    }
+}
 
 ChordGenPanel::ChordGenPanel(KeysProcessor& p) : processor(p)
 {
@@ -151,17 +242,6 @@ void ChordGenPanel::buildControls()
     octaveSlider.setRange(2, 6, 1);
     addAndMakeVisible(octaveSlider);
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "genOctave", octaveSlider);
-
-    // Emotion presets: one click sets the generator's key and mode, and moves Root/Scale
-    // to match so Scale Lock agrees with what the pads are about to be built from.
-    styleLabel(emotionLabel, "Feel");
-    addAndMakeVisible(emotionLabel);
-    for (int i = 0; i < (int) modes::emotions().size(); ++i)
-    {
-        auto* b = emotionButtons.add(new juce::TextButton(modes::emotions()[(size_t) i].label));
-        b->onClick = [this, i] { applyEmotion(i); };
-        addAndMakeVisible(*b);
-    }
 
     styleLabel(notesLabel, "Notes");
     addAndMakeVisible(notesLabel);
@@ -279,22 +359,11 @@ void ChordGenPanel::buildControls()
                 processor.releaseChordPad(slot);
             r.playHeld = down;
         };
-        row->lock.onClick = [this, v]
-        {
-            const int slot = processor.padPageOffset() + v;
-            processor.setChordPadLocked(slot, ! processor.chordPad(slot).locked);
-        };
-        row->regen.onClick = [this, v] { regeneratePad(processor.padPageOffset() + v); };
-        row->next.onClick = [this, v] { showSuggestions(processor.padPageOffset() + v); };
+        // Octavium's card menu, back on the card itself: Lock / New chord / Next.
+        row->play.onRightClick = [this, v] { showPadMenu(processor.padPageOffset() + v); };
+        row->play.setTooltip("Hold to hear it. Right-click for Lock, New chord, and what could follow.");
 
-        row->regen.setButtonText("New");
-        row->next.setButtonText("Next");
-        row->lock.setTooltip("Keep this chord when regenerating, and steer new chords toward its character.");
-        row->regen.setTooltip("A different chord for this pad's scale degree.");
-        row->next.setTooltip("Chords that could follow this one.");
-
-        for (auto* b : { &row->play, &row->lock, &row->regen, &row->next })
-            addAndMakeVisible(*b);
+        addAndMakeVisible(row->play);
         padRows[(size_t) v] = std::move(row);
     }
 }
@@ -347,28 +416,6 @@ void ChordGenPanel::writeChord(int slot, const chordgen::Chord& c)
     pad.degree = c.degree;
     pad.locked = processor.chordPad(slot).locked;
     processor.setChordPad(slot, pad);
-}
-
-void ChordGenPanel::applyEmotion(int emotionIndex)
-{
-    const auto& e = modes::emotions()[(size_t) emotionIndex];
-    const int modeIdx = modes::indexOf(e.mode);
-
-    const auto set = [this](const char* id, int value)
-    {
-        if (auto* p = processor.apvts.getParameter(id))
-            p->setValueNotifyingHost(p->convertTo0to1((float) value));
-    };
-    set("genRoot", e.rootPc);
-    set("genMode", modeIdx);
-
-    // Move Scale Lock to the same key, so the keyboard and the pads agree.
-    set("root", e.rootPc);
-    if (const int kit = modes::kitScaleIndex(modeIdx); kit >= 0)
-        set("scale", kit);
-
-    if (onKeyChanged)
-        onKeyChanged();
 }
 
 void ChordGenPanel::refreshMoodItems()
@@ -528,74 +575,114 @@ void ChordGenPanel::regeneratePad(int slot)
     writeChord(slot, c);
 }
 
-void ChordGenPanel::showSuggestions(int slot)
+void ChordGenPanel::newChordFor(int slot)
 {
     const auto& pad = processor.chordPad(slot);
-    if (pad.notes.empty())
+    if (pad.locked)
         return;
+    if (! pad.notes.empty())
+    {
+        regeneratePad(slot);
+        return;
+    }
+    // An empty slot gets a fresh chord from whichever brain is up; a Markov one
+    // steps from its left neighbour, exactly like a page fill would.
+    if (markovActive())
+    {
+        regeneratePadMarkov(slot);
+        return;
+    }
+    const auto generated = chordgen::generate(genRoot(), genMode(), 1, currentOptions(),
+                                              lockedTypesOnPage(), rng);
+    if (! generated.empty())
+        writeChord(slot, generated.front());
+}
 
-    // A generated pad already knows what it is; a hand-captured one gets worked out here.
-    auto [rootPc, type] = pad.type >= 0 ? std::pair<int, int> { pad.rootPc, pad.type }
-                                        : suggest::analyse(pad.notes);
-    const int octave = octaveOf(pad.notes, currentOptions().octave);
-    const auto suggestions = suggest::all(rootPc, type, octave);
-
-    // A suggestion answers "what comes next", so it lands in the next free pad on the page
-    // rather than replacing the chord you asked about. With the page full it takes the slot
-    // right after, which is where a progression would go anyway.
+void ChordGenPanel::showPadMenu(int slot)
+{
+    const auto& pad = processor.chordPad(slot);
+    const bool filled = ! pad.notes.empty();
     const int offset = processor.padPageOffset();
-    int target = -1;
-    for (int v = 0; v < KeysProcessor::padsPerPage && target < 0; ++v)
-    {
-        const int s = offset + v;
-        if (processor.chordPad(s).notes.empty() && ! processor.chordPad(s).locked)
-            target = s;
-    }
-    if (target < 0)
-    {
-        const int after = slot + 1 < offset + KeysProcessor::padsPerPage ? slot + 1 : offset;
-        target = processor.chordPad(after).locked ? -1 : after;
-    }
-    if (target < 0)
-        return; // everything on the page is locked; nowhere to put it
+    juce::Component::SafePointer<ChordGenPanel> safe(this);
 
     juce::PopupMenu menu;
-    const char* categories[] = { "Neo-Riemannian", "Circle of Fifths", "Diatonic", "Chromatic" };
-    int id = 1;
+    menu.addItem(1, pad.locked ? "Unlock" : "Lock", filled);
+    menu.addItem(2, "New chord", ! pad.locked);
+
+    // "What could follow this?" — the four suggestion families, each row carrying a
+    // play button so it can audition without closing the menu (Octavium's per-row
+    // preview). A pick lands in the next free pad on the page rather than replacing
+    // the chord you asked about; with the page full it takes the slot right after,
+    // which is where a progression would go anyway.
     std::vector<suggest::Suggestion> flat;
-    juce::Component::SafePointer<ChordGenPanel> safe(this);
-    for (const char* cat : categories)
+    int target = -1;
+    if (filled)
     {
-        juce::PopupMenu sub;
-        for (const auto& s : suggestions)
+        for (int v = 0; v < KeysProcessor::padsPerPage && target < 0; ++v)
         {
-            if (juce::String(s.category) != cat)
-                continue;
-            // Custom rows so each carries a play button: audition without closing the
-            // menu (Octavium's per-row preview), click the row itself to take it.
-            sub.addCustomItem(id++,
-                              std::make_unique<SuggestionRow>(juce::String(s.transform) + "   " + s.name,
-                                                              [safe, notes = s.notes]
-                                                              {
-                                                                  if (safe != nullptr)
-                                                                      safe->previewChord(notes);
-                                                              }));
-            flat.push_back(s);
+            const int s = offset + v;
+            if (processor.chordPad(s).notes.empty() && ! processor.chordPad(s).locked)
+                target = s;
         }
-        menu.addSubMenu(cat, sub);
+        if (target < 0)
+        {
+            const int after = slot + 1 < offset + KeysProcessor::padsPerPage ? slot + 1 : offset;
+            target = processor.chordPad(after).locked ? -1 : after;
+        }
+    }
+    if (filled && target >= 0)
+    {
+        // A generated pad already knows what it is; a hand-captured one gets worked out here.
+        auto [rootPc, type] = pad.type >= 0 ? std::pair<int, int> { pad.rootPc, pad.type }
+                                            : suggest::analyse(pad.notes);
+        const auto suggestions = suggest::all(rootPc, type, octaveOf(pad.notes, currentOptions().octave));
+
+        menu.addSeparator();
+        menu.addSectionHeader("Next: could follow");
+        const char* categories[] = { "Neo-Riemannian", "Circle of Fifths", "Diatonic", "Chromatic" };
+        int id = 10;
+        for (const char* cat : categories)
+        {
+            juce::PopupMenu sub;
+            for (const auto& s : suggestions)
+            {
+                if (juce::String(s.category) != cat)
+                    continue;
+                sub.addCustomItem(id++,
+                                  std::make_unique<SuggestionRow>(juce::String(s.transform) + "   " + s.name,
+                                                                  [safe, notes = s.notes]
+                                                                  {
+                                                                      if (safe != nullptr)
+                                                                          safe->previewChord(notes);
+                                                                  }));
+                flat.push_back(s);
+            }
+            menu.addSubMenu(cat, sub);
+        }
     }
 
     menu.showMenuAsync(juce::PopupMenu::Options()
-                           .withTargetComponent(&padRows[(size_t) (slot - offset)]->next)
+                           .withTargetComponent(&padRows[(size_t) (slot - offset)]->play)
                            .withStandardItemHeight(okstudio::ui::minHitPx), // mouse-only: no small targets
-                       [safe, flat, target](int choice)
+                       [safe, slot, flat, target](int choice)
     {
         if (safe == nullptr)
             return;
         safe->stopPreview(); // don't let the last audition ring past the menu
-        if (choice <= 0 || choice > (int) flat.size())
+        if (choice == 1)
+        {
+            auto& p = safe->processor;
+            p.setChordPadLocked(slot, ! p.chordPad(slot).locked);
             return;
-        const auto& s = flat[(size_t) (choice - 1)];
+        }
+        if (choice == 2)
+        {
+            safe->newChordFor(slot);
+            return;
+        }
+        if (choice < 10 || choice - 10 >= (int) flat.size() || target < 0)
+            return;
+        const auto& s = flat[(size_t) (choice - 10)];
         safe->writeChord(target, { s.rootPc, s.type, s.notes, -1 });
     });
 }
@@ -633,9 +720,6 @@ void ChordGenPanel::timerCallback()
                                                              &complianceSlider, &complianceLabel,
                                                              &lockInfluenceSlider, &lockInfluenceLabel })
         c->setEnabled(! markov);
-    for (auto* b : emotionButtons)
-        b->setEnabled(! markov);
-
     const int offset = processor.padPageOffset();
     for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
     {
@@ -644,13 +728,13 @@ void ChordGenPanel::timerCallback()
         const bool filled = ! pad.notes.empty();
 
         r.play.setButtonText(filled ? pad.name : juce::String("-"));
-        r.play.setEnabled(filled);
-        r.lock.setButtonText(pad.locked ? "Locked" : "Lock");
-        r.lock.setColour(juce::TextButton::buttonColourId,
-                         pad.locked ? okstudio::theme::good.withAlpha(0.7f) : skin::control);
-        r.lock.setEnabled(filled);
-        r.regen.setEnabled(filled && ! pad.locked);
-        r.next.setEnabled(filled);
+        r.play.setEnabled(filled); // the right-click menu still opens on an empty pad
+        if (r.play.locked != pad.locked || r.play.notes != pad.notes)
+        {
+            r.play.locked = pad.locked;
+            r.play.notes = pad.notes;
+            r.play.repaint();
+        }
     }
     repaint();
 }
@@ -698,22 +782,7 @@ void ChordGenPanel::resized()
     cell(rowA, 130, sourceLabel, sourceBox);
     area.removeFromTop(4);
 
-    // Row 2: the emotion presets, evenly across the width.
-    auto rowB = area.removeFromTop(44);
-    emotionLabel.setBounds(rowB.removeFromLeft(40).removeFromTop(14).translated(0, 14));
-    {
-        const int n = emotionButtons.size();
-        const int gap = 4;
-        const int w = (rowB.getWidth() - gap * (n - 1)) / juce::jmax(n, 1);
-        for (int i = 0; i < n; ++i)
-        {
-            emotionButtons[i]->setBounds(rowB.removeFromLeft(w).withTrimmedTop(6));
-            rowB.removeFromLeft(gap);
-        }
-    }
-    area.removeFromTop(4);
-
-    // Row 3: note counts, inversions, and the two weighting sliders — or, when the
+    // Row 2: note counts, inversions, and the two weighting sliders — or, when the
     // Markov source is up, its chain controls in the same band (visibility picks one).
     auto rowC = area.removeFromTop(44);
     {
@@ -747,7 +816,7 @@ void ChordGenPanel::resized()
     cell(rowC, 230, lockInfluenceLabel, lockInfluenceSlider);
     area.removeFromTop(6);
 
-    // Row 4: the page-wide actions.
+    // Row 3: the page-wide actions (the left-click bulk path).
     auto rowD = area.removeFromTop(36);
     fillButton.setBounds(rowD.removeFromLeft(120));
     rowD.removeFromLeft(8);
@@ -756,7 +825,9 @@ void ChordGenPanel::resized()
     clearButton.setBounds(rowD.removeFromLeft(120));
     area.removeFromTop(8);
 
-    // The pad grid: 4 across, 4 down (16 pads, Octavium's 4x4), each with its own actions underneath.
+    // The pad grid: 4 across, 4 down (16 pads, Octavium's 4x4). Just the cards — the
+    // per-pad actions live in each card's right-click menu, so every card is a big,
+    // clean play target.
     const int cols = 4, rows = KeysProcessor::padsPerPage / 4;
     const int gap = 8;
     const int cw = (area.getWidth() - gap * (cols - 1)) / cols;
@@ -765,18 +836,7 @@ void ChordGenPanel::resized()
     {
         auto& r = *padRows[(size_t) v];
         const int col = v % cols, rw = v / cols;
-        juce::Rectangle<int> cellArea(area.getX() + col * (cw + gap), area.getY() + rw * (ch + gap), cw, ch);
-
-        // The chord button takes the space that's left; the three actions get a fixed strip
-        // at the bottom, never thinner than the minimum hit target.
-        auto actions = cellArea.removeFromBottom(juce::jmax(okstudio::ui::minHitPx, ch / 3));
-        r.play.setBounds(cellArea.reduced(0, 2));
-        const int aw = (actions.getWidth() - 8) / 3;
-        r.lock.setBounds(actions.removeFromLeft(aw));
-        actions.removeFromLeft(4);
-        r.regen.setBounds(actions.removeFromLeft(aw));
-        actions.removeFromLeft(4);
-        r.next.setBounds(actions);
+        r.play.setBounds(area.getX() + col * (cw + gap), area.getY() + rw * (ch + gap), cw, ch);
     }
 }
 } // namespace keys

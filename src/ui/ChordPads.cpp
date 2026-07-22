@@ -159,6 +159,15 @@ void ChordPads::paint(juce::Graphics& g)
 
         if (dropHere)
             skin::glowRect(g, b, kRadius, skin::accentHot);
+
+        // The pad currently linked to the keyboard for editing.
+        if (i == editingSlot)
+        {
+            skin::glowRect(g, b, kRadius, skin::accentHot);
+            g.setColour(skin::accentHot);
+            g.setFont(skin::micro(8.0f));
+            g.drawText("EDIT", b.reduced(6.0f, 3.0f).toNearestInt(), juce::Justification::topLeft);
+        }
     }
 
     // Drag ghost following the cursor.
@@ -176,8 +185,56 @@ void ChordPads::paint(juce::Graphics& g)
     }
 }
 
+void ChordPads::setEditingSlot(int slot)
+{
+    if (editingSlot == slot)
+        return;
+    editingSlot = slot;
+    repaint();
+}
+
+void ChordPads::showPadMenu(int slot)
+{
+    const auto& pad = processor.chordPad(slot);
+    const bool editing = slot == editingSlot;
+
+    juce::PopupMenu menu;
+    menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");
+    menu.addItem(2, "Clear pad", ! pad.notes.empty() && ! pad.locked);
+
+    const auto area = localAreaToGlobal(padBounds(slot - processor.padPageOffset()).toNearestInt());
+    juce::Component::SafePointer<ChordPads> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options()
+                           .withTargetScreenArea(area)
+                           .withStandardItemHeight(okstudio::ui::minHitPx), // mouse-only: no small targets
+                       [safe, slot](int choice)
+    {
+        if (safe == nullptr)
+            return;
+        if (choice == 1 && safe->onEditToggle)
+        {
+            safe->onEditToggle(slot);
+        }
+        else if (choice == 2)
+        {
+            if (slot == safe->editingSlot && safe->onEditToggle)
+                safe->onEditToggle(slot); // end the edit before wiping its target
+            safe->processor.clearChordPad(slot);
+        }
+    });
+}
+
 void ChordPads::mouseDown(const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+    {
+        // Right-click never plays or drags; it opens the pad's card menu.
+        const int cell = cellAt(e.position);
+        if (cell >= 0)
+            showPadMenu(cell);
+        return;
+    }
+
     downPos = e.position;
     dragPos = e.position;
     dragging = false;

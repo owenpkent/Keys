@@ -43,6 +43,8 @@ private:
     void stepPadPage(int delta);
     void toggleGenPanel();
     void toggleArpPanel();
+    void toggleEditPad(int slot); // link a chord pad to the keyboard for editing
+    void endPadEdit();
 
     KeysProcessor& processor;
     KeysLookAndFeel lnf;
@@ -102,6 +104,8 @@ private:
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;
+    int editingPad = -1;              // pad slot linked to the keyboard for editing, or -1
+    std::vector<int> lastEditNotes;   // last content written back, to detect changes cheaply
     int lastChannel = -1;    // to panic on MIDI-channel change (avoids notes stuck on the old channel)
     bool embedded = false;   // see setEmbedded()
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts

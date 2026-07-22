@@ -273,7 +273,10 @@ void KeysLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& butt
 
 juce::Font KeysLookAndFeel::getTextButtonFont(juce::TextButton&, int buttonHeight)
 {
-    return skin::uiSemi(juce::jmin(14.0f, (float) buttonHeight * 0.45f));
+    // Tall buttons (the generator's chord cards) carry their name larger; ordinary
+    // chrome buttons stay at 14.
+    const float cap = buttonHeight >= 60 ? 17.0f : 14.0f;
+    return skin::uiSemi(juce::jmin(cap, (float) buttonHeight * 0.45f));
 }
 
 // Checkbox toggles (Scale Lock, Sustain, Latch, ...): an inset well that fills
