@@ -4,8 +4,8 @@
 #include "ui/ArpPanel.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
+#include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
-#include <okstudio/Theme.h>
 #include <okstudio/Updater.h>
 #include <memory>
 
@@ -24,6 +24,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void parentHierarchyChanged() override; // skins the standalone wrapper's window chrome
 
     // True when this editor lives inside another editor (Keys Host). An embedded
     // editor must never setSize() itself; the parent owns geometry and reacts to
@@ -44,12 +45,12 @@ private:
     void toggleArpPanel();
 
     KeysProcessor& processor;
-    okstudio::theme::LookAndFeel lnf;
+    KeysLookAndFeel lnf;
 
     // The default LookAndFeel_V4 linear slider caps its track at ~6 px no matter how
     // wide the component is; the performance wheels want a hardware-wheel look — a
     // wide groove with a chunky grab bar.
-    struct WheelLookAndFeel : okstudio::theme::LookAndFeel
+    struct WheelLookAndFeel : KeysLookAndFeel
     {
         void drawLinearSlider(juce::Graphics&, int x, int y, int w, int h, float sliderPos,
                               float minPos, float maxPos, juce::Slider::SliderStyle,
@@ -58,6 +59,8 @@ private:
     WheelLookAndFeel wheelLnf;
 
     juce::Label title;
+    juce::Rectangle<int> titleCaption; // "OK STUDIO" wordmark, painted under the title
+    juce::Component::SafePointer<juce::DocumentWindow> styledWindow; // standalone chrome we skinned
 
     // The one playing surface this product builds: the piano, for Keys and Keys Host.
     PianoKeyboard keyboard;

@@ -4,6 +4,8 @@ Distilled from a deep-research pass (2026-07-19) over the Xfer Cthulhu v1.1 manu
 Xfer Serum manual, Kirnu Cream and Devicemeister Stepic reviews and vendor docs, and
 the JUCE ArpeggiatorPluginDemo source. Confidence notes and gaps at the bottom.
 
+![The arpeggiator overlay](../assets/screenshots/arpeggiator.png)
+
 ## Placement and contract
 
 A new stage in the MIDI path, in this order (Cthulhu's proven pipeline order):

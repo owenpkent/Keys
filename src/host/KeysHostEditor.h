@@ -68,6 +68,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void parentHierarchyChanged() override; // skins the standalone wrapper's window chrome
 
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
     void filesDropped(const juce::StringArray& files, int x, int y) override;
@@ -86,6 +87,11 @@ private:
     void placeInstrumentWindow(); // above the keyboard window, clamped on-screen
 
     KeysHostProcessor& host;
+
+    // The bar and the picker draw with the same skin as the embedded editor (which
+    // only applies its own LookAndFeel to its subtree, not to this parent).
+    KeysLookAndFeel hostLnf;
+    juce::Component::SafePointer<juce::DocumentWindow> styledWindow; // standalone chrome we skinned
 
     juce::TextButton loadButton { "Load Instrument..." };
     juce::TextButton showHideButton;

@@ -168,6 +168,7 @@ namespace
 InstrumentPicker::InstrumentPicker()
 {
     title.setText("Load instrument", juce::dontSendNotification);
+    title.setFont(skin::uiSemi(16.0f).withExtraKerningFactor(0.04f));
     title.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(title);
 
@@ -224,12 +225,13 @@ juce::Rectangle<int> InstrumentPicker::panelBounds() const
 
 void InstrumentPicker::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colours::black.withAlpha(0.55f)); // dim the editor behind the panel
-    auto panel = panelBounds().toFloat();
-    g.setColour(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
-    g.fillRoundedRectangle(panel, 8.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.2f));
-    g.drawRoundedRectangle(panel, 8.0f, 1.0f);
+    g.fillAll(juce::Colours::black.withAlpha(0.65f)); // dim the editor behind the panel
+    const auto panel = panelBounds().toFloat();
+    g.setColour(juce::Colour(0xff1c1f24));
+    g.fillRoundedRectangle(panel, skin::panelRadius);
+    g.setColour(juce::Colours::white.withAlpha(0.05f));
+    g.fillRoundedRectangle(panel.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
+    skin::glowRect(g, panel, skin::panelRadius, skin::accent, 0.55f);
 }
 
 void InstrumentPicker::resized()
@@ -290,6 +292,10 @@ void InstrumentWindow::closeButtonPressed()
 KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     : juce::AudioProcessorEditor(p), host(p), keysEditor(p)
 {
+    setLookAndFeel(&hostLnf);
+    instLabel.setColour(juce::Label::textColourId, skin::textDim);
+    instLabel.setFont(skin::ui(13.5f));
+
     addAndMakeVisible(loadButton);
     loadButton.onClick = [this] { openPicker(); };
 
@@ -326,6 +332,32 @@ KeysHostEditor::~KeysHostEditor()
     host.onInstrumentWillChange = nullptr;
     host.removeChangeListener(this);
     closeInstrumentEditor();
+    if (styledWindow != nullptr)
+        styledWindow->setLookAndFeel(nullptr);
+    setLookAndFeel(nullptr);
+}
+
+void KeysHostEditor::parentHierarchyChanged()
+{
+    // Same standalone-chrome hook as KeysEditor (which skips itself when embedded
+    // here): the wrapper window's title bar follows the skin, restored on teardown.
+    // Deferred a message-loop turn for the same reason as there: restyling the
+    // window mid-construction breaks the wrapper's content sizing.
+    if (! juce::JUCEApplicationBase::isStandaloneApp() || styledWindow != nullptr)
+        return;
+    juce::Component::SafePointer<KeysHostEditor> safe(this);
+    juce::MessageManager::callAsync([safe]
+    {
+        auto* e = safe.getComponent();
+        if (e == nullptr || e->styledWindow != nullptr)
+            return;
+        if (auto* window = dynamic_cast<juce::DocumentWindow*>(e->getTopLevelComponent()))
+        {
+            e->styledWindow = window;
+            window->setLookAndFeel(&e->hostLnf);
+            window->setTitleBarHeight(38);
+        }
+    });
 }
 
 void KeysHostEditor::openPicker()
@@ -476,7 +508,16 @@ void KeysHostEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 
 void KeysHostEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
+    g.fillAll(skin::bgBot);
+
+    // The instrument bar is a header band, same language as the editor below it.
+    const auto bar = getLocalBounds().toFloat().withHeight((float) barHeight);
+    g.setGradientFill({ skin::headerTop, 0.0f, 0.0f, skin::headerBot, 0.0f, bar.getBottom(), false });
+    g.fillRect(bar);
+    g.setColour(juce::Colours::black.withAlpha(0.55f));
+    g.fillRect(0.0f, bar.getBottom(), bar.getWidth(), 1.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.04f));
+    g.fillRect(0.0f, bar.getBottom() + 1.0f, bar.getWidth(), 1.0f);
 }
 
 void KeysHostEditor::resized()

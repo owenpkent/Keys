@@ -1,7 +1,7 @@
 #include "PianoKeyboard.h"
 #include "../NoteMath.h"
+#include "KeysLookAndFeel.h"
 #include <okstudio/Scales.h>
-#include <okstudio/Theme.h>
 
 namespace keys
 {
@@ -108,18 +108,16 @@ void PianoKeyboard::paint(juce::Graphics& g)
     using namespace okstudio;
     const auto full = getLocalBounds().toFloat();
 
-    // Instrument bar behind the keys: subtle horizontal vignette, like Octavium.
-    juce::ColourGradient bar(juce::Colour(0xff1b1b1b), full.getX(), 0.0f,
-                             juce::Colour(0xff1b1b1b), full.getRight(), 0.0f, false);
-    bar.addColour(0.5, juce::Colour(0xff202020));
-    g.setGradientFill(bar);
+    // Instrument body above the keybed.
+    g.setGradientFill({ juce::Colour(0xff121317), 0.0f, 0.0f,
+                        juce::Colour(0xff0c0d10), 0.0f, full.getBottom(), false });
     g.fillRect(full);
 
     const auto inScale = [this](int note)
     { return ! scaleLock || scales::isInScale(note, rootPc, scaleIndex); };
 
-    // Three visual states, matching Octavium: momentary press (bright blue), held
-    // via latch/sustain (deeper blue), and resting.
+    // Three visual states, matching Octavium: momentary press (hot accent), held
+    // via latch/sustain (deeper accent), and resting.
     enum class State { normal, active, held };
     const auto stateOf = [this](int drawn) -> State
     {
@@ -138,35 +136,63 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const auto b = k.bounds;
         const float top = b.getY(), bot = b.getBottom();
         const State s = stateOf(k.note);
-        const bool dim = s == State::normal && ! inScale(k.note);
+        const bool lit = s != State::normal;
+        const bool dim = ! lit && ! inScale(k.note);
 
-        juce::ColourGradient grad = vGrad(juce::Colours::white, juce::Colour(0xffe7e7e7), top, bot);
-        if (s == State::active)      grad = vGrad(juce::Colour(0xff6bb8ff), juce::Colour(0xff2f82e6), top, bot);
-        else if (s == State::held)   grad = vGrad(juce::Colour(0xff5fb1ff), juce::Colour(0xff2b7ade), top, bot);
-        else if (dim)                grad = vGrad(juce::Colour(0xffc4cad2), juce::Colour(0xffa9b1bd), top, bot);
-        else { grad.addColour(0.25, juce::Colour(0xfffbfbfb)); grad.addColour(0.55, juce::Colour(0xfff3f3f3)); }
+        juce::Path key;
+        key.addRoundedRectangle(b.getX(), top, b.getWidth(), b.getHeight(),
+                                2.5f, 2.5f, false, false, true, true);
+
+        // Ivory body, top-lit; lit keys go full accent.
+        juce::ColourGradient grad = vGrad(juce::Colour(0xfff4f6f8), juce::Colour(0xffd2d6db), top, bot);
+        if (s == State::active)      grad = vGrad(juce::Colour(0xff8cebf7), juce::Colour(0xff1fa5ba), top, bot);
+        else if (s == State::held)   grad = vGrad(juce::Colour(0xff59c9da), juce::Colour(0xff16808f), top, bot);
+        else if (dim)                grad = vGrad(juce::Colour(0xffc9cdd4), juce::Colour(0xff9ea4ad), top, bot);
+        else                         grad.addColour(0.55, juce::Colour(0xffe9ecef));
         g.setGradientFill(grad);
-        g.fillRect(b);
+        g.fillPath(key);
 
-        // Bottom lip for depth (blue when active/held).
-        g.setColour(s == State::normal ? (dim ? juce::Colour(0xff8f97a2) : juce::Colour(0xffbbbbbb))
-                                       : juce::Colour(0xff1b64c7));
-        g.fillRect(b.getX(), bot - 2.0f, b.getWidth(), 2.0f);
+        // Front lip: the vertical face under the playing surface, separated by a
+        // shadow line — the step that makes the keybed read as 3D.
+        const float lipH = juce::jmin(10.0f, b.getHeight() * 0.09f);
+        {
+            juce::Graphics::ScopedSaveState clip(g);
+            g.reduceClipRegion(key);
+            juce::Colour lipTop { 0xffb4b9c1 }, lipBot { 0xff969ba4 };
+            if (s == State::active)      { lipTop = juce::Colour(0xff12808f); lipBot = juce::Colour(0xff0d5b66); }
+            else if (s == State::held)   { lipTop = juce::Colour(0xff0f6874); lipBot = juce::Colour(0xff0a4a52); }
+            else if (dim)                { lipTop = juce::Colour(0xff868c96); lipBot = juce::Colour(0xff6e747e); }
+            g.setGradientFill(vGrad(lipTop, lipBot, bot - lipH, bot));
+            g.fillRect(b.getX(), bot - lipH, b.getWidth(), lipH);
+            g.setColour(juce::Colours::black.withAlpha(0.30f));
+            g.fillRect(b.getX(), bot - lipH, b.getWidth(), 1.0f);
+        }
 
-        // Thin seam on the right edge reads as the gap to the next key.
-        g.setColour(juce::Colour(0xff0e0e0e).withAlpha(0.55f));
+        // Seams: shadowed gap on the right, a hair of light on the left edge.
+        g.setColour(juce::Colours::black.withAlpha(0.45f));
         g.fillRect(b.getRight() - 1.0f, top, 1.0f, b.getHeight());
+        g.setColour(juce::Colours::white.withAlpha(dim ? 0.10f : 0.25f));
+        g.fillRect(b.getX(), top, 1.0f, b.getHeight() - lipH);
+
+        if (lit)
+        {
+            g.setColour(skin::accent.withAlpha(0.45f));
+            g.strokePath(key, juce::PathStrokeType(2.0f));
+            g.setColour(skin::accent.withAlpha(0.15f));
+            g.strokePath(key, juce::PathStrokeType(5.0f));
+        }
 
         if ((((k.note % 12) + 12) % 12) == 0) // subtle C marker for orientation
         {
-            g.setColour(juce::Colour(0xff70767d));
-            g.setFont(juce::Font(juce::FontOptions(10.0f)));
+            g.setColour(lit ? juce::Colour(0xff07272c) : juce::Colour(0xff6a7078));
+            g.setFont(skin::micro(9.5f));
             g.drawText("C" + juce::String(k.note / 12 - 1),
-                       b.withTrimmedBottom(4.0f).removeFromBottom(14.0f), juce::Justification::centred);
+                       b.withTrimmedBottom(lipH + 3.0f).removeFromBottom(12.0f),
+                       juce::Justification::centred);
         }
     }
 
-    // ---- Black keys (glossy, rounded, on top) ----
+    // ---- Black keys (stepped and glossy, on top) ----
     for (const auto& k : keys)
     {
         if (! k.black)
@@ -174,37 +200,60 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const auto b = k.bounds;
         const float top = b.getY(), bot = b.getBottom();
         const State s = stateOf(k.note);
-        const bool dim = s == State::normal && ! inScale(k.note);
+        const bool lit = s != State::normal;
+        const bool dim = ! lit && ! inScale(k.note);
 
-        juce::ColourGradient grad = vGrad(juce::Colour(0xff3a3a3a), juce::Colour(0xff050505), top, bot);
-        if (s == State::active)      grad = vGrad(juce::Colour(0xff4aa3ff), juce::Colour(0xff2f82e6), top, bot);
-        else if (s == State::held)   grad = vGrad(juce::Colour(0xff3f9cff), juce::Colour(0xff2b7ade), top, bot);
-        else if (dim)                grad = vGrad(juce::Colour(0xff4a5460), juce::Colour(0xff20262e), top, bot);
-        else { grad.addColour(0.12, juce::Colour(0xff2a2a2a)); grad.addColour(0.5, juce::Colour(0xff121212)); }
+        // Two-pass drop shadow onto the whites.
+        g.setColour(juce::Colours::black.withAlpha(0.30f));
+        g.fillRoundedRectangle(b.translated(1.2f, 2.2f).expanded(1.0f, 0.0f), 3.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.18f));
+        g.fillRoundedRectangle(b.translated(0.5f, 1.0f).expanded(0.5f, 0.0f), 3.0f);
 
-        // Soft drop shadow onto the white keys below.
-        g.setColour(juce::Colours::black.withAlpha(0.28f));
-        g.fillRoundedRectangle(b.translated(0.0f, 1.5f).expanded(0.6f, 0.0f), 3.0f);
-
+        juce::ColourGradient grad = vGrad(juce::Colour(0xff33373e), juce::Colour(0xff0b0d0f), top, bot);
+        if (s == State::active)      grad = vGrad(juce::Colour(0xff20b0c6), juce::Colour(0xff0c4c57), top, bot);
+        else if (s == State::held)   grad = vGrad(juce::Colour(0xff189aad), juce::Colour(0xff0a3d46), top, bot);
+        else if (dim)                grad = vGrad(juce::Colour(0xff3c434c), juce::Colour(0xff151920), top, bot);
+        else                         grad.addColour(0.5, juce::Colour(0xff191c20));
         g.setGradientFill(grad);
         g.fillRoundedRectangle(b, 3.0f);
 
-        // Glossy top reflection.
-        if (s == State::normal && ! dim)
-        {
-            g.setColour(juce::Colours::white.withAlpha(0.07f));
-            g.fillRoundedRectangle(b.withHeight(b.getHeight() * 0.30f).reduced(2.0f, 2.0f), 2.0f);
-        }
+        // The playing surface sits on top and ends in a catch-light edge — the
+        // step that makes the key read as a solid block instead of a flat shape.
+        const float faceBot = top + b.getHeight() * 0.60f;
+        const auto face = juce::Rectangle<float>(b.getX() + 1.6f, top + 1.0f,
+                                                 b.getWidth() - 3.2f, faceBot - top - 1.0f);
+        juce::Colour faceTop { 0xff3f444c }, faceLow { 0xff23262b };
+        if (s == State::active)      { faceTop = juce::Colour(0xff4fd4e6); faceLow = juce::Colour(0xff1793a6); }
+        else if (s == State::held)   { faceTop = juce::Colour(0xff2fb4c7); faceLow = juce::Colour(0xff0f7280); }
+        else if (dim)                { faceTop = juce::Colour(0xff4a515b); faceLow = juce::Colour(0xff2a3037); }
+        g.setGradientFill(vGrad(faceTop, faceLow, face.getY(), face.getBottom()));
+        g.fillRoundedRectangle(face, 2.0f);
+        g.setColour(lit ? skin::accentHot.withAlpha(0.55f) : juce::Colours::white.withAlpha(0.10f));
+        g.fillRect(face.getX() + 1.0f, face.getBottom(), face.getWidth() - 2.0f, 1.5f);
 
-        g.setColour(juce::Colour(0xff222222));
+        g.setColour(juce::Colours::black.withAlpha(0.6f));
         g.drawRoundedRectangle(b, 3.0f, 1.0f);
+
+        if (lit)
+        {
+            g.setColour(skin::accent.withAlpha(0.35f));
+            g.drawRoundedRectangle(b.expanded(1.0f), 4.0f, 2.0f);
+            g.setColour(skin::accent.withAlpha(0.12f));
+            g.drawRoundedRectangle(b.expanded(2.5f), 5.0f, 4.0f);
+        }
     }
 
-    // Fallboard rail at the top of the keybed, with a soft shadow onto the keys.
-    g.setColour(juce::Colour(0xff141414));
-    g.fillRect(full.getX(), keysTop, full.getWidth(), 3.0f);
-    g.setGradientFill(vGrad(juce::Colours::black.withAlpha(0.35f), juce::Colours::transparentBlack,
-                            keysTop + 3.0f, keysTop + 12.0f));
-    g.fillRect(full.getX(), keysTop + 3.0f, full.getWidth(), 9.0f);
+    // Fallboard rail, the cyan felt strip (the skin's signature detail), and the
+    // ambient shadow the board casts down the keys.
+    g.setColour(juce::Colour(0xff0a0b0d));
+    g.fillRect(full.getX(), keysTop, full.getWidth(), 2.0f);
+    g.setGradientFill({ skin::accent, full.getX(), 0.0f, skin::accentDeep, full.getRight(), 0.0f, false });
+    g.fillRect(full.getX(), keysTop + 2.0f, full.getWidth(), 2.5f);
+    g.setGradientFill(vGrad(skin::accent.withAlpha(0.16f), juce::Colours::transparentBlack,
+                            keysTop + 4.5f, keysTop + 13.0f));
+    g.fillRect(full.getX(), keysTop + 4.5f, full.getWidth(), 8.5f);
+    g.setGradientFill(vGrad(juce::Colours::black.withAlpha(0.45f), juce::Colours::transparentBlack,
+                            keysTop + 4.5f, keysTop + 22.0f));
+    g.fillRect(full.getX(), keysTop + 4.5f, full.getWidth(), 17.5f);
 }
 } // namespace keys

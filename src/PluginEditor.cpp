@@ -23,39 +23,26 @@ namespace
         return out;
     }
 
+    // Micro-caps section labels, the skin's typographic voice (see KeysLookAndFeel.h).
     void styleLabel(juce::Label& l, const juce::String& text)
     {
-        l.setText(text, juce::dontSendNotification);
-        l.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
-        l.setColour(juce::Label::textColourId, okstudio::theme::textDim);
+        l.setText(text.toUpperCase(), juce::dontSendNotification);
+        l.setFont(skin::micro(10.0f));
+        l.setColour(juce::Label::textColourId, skin::textDim);
     }
-
-    // Octavium-neutral chrome (local to Keys; the shared kit palette is blue-tinted).
-    const juce::Colour neutralBg      { 0xff1a1c20 };
-    const juce::Colour neutralPanel   { 0xff23262c };
-    const juce::Colour neutralControl { 0xff2b2f36 };
-    const juce::Colour neutralOutline { 0xff3b4148 };
-    const juce::Colour neutralGroove  { 0xff3a3f46 };
 } // namespace
 
 KeysEditor::KeysEditor(KeysProcessor& p)
     : juce::AudioProcessorEditor(p), processor(p),
       keyboard(p), knobBank(p), chordPads(p)
 {
-    setLookAndFeel(&lnf);
-    // Retint the kit chrome toward Octavium's neutral grey. Overrides live on this
-    // editor's own LookAndFeel instance, so sibling plugins are untouched.
-    lnf.setColour(juce::ResizableWindow::backgroundColourId, neutralBg);
-    lnf.setColour(juce::ComboBox::backgroundColourId, neutralControl);
-    lnf.setColour(juce::ComboBox::outlineColourId, neutralOutline);
-    lnf.setColour(juce::PopupMenu::backgroundColourId, neutralPanel);
-    lnf.setColour(juce::TextButton::buttonColourId, neutralControl);
-    lnf.setColour(juce::Slider::backgroundColourId, neutralGroove);
+    setLookAndFeel(&lnf); // the Keys "Obsidian" skin; palette lives in KeysLookAndFeel.h
     okstudio::ui::makeMouseOnly(*this);
 
-    title.setText("Keys", juce::dontSendNotification);
-    title.setFont(juce::Font(juce::FontOptions(22.0f, juce::Font::bold)));
-    title.setColour(juce::Label::textColourId, okstudio::theme::text);
+    title.setText("KEYS", juce::dontSendNotification);
+    title.setFont(juce::Font(juce::FontOptions("Segoe UI", 24.0f, juce::Font::bold))
+                      .withExtraKerningFactor(0.10f));
+    title.setColour(juce::Label::textColourId, skin::text);
     addAndMakeVisible(title);
 
     addCombo(sizeBox, sizeLabel, "Size", sizeItems(), "size", sizeAtt);
@@ -222,36 +209,103 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     setResizable(true, true);
     setResizeLimits(820, 560, 2200, 1200);
     setSize(960, 660);
+
+    // Children configured before they were parented (slider textboxes especially)
+    // baked colours from the default LookAndFeel; re-resolve everything under ours.
+    sendLookAndFeelChange();
     startTimerHz(30);
 }
 
 KeysEditor::~KeysEditor()
 {
     stopTimer();
+    if (styledWindow != nullptr)
+        styledWindow->setLookAndFeel(nullptr);
     modWheel.setLookAndFeel(nullptr);
     pitchWheel.setLookAndFeel(nullptr);
     setLookAndFeel(nullptr);
+}
+
+void KeysEditor::parentHierarchyChanged()
+{
+    // Standalone only: the JUCE wrapper window above this editor draws its own
+    // title bar with the process-default LookAndFeel, which clashes with the skin.
+    // Point it at ours (and restore in the destructor). In a DAW the host owns the
+    // window chrome and no DocumentWindow ever appears in the parent chain.
+    //
+    // Deferred a message-loop turn: this fires while the wrapper is still
+    // assembling its hierarchy, and restyling the window mid-construction breaks
+    // its content sizing (it opens at the minimum size).
+    if (embedded || ! juce::JUCEApplicationBase::isStandaloneApp() || styledWindow != nullptr)
+        return;
+    juce::Component::SafePointer<KeysEditor> safe(this);
+    juce::MessageManager::callAsync([safe]
+    {
+        auto* e = safe.getComponent();
+        if (e == nullptr || e->styledWindow != nullptr)
+            return;
+        if (auto* window = dynamic_cast<juce::DocumentWindow*>(e->getTopLevelComponent()))
+        {
+            e->styledWindow = window;
+            window->setLookAndFeel(&e->lnf);
+            window->setTitleBarHeight(38); // window buttons become 38 px targets (mouse-only floor is 34)
+        }
+    });
 }
 
 void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
                                                     float sliderPos, float, float,
                                                     juce::Slider::SliderStyle, juce::Slider& s)
 {
-    // Groove the full component width, thumb as a chunky grab bar. No value fill —
-    // hardware wheels don't show one, and it would read oddly on the centred pitch wheel.
+    // Hardware-wheel look: a deep ridged groove and a machined grab bar with an
+    // accent LED stripe. No value fill — hardware wheels don't show one, and it
+    // would read oddly on the centred pitch wheel.
     const auto groove = juce::Rectangle<float>((float) x, (float) y, (float) w, (float) h)
-                            .reduced((float) w * 0.15f, 6.0f);
-    const float corner = groove.getWidth() * 0.35f;
-    g.setColour(s.findColour(juce::Slider::backgroundColourId));
-    g.fillRoundedRectangle(groove, corner);
-    g.setColour(s.findColour(juce::Slider::trackColourId));
-    g.drawRoundedRectangle(groove, corner, 1.0f);
+                            .reduced((float) w * 0.14f, 5.0f);
+    const float corner = groove.getWidth() * 0.28f;
 
-    const float thumbH = 18.0f;
+    g.setColour(juce::Colours::black.withAlpha(0.5f));
+    g.drawRoundedRectangle(groove.expanded(0.5f), corner + 0.5f, 1.0f);
+    g.setGradientFill({ juce::Colour(0xff0c0e11), 0.0f, groove.getY(),
+                        juce::Colour(0xff16191d), 0.0f, groove.getBottom(), false });
+    g.fillRoundedRectangle(groove, corner);
+
+    {
+        // Rubber ridges, clipped to the groove.
+        juce::Graphics::ScopedSaveState clip(g);
+        juce::Path grooveClip;
+        grooveClip.addRoundedRectangle(groove, corner);
+        g.reduceClipRegion(grooveClip);
+        g.setColour(juce::Colours::black.withAlpha(0.22f));
+        for (float ry = groove.getY() + 4.0f; ry < groove.getBottom() - 3.0f; ry += 6.0f)
+            g.fillRect(groove.getX() + 3.0f, ry, groove.getWidth() - 6.0f, 1.0f);
+    }
+
+    // Centre detent marker on the sprung pitch wheel (identified by its bend range).
+    if (s.getMaximum() > 10000.0)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.08f));
+        g.fillRect(groove.getX() + 2.0f, groove.getCentreY() - 1.0f, groove.getWidth() - 4.0f, 2.0f);
+    }
+
+    const float thumbH = 20.0f;
     const float thumbY = juce::jlimit(groove.getY(), groove.getBottom() - thumbH, sliderPos - thumbH * 0.5f);
-    g.setColour(s.findColour(juce::Slider::thumbColourId));
-    g.fillRoundedRectangle(groove.expanded(3.0f, 0.0f).getX(), thumbY,
-                           groove.getWidth() + 6.0f, thumbH, 4.0f);
+    const auto thumb = juce::Rectangle<float>(groove.getX() - 3.0f, thumbY, groove.getWidth() + 6.0f, thumbH);
+
+    g.setColour(juce::Colours::black.withAlpha(0.35f));
+    g.fillRoundedRectangle(thumb.translated(0.0f, 2.0f), 4.0f);
+    g.setGradientFill({ juce::Colour(0xff3f444c), 0.0f, thumb.getY(),
+                        juce::Colour(0xff22252a), 0.0f, thumb.getBottom(), false });
+    g.fillRoundedRectangle(thumb, 4.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.08f));
+    g.fillRoundedRectangle(thumb.withHeight(1.5f).reduced(3.0f, 0.0f), 0.75f);
+
+    const auto led = juce::Rectangle<float>(thumb.getX() + 5.0f, thumb.getCentreY() - 1.25f,
+                                            thumb.getWidth() - 10.0f, 2.5f);
+    g.setColour(skin::accent.withAlpha(0.35f));
+    g.fillRoundedRectangle(led.expanded(2.0f, 2.0f), 3.0f);
+    g.setColour(skin::accentHot);
+    g.fillRoundedRectangle(led, 1.25f);
 }
 
 void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::String& text,
@@ -276,9 +330,16 @@ void KeysEditor::stepPadPage(int delta)
 
 void KeysEditor::toggleGenPanel()
 {
+    // The door buttons light up while their overlay is open (skin toggle look).
+    const auto syncDoors = [this]
+    {
+        chordsButton.setToggleState(genPanel != nullptr, juce::dontSendNotification);
+        arpButton.setToggleState(arpPanel != nullptr, juce::dontSendNotification);
+    };
     if (genPanel != nullptr)
     {
         genPanel.reset();
+        syncDoors();
         return;
     }
     if (arpPanel != nullptr)
@@ -291,19 +352,27 @@ void KeysEditor::toggleGenPanel()
         setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 640));
 
     genPanel = std::make_unique<ChordGenPanel>(processor);
-    genPanel->onClose = [this] { genPanel.reset(); };
+    genPanel->onClose = [this, syncDoors] { genPanel.reset(); syncDoors(); };
     // An emotion preset moves Root and Scale as well as the generator's own key; the
     // combos are APVTS-attached and follow on their own, so this is just the repaint.
     genPanel->onKeyChanged = [this] { repaint(); };
     addAndMakeVisible(*genPanel);
     genPanel->setBounds(getLocalBounds());
+    genPanel->sendLookAndFeelChange(); // its controls were configured pre-parenting
+    syncDoors();
 }
 
 void KeysEditor::toggleArpPanel()
 {
+    const auto syncDoors = [this]
+    {
+        chordsButton.setToggleState(genPanel != nullptr, juce::dontSendNotification);
+        arpButton.setToggleState(arpPanel != nullptr, juce::dontSendNotification);
+    };
     if (arpPanel != nullptr)
     {
         arpPanel.reset();
+        syncDoors();
         return;
     }
     if (genPanel != nullptr)
@@ -315,9 +384,11 @@ void KeysEditor::toggleArpPanel()
         setSize(juce::jmax(getWidth(), 1010), juce::jmax(getHeight(), 780));
 
     arpPanel = std::make_unique<ArpPanel>(processor);
-    arpPanel->onClose = [this] { arpPanel.reset(); };
+    arpPanel->onClose = [this, syncDoors] { arpPanel.reset(); syncDoors(); };
     addAndMakeVisible(*arpPanel);
     arpPanel->setBounds(getLocalBounds());
+    arpPanel->sendLookAndFeelChange(); // its controls were configured pre-parenting
+    syncDoors();
 }
 
 void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
@@ -387,7 +458,7 @@ void KeysEditor::timerCallback()
     const int vmin = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
     const int vmax = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
     humanizeVelSlider.setMinAndMaxValues(vmin, vmax, juce::dontSendNotification);
-    humanizeVelLabel.setText("Velocity  " + juce::String(vmin) + "-" + juce::String(vmax),
+    humanizeVelLabel.setText("VELOCITY  " + juce::String(vmin) + "-" + juce::String(vmax),
                              juce::dontSendNotification);
 
     // Pad page: label and the ends of the range.
@@ -420,7 +491,7 @@ void KeysEditor::timerCallback()
     {
         panicFlash = juce::jmax(0.0f, panicFlash - 0.08f); // ~400 ms at 30 Hz
         panicButton.setColour(juce::TextButton::buttonColourId,
-                              neutralControl.interpolatedWith(okstudio::theme::accent, panicFlash));
+                              skin::control.interpolatedWith(skin::accent, panicFlash));
     }
 
     // Keep the CC assignment labels current (they are parameters; automation or another
@@ -434,9 +505,32 @@ void KeysEditor::timerCallback()
 
 void KeysEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(neutralBg);
-    g.setColour(neutralPanel);
-    g.fillRect(getLocalBounds().removeFromTop(168)); // behind the three control rows
+    const auto full = getLocalBounds().toFloat();
+    g.setGradientFill({ skin::bgTop, 0.0f, 0.0f, skin::bgBot, 0.0f, full.getBottom(), false });
+    g.fillRect(full);
+
+    // Header band behind the three control rows, seated on a shadow + catch-light pair.
+    const auto band = full.withHeight(168.0f);
+    g.setGradientFill({ skin::headerTop, 0.0f, 0.0f, skin::headerBot, 0.0f, band.getBottom(), false });
+    g.fillRect(band);
+    g.setColour(juce::Colours::black.withAlpha(0.55f));
+    g.fillRect(0.0f, band.getBottom(), full.getWidth(), 1.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.04f));
+    g.fillRect(0.0f, band.getBottom() + 1.0f, full.getWidth(), 1.0f);
+
+    // Wordmark caption under the title.
+    g.setColour(skin::accent.withAlpha(0.85f));
+    g.setFont(skin::micro(9.0f).withExtraKerningFactor(0.32f));
+    g.drawText("OK STUDIO", titleCaption, juce::Justification::centredLeft);
+
+    // The performance module (knobs + pads) floats as one raised panel.
+    const auto perf = knobBank.getBounds().getUnion(chordPads.getBounds()).toFloat().expanded(4.0f, 5.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.45f));
+    g.drawRoundedRectangle(perf.expanded(0.5f), skin::panelRadius + 0.5f, 1.0f);
+    g.setColour(skin::panel);
+    g.fillRoundedRectangle(perf, skin::panelRadius);
+    g.setColour(juce::Colours::white.withAlpha(0.045f));
+    g.fillRoundedRectangle(perf.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
 }
 
 void KeysEditor::resized()
@@ -466,7 +560,13 @@ void KeysEditor::resized()
 
     auto play = area;
 
-    title.setBounds(header.removeFromLeft(84).withTrimmedTop(header.getHeight() / 2 - 17).withHeight(34));
+    {
+        // Title + wordmark caption, centred as a pair in the header band.
+        auto titleCol = header.removeFromLeft(84);
+        const int pairTop = titleCol.getY() + (titleCol.getHeight() - 48) / 2;
+        title.setBounds(titleCol.withY(pairTop).withHeight(34));
+        titleCaption = { title.getX() + 2, title.getBottom() - 2, 80, 12 };
+    }
     header.removeFromLeft(6);
 
     auto rowA = header.removeFromTop(rowH);

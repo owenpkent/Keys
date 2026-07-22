@@ -1,7 +1,7 @@
 #include "ChordPads.h"
 #include "../Chords.h"
+#include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
-#include <okstudio/Theme.h>
 
 namespace keys
 {
@@ -69,36 +69,47 @@ void ChordPads::setCurrentChord(const std::vector<int>& notes)
 void ChordPads::paint(juce::Graphics& g)
 {
     using namespace okstudio;
-    const juce::Colour accent = theme::accent;
-    const juce::Colour cardBg { 0xff20242b };
-    const juce::Colour padBg { 0xff191d23 };
-    const juce::Colour line { 0xff3b4148 };
+    const juce::Colour inkOnAccent { 0xff07272c }; // dark ink for text on lit surfaces
 
     const int offset = processor.padPageOffset();
     const int hovered = dragging ? cellAt(dragPos) : -1;
 
-    // Live chord card. While a filled pad is being dragged over it, it highlights to offer
-    // the recall gesture (drop to pull that pad's chord back for editing).
+    // Live chord card: an inset well that lights up while a chord is sounding.
+    // While a filled pad is being dragged over it, it highlights to offer the
+    // recall gesture (drop to pull that pad's chord back for editing).
     {
         const auto b = cardBounds();
         const bool has = isChord(currentNotes);
         const bool recallHover = dragging && dragSource >= 0 && hovered == -2;
-        g.setColour(cardBg);
+
+        g.setColour(juce::Colours::black.withAlpha(0.4f));
+        g.drawRoundedRectangle(b.expanded(0.5f), kRadius + 0.5f, 1.0f);
+        g.setColour(skin::well);
         g.fillRoundedRectangle(b, kRadius);
-        g.setColour(has ? accent : line);
-        g.drawRoundedRectangle(b, kRadius, has ? 2.0f : 1.0f);
-        g.setColour(has ? theme::text : theme::textDim);
-        g.setFont(juce::Font(juce::FontOptions(has ? 15.0f : 11.0f, has ? juce::Font::bold : juce::Font::plain)));
+        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.fillRoundedRectangle(b.withHeight(2.0f).reduced(kRadius, 0.0f), 1.0f);
+
+        if (has)
+        {
+            g.setColour(skin::accent.withAlpha(0.10f));
+            g.fillRoundedRectangle(b, kRadius);
+            skin::glowRect(g, b, kRadius, skin::accent, 0.9f);
+        }
+        else
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.05f));
+            g.drawRoundedRectangle(b, kRadius, 1.0f);
+        }
+        g.setColour(has ? skin::text : skin::textFaint);
+        g.setFont(has ? skin::uiSemi(15.0f) : skin::ui(11.0f));
         g.drawText(has ? currentName : juce::String("hold a chord"), b.reduced(6.0f),
                    juce::Justification::centred);
         if (recallHover)
-        {
-            g.setColour(accent.withAlpha(0.6f));
-            g.drawRoundedRectangle(b, kRadius, 2.0f);
-        }
+            skin::glowRect(g, b, kRadius, skin::accentHot);
     }
 
-    // Pads: the current page's slice, drawn two rows of eight.
+    // Pads: the current page's slice, drawn two rows of eight. Empty slots are
+    // quiet inset wells; filled pads are raised chips; a sounding pad is lit.
     for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
     {
         const int i = offset + v;
@@ -109,41 +120,45 @@ void ChordPads::paint(juce::Graphics& g)
         const bool dropHere = dragging && hovered == i
                               && ((dragSource == -2 && isChord(currentNotes)) || (dragSource >= 0 && dragSource != i));
 
-        g.setColour(active ? accent.withAlpha(0.85f) : padBg);
-        g.fillRoundedRectangle(b, kRadius);
-
-        if (filled)
+        if (! filled)
         {
-            g.setColour(active ? accent : line);
-            g.drawRoundedRectangle(b, kRadius, active ? 2.0f : 1.5f);
-            g.setColour(active ? juce::Colours::black.withAlpha(0.85f) : theme::text);
-            g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
+            g.setColour(skin::well.withAlpha(0.55f));
+            g.fillRoundedRectangle(b, kRadius);
+            g.setColour(juce::Colours::white.withAlpha(0.035f));
+            g.drawRoundedRectangle(b, kRadius, 1.0f);
+        }
+        else if (active)
+        {
+            g.setGradientFill({ skin::accentHot, 0.0f, b.getY(), skin::accent, 0.0f, b.getBottom(), false });
+            g.fillRoundedRectangle(b, kRadius);
+            skin::glowRect(g, b, kRadius, skin::accent);
+            g.setColour(inkOnAccent);
+            g.setFont(skin::uiSemi(13.5f));
             g.drawText(pad.name, b.reduced(4.0f), juce::Justification::centred);
         }
         else
         {
-            juce::Path outline;
-            outline.addRoundedRectangle(b.reduced(0.5f), kRadius);
-            const float dashes[] = { 4.0f, 3.0f };
-            juce::Path dashed;
-            juce::PathStrokeType(1.0f).createDashedStroke(dashed, outline, dashes, 2);
-            g.setColour(line.withAlpha(0.7f));
-            g.fillPath(dashed);
+            skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+            g.setColour(skin::text);
+            g.setFont(skin::uiSemi(13.5f));
+            g.drawText(pad.name, b.reduced(4.0f), juce::Justification::centred);
         }
 
         // Locked pads carry a corner dot. It is an indicator, not a target: the toggle
         // lives in the Chords panel, where it can be a full-size button.
         if (filled && pad.locked)
         {
-            g.setColour(active ? juce::Colours::black.withAlpha(0.7f) : theme::good);
-            g.fillEllipse(b.getRight() - 10.0f, b.getY() + 4.0f, 5.0f, 5.0f);
+            const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
+                                 .withCentre({ b.getRight() - 8.0f, b.getY() + 8.0f });
+            const auto c = active ? inkOnAccent : theme::good;
+            g.setColour(c.withAlpha(0.4f));
+            g.fillEllipse(dot.expanded(2.0f));
+            g.setColour(c);
+            g.fillEllipse(dot);
         }
 
         if (dropHere)
-        {
-            g.setColour(accent);
-            g.drawRoundedRectangle(b, kRadius, 2.0f);
-        }
+            skin::glowRect(g, b, kRadius, skin::accentHot);
     }
 
     // Drag ghost following the cursor.
@@ -151,10 +166,12 @@ void ChordPads::paint(juce::Graphics& g)
     {
         const juce::String label = dragSource == -2 ? currentName : processor.chordPad(dragSource).name;
         auto ghost = juce::Rectangle<float>(0.0f, 0.0f, 84.0f, 26.0f).withCentre(dragPos);
-        g.setColour(accent.withAlpha(0.92f));
+        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.fillRoundedRectangle(ghost.translated(0.0f, 2.0f), kRadius);
+        g.setGradientFill({ skin::accentHot, 0.0f, ghost.getY(), skin::accent, 0.0f, ghost.getBottom(), false });
         g.fillRoundedRectangle(ghost, kRadius);
-        g.setColour(juce::Colours::black);
-        g.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+        g.setColour(inkOnAccent);
+        g.setFont(skin::uiSemi(12.0f));
         g.drawText(label, ghost, juce::Justification::centred);
     }
 }

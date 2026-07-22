@@ -3,6 +3,7 @@
 #include "../ChordSuggest.h"
 #include "../Chords.h"
 #include "../ScaleModes.h"
+#include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 #include <okstudio/Theme.h>
@@ -11,14 +12,14 @@ namespace keys
 {
 namespace
 {
-    const juce::Colour panelBg { 0xff23262c };
+    const juce::Colour panelBg { 0xff1c1f24 };
     const juce::Colour scrim { 0xcc0d0f12 };
 
     void styleLabel(juce::Label& l, const juce::String& text)
     {
-        l.setText(text, juce::dontSendNotification);
-        l.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
-        l.setColour(juce::Label::textColourId, okstudio::theme::textDim);
+        l.setText(text.toUpperCase(), juce::dontSendNotification);
+        l.setFont(skin::micro(10.0f));
+        l.setColour(juce::Label::textColourId, skin::textDim);
     }
 
     // A chord's own register, so a suggestion lands where the chord it follows sits.
@@ -59,11 +60,14 @@ namespace
         {
             if (isItemHighlighted())
             {
-                g.setColour(okstudio::theme::accent.withAlpha(0.25f));
-                g.fillRect(getLocalBounds());
+                const auto r = getLocalBounds().toFloat().reduced(2.0f, 1.0f);
+                g.setColour(skin::accent.withAlpha(0.15f));
+                g.fillRoundedRectangle(r, 4.0f);
+                g.setColour(skin::accent.withAlpha(0.4f));
+                g.drawRoundedRectangle(r, 4.0f, 1.0f);
             }
-            g.setColour(isItemHighlighted() ? juce::Colours::white : okstudio::theme::text);
-            g.setFont(juce::Font(juce::FontOptions(14.0f)));
+            g.setColour(isItemHighlighted() ? juce::Colour(0xffeafcff) : skin::text);
+            g.setFont(skin::ui(14.0f));
             g.drawText(label, getLocalBounds().withTrimmedLeft(okstudio::ui::minHitPx + 10),
                        juce::Justification::centredLeft);
         }
@@ -117,7 +121,7 @@ int ChordGenPanel::genMode() const
 void ChordGenPanel::buildControls()
 {
     title.setText("Chord Generator", juce::dontSendNotification);
-    title.setFont(juce::Font(juce::FontOptions(16.0f, juce::Font::bold)));
+    title.setFont(skin::uiSemi(16.0f).withExtraKerningFactor(0.04f));
     title.setColour(juce::Label::textColourId, okstudio::theme::text);
     addAndMakeVisible(title);
 
@@ -643,7 +647,7 @@ void ChordGenPanel::timerCallback()
         r.play.setEnabled(filled);
         r.lock.setButtonText(pad.locked ? "Locked" : "Lock");
         r.lock.setColour(juce::TextButton::buttonColourId,
-                         pad.locked ? okstudio::theme::good.withAlpha(0.7f) : juce::Colour(0xff2b2f36));
+                         pad.locked ? okstudio::theme::good.withAlpha(0.7f) : skin::control);
         r.lock.setEnabled(filled);
         r.regen.setEnabled(filled && ! pad.locked);
         r.next.setEnabled(filled);
@@ -659,11 +663,12 @@ void ChordGenPanel::mouseDown(const juce::MouseEvent&)
 void ChordGenPanel::paint(juce::Graphics& g)
 {
     g.fillAll(scrim); // dim whatever is behind, so the panel reads as the active surface
-    auto b = getLocalBounds().reduced(8).toFloat();
+    const auto b = getLocalBounds().reduced(8).toFloat();
     g.setColour(panelBg);
-    g.fillRoundedRectangle(b, 8.0f);
-    g.setColour(okstudio::theme::accent.withAlpha(0.5f));
-    g.drawRoundedRectangle(b, 8.0f, 1.5f);
+    g.fillRoundedRectangle(b, skin::panelRadius);
+    g.setColour(juce::Colours::white.withAlpha(0.05f));
+    g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accent, 0.55f);
 }
 
 void ChordGenPanel::resized()

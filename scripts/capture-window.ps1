@@ -1,0 +1,87 @@
+# Captures a screenshot of the Keys (or Keys Host) standalone for the docs, per the
+# CLAUDE.md screenshot contract: launch, PrintWindow(PW_RENDERFULLCONTENT), kill.
+# Never SetForegroundWindow/SetCursorPos (Owen may be using the machine), and never
+# synthesized clicks - overlay buttons are driven through UI Automation Invoke.
+#
+# Usage:
+#   powershell -File scripts/capture-window.ps1 -ExePath build/Keys_artefacts/Release/Standalone/Keys.exe `
+#       -OutPath assets/screenshots/keys.png
+#   ... -InvokeButtons Chords            # open an overlay first (UIA Invoke by name)
+#   ... -KeepOpen                        # leave the app running (repeat captures)
+param(
+    [Parameter(Mandatory = $true)] [string]$ExePath,
+    [Parameter(Mandatory = $true)] [string]$OutPath,
+    [int]$SettleMs = 2500,
+    [string[]]$InvokeButtons = @(),
+    [int]$AfterInvokeMs = 900,
+    [switch]$KeepOpen,
+    [int]$ProcessId = 0   # reuse an already-running instance instead of launching
+)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class KeysCapture {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+}
+'@
+[KeysCapture]::SetProcessDPIAware() | Out-Null
+
+$launched = $false
+if ($ProcessId -ne 0) {
+    $proc = Get-Process -Id $ProcessId
+} else {
+    $proc = Start-Process -FilePath $ExePath -PassThru
+    $launched = $true
+}
+
+try {
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        $proc.Refresh()
+        if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    if ($proc.MainWindowHandle -eq [IntPtr]::Zero) { throw "The app never opened a main window." }
+    if ($launched) { Start-Sleep -Milliseconds $SettleMs }
+
+    foreach ($name in $InvokeButtons) {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
+        $cond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $name)
+        $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        if ($null -eq $el) { throw "UIA element named '$name' not found." }
+        $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Start-Sleep -Milliseconds $AfterInvokeMs
+    }
+
+    $hwnd = $proc.MainWindowHandle
+    $rect = New-Object KeysCapture+RECT
+    [KeysCapture]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
+    $w = $rect.Right - $rect.Left
+    $h = $rect.Bottom - $rect.Top
+    if ($w -le 0 -or $h -le 0) { throw "Window rect is empty ($w x $h)." }
+
+    $bmp = New-Object System.Drawing.Bitmap($w, $h)
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $hdc = $gfx.GetHdc()
+    $ok = [KeysCapture]::PrintWindow($hwnd, $hdc, 2)  # 2 = PW_RENDERFULLCONTENT
+    $gfx.ReleaseHdc($hdc)
+    $gfx.Dispose()
+    if (-not $ok) { $bmp.Dispose(); throw "PrintWindow failed." }
+
+    $bmp.Save($OutPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    Write-Output "saved $OutPath ($w x $h)"
+}
+finally {
+    if ($launched -and -not $KeepOpen) {
+        try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch {}
+    }
+}

@@ -5,6 +5,32 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the "Obsidian" skin — a full visual redesign
+- **Every surface is restyled by a new Keys-local LookAndFeel**
+  (`src/ui/KeysLookAndFeel.{h,cpp}`, subclassing the kit theme): near-black neutral
+  chrome, one cyan accent family for every lit state, machined 3D knobs with glowing
+  value arcs, ball-thumb sliders, inset toggle wells with a check, chevron combos,
+  and restyled popup menus. All vector-drawn (gradients + layered strokes, no
+  images, no OpenGL), so it scales with the resizable editor.
+- **The keyboard is dimensional now:** white keys with a front lip and seams, black
+  keys as stepped glossy blocks with a catch-light edge, drop shadows, and a cyan
+  "felt" strip along the fallboard. Pressed/held keys glow in the accent (the old
+  blues are gone; one accent everywhere).
+- **Chrome:** "KEYS / OK STUDIO" wordmark, micro-caps section labels, a header band,
+  and the knob row + chord pads unified on one raised panel. Chord pads are inset
+  wells (empty), raised chips (filled), or lit accent (sounding); the wheels got
+  ridged grooves and LED-striped grab bars. The Chords/Arp door buttons light up
+  while their overlay is open. The Chord Generator, Arpeggiator, Keys Host bar, and
+  instrument picker all follow the same language.
+- Interaction, layout, hit targets, and parameters are untouched: this is paint
+  only. Sessions are unaffected.
+- **The standalone window chrome follows the skin too**: title bar band, tracked-caps
+  window title, and thin-glyph minimise/close buttons on 38 px targets (the stock
+  JUCE wrapper drew its own default-theme bar above the editor). DAW builds are
+  unaffected; the host owns the window there.
+- New `scripts/capture-window.ps1` implements the CLAUDE.md screenshot procedure
+  (PrintWindow + UI Automation, no focus/cursor theft) for the docs.
+
 ### Changed: one view, no tabs — the Faders and XY surfaces are now eight knobs
 - **Keys collapsed from five tabbed surfaces (Keys/Hex/Pads/Faders/XY) to one view:**
   header controls, eight rotary CC knobs, the chord-pad strip, then the playing

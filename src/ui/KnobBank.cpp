@@ -73,9 +73,4 @@ void KnobBank::resized()
         ccButtons[(size_t) i]->setBounds(buttonArea);
     }
 }
-
-void KnobBank::paint(juce::Graphics& g)
-{
-    g.fillAll(juce::Colour(0xff1b1b1b));
-}
 } // namespace keys

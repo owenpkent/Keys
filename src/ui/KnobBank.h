@@ -28,7 +28,6 @@ public:
     explicit KnobBank(KeysProcessor&);
 
     void resized() override;
-    void paint(juce::Graphics&) override;
 
     // Called from the editor's timer: keep the assignment labels in sync with the params.
     void refreshAssignments();

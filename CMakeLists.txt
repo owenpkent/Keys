@@ -32,6 +32,7 @@ set(KEYS_SOURCES
     src/mcp/KeysMcp.cpp
     src/ui/NoteSurface.cpp
     src/ui/PianoKeyboard.cpp
+    src/ui/KeysLookAndFeel.cpp
     src/ui/KnobBank.cpp
     src/ui/ChordPads.cpp
     src/ui/ChordGenPanel.cpp

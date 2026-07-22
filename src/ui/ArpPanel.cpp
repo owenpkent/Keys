@@ -1,20 +1,20 @@
 #include "ArpPanel.h"
+#include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
 
 namespace keys
 {
 namespace
 {
-    // Caption styling only (font, no colour). ArpPanel is constructed before it is
-    // parented into KeysEditor (same as ChordGenPanel), so a colour snapshotted here
-    // via findColour() would read the JUCE default LookAndFeel, not the editor's
-    // okstudio theme. Leaving Label/ToggleButton colours unset lets every control
-    // resolve its colour through the parent chain at paint time instead, which is
-    // when the theme is actually in effect.
+    // Micro-caps captions in the skin's voice. Colours here are the compile-time
+    // skin tokens, deliberately not findColour(): ArpPanel is constructed before it
+    // is parented into KeysEditor, so a colour snapshotted via findColour() would
+    // read the JUCE default LookAndFeel, not the editor's skin.
     void styleLabel(juce::Label& l, const juce::String& text)
     {
-        l.setText(text, juce::dontSendNotification);
-        l.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
+        l.setText(text.toUpperCase(), juce::dontSendNotification);
+        l.setFont(skin::micro(10.0f));
+        l.setColour(juce::Label::textColourId, skin::textDim);
     }
 
     constexpr const char* clockDivNames[3] = { "1x", "1/2", "1/4" };
@@ -93,13 +93,12 @@ juce::String ArpPanel::LaneGrid::cellText(int value) const
 void ArpPanel::LaneGrid::paint(juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
-    const auto outline = findColour(juce::ComboBox::outlineColourId);
-    const auto accent = findColour(juce::Slider::trackColourId);
-    const auto text = findColour(juce::Label::textColourId);
-    const auto dim = findColour(juce::ToggleButton::tickDisabledColourId);
 
-    g.setColour(findColour(juce::ComboBox::backgroundColourId));
+    // Inset well with step bars: accent gradient bodies capped by a hot top line.
+    g.setColour(skin::well);
     g.fillRect(b);
+    g.setColour(juce::Colours::black.withAlpha(0.4f));
+    g.fillRect(b.getX(), b.getY(), b.getWidth(), 1.5f);
 
     const int length = currentLength();
     const float cellW = length > 0 ? b.getWidth() / (float) length : b.getWidth();
@@ -110,20 +109,26 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
                                        processor.arp.lanes.value[(size_t) lane][(size_t) i].load(std::memory_order_relaxed));
         auto cell = juce::Rectangle<float>(b.getX() + cellW * (float) i, b.getY(), cellW, b.getHeight());
 
-        g.setColour(outline.withAlpha(0.35f));
+        g.setColour(juce::Colours::white.withAlpha(0.045f));
         g.drawVerticalLine((int) cell.getX(), b.getY(), b.getBottom());
 
         const auto bar = cell.reduced(1.5f);
         const float frac = hiVal > loVal ? (float) (value - loVal) / (float) (hiVal - loVal) : 0.0f;
         const auto filled = bar.withTop(bar.getBottom() - bar.getHeight() * frac);
-        g.setColour(accent.withAlpha(0.6f));
-        g.fillRect(filled);
+        if (filled.getHeight() > 0.5f)
+        {
+            g.setGradientFill({ skin::accent.withAlpha(0.55f), 0.0f, filled.getY(),
+                                skin::accentDeep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
+            g.fillRect(filled);
+            g.setColour(skin::accentHot.withAlpha(0.9f));
+            g.fillRect(filled.getX(), filled.getY(), filled.getWidth(), 1.5f);
+        }
 
         const bool asDot = (lane == ArpEngine::laneNote && value == 0);
         if (asDot)
         {
             const float r = juce::jmin(6.0f, cell.getWidth() * 0.25f);
-            g.setColour(text);
+            g.setColour(skin::text);
             g.fillEllipse(cell.getCentreX() - r, cell.getCentreY() - r, r * 2.0f, r * 2.0f);
         }
         else if (cell.getWidth() > 16.0f)
@@ -131,29 +136,29 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
             const auto txt = cellText(value);
             if (txt.isNotEmpty())
             {
-                g.setColour(lane == ArpEngine::laneNote && value == -1 ? dim : text);
-                g.setFont(juce::Font(juce::FontOptions(11.0f)));
+                g.setColour(lane == ArpEngine::laneNote && value == -1 ? skin::textFaint : skin::text);
+                g.setFont(skin::ui(11.0f));
                 g.drawText(txt, cell.toNearestInt(), juce::Justification::centred);
             }
         }
     }
 
-    g.setColour(outline);
+    g.setColour(juce::Colours::black.withAlpha(0.5f));
     g.drawRect(b, 1.0f);
 
     if (dragging)
     {
         const auto txt = juce::String(cursorValue);
-        const juce::Font f(juce::FontOptions(12.0f, juce::Font::bold));
+        const juce::Font f = skin::uiSemi(12.0f);
         const int tw = f.getStringWidth(txt) + 14;
         auto box = juce::Rectangle<int>(juce::roundToInt(cursorPos.x) - tw / 2,
                                         juce::roundToInt(cursorPos.y) - 28, tw, 20)
                       .constrainedWithin(getLocalBounds());
-        g.setColour(findColour(juce::PopupMenu::backgroundColourId));
+        g.setColour(juce::Colour(0xff1e2127));
         g.fillRoundedRectangle(box.toFloat(), 4.0f);
-        g.setColour(accent);
+        g.setColour(skin::accent);
         g.drawRoundedRectangle(box.toFloat(), 4.0f, 1.0f);
-        g.setColour(text);
+        g.setColour(skin::text);
         g.setFont(f);
         g.drawText(txt, box, juce::Justification::centred);
     }
@@ -207,9 +212,6 @@ void ArpPanel::MuteRow::mouseDrag(const juce::MouseEvent& e)
 void ArpPanel::MuteRow::paint(juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
-    const auto outline = findColour(juce::ComboBox::outlineColourId);
-    const auto accent = findColour(juce::Slider::trackColourId);
-    const auto dim = findColour(juce::ToggleButton::tickDisabledColourId);
 
     const int length = currentLength();
     const float cellW = length > 0 ? b.getWidth() / (float) length : b.getWidth();
@@ -220,15 +222,26 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
         const bool muted = value == -1;
         auto cell = juce::Rectangle<float>(b.getX() + cellW * (float) i, b.getY(), cellW, b.getHeight()).reduced(2.0f);
 
-        g.setColour(muted ? dim.withAlpha(0.3f) : accent.withAlpha(0.6f));
-        g.fillRoundedRectangle(cell, 3.0f);
-        g.setColour(outline);
-        g.drawRoundedRectangle(cell, 3.0f, 1.0f);
+        if (muted)
+        {
+            g.setColour(skin::well);
+            g.fillRoundedRectangle(cell, 3.0f);
+            g.setColour(juce::Colours::white.withAlpha(0.05f));
+            g.drawRoundedRectangle(cell, 3.0f, 1.0f);
+        }
+        else
+        {
+            g.setGradientFill({ skin::accent.withAlpha(0.5f), 0.0f, cell.getY(),
+                                skin::accentDeep.withAlpha(0.45f), 0.0f, cell.getBottom(), false });
+            g.fillRoundedRectangle(cell, 3.0f);
+            g.setColour(skin::accentHot.withAlpha(0.5f));
+            g.fillRect(cell.getX() + 2.0f, cell.getY() + 1.0f, cell.getWidth() - 4.0f, 1.5f);
+        }
 
         if (muted && cell.getWidth() > 14.0f)
         {
-            g.setColour(dim);
-            g.setFont(juce::Font(juce::FontOptions(11.0f)));
+            g.setColour(skin::textFaint);
+            g.setFont(skin::ui(11.0f));
             g.drawText("X", cell.toNearestInt(), juce::Justification::centred);
         }
     }
@@ -334,7 +347,7 @@ void ArpPanel::refreshPatternButtons()
 void ArpPanel::buildControls()
 {
     title.setText("Arpeggiator", juce::dontSendNotification);
-    title.setFont(juce::Font(juce::FontOptions(16.0f, juce::Font::bold)));
+    title.setFont(skin::uiSemi(16.0f).withExtraKerningFactor(0.04f));
     addAndMakeVisible(title);
 
     addAndMakeVisible(onButton);
@@ -455,12 +468,13 @@ void ArpPanel::mouseDown(const juce::MouseEvent&)
 
 void ArpPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colours::black.withAlpha(0.75f)); // dim whatever is behind the overlay
-    auto b = getLocalBounds().reduced(8).toFloat();
-    g.setColour(findColour(juce::ComboBox::backgroundColourId));
-    g.fillRoundedRectangle(b, 8.0f);
-    g.setColour(findColour(juce::Slider::trackColourId));
-    g.drawRoundedRectangle(b, 8.0f, 1.5f);
+    g.fillAll(juce::Colours::black.withAlpha(0.78f)); // dim whatever is behind the overlay
+    const auto b = getLocalBounds().reduced(8).toFloat();
+    g.setColour(juce::Colour(0xff1c1f24));
+    g.fillRoundedRectangle(b, skin::panelRadius);
+    g.setColour(juce::Colours::white.withAlpha(0.05f));
+    g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accent, 0.55f);
 }
 
 void ArpPanel::resized()
