@@ -86,6 +86,9 @@ Use the PrintWindow approach (never SetForegroundWindow/SetCursorPos — Owen is
 using the machine, and a mis-capture can grab his private windows). Launch the
 standalone, capture via `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`, kill the
 process. Screenshots live in `assets/screenshots/`, referenced from README and docs.
+To capture an overlay (Chords/Arp), don't synthesize clicks — posted WM_LBUTTONDOWN
+never reaches JUCE. Invoke the button through UI Automation instead (find the
+AutomationElement by name, InvokePattern.Invoke()); no cursor movement involved.
 
 ## Conventions
 
