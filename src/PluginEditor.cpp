@@ -320,6 +320,7 @@ void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::S
     styleLabel(label, text);
     addAndMakeVisible(label);
     box.addItemList(items, 1);
+    box.setTitle(text); // accessible name (screen readers / UI Automation); combos otherwise expose none
     addAndMakeVisible(box);
     att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
 }
@@ -679,7 +680,7 @@ void KeysEditor::resized()
     // slim as the mouse-only floor allows (40 px column -> 36 px slider, floor 34).
     auto playArea = play;
     auto wheels = playArea.removeFromLeft(84);
-    playArea.removeFromLeft(6);
+    playArea.removeFromLeft(4);
     auto modCol = wheels.removeFromLeft(40);
     wheels.removeFromLeft(4);
     auto pitchCol = wheels;

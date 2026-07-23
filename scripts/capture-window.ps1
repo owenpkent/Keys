@@ -13,6 +13,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$OutPath,
     [int]$SettleMs = 2500,
     [string[]]$InvokeButtons = @(),
+    [string[]]$SetValues = @(),   # ComboBox "CurrentText=NewText" pairs (matched by current value)
     [int]$AfterInvokeMs = 900,
     [switch]$KeepOpen,
     [int]$ProcessId = 0   # reuse an already-running instance instead of launching
@@ -50,6 +51,50 @@ try {
     }
     if ($proc.MainWindowHandle -eq [IntPtr]::Zero) { throw "The app never opened a main window." }
     if ($launched) { Start-Sleep -Milliseconds $SettleMs }
+
+    foreach ($pair in $SetValues) {
+        $current, $value = $pair -split '=', 2
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
+        $cond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::ComboBox)
+        $el = $null
+        foreach ($c in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)) {
+            try {
+                if ($c.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $current) {
+                    $el = $c
+                    break
+                }
+            } catch {}
+        }
+        if ($null -eq $el) { throw "No ComboBox with value '$current' found." }
+
+        # JUCE's combo value is UIA read-only, so drive it the way a user would:
+        # open its menu, then invoke the row. The popup is a separate top-level
+        # window in the same process.
+        $opened = $false
+        try { $el.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand(); $opened = $true } catch {}
+        if (-not $opened) {
+            try { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $opened = $true } catch {}
+        }
+        if (-not $opened) { throw "Could not open the ComboBox menu for '$current'." }
+        Start-Sleep -Milliseconds 600
+
+        $procCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $proc.Id)
+        $itemCond = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $value)
+        $item = $null
+        foreach ($w in [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                     [System.Windows.Automation.TreeScope]::Children, $procCond)) {
+            $item = $w.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $itemCond)
+            if ($null -ne $item) { break }
+        }
+        if ($null -eq $item) { throw "Menu item '$value' not found." }
+        try { $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+        catch { $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
+        Start-Sleep -Milliseconds $AfterInvokeMs
+    }
 
     foreach ($name in $InvokeButtons) {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)

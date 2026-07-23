@@ -54,8 +54,9 @@ void PianoKeyboard::layoutKeys()
     // between the pad strip and the keybed.)
     const float wh = juce::jmin(area.getHeight(), 185.0f);
     const float yTop = area.getBottom() - wh;
-    const float bw = ww * 0.64f; // Octavium proportions: black ~64% of white width,
-    const float bh = wh * 0.62f; // ~62% of its height.
+    const float bw = ww * 0.64f; // Octavium proportions: black ~64% of white width.
+    const float bh = wh * 0.56f; // Shorter than Octavium's 62%: more of each white key
+                                 // is full-width, the accurate zone for mouse-only play.
     keysTop = yTop;
 
     int whiteIndex = 0;

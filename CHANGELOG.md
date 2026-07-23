@@ -58,6 +58,12 @@ All notable changes to Keys are documented here. Format follows
   112 to 84 px (each slider 36 px wide, still above the 34 px mouse-only floor) and
   the key-height cap rises from 150 to 185 px, closing the dead band that sat
   between the pad strip and the keybed at the default window size.
+- **Clickable keys: the default Size is 49 keys now (was 61).** At the default
+  window, 61 keys left ~24 px per white key — too narrow to hit accurately with a
+  mouse; 49 keys is ~30 px. Existing sessions keep their stored Size (flip the combo
+  once to adopt 49); 61-88 remain available when range matters more than width.
+  Black keys are also slightly shorter (56% of white height, was 62%), so more of
+  every white key is the full-width, accurate-to-click zone.
 - New `scripts/capture-window.ps1` implements the CLAUDE.md screenshot procedure
   (PrintWindow + UI Automation, no focus/cursor theft) for the docs.
 

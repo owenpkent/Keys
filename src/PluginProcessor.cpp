@@ -36,7 +36,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
                                                        okstudio::scales::names(), 0));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "scaleLock", 1 }, "Scale Lock", false));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "octave", 1 }, "Octave", -5, 5, 0));
-    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "size", 1 }, "Keyboard Size", sizeNames(), 2));
+    // Default 49 keys (was 61): at the default window a 61-key bed leaves ~24 px per
+    // white key, too narrow to click accurately mouse-only. 49 keys ≈ 30 px whites;
+    // the Size combo still goes up to 88 when range matters more than width. A
+    // default change only, not a layout change: saved sessions keep their value.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "size", 1 }, "Keyboard Size", sizeNames(), 1));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "polyphony", 1 }, "Polyphony",
                                                       juce::StringArray { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "channel", 1 }, "MIDI Channel", channelNames(), 0));
