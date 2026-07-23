@@ -54,6 +54,10 @@ All notable changes to Keys are documented here. Format follows
   window title, and thin-glyph minimise/close buttons on 38 px targets (the stock
   JUCE wrapper drew its own default-theme bar above the editor). DAW builds are
   unaffected; the host owns the window there.
+- **Layout: slimmer wheels, taller keys.** The Mod/Pitch wheel column narrows from
+  112 to 84 px (each slider 36 px wide, still above the 34 px mouse-only floor) and
+  the key-height cap rises from 150 to 185 px, closing the dead band that sat
+  between the pad strip and the keybed at the default window size.
 - New `scripts/capture-window.ps1` implements the CLAUDE.md screenshot procedure
   (PrintWindow + UI Automation, no focus/cursor theft) for the docs.
 

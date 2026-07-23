@@ -50,7 +50,9 @@ void PianoKeyboard::layoutKeys()
     const float ww = area.getWidth() / (float) whiteCount;
     // Cap the key height so keys stay piano-proportioned instead of stretching to fill
     // a tall window; any extra height becomes instrument body above, keys anchored low.
-    const float wh = juce::jmin(area.getHeight(), 150.0f);
+    // (185, up from 150: at the default window size the old cap left a wide dead band
+    // between the pad strip and the keybed.)
+    const float wh = juce::jmin(area.getHeight(), 185.0f);
     const float yTop = area.getBottom() - wh;
     const float bw = ww * 0.64f; // Octavium proportions: black ~64% of white width,
     const float bh = wh * 0.62f; // ~62% of its height.

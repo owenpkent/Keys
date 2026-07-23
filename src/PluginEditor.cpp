@@ -675,11 +675,12 @@ void KeysEditor::resized()
     knobBank.setBounds(knobRow);
     chordPads.setBounds(padRows);
 
-    // Wheels sit left of the keyboard; the keyboard fills the rest.
+    // Wheels sit left of the keyboard; the keyboard fills the rest. Columns are as
+    // slim as the mouse-only floor allows (40 px column -> 36 px slider, floor 34).
     auto playArea = play;
-    auto wheels = playArea.removeFromLeft(112);
+    auto wheels = playArea.removeFromLeft(84);
     playArea.removeFromLeft(6);
-    auto modCol = wheels.removeFromLeft(54);
+    auto modCol = wheels.removeFromLeft(40);
     wheels.removeFromLeft(4);
     auto pitchCol = wheels;
     modLabel.setBounds(modCol.removeFromBottom(15));
