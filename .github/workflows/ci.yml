@@ -19,6 +19,12 @@ on:
 permissions:
   contents: read
 
+# Cancel an in-flight build when a newer commit lands on the same branch/PR,
+# so rapid pushes don't stack 2x-billed Windows runs to completion.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     # Windows only. Owen ships Windows; the macos-latest leg was dropped
