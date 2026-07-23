@@ -1,9 +1,19 @@
 name: CI
 
+# Docs/screenshot-only pushes don't need a build; every skipped run saves
+# 2x-billed Windows minutes.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'assets/**'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'assets/**'
+      - 'docs/**'
 
 # Least privilege: this workflow only reads source and uploads an artifact.
 permissions:
@@ -11,12 +21,13 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    # Windows only. Owen ships Windows; the macos-latest leg was dropped
+    # 2026-07-22 because macOS runners bill included Actions minutes at 10x
+    # (the "90% of included minutes" warning). If mac builds ever return,
+    # revive the matrix from git history or a self-hosted Mac runner (see
+    # homelab-network/CHECKLIST.md).
+    name: windows-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -59,7 +70,6 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Upload VST3 artifact
-        if: runner.os == 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Keys-VST3-win64

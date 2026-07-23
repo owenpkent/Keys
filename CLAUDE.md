@@ -100,7 +100,10 @@ AutomationElement by name, InvokePattern.Invoke()); no cursor movement involved.
 - C++20, JUCE idioms, match surrounding style (`.clang-format`).
 - Update `CHANGELOG.md` under `[Unreleased]` with every user-visible change.
 - Never add AI attribution to commits.
-- CI builds `windows-latest` + `macos-latest`; don't pin a VS generator in workflows.
+- CI builds `windows-latest` only; don't pin a VS generator in workflows. The
+  `macos-latest` leg was dropped 2026-07-22 (Owen ships Windows; macOS runners bill
+  included Actions minutes at 10x) — revive from git history or a self-hosted Mac
+  runner if mac builds ever return. Docs/assets-only pushes skip CI (`paths-ignore`).
 
 ## Sibling projects (same owner, same conventions)
 
