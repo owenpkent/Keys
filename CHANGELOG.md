@@ -25,6 +25,13 @@ gave no indication of which notes it was holding.
 - **Those keys paint as `held`**, the state that already means "ringing with no finger on
   it", and they are checked after `pressed`/`latched`, so a key you are genuinely holding
   still reads as your own gesture.
+- **Notes the surface is already playing are excluded**, rather than inverse-mapped back
+  onto a key. `drawnForOutputNote()` is only the inverse of `outputNote()` while nothing
+  has moved between them, and two ordinary things move: Scale Lock snaps an out-of-scale
+  key onto its neighbour (those keys are dimmed, not disabled, so clicking one is normal
+  use), and the octave can change while a note is latched and still ringing at its
+  press-time pitch. Both would otherwise light a second, wrong key next to the one you
+  actually touched.
 
 ### Fixed: `play_notes` and `play_sequence` made no sound at all
 
@@ -55,6 +62,10 @@ because its release comes from this bridge's timer rather than from a delayed me
 - **`all_notes_off` abandons anything still scheduled**, so it stops a phrase
   mid-flight. Previously it could only silence the current note while the rest of the
   queue carried on.
+- **`play_sequence` accepts steps in any order.** The queue sorts by time, and at equal
+  times a note-off goes before a note-on, so a note that repeats back-to-back releases
+  before it re-attacks. Ordering by time alone let an unsorted phrase drop notes: the
+  second attack could land ahead of the first release, which then killed it.
 - `noteOn`/`noteOff` keep their `delaySeconds` parameters, which remain correct for the
   sub-block use they were written for (chord strum spread). Nothing outside this bridge
   relied on them for longer waits.
@@ -86,6 +97,10 @@ per-step lane edits will now play as a plain arpeggiator until you set **Shape**
 - **Fixed: tooltips never appeared anywhere in the plugin.** JUCE only shows them when a
   `TooltipWindow` exists and there was none, so 19 written explanations across the arp
   and chord panels were dead code.
+- Shape brackets its writes in `beginChangeGesture`/`endChangeGesture`. It spans two
+  parameters, so it cannot be an APVTS attachment, and the attachment is what normally
+  supplies those: without them a host in touch or latch mode would not arm on a Shape
+  change the way it does on every other arp control.
 
 ### Changed: the instrument picker files VSTs into folders
 - **One collapsible folder per publisher**, opening closed, so a big library reads as a

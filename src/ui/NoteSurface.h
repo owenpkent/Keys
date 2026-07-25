@@ -69,7 +69,8 @@ protected:
     // subclass's paint() should treat these as held, AFTER checking its own pressed and
     // latched sets, so a key the user is actually holding still paints as their gesture.
     // Built from the processor's refcounts and mapped back through drawnForOutputNote,
-    // so a note with no key on this surface is simply skipped.
+    // so a note with no key on this surface is simply skipped, and notes already in
+    // `sounding` are excluded outright (see the .cpp for why that matters).
     std::set<int> externallySounding() const;
 
     KeysProcessor& processor;

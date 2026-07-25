@@ -160,9 +160,18 @@ void KeysMcp::scheduleNote(double atMs, int note, int channel, float vel01, bool
     const PendingNote pn { atMs, note, channel, vel01, isOn };
     // Insert in place rather than sorting the whole vector each time: callers append
     // in mostly-ascending order, so this lands at or near the back.
-    const auto at = std::upper_bound(pendingNotes.begin(), pendingNotes.end(), pn,
-                                     [](const PendingNote& a, const PendingNote& b) { return a.atMs < b.atMs; });
-    pendingNotes.insert(at, pn);
+    //
+    // At equal times a note-off sorts before a note-on. Nothing in play_sequence
+    // requires the caller's steps to arrive in chronological order, and on a note that
+    // repeats back-to-back, ordering by time alone lets the second attack be inserted
+    // ahead of the first release: the release then kills the note that just started and
+    // the phrase drops a note. Time first, off-before-on second, is a strict weak
+    // ordering, so upper_bound keeps working.
+    const auto before = [](const PendingNote& a, const PendingNote& b)
+    {
+        return a.atMs != b.atMs ? a.atMs < b.atMs : (! a.isOn && b.isOn);
+    };
+    pendingNotes.insert(std::upper_bound(pendingNotes.begin(), pendingNotes.end(), pn, before), pn);
 }
 
 void KeysMcp::cancelPendingRelease(int slot)
@@ -371,8 +380,9 @@ okstudio::mcp::Tool KeysMcp::toolPlaySequence()
     t.description = "Schedule a whole phrase in one call: an array of steps, each "
                      "{note, startMs, durationMs, velocity?}, all timed from now. This is "
                      "the tool for writing a melody rather than triggering single notes. "
-                     "Limits: at most 256 steps, and the phrase must finish inside "
-                     "120000ms (start + duration of every step).";
+                     "Steps may be listed in any order; they are scheduled by their own "
+                     "startMs. Limits: at most 256 steps, and the phrase must finish "
+                     "inside 120000ms (start + duration of every step).";
     t.params = { { "steps", "array", "Notes to schedule, each {note (0..127), startMs, durationMs, velocity? (1..127, default the Velocity control)}.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {

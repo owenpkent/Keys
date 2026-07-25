@@ -29,10 +29,22 @@ void NoteSurface::timerCallback()
 
 std::set<int> NoteSurface::externallySounding() const
 {
+    // Skip what this surface is already playing. Its own notes are drawn from
+    // `pressed`/`latched`/`sustained`, in the key coordinates they were pressed in, and
+    // drawnForOutputNote is only the inverse of outputNote while nothing has moved
+    // between the two. Two things do: Scale Lock snaps an out-of-scale key onto a
+    // neighbour (out-of-scale keys are dimmed, not disabled, so this is an ordinary
+    // click), and the octave can change while a note is latched or sustained and still
+    // ringing at its press-time pitch. Inverse-mapping those lit a second, wrong key
+    // beside the one the user actually touched.
+    std::set<int> own;
+    for (const auto& kv : sounding)
+        own.insert(kv.second);
+
     std::set<int> out;
     for (int note = 0; note < 128; ++note)
     {
-        if (! processor.isNoteSounding(note))
+        if (own.count(note) > 0 || ! processor.isNoteSounding(note))
             continue;
         const int drawn = drawnForOutputNote(note);
         if (drawn >= 0)

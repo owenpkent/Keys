@@ -58,6 +58,10 @@ This also means timing is message-thread timing, not sample-accurate. It is well
 what a sparse phrase needs; it is not a sequencer, and a dense pattern that has to lock to
 the host grid belongs in the arp lanes or in Contour, not here.
 
+Steps may be given in any order. The queue sorts by time, and at equal times a note-off
+is emitted before a note-on, so a note repeated back-to-back releases before it
+re-attacks instead of the new attack being cut by the old release.
+
 `all_notes_off` discards anything still queued, so it stops a phrase mid-flight.
 
 ## Setting it up in Claude Code

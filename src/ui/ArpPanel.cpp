@@ -335,11 +335,22 @@ void ArpPanel::applyShapeChoice()
 {
     const int chosen = shapeBox.getSelectedItemIndex(); // 0..7 = a direction, 8 = Pattern
     auto& apvts = processor.apvts;
+    // Gestures by hand. Every other control here is an APVTS attachment and gets its
+    // begin/end for free; Shape spans two parameters so it cannot be one, and without
+    // the brackets a host in touch or latch never arms on a Shape change.
     if (auto* pat = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpPattern")))
+    {
+        pat->beginChangeGesture();
         *pat = chosen >= ArpEngine::numDirections;
+        pat->endChangeGesture();
+    }
     if (chosen >= 0 && chosen < ArpEngine::numDirections)
         if (auto* dir = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpDirection")))
+        {
+            dir->beginChangeGesture();
             *dir = chosen; // "Pattern" leaves the direction alone; lanes can still follow it
+            dir->endChangeGesture();
+        }
     refreshShape();
 }
 
@@ -571,7 +582,7 @@ void ArpPanel::mouseDown(const juce::MouseEvent&)
 juce::Rectangle<int> ArpPanel::cardBounds() const
 {
     constexpr int shapeH = 12 + (28 + 8) + (40 + 6) + 40 + 12;
-    constexpr int patternH = shapeH + (34 + 6) + (150 + 6) + (34 + 10) + (48 + 8) + 40;
+    constexpr int patternH = shapeH + (34 + 6) + (150 + 6) + (14 + 2) + (34 + 10) + (48 + 8) + 40;
     const auto full = getLocalBounds().reduced(8);
     return full.withHeight(juce::jmin(full.getHeight(), patternMode() ? patternH : shapeH));
 }
@@ -647,11 +658,15 @@ void ArpPanel::resized()
         if (lr.grid != nullptr)
             lr.grid->setBounds(gridArea); // all share the slot; only one is visible
 
+    // The mute strip divides its own width into the same step count the grid does, so it
+    // only reads as "the steps above, muted" while the two share an origin and a width.
+    // The caption therefore goes above the strip, not beside it: a left gutter on one and
+    // not the other silently slid every mute cell off the step it belongs to.
+    muteRowLabel.setBounds(area.removeFromTop(14));
+    area.removeFromTop(2);
     auto muteArea = area.removeFromTop(34);
     area.removeFromTop(10);
-    muteRowLabel.setBounds(muteArea.removeFromLeft(90));
-    muteArea.removeFromLeft(8);
-    muteRow->setBounds(muteArea);
+    muteRow->setBounds(muteArea); // same x and width as gridArea, both carved off `area`
 
     auto stepsRow = area.removeFromTop(48);
     area.removeFromTop(8);
