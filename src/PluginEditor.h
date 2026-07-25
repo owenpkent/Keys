@@ -120,14 +120,13 @@ private:
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
-    juce::Slider velocitySlider, octaveSlider, chordStrumSlider;
-    juce::Label velocityLabel, octaveLabel, chordStrumLabel;
+    juce::Slider octaveSlider, chordStrumSlider;
+    juce::Label octaveLabel, chordStrumLabel;
     juce::Slider modWheel, pitchWheel;  // transient performance wheels (no persistence)
     juce::Label modLabel, pitchLabel;
 
     juce::ToggleButton scaleLockButton { "Scale Lock" };
     juce::ToggleButton sustainButton { "Sustain" };
-    juce::ToggleButton latchButton { "Latch" };
     juce::ToggleButton humanizeButton { "Humanize" };
     juce::ToggleButton chordExclusiveButton { "Exclusive" };
     juce::TextButton panicButton { "All Off" };
@@ -178,8 +177,8 @@ private:
     juce::Label humanizeVelLabel, humanizeTimeLabel;
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
-    std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeTimeAtt, chordStrumAtt;
-    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
+    std::unique_ptr<SliderAtt> octaveAtt, humanizeTimeAtt, chordStrumAtt;
+    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;

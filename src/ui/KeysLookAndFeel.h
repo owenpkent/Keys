@@ -168,6 +168,10 @@ public:
     void drawTooltip(juce::Graphics&, const juce::String& text, int width, int height) override;
 
     void drawPopupMenuBackground(juce::Graphics&, int width, int height) override;
+    // Must agree with drawPopupMenuItem's gutters, or JUCE sizes the menu to the text
+    // alone and our own inset then clips it. This is what was truncating "Magenta".
+    void getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator, int standardHeight,
+                                   int& idealWidth, int& idealHeight) override;
     void drawPopupMenuItem(juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator,
                            bool isActive, bool isHighlighted, bool isTicked, bool hasSubMenu,
                            const juce::String& text, const juce::String& shortcutKeyText,

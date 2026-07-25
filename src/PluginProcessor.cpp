@@ -44,9 +44,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "polyphony", 1 }, "Polyphony",
                                                       juce::StringArray { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "channel", 1 }, "MIDI Channel", channelNames(), 0));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "sustain", 1 }, "Sustain", false));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", false));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 1, 127, 64));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 1, 127, 88));
@@ -89,6 +87,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // were three overlapping ways to set velocity; this is the one that earned nothing.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "curve", 1 }, "Velocity Curve",
                                                       juce::StringArray { "Soft", "Linear", "Hard" }, 1));
+    // Velocity and Latch, same story. The fixed Velocity slider only ever applied while
+    // Humanize was off, so it and the Humanize range were one control in two costumes;
+    // the range absorbed it (baseVelocity01). Latch-as-a-mode went once a left click
+    // released a held note, which left right-click-to-hold as the only path worth having.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padChannel", 1 }, "Pad Grid Channel",
                                                       channelNames(), 9));
 
@@ -193,8 +197,16 @@ int KeysProcessor::padPage() const
 
 float KeysProcessor::baseVelocity01() const
 {
-    const float v = apvts.getRawParameterValue("velocity")->load();
-    return (v - 1.0f) / 126.0f;
+    // The Humanize range *is* the velocity control. There used to be two: a fixed Velocity
+    // slider that only applied while Humanize was off, and this range that only applied
+    // while it was on - the same control wearing different clothes, which is what made
+    // them feel redundant. Now Humanize on picks a random value inside the range per note
+    // (see noteOn), and off plays its midpoint. Collapsing the band onto a single value
+    // therefore gives a plain fixed velocity, which is exactly what the slider did.
+    const float a = apvts.getRawParameterValue("humanizeVelMin")->load();
+    const float b = apvts.getRawParameterValue("humanizeVelMax")->load();
+    const float mid = (juce::jmin(a, b) + juce::jmax(a, b)) * 0.5f;
+    return juce::jlimit(0.0f, 1.0f, (mid - 1.0f) / 126.0f);
 }
 
 bool KeysProcessor::chordPadActive(int i) const

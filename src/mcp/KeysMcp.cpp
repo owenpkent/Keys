@@ -203,7 +203,7 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("octave", text("octave"));
         obj->setProperty("sustain", text("sustain"));
         obj->setProperty("latch", text("latch"));
-        obj->setProperty("velocity", text("velocity"));
+        obj->setProperty("velocity", juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         obj->setProperty("arpOn", text("arpOn"));
         obj->setProperty("arpRate", text("arpRate"));
         obj->setProperty("arpDirection", text("arpDirection"));
@@ -328,7 +328,7 @@ okstudio::mcp::Tool KeysMcp::toolPlayNotes()
                      "the arp (if it's on).";
     t.params = {
         { "notes", "array", "MIDI note numbers to play, 0..127.", true },
-        { "velocity", "integer", "Note-on velocity, 1..127. Default: the Velocity control's current value.", false },
+        { "velocity", "integer", "Note-on velocity, 1..127. Default: the Velocity range's current value.", false },
         { "durationMs", "integer", "How long to hold each note before its note-off, in ms (clamped 10..60000). Default 500.", false },
         { "channel", "integer", "MIDI channel 1..16 to send on. Default: the MIDI Channel control.", false },
     };
@@ -349,7 +349,7 @@ okstudio::mcp::Tool KeysMcp::toolPlayNotes()
             }
         }
 
-        const int defaultVel = (int) processor.apvts.getRawParameterValue("velocity")->load();
+        const int defaultVel = juce::jlimit(1, 127, juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         const int velocity = juce::jlimit(1, 127, (int) args.getProperty("velocity", defaultVel));
         const int durationMs = juce::jlimit(10, 60000, (int) args.getProperty("durationMs", 500));
         const int channel = (int) args.getProperty("channel", 0);
@@ -401,7 +401,7 @@ okstudio::mcp::Tool KeysMcp::toolPlaySequence()
         struct Step { int note; double startMs; double durationMs; float vel01; };
         std::vector<Step> steps;
         steps.reserve((size_t) arr->size());
-        const int defaultVel = (int) processor.apvts.getRawParameterValue("velocity")->load();
+        const int defaultVel = juce::jlimit(1, 127, juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         double horizonMs = 0.0;
 
         for (const auto& item : *arr)

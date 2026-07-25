@@ -19,7 +19,7 @@ namespace
     // Fixed heights of the editor's bands, shared by idealHeight() and resized() so the
     // window the folds ask for and the layout they get can never drift apart.
     constexpr int rowH = 46;                          // one row of header controls
-    constexpr int headerH = 14 + rowH * 3 + 6;        // the three of them, plus label lead-in
+    constexpr int headerH = 14 + rowH * 2 + 6;        // both of them, plus label lead-in
     constexpr int viewBarH = 34;                      // centre-view tabs + pad transport
     constexpr int knobRowH = 110;
     constexpr int padRowH = 96;
@@ -69,20 +69,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     octaveSlider.setRange(-5, 5, 1);
     addAndMakeVisible(octaveSlider);
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "octave", octaveSlider);
-
-    styleLabel(velocityLabel, "Velocity");
-    addAndMakeVisible(velocityLabel);
-    velocitySlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    velocitySlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 42, 26);
-    velocitySlider.setRange(1, 127, 1);
-    addAndMakeVisible(velocitySlider);
-    velocityAtt = std::make_unique<SliderAtt>(processor.apvts, "velocity", velocitySlider);
-
-    for (auto* b : { &scaleLockButton, &sustainButton, &latchButton, &humanizeButton, &chordExclusiveButton })
+    for (auto* b : { &scaleLockButton, &sustainButton, &humanizeButton, &chordExclusiveButton })
         addAndMakeVisible(*b);
     scaleLockAtt = std::make_unique<ButtonAtt>(processor.apvts, "scaleLock", scaleLockButton);
     sustainAtt = std::make_unique<ButtonAtt>(processor.apvts, "sustain", sustainButton);
-    latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "latch", latchButton);
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
     chordExclusiveAtt = std::make_unique<ButtonAtt>(processor.apvts, "chordExclusive", chordExclusiveButton);
 
@@ -542,8 +532,7 @@ void KeysEditor::syncSectionControls()
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &title, &sizeBox, &sizeLabel, &rootBox, &rootLabel, &scaleBox, &scaleLabel,
              &octaveSlider, &octaveLabel, &scaleLockButton, &polyphonyBox, &polyphonyLabel,
-             &velocitySlider, &velocityLabel, &channelBox, &channelLabel,
-             &latchButton, &humanizeButton,
+             &channelBox, &channelLabel, &humanizeButton,
              &humanizeVelSlider, &humanizeVelLabel, &humanizeTimeSlider, &humanizeTimeLabel,
              &chordStrumSlider, &chordStrumLabel, &chordStrumDirBox, &chordStrumDirLabel })
         c->setVisible(lay.controls);
@@ -797,7 +786,7 @@ void KeysEditor::timerCallback()
     keyboard.setSustain(sus);
     // While a pad is linked for editing, clicks must toggle notes, so Latch behaviour
     // is forced on regardless of the parameter.
-    keyboard.setLatch(apvts.getRawParameterValue("latch")->load() > 0.5f || editingPad >= 0);
+    keyboard.setLatch(editingPad >= 0);
     keyboard.setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
 
     // Lifting the sustain pedal releases any pad chords left ringing by it.
@@ -818,18 +807,22 @@ void KeysEditor::timerCallback()
         lastChannel = ch;
     }
 
-    // Grey the humanize amounts out when Humanize is off, so their state reads at a glance.
+    // Only the timing spread greys out with Humanize now. The velocity range is the
+    // velocity control whether Humanize is on or off (it plays the band's midpoint when
+    // off), so disabling it would grey out the only way to set how hard Keys plays.
     const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
-    humanizeVelSlider.setEnabled(hum);
     humanizeTimeSlider.setEnabled(hum);
-    humanizeVelLabel.setEnabled(hum);
     humanizeTimeLabel.setEnabled(hum);
 
-    // Keep the two-handle velocity range synced to its params and show the numbers.
+    // Keep the two-handle velocity range synced to its params and show the numbers. With
+    // Humanize off the two ends are one value as far as playing goes, so read out the
+    // midpoint rather than a range that is not being spread over.
     const int vmin = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
     const int vmax = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
     humanizeVelSlider.setMinAndMaxValues(vmin, vmax, juce::dontSendNotification);
-    humanizeVelLabel.setText("VELOCITY  " + juce::String(vmin) + "-" + juce::String(vmax),
+    humanizeVelLabel.setText(hum ? "VELOCITY  " + juce::String(juce::jmin(vmin, vmax)) + "-"
+                                       + juce::String(juce::jmax(vmin, vmax))
+                                 : "VELOCITY  " + juce::String((vmin + vmax) / 2),
                              juce::dontSendNotification);
 
     // Pad page: label and the ends of the range.
@@ -1045,8 +1038,6 @@ void KeysEditor::resized()
     auto rowA = header.removeFromTop(rowH);
     header.removeFromTop(3);
     auto rowB = header.removeFromTop(rowH);
-    header.removeFromTop(3);
-    auto rowC = header.removeFromTop(rowH);
 
     const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
     {
@@ -1062,22 +1053,22 @@ void KeysEditor::resized()
         ctl.setBounds(c.withTrimmedTop(14));
     };
 
+    // Two rows, down from three: dropping the fixed Velocity slider and the Latch toggle
+    // emptied the middle one, so the remaining controls close up and the header (and with
+    // it the whole window) gets 49 px shorter.
     cell(rowA, 88, sizeLabel, sizeBox);
     cell(rowA, 70, rootLabel, rootBox);
     cell(rowA, 150, scaleLabel, scaleBox);
     cell(rowA, 120, octaveLabel, octaveSlider);
     toggleCell(rowA, 110, scaleLockButton);
     cell(rowA, 90, polyphonyLabel, polyphonyBox);
+    cell(rowA, 70, channelLabel, channelBox);
 
-    cell(rowB, 210, velocityLabel, velocitySlider);
-    cell(rowB, 70, channelLabel, channelBox);
-    toggleCell(rowB, 90, latchButton);
-
-    toggleCell(rowC, 96, humanizeButton);
-    cell(rowC, 208, humanizeVelLabel, humanizeVelSlider);
-    cell(rowC, 130, humanizeTimeLabel, humanizeTimeSlider);
-    cell(rowC, 150, chordStrumLabel, chordStrumSlider);
-    cell(rowC, 100, chordStrumDirLabel, chordStrumDirBox);
+    toggleCell(rowB, 96, humanizeButton);
+    cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
+    cell(rowB, 130, humanizeTimeLabel, humanizeTimeSlider);
+    cell(rowB, 150, chordStrumLabel, chordStrumSlider);
+    cell(rowB, 100, chordStrumDirLabel, chordStrumDirBox);
 
     layoutToolRow(toolRow);
 }

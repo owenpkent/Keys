@@ -1,4 +1,5 @@
 #include "KeysLookAndFeel.h"
+#include <okstudio/MouseOnly.h>
 
 namespace keys
 {
@@ -558,4 +559,22 @@ void KeysLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle
 }
 
 juce::Font KeysLookAndFeel::getPopupMenuFont() { return skin::ui(13.5f); }
+
+void KeysLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator,
+                                                int standardHeight, int& idealWidth, int& idealHeight)
+{
+    if (isSeparator)
+    {
+        idealWidth = 50;
+        idealHeight = standardHeight > 0 ? standardHeight / 2 : 9;
+        return;
+    }
+
+    // drawPopupMenuItem draws into area.reduced(26, 0): a left gutter for the tick and a
+    // matching right one. The base class sizes items from the text alone, so every menu
+    // came out 52 px too narrow and clipped its longest entry.
+    const auto f = getPopupMenuFont();
+    idealWidth = (int) std::ceil(f.getStringWidthFloat(text)) + 26 * 2 + 10;
+    idealHeight = juce::jmax(okstudio::ui::minHitPx, (int) std::ceil(f.getHeight() * 1.6f));
+}
 } // namespace keys

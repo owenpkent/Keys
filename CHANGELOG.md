@@ -29,6 +29,32 @@ which is an accelerator not everyone reaches for. A plain left click now release
 so a chord with a wrong note in it can be taken apart a note at a time instead of started
 over.
 
+### Changed: one velocity control, not two
+
+There were two: a fixed Velocity slider that only applied while Humanize was **off**, and
+the Humanize range that only applied while it was **on**. The same control in two costumes,
+which is what made them feel redundant. The range absorbed it: Humanize on picks a random
+value inside the band per note, off plays its midpoint. Collapse the band onto one value
+and you have a plain fixed velocity — which is all the slider ever did.
+
+The header is two rows instead of three as a result, so the whole window is 49 px shorter.
+
+### Changed: the Latch toggle is gone
+
+Once a left click releases a note it is holding, a whole *mode* for holding notes earned
+nothing: right-click holds, left-click releases. Latch survives internally for chord-pad
+editing, which still forces it on.
+
+Both parameters are **retained but no longer read**, alongside `curve`, `surface`,
+`padChannel` and the XY pad's, so existing sessions and host automation still load.
+
+### Fixed: long names were clipped in every menu, not just the colour picker
+
+`drawPopupMenuItem` insets its text by 26 px on each side for the tick gutter, but the
+base class sizes menu items from the text alone — so every menu in the plugin came out
+52 px too narrow and ellipsised its longest entry. "Magenta" was the visible symptom; the
+CC picker and the chord-card menus had it too.
+
 ### Changed: Velocity Curve is gone from the UI
 
 It shaped the Velocity slider's own constant, so it only ever remapped one fixed number to

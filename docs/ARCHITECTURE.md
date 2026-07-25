@@ -71,8 +71,12 @@ Chords and holds make "which notes should sound" non-trivial. `NoteSurface` keep
 three sets of **drawn** ids (a MIDI note for the piano, a cell index for the grids):
 
 - `pressed` — under the active mouse gesture (a click, or the current key in a glide),
-- `latched` — toggled on in Latch mode, or by right-click,
+- `latched` — toggled on by right-click (or by the forced latch during pad editing),
 - `sustained` — captured by the Sustain pedal when the mouse released.
+
+A left click on a key already in `latched` or `sustained` **releases** it. That is what
+retired the Latch toggle: once a plain click both holds and releases, a whole mode for it
+earned nothing. The `latch` member survives for pad editing, which still forces it on.
 
 `refresh()` computes `want = pressed ∪ latched ∪ sustained`, diffs it against
 `sounding` (drawn id → the output MIDI note currently on), and emits exactly the
@@ -82,11 +86,11 @@ and panic is just "clear all three, refresh". When a polyphony limit is set, `re
 first steals the oldest voices (FIFO `voiceOrder`) until `want` fits the cap. Changing
 MIDI channel panics, so a note can't stick on the channel it was played on.
 
-**Right-click latch** is an optional accelerator on every note surface (the on-screen
-Latch toggle remains the left-click path, per the accessibility contract): it toggles
-the drawn id in the same `latched` set, so Latch-off and panic clear it. Octavium kept
-right-click latches in a private set no panic ever cleared; that was its worst stuck-
-note bug, not a behaviour to keep.
+**Right-click latch** is an optional accelerator on every note surface, and the
+accessibility contract is still satisfied because a left click releases what it holds:
+right-click is never the only way out. It toggles the drawn id in the same `latched` set,
+so panic clears it. Octavium kept right-click latches in a private set no panic ever
+cleared; that was its worst stuck-note bug, not a behaviour to keep.
 
 A subclass provides only geometry: `drawnAt` (hit test), `outputNote` (resolution),
 and optionally `noteChannel` (defaults to the global channel param; no built-in

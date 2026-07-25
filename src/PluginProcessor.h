@@ -86,7 +86,7 @@ public:
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
     int octaveShift() const;   // -5..+5, in octaves
-    float baseVelocity01() const; // the Velocity slider as 0..1 (Humanize aside)
+    float baseVelocity01() const; // midpoint of the velocity range, 0..1 (Humanize re-rolls it per note)
     int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes
 
     // Chord pads: capture a chord's notes into a slot, click to play/stop it. The pad
