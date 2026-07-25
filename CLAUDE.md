@@ -16,6 +16,24 @@ drums, Keys = the played keyboard). Where those two generate, Keys is performed.
 
 ## Build & Run
 
+**Default dev loop: `.\run.ps1`.** Do not send Owen to Ableton to try a change. `run.ps1`
+closes the running standalone, builds exactly one Standalone target, and relaunches it:
+about 5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real
+instrument VST3 in-process, so a click makes sound with no DAW involved and no rescan.
+It remembers the loaded synth between launches, which is why the script asks the app to
+close politely (a forced kill skips JUCE's settings write and loses it).
+
+```powershell
+.\run.ps1              # build + launch Keys Host standalone (makes sound)
+.\run.ps1 -Keys        # plain Keys instead (MIDI only, silent)
+.\run.ps1 -NoBuild     # just relaunch what is already built
+```
+
+Go to a real Live load test only for what the standalone genuinely cannot show: bus
+layout, plugin classification, installer, updater, host automation.
+
+Full build (VST3 + install to the DAW):
+
 ```powershell
 cmake -B build -G "Visual Studio 17 2022" -A x64 -DKEYS_COPY_PLUGIN=OFF
 cmake --build build --config Release --target Keys_VST3 Keys_Standalone
