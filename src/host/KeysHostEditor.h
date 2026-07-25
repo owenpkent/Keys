@@ -7,11 +7,15 @@
 namespace keys
 {
 // "Load Instrument..." opens this overlay: every VST3 in the folders the DAW scans,
-// grouped under publisher headers, one left-click to load. Live's browser can't drag
-// into a plugin window (its drags are internal to Live), so the browser comes to
-// Keys Host instead. Publisher comes from the bundle's moduleinfo.json or the DLL's
-// version resource — metadata only, no plugin is instantiated until a row is
-// clicked, so listing can't crash and needs no scanner.
+// filed into one collapsible folder per publisher, one left-click to load. Live's
+// browser can't drag into a plugin window (its drags are internal to Live), so the
+// browser comes to Keys Host instead. Publisher comes from the bundle's
+// moduleinfo.json or the DLL's version resource — metadata only, no plugin is
+// instantiated until a row is clicked, so listing can't crash and needs no scanner.
+//
+// Folders open closed. A big library listed flat is a long scroll to reach anything,
+// and scrolling is the expensive gesture here; collapsed, the whole library is a
+// short list of publishers with every instrument two clicks away.
 class InstrumentPicker : public juce::Component
 {
 public:
@@ -30,11 +34,46 @@ public:
 private:
     juce::Rectangle<int> panelBounds() const;
 
+    // One publisher = one folder: a clickable header, plus rows that are only on
+    // screen while it is open.
+    struct Folder
+    {
+        juce::String name;
+        std::unique_ptr<juce::TextButton> header;
+        juce::OwnedArray<juce::TextButton> rows;
+        bool open = false;
+    };
+
+    // A folder and the instruments inside it must not look alike. On the skin's default
+    // button both are the same raised pill with centred text, so an indent and a small
+    // triangle were the only difference and the list read as one flat run of buttons.
+    // Folders keep the raised chip with a bright semibold caption; instruments are
+    // recessed and dim, so the eye sorts containers from contents before reading a word.
+    struct FolderLookAndFeel : KeysLookAndFeel
+    {
+        void drawButtonText(juce::Graphics&, juce::TextButton&, bool, bool) override;
+    };
+
+    struct ItemLookAndFeel : KeysLookAndFeel
+    {
+        void drawButtonBackground(juce::Graphics&, juce::Button&, const juce::Colour&,
+                                  bool highlighted, bool down) override;
+        void drawButtonText(juce::Graphics&, juce::TextButton&, bool, bool) override;
+    };
+
+    void applyFolderState(Folder&); // header caption + row visibility, no relayout
+    void setFolderOpen(Folder&, bool open);
+
+    FolderLookAndFeel folderLnf;
+    ItemLookAndFeel itemLnf;
+
     juce::Label title;
     juce::TextButton rescanButton { "Rescan" }, browseButton { "Browse files..." }, closeButton { "Close" };
     juce::Viewport viewport;
     juce::Component rowHolder;
-    juce::OwnedArray<juce::Component> items; // publisher headers (Labels) and plugin rows (TextButtons)
+    juce::OwnedArray<Folder> folders;
+    std::unique_ptr<juce::TextButton> emptyRow; // stands in when nothing was found
+    juce::StringArray openFolderNames;          // so Rescan doesn't re-collapse everything
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(InstrumentPicker)
 };
@@ -101,6 +140,7 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> instEditor;
     std::unique_ptr<InstrumentWindow> instWindow;
     bool instShown = true;
+    bool instPlaceDeferred = false; // one retry only; see placeInstrumentWindow
 
     KeysEditor keysEditor;
 

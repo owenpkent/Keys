@@ -88,8 +88,8 @@ Live](http://audioswiftapp.com/midi-effects-wrapper-for-vst-au-plugins-using-max
 ## Keys Host: one window for VST3 instruments
 
 Drop **Keys Host** on a MIDI track and click **Load Instrument…**: an in-window list
-of every installed VST3 (the same folders Live's browser scans), grouped by
-publisher, one click to load. The synth's UI opens in its **own floating window**
+of every installed VST3 (the same folders Live's browser scans), filed into a
+collapsible folder per publisher, one click to open a folder and one to load. The synth's UI opens in its **own floating window**
 above the keyboard — two windows, not one stack; the top bar's **Show/Hide
 Instrument** controls it (the window's close button just hides it). Audio comes out
 of the Keys Host track. The

@@ -5,6 +5,29 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the instrument picker files VSTs into folders
+- **One collapsible folder per publisher**, opening closed, so a big library reads as a
+  short list of publishers instead of one long scroll. The header shows how many
+  instruments are inside; one click opens it, another closes it, and several can be
+  open at once. Which folders you left open survives Rescan.
+- **Folders are the only raised chips; instruments are plain indented text.** On the
+  standard button both were the same centred pill, so an indent and a small triangle
+  were all that separated them and the instruments still read as more folders. Rows are
+  left-aligned, folder captions are bright and semibold, and an instrument lights up
+  with an accent edge under the mouse instead of carrying a chip of its own.
+
+### Fixed: the hosted instrument's window could open unmovable
+- **Keys Host's instrument window opened with its title bar off the top of the screen**,
+  and since that window has no resize frame, its title bar is the only thing you can
+  drag: the window was stuck wherever it landed, permanently. Two causes, both fixed.
+  `placeInstrumentWindow` clamped the window into the display work area using *component*
+  coordinates, which exclude a native title bar, so pinning to the top edge put the bar
+  itself at y = -30. And it ran before the editor had a screen position, so it read the
+  keyboard window's origin as (0, 0) and took that clamp path on every single launch.
+- The clamp now accounts for the window frame (`okstudio::ui::ensureWindowReachable` in
+  the kit, so the whole line gets it), and placement defers one message-loop turn when
+  the editor isn't on screen yet, with a single retry rather than an unbounded re-post.
+
 ### Added: edit chord pads on the keyboard, and chord cards that show their notes
 - **Right-click a pad on the main page → "Edit on keyboard".** The pad's notes latch
   onto the piano (latch behaviour is forced on while editing), clicking keys adds and

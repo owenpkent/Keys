@@ -1,4 +1,5 @@
 #include "KeysHostEditor.h"
+#include <okstudio/MouseOnly.h>
 #include <algorithm>
 #include <vector>
 
@@ -188,32 +189,100 @@ InstrumentPicker::InstrumentPicker()
 
 void InstrumentPicker::refresh()
 {
-    items.clear();
+    folders.clear();
+    emptyRow = nullptr;
+
     juce::String currentPublisher("\x01"); // never matches a real (or empty) publisher
+    Folder* folder = nullptr;
     for (const auto& entry : findInstalledVst3s())
     {
         if (entry.publisher != currentPublisher)
         {
             currentPublisher = entry.publisher;
-            auto* header = new juce::Label({}, currentPublisher.isEmpty() ? "Other" : currentPublisher);
-            header->setJustificationType(juce::Justification::bottomLeft);
-            header->setAlpha(0.6f);
-            items.add(header);
-            rowHolder.addAndMakeVisible(header);
+            folder = folders.add(new Folder());
+            folder->name = currentPublisher.isEmpty() ? "Other" : currentPublisher;
+            folder->open = openFolderNames.contains(folder->name);
+            folder->header = std::make_unique<juce::TextButton>();
+            folder->header->setLookAndFeel(&folderLnf);
+            folder->header->onClick = [this, folder] { setFolderOpen(*folder, ! folder->open); };
+            rowHolder.addAndMakeVisible(*folder->header);
         }
-        auto* row = new juce::TextButton(entry.file.getFileNameWithoutExtension());
+        auto* row = folder->rows.add(new juce::TextButton(entry.file.getFileNameWithoutExtension()));
         const auto file = entry.file;
+        row->setLookAndFeel(&itemLnf);
         row->onClick = [this, file] { if (onPick) onPick(file); };
-        items.add(row);
-        rowHolder.addAndMakeVisible(row);
+        rowHolder.addChildComponent(*row); // shown only while its folder is open
     }
-    if (items.isEmpty())
+
+    for (auto* f : folders)
+        applyFolderState(*f);
+
+    if (folders.isEmpty())
     {
-        auto* row = new juce::TextButton("No VST3s found - use Browse files...");
-        row->setEnabled(false);
-        items.add(row);
-        rowHolder.addAndMakeVisible(row);
+        emptyRow = std::make_unique<juce::TextButton>("No VST3s found - use Browse files...");
+        emptyRow->setLookAndFeel(&itemLnf);
+        emptyRow->setEnabled(false);
+        rowHolder.addAndMakeVisible(*emptyRow);
     }
+    resized();
+}
+
+void InstrumentPicker::FolderLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b,
+                                                         bool, bool)
+{
+    g.setFont(skin::uiSemi(15.0f));
+    g.setColour(skin::text);
+    g.drawFittedText(b.getButtonText(), b.getLocalBounds().withTrimmedLeft(14).withTrimmedRight(12),
+                     juce::Justification::centredLeft, 1);
+}
+
+void InstrumentPicker::ItemLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& b,
+                                                             const juce::Colour&,
+                                                             bool highlighted, bool down)
+{
+    // No chip at all at rest: giving an instrument the same rounded fill as a folder is
+    // what made the two read as siblings, and dimming it only softened the problem.
+    // Leaving folders as the only raised objects makes the indent do its job. The row
+    // lights up under the mouse, which is where the clickable affordance comes from.
+    if (! b.isEnabled() || ! (highlighted || down))
+        return;
+
+    const auto r = b.getLocalBounds().toFloat().reduced(0.5f);
+    g.setColour(skin::well.withAlpha(down ? 1.0f : 0.85f));
+    g.fillRoundedRectangle(r, skin::radius);
+    g.setColour(skin::accent.withAlpha(down ? 0.55f : 0.32f));
+    g.drawRoundedRectangle(r.reduced(0.5f), skin::radius, 1.0f);
+}
+
+void InstrumentPicker::ItemLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b,
+                                                       bool highlighted, bool)
+{
+    g.setFont(skin::ui(15.0f));
+    g.setColour(! b.isEnabled() ? skin::textFaint : highlighted ? skin::text : skin::textDim);
+    g.drawFittedText(b.getButtonText(), b.getLocalBounds().withTrimmedLeft(14).withTrimmedRight(12),
+                     juce::Justification::centredLeft, 1);
+}
+
+void InstrumentPicker::applyFolderState(Folder& folder)
+{
+    // Triangle then name then count: "5 Spitfire Audio" reads as a folder you can open,
+    // where a bare name reads as something to click and load.
+    const auto arrow = juce::String::fromUTF8(folder.open ? "\xe2\x96\xbe" : "\xe2\x96\xb8");
+    folder.header->setButtonText(arrow + "  " + folder.name + "   (" + juce::String(folder.rows.size()) + ")");
+    for (auto* row : folder.rows)
+        row->setVisible(folder.open);
+}
+
+void InstrumentPicker::setFolderOpen(Folder& folder, bool open)
+{
+    folder.open = open;
+    // Remembered by name, so Rescan doesn't collapse what you just opened.
+    if (open)
+        openFolderNames.addIfNotAlreadyThere(folder.name);
+    else
+        openFolderNames.removeString(folder.name);
+
+    applyFolderState(folder);
     resized();
 }
 
@@ -251,15 +320,26 @@ void InstrumentPicker::resized()
     panel.removeFromBottom(8);
 
     viewport.setBounds(panel);
-    const int rowH = 40, headerH = 30;
+    // Folder headers are click targets now, not captions, so they get a full row.
+    const int rowH = 40, indent = 26;
     const int width = panel.getWidth() - viewport.getScrollBarThickness();
     int y = 0;
-    for (auto* item : items)
+    for (auto* folder : folders)
     {
-        const bool isHeader = dynamic_cast<juce::Label*>(item) != nullptr;
-        const int h = isHeader ? headerH : rowH;
-        item->setBounds(0, y, width, h - 4);
-        y += h;
+        folder->header->setBounds(0, y, width, rowH - 4);
+        y += rowH;
+        if (! folder->open)
+            continue; // closed folders take no space; their rows stay hidden
+        for (auto* row : folder->rows)
+        {
+            row->setBounds(indent, y, width - indent, rowH - 4);
+            y += rowH;
+        }
+    }
+    if (emptyRow != nullptr)
+    {
+        emptyRow->setBounds(0, y, width, rowH - 4);
+        y += rowH;
     }
     rowHolder.setSize(width, juce::jmax(1, y));
 }
@@ -461,6 +541,21 @@ void KeysHostEditor::placeInstrumentWindow()
 {
     if (instWindow == nullptr)
         return;
+    // Placing against our own screen position is meaningless until we have one. On the
+    // first open we are still being parented, so getScreenBounds() reads (0, 0) and
+    // every offset below is computed from the wrong origin. Try again once we are up.
+    // Exactly one retry: re-posting until isShowing() turns true would spin the message
+    // thread forever for an editor that never becomes visible. If the second attempt is
+    // still blind, place anyway - the clamp at the end keeps the window reachable.
+    if (! isShowing() && ! instPlaceDeferred)
+    {
+        instPlaceDeferred = true;
+        juce::Component::SafePointer<KeysHostEditor> safe(this);
+        juce::MessageManager::callAsync([safe] { if (auto* e = safe.getComponent()) e->placeInstrumentWindow(); });
+        return;
+    }
+    instPlaceDeferred = false;
+
     const auto keysBounds = getScreenBounds();
     const auto area = juce::Desktop::getInstance().getDisplays()
                           .getDisplayForRect(keysBounds)->userArea;
@@ -473,6 +568,10 @@ void KeysHostEditor::placeInstrumentWindow()
         y = juce::jlimit(area.getY(), juce::jmax(area.getY(), area.getBottom() - wb.getHeight()),
                          keysBounds.getY());
     instWindow->setTopLeftPosition(x, y);
+    // The clamps above are in component coordinates, which exclude this window's native
+    // title bar: pinning to area.getY() puts the bar itself off the top of the screen,
+    // and the instrument window is then unmovable (no thick frame, title bar only).
+    okstudio::ui::ensureWindowReachable(*instWindow);
 }
 
 void KeysHostEditor::setInstrumentShown(bool shown)
