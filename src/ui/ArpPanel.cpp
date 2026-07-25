@@ -387,6 +387,10 @@ void ArpPanel::refreshShape()
     if (lastPatternMode != (int) pattern)
     {
         lastPatternMode = (int) pattern;
+        // Inline, the card does not size itself: the editor gives it preferredHeight(),
+        // so the editor has to re-lay-out first or resized() would carve up stale bounds.
+        if (onPreferredHeightChanged)
+            onPreferredHeightChanged();
         resized();
         repaint();
     }
@@ -573,29 +577,51 @@ void ArpPanel::timerCallback()
 
 void ArpPanel::mouseDown(const juce::MouseEvent&)
 {
-    // The overlay is opaque to clicks: nothing behind it should react while it is up.
+    // Opaque to clicks: as an overlay nothing behind it should react, and inline the
+    // card's own background should not fall through to the editor either.
 }
 
-// Heights of the two layouts, kept next to the resized() that spends them: title + the
-// two globals rows, plus (in Pattern) tabs, grid, mute row, the steps row and the
-// pattern row, with the 12 px inner padding at both ends.
+void ArpPanel::setInlineMode(bool b)
+{
+    if (inlineMode == b)
+        return;
+    inlineMode = b;
+    resized();
+    repaint();
+}
+
+namespace
+{
+    // Heights of the two layouts, kept next to the resized() that spends them: title +
+    // the two globals rows, plus (in Pattern) tabs, grid, mute row, the steps row and
+    // the pattern row, with the 12 px inner padding at both ends.
+    constexpr int arpShapeH = 12 + (28 + 8) + (40 + 6) + 40 + 12;
+    constexpr int arpPatternH = arpShapeH + (34 + 6) + (150 + 6) + (14 + 2) + (34 + 10) + (48 + 8) + 40;
+} // namespace
+
+int ArpPanel::preferredHeight() const
+{
+    return (patternMode() ? arpPatternH : arpShapeH) + 16; // + the 8 px margin at both ends
+}
+
 juce::Rectangle<int> ArpPanel::cardBounds() const
 {
-    constexpr int shapeH = 12 + (28 + 8) + (40 + 6) + 40 + 12;
-    constexpr int patternH = shapeH + (34 + 6) + (150 + 6) + (14 + 2) + (34 + 10) + (48 + 8) + 40;
     const auto full = getLocalBounds().reduced(8);
-    return full.withHeight(juce::jmin(full.getHeight(), patternMode() ? patternH : shapeH));
+    if (inlineMode)
+        return full; // the editor already gave us exactly preferredHeight()
+    return full.withHeight(juce::jmin(full.getHeight(), patternMode() ? arpPatternH : arpShapeH));
 }
 
 void ArpPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colours::black.withAlpha(0.78f)); // dim whatever is behind the overlay
+    if (! inlineMode)
+        g.fillAll(juce::Colours::black.withAlpha(0.78f)); // dim whatever is behind the overlay
     const auto b = cardBounds().toFloat();
     g.setColour(juce::Colour(0xff1c1f24));
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, b, skin::panelRadius, skin::accent, 0.55f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accent, inlineMode ? 0.30f : 0.55f);
 }
 
 void ArpPanel::resized()

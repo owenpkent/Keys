@@ -9,9 +9,15 @@
 
 namespace keys
 {
-// The arpeggiator editor (docs/ARP_DESIGN.md): an overlay opened from the tabs row,
-// same contract as ChordGenPanel. Six per-parameter step lanes (Cthulhu architecture)
-// sit under a globals row, with pattern recall/copy/randomize along the bottom.
+// The arpeggiator editor (docs/ARP_DESIGN.md). Six per-parameter step lanes (Cthulhu
+// architecture) sit under a globals row, with pattern recall/copy/randomize along the
+// bottom.
+//
+// It lives inline, as the editor's centre view: picking Arp swaps it in where the knob
+// bank and chord pads were, instead of throwing a dimmed sheet over the whole plugin.
+// The old behaviour hid the keyboard behind the panel, which is backwards for a plugin
+// you play while you edit the arp. setInlineMode(false) restores the overlay look (no
+// caller does today; kept because the class is shared with Keys Host).
 //
 // Lane data lives in processor.arp.lanes as arrays of std::atomic<int>, written here
 // on the message thread and read on the audio thread; no locking, so every edit is a
@@ -28,6 +34,15 @@ public:
     void mouseDown(const juce::MouseEvent&) override; // swallow clicks so the editor below is inert
 
     std::function<void()> onClose;
+
+    // Inline: draw as a plain card filling our bounds, with no scrim behind it.
+    void setInlineMode(bool);
+
+    // How tall the panel needs to be to show everything at full-size targets. Changes
+    // with Shape (a direction shape has two rows; Pattern adds the whole step editor),
+    // so the editor is told when it moves.
+    int preferredHeight() const;
+    std::function<void()> onPreferredHeightChanged;
 
     // LaneGrid and MuteRow are implementation detail, but public: their member
     // functions are defined out-of-line in ArpPanel.cpp, which needs to name them,
@@ -123,6 +138,7 @@ private:
     // there are two rows to show and no reason to draw a full-height empty box.
     juce::Rectangle<int> cardBounds() const;
 
+    bool inlineMode = false;
     int lastPatternMode = -1; // -1 = not yet laid out; else the last bool seen
 
     KeysProcessor& processor;

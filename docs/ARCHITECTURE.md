@@ -26,8 +26,10 @@ src/
 │   ├── KnobBank.{h,cpp}      # eight assignable CC rotary knobs above the playing surface
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-│   ├── ChordGenPanel.{h,cpp} # the chord generator overlay (algorithmic + Markov)
-│   ├── ArpPanel.{h,cpp}      # the arp overlay: Shape gates a tabbed lane editor
+│   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
+│   ├── ArpPanel.{h,cpp}      # the arp centre view: Shape gates a tabbed lane editor
+│   ├── SectionBar.h          # the fold/unfold header above a section of the editor
+│   ├── KeyboardWindow.h      # the keybed popped out into its own resizable window
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
 ├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
 │   ├── KeysHostProcessor.{h,cpp} # KeysProcessor + one hosted instrument VST3
@@ -176,15 +178,50 @@ degenerated to I-I-I-I for every user. Realisation is root-position through
 
 All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
 
+## Folding layout, and the centre view
+
+The editor is a stack of sections, each of which folds away so the window can be squeezed
+small when the screen is busy: **Controls** (the three header rows), the **centre view**,
+and the **Keyboard** (with the wheels as a sub-fold). `SectionBar` is the affordance — a
+`juce::Button` so the mouse-only contract and the accessible name come for free, with the
+section's own small controls laid out as its siblings in `contentArea()`.
+
+The middle of the editor is a *view*, not a stack of overlays. `Perform` is the knob bank
+plus the chord-pad strip; `Chords` and `Arp` swap `ChordGenPanel` / `ArpPanel` into the
+same slot. Clicking the lit tab folds the centre away entirely, so the centre needs no
+chevron of its own. Only the view on show exists — both panels are heavy and neither is
+worth keeping warm behind the other.
+
+This replaced full-editor overlays that dimmed and covered everything, including the
+keyboard. Editing an arp while unable to play a note was backwards for an instrument you
+perform. The panels keep an overlay mode (`setInlineMode(false)`) but nothing uses it.
+
+`KeysEditor::idealHeight()` is the single source of truth for what the folds add up to;
+`resized()` spends exactly the same constants, so the window a fold asks for and the
+layout it gets cannot drift. Standalone and in a DAW the editor resizes itself to that
+height; embedded in Keys Host it reports the number through `onIdealHeightChanged` and the
+host grows to fit, because a tall centre view would otherwise push the keybed off the end.
+
+The keybed and the wheels live inside one `KeybedHolder`, so **Detach** is a single
+re-parent into a `KeyboardWindow`. Detached, `PianoKeyboard`'s 185 px key-height cap comes
+off: dragging that window is meant to resize the keys, which is the whole point of the
+feature for a player working with one mouse. The window borrows the holder and owns
+nothing, so `~KeysEditor` tears it down explicitly before anything else.
+
+All of it (folds, current view, detached window bounds) is in `KeysProcessor::LayoutState`
+rather than the editor, so it survives the window closing, and it is saved in the session
+tree rather than as parameters: none of it changes a note, and exposing it to host
+automation would only add ways to break a session.
+
 ## Chord generator panel
 
-`ChordGenPanel` is an overlay, not a dialog: a plugin editor has no business opening OS
-windows, and an overlay keeps every target inside the surface the mouse is already in.
-It fills the **current page**, so the four pages can hold four different keys.
+`ChordGenPanel` is a centre view, not a dialog: a plugin editor has no business opening OS
+windows, and staying inside the editor keeps every target on the surface the mouse is
+already in. It fills the **current page**, so the four pages can hold four different keys.
 
 Its pad grid repeats the strip at full size on purpose. Everything Octavium reached by
 right-click (lock, regenerate, suggest) is a real on-screen button here, and at strip
-size those targets would be far under the 34 px minimum. Opening the panel grows the
+size those targets would be far under the 34 px minimum. Selecting the view grows the
 editor to fit rather than shrinking them. Auditioning a chord in the grid reuses
 `pressChordPad` / `releaseChordPad`, so it is the same code path as playing the strip.
 

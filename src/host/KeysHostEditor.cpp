@@ -17,10 +17,11 @@ namespace
 {
     constexpr int barHeight = 44;
     constexpr int keysHeight = 640;      // the embedded editor's comfortable height (gen-panel floor)
-    // Bumped from 520 when the knob row replaced the Faders/XY tabs: the single-view
-    // editor's fixed chrome (header + tool row + knob row + chord-pad strip) is
-    // taller than the old tabbed layout's, so the floor needs to grow with it.
+    // The height Keys Host opens at. It is no longer a *floor*: every section of the Keys
+    // editor folds away, and the window follows what the folds add up to, so the real
+    // minimum is the Keys editor's own (three bars and the margins, see absMinKeysHeight).
     constexpr int minKeysHeight = 620;
+    constexpr int absMinKeysHeight = 150;
 
     juce::File defaultVst3Folder()
     {
@@ -395,11 +396,22 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     keysEditor.setResizable(false, false);
     keysEditor.setEmbedded(true);
 
+    // Folding a section or opening a taller centre view changes what the Keys editor
+    // needs, and the window follows it in both directions: minimizing a section should
+    // actually make the window smaller, which is the whole point of being able to fold
+    // one. Width is left alone - it is the keybed's, and Owen sets it deliberately.
+    keysEditor.onIdealHeightChanged = [this](int wanted)
+    {
+        const int needed = juce::jlimit(barHeight + absMinKeysHeight, 1700, barHeight + wanted);
+        if (needed != getHeight())
+            setSize(getWidth(), needed);
+    };
+
     host.onInstrumentWillChange = [this] { closeInstrumentEditor(); };
     host.addChangeListener(this);
 
     setResizable(true, true);
-    setResizeLimits(1010, barHeight + minKeysHeight, 2600, 1700);
+    setResizeLimits(1010, barHeight + absMinKeysHeight, 2600, 1700);
     // Owen resizes to the minimum every time anyway — open there. (keysHeight is what
     // the chord-generator overlay grows the embedded editor to when opened.)
     setSize(1010, barHeight + minKeysHeight);

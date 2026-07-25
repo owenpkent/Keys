@@ -741,18 +741,28 @@ void ChordGenPanel::timerCallback()
 
 void ChordGenPanel::mouseDown(const juce::MouseEvent&)
 {
-    // The overlay is opaque to clicks: nothing behind it should react while it is up.
+    // Opaque to clicks: as an overlay nothing behind it should react, and inline the
+    // card's own background should not fall through to the editor either.
+}
+
+void ChordGenPanel::setInlineMode(bool b)
+{
+    if (inlineMode == b)
+        return;
+    inlineMode = b;
+    repaint();
 }
 
 void ChordGenPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(scrim); // dim whatever is behind, so the panel reads as the active surface
+    if (! inlineMode)
+        g.fillAll(scrim); // dim whatever is behind, so the panel reads as the active surface
     const auto b = getLocalBounds().reduced(8).toFloat();
     g.setColour(panelBg);
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, b, skin::panelRadius, skin::accent, 0.55f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accent, inlineMode ? 0.30f : 0.55f);
 }
 
 void ChordGenPanel::resized()

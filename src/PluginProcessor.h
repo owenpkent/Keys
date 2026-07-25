@@ -151,7 +151,28 @@ public:
     const ArpPattern& arpPatternSlot(int index) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
 
+    // How the editor is folded up. Deliberately not parameters: none of it changes a
+    // note, and exposing five booleans to host automation would only add ways to break
+    // a session. It lives here rather than in the editor because the editor is created
+    // and destroyed every time the window opens, and Owen should get the same layout
+    // back. Message thread only; the audio thread never reads it.
+    struct LayoutState
+    {
+        bool controls = true;   // the three header rows
+        bool knobs = true;      // the CC knob bank
+        bool pads = true;       // the chord-pad strip
+        bool wheels = true;     // mod + pitch, left of the keybed
+        bool keyboard = true;   // the keybed itself
+        bool detached = false;  // keybed lives in its own resizable window
+        int  view = 0;          // centre view: 0 = perform, 1 = chords, 2 = arp
+        juce::Rectangle<int> detachedBounds {}; // empty = never detached yet, so centre it
+    };
+    LayoutState layout;
+
 protected:
+    juce::ValueTree layoutToTree() const;
+    void layoutFromTree(const juce::ValueTree& root);
+
     juce::ValueTree arpToTree() const;              // all patterns + the live lanes
     void arpFromTree(const juce::ValueTree& root);
     // Chord-pad state as a "chordPads" ValueTree, shared with subclasses (Keys Host

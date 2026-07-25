@@ -28,6 +28,16 @@ void PianoKeyboard::setRange(int newLow, int newCount)
     repaint();
 }
 
+void PianoKeyboard::setKeyHeightCap(float px)
+{
+    px = juce::jmax(40.0f, px);
+    if (juce::approximatelyEqual(px, keyHeightCap))
+        return;
+    keyHeightCap = px;
+    layoutKeys();
+    repaint();
+}
+
 void PianoKeyboard::resized()
 {
     layoutKeys();
@@ -51,8 +61,9 @@ void PianoKeyboard::layoutKeys()
     // Cap the key height so keys stay piano-proportioned instead of stretching to fill
     // a tall window; any extra height becomes instrument body above, keys anchored low.
     // (185, up from 150: at the default window size the old cap left a wide dead band
-    // between the pad strip and the keybed.)
-    const float wh = juce::jmin(area.getHeight(), 185.0f);
+    // between the pad strip and the keybed.) setKeyHeightCap lifts it when the keybed
+    // is detached, where resizing the window is meant to resize the keys.
+    const float wh = juce::jmin(area.getHeight(), keyHeightCap);
     const float yTop = area.getBottom() - wh;
     const float bw = ww * 0.64f; // Octavium proportions: black ~64% of white width.
     const float bh = wh * 0.56f; // Shorter than Octavium's 62%: more of each white key
@@ -162,19 +173,22 @@ void PianoKeyboard::paint(juce::Graphics& g)
         g.setGradientFill(grad);
         g.fillPath(key);
 
-        // Front lip: the vertical face under the playing surface, separated by a
-        // shadow line — the step that makes the keybed read as 3D.
-        const float lipH = juce::jmin(10.0f, b.getHeight() * 0.09f);
+        // Front lip: the vertical face under the playing surface. It used to be a 10 px
+        // band two steps darker than the key with a 30% black line above it, which read
+        // as a shadow smeared across the bottom of the keybed rather than as an edge.
+        // Now it is a thin bevel — barely darker than the key body, hairline separator —
+        // so it still gives the keys a front face without dirtying them.
+        const float lipH = juce::jmin(5.0f, b.getHeight() * 0.04f);
         {
             juce::Graphics::ScopedSaveState clip(g);
             g.reduceClipRegion(key);
-            juce::Colour lipTop { 0xffb4b9c1 }, lipBot { 0xff969ba4 };
-            if (s == State::active)      { lipTop = juce::Colour(0xff12808f); lipBot = juce::Colour(0xff0d5b66); }
-            else if (s == State::held)   { lipTop = juce::Colour(0xff0f6874); lipBot = juce::Colour(0xff0a4a52); }
-            else if (dim)                { lipTop = juce::Colour(0xff868c96); lipBot = juce::Colour(0xff6e747e); }
+            juce::Colour lipTop { 0xffdcdfe4 }, lipBot { 0xffc4c8cf };
+            if (s == State::active)      { lipTop = juce::Colour(0xff2ab6cb); lipBot = juce::Colour(0xff1a90a2); }
+            else if (s == State::held)   { lipTop = juce::Colour(0xff1f9dae); lipBot = juce::Colour(0xff137886); }
+            else if (dim)                { lipTop = juce::Colour(0xffb2b7bf); lipBot = juce::Colour(0xff9aa0a9); }
             g.setGradientFill(vGrad(lipTop, lipBot, bot - lipH, bot));
             g.fillRect(b.getX(), bot - lipH, b.getWidth(), lipH);
-            g.setColour(juce::Colours::black.withAlpha(0.30f));
+            g.setColour(juce::Colours::black.withAlpha(0.10f));
             g.fillRect(b.getX(), bot - lipH, b.getWidth(), 1.0f);
         }
 

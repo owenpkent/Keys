@@ -638,6 +638,40 @@ void KeysProcessor::randomizeActiveArpPattern()
     }
 }
 
+juce::ValueTree KeysProcessor::layoutToTree() const
+{
+    juce::ValueTree tree { "layout" };
+    tree.setProperty("controls", layout.controls, nullptr);
+    tree.setProperty("knobs", layout.knobs, nullptr);
+    tree.setProperty("pads", layout.pads, nullptr);
+    tree.setProperty("wheels", layout.wheels, nullptr);
+    tree.setProperty("keyboard", layout.keyboard, nullptr);
+    tree.setProperty("detached", layout.detached, nullptr);
+    tree.setProperty("view", layout.view, nullptr);
+    tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
+    return tree;
+}
+
+void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
+{
+    const auto tree = root.getChildWithName("layout");
+    if (! tree.isValid())
+        return; // sessions from before folding sections: everything open, as it was
+    const auto flag = [&tree](const char* id, bool fallback)
+    { return (bool) tree.getProperty(id, fallback); };
+    layout.controls = flag("controls", true);
+    layout.knobs = flag("knobs", true);
+    layout.pads = flag("pads", true);
+    layout.wheels = flag("wheels", true);
+    layout.keyboard = flag("keyboard", true);
+    layout.detached = flag("detached", false);
+    layout.view = juce::jlimit(0, 2, (int) tree.getProperty("view", 0));
+
+    const auto bounds = juce::Rectangle<int>::fromString(tree.getProperty("detachedBounds").toString());
+    if (! bounds.isEmpty())
+        layout.detachedBounds = bounds;
+}
+
 juce::ValueTree KeysProcessor::arpToTree() const
 {
     // The live lanes are the active pattern; snapshot them so the tree is current.
@@ -706,7 +740,7 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
 
 void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree() });
+    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree(), layoutToTree() });
 }
 
 void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -715,6 +749,7 @@ void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
     {
         chordPadsFromTree(root);
         arpFromTree(root);
+        layoutFromTree(root);
     });
 }
 

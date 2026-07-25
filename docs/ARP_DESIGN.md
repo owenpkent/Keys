@@ -140,11 +140,13 @@ Concrete remaps:
 - Grid snap and edit modes: on-screen toggles, never modifier keys.
 - Lane length: drag a handle at the lane's right edge, or - / + buttons.
 
-## UI placement (decided: overlay panel)
+## UI placement (decided: a centre view)
 
-An **Arp** button (tabs row, next to Chords) opens the lane editor as an overlay,
-exactly the chord generator's pattern; a compact on/off toggle stays always
-visible beside it. (Decided by Owen, 2026-07-19.)
+An **Arp** tab (view bar, next to Perform and Chords) swaps the lane editor into the
+middle of the editor, where the knob bank and chord-pad strip sit; a compact on/off
+toggle rides in the panel's own header. (Decided by Owen, 2026-07-19; originally a
+full-editor overlay, changed to a centre view 2026-07-25 at Owen's request, because the
+overlay dimmed and covered the keyboard you are meant to be playing while you edit.)
 
 ## v1 implementation notes
 

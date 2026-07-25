@@ -4,8 +4,10 @@
 #include "ui/ArpPanel.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
+#include "ui/KeyboardWindow.h"
 #include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
+#include "ui/SectionBar.h"
 #include <okstudio/Updater.h>
 #include <memory>
 
@@ -31,6 +33,12 @@ public:
     // layout changes on its own.
     void setEmbedded(bool b) { embedded = b; }
 
+    // Embedded only: how tall this editor would like to be, after a fold or a change of
+    // centre view. The centre views (the generator, the arp with its step editor) need
+    // far more room than the player, so a parent that ignores this clips the keybed off
+    // the bottom. Keys Host grows itself to fit.
+    std::function<void(int)> onIdealHeightChanged;
+
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -41,10 +49,36 @@ private:
                   const juce::String& paramID, std::unique_ptr<ComboAtt>&);
     void showUpdate(const okstudio::updater::UpdateInfo&);
     void stepPadPage(int delta);
-    void toggleGenPanel();
-    void toggleArpPanel();
     void toggleEditPad(int slot); // link a chord pad to the keyboard for editing
     void endPadEdit();
+
+    // --- Folding layout ------------------------------------------------------------
+    // Which panel occupies the centre of the editor. The generator and the arpeggiator
+    // used to be sheets thrown over the whole plugin, which hid the keyboard behind the
+    // thing you were editing; they are now views that swap in where the knob bank and
+    // chord pads sit. `folded` is the fourth state: no centre at all.
+    enum CentreView { viewPerform = 0, viewChords = 1, viewArp = 2, viewFolded = 3 };
+
+    void setCentreView(int view);      // builds/destroys the panel, then relayouts
+    void syncSectionControls();        // toggle states + visibility from processor.layout
+    int  centreHeight() const;         // height the current centre view asks for, 0 if folded
+    int  idealHeight() const;          // total height with the current folds
+    int  minWidthForView() const;      // the centre views carry more controls than the player
+    void applyLayout();                // resize to fit the folds (unless embedded), then resized()
+    void setKeyboardDetached(bool);    // move the keybed in/out of its own window
+    void rememberDetachedBounds();
+    void layoutKeybed();               // wheels + keys inside keybedHolder, wherever it lives
+    void layoutToolRow(juce::Rectangle<int>);
+
+    // Wheels + keybed as one unit, so detaching re-parents a single component instead of
+    // shuffling three. Always the parent of `keyboard`, `modWheel` and `pitchWheel`;
+    // its own parent is either this editor or the detached window's content slot.
+    struct KeybedHolder : juce::Component
+    {
+        std::function<void()> layout;
+        void resized() override { if (layout) layout(); }
+        void paint(juce::Graphics& g) override { g.fillAll(skin::bgBot); }
+    };
 
     KeysProcessor& processor;
     KeysLookAndFeel lnf;
@@ -62,6 +96,7 @@ private:
 
     juce::Label title;
     juce::Rectangle<int> titleCaption; // "OK STUDIO" wordmark, painted under the title
+    juce::Rectangle<int> headerBand;   // the band paint() fills behind the control rows
     juce::Component::SafePointer<juce::DocumentWindow> styledWindow; // standalone chrome we skinned
 
     // Nothing was displaying the setTooltip text scattered through the arp and chord
@@ -73,6 +108,9 @@ private:
     juce::TooltipWindow tooltips { this, 450 };
 
     // The one playing surface this product builds: the piano, for Keys and Keys Host.
+    // It and the wheels live inside `keybedHolder`, never directly in the editor, so
+    // detaching is one re-parent (see KeybedHolder).
+    KeybedHolder keybedHolder;
     PianoKeyboard keyboard;
 
     KnobBank knobBank; // eight CC knobs, replaces the old Fader/XY surfaces
@@ -93,15 +131,30 @@ private:
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
-    // Chord-pad page navigation, and the door to the generator overlay.
-    juce::TextButton pagePrevButton { "<" }, pageNextButton { ">" }, chordsButton { "Chords" };
+    // Chord-pad page navigation, and the three centre-view tabs. The tabs are toggles:
+    // clicking the lit one folds the centre away, which is how the centre section is
+    // minimized (it needs no chevron of its own, unlike the other sections).
+    juce::TextButton pagePrevButton { "<" }, pageNextButton { ">" };
+    juce::TextButton performButton { "Perform" }, chordsButton { "Chords" }, arpButton { "Arp" };
     juce::Label pageLabel;
-    std::unique_ptr<ChordGenPanel> genPanel; // only alive while the overlay is open
 
-    // The arpeggiator overlay's door (docs/ARP_DESIGN.md); only one overlay is ever
-    // open at a time, see toggleGenPanel()/toggleArpPanel().
-    juce::TextButton arpButton { "Arp" };
+    // Only the centre view currently showing is alive; both are heavy (the generator
+    // builds 16 chord cards, the arp six step lanes) and neither is worth keeping warm.
+    std::unique_ptr<ChordGenPanel> genPanel;
     std::unique_ptr<ArpPanel> arpPanel;
+
+    // Section folds. Every section of the editor can be minimized so the window can be
+    // squeezed small when the screen is busy; the state lives on the processor
+    // (KeysProcessor::LayoutState) so it survives the editor being closed and reopened.
+    SectionBar controlsBar { "Controls" };
+    SectionBar keyboardBar { "Keyboard" };
+    juce::TextButton knobsButton { "Knobs" }, padsButton { "Pads" };
+    juce::TextButton wheelsButton { "Wheels" }, detachButton { "Detach" };
+
+    // Alive only while the keybed is popped out. Declared after keybedHolder so it is
+    // destroyed first; ~KeysEditor resets it explicitly too, since relying on member
+    // order for a window that borrows a component is too subtle to leave implicit.
+    std::unique_ptr<KeyboardWindow> keyboardWindow;
 
     juce::Slider humanizeVelSlider, humanizeTimeSlider; // velocity is a two-value range
     juce::Label humanizeVelLabel, humanizeTimeLabel;

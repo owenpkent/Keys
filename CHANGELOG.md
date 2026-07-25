@@ -5,6 +5,68 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the dev loop is `run.py`, so it can be launched with a double-click
+
+`run.ps1` had to be typed at a prompt. Typing is real effort here, and the dev loop is the
+one command that gets run dozens of times a day. `run.py` does exactly the same work and
+Explorer will run it on a double-click (or right-click → Open), with no arguments needed.
+
+- Same behaviour throughout: the polite WM_CLOSE aimed at the window titled after the
+  product (a force-kill loses the synth Keys Host has loaded), configure only on a cold
+  build tree, and the Smart App Control launch retry.
+- **The console holds open if anything fails**, so the error can be read instead of
+  flashing past as the window closes. It only does this when the console was created for
+  the script, so running it from a terminal never pauses.
+- `run.ps1` is now a shim that forwards to `run.py`. One copy of the logic, and
+  `./run.ps1 -Keys -NoBuild` still works exactly as before.
+
+### Changed: every section folds, and the keyboard can leave the window
+
+The editor was one fixed stack: three rows of controls, knobs, pads, keys, all of it
+always on screen, with a floor of 820x560 whether or not you were using any of it. On a
+busy screen that is a lot of plugin for a keyboard you mostly want to click.
+
+- **Controls, Knobs, Pads, Wheels and Keyboard each fold away**, from a `SectionBar`
+  (a full-width 34 px header with a disclosure chevron) or a chip on the bar the section
+  belongs to. The window resizes itself to whatever the folds add up to, so the minimum
+  height drops from 560 to 150: bars only, if that is all you want on screen.
+- **The keyboard detaches into its own resizable window.** Docked, the keybed is one row
+  of a fixed layout and key size is a compromise with everything above it. Detached, its
+  size is entirely yours, and the 185 px key-height cap comes off so dragging the window
+  taller genuinely makes the keys taller. Its close button re-docks it.
+- **Folds, the current view and the detached window's position are saved with the
+  session**, so a session comes back looking the way it was left. They are session state,
+  not parameters: none of it changes a note.
+- **Wheels and Detach travel with the keybed.** Detached, they sit on a strip inside the
+  keyboard window: leaving the control that undoes a detach on the main editor put it in
+  the window you were not looking at, and left the keyboard window with nothing on it but
+  a close box.
+- **Keys Host follows the folds too**, in both directions. Its window used to only ever
+  grow, so minimizing a section there did nothing except hand the freed space to the
+  keybed. Its minimum height drops with it (664 -> 194).
+- **Hiding the wheels widens the keyboard.** The toggle hid them but left the keys where
+  they were: the keybed holder's own bounds do not move when only its contents change, so
+  JUCE never called its `resized()` and the keys kept their old width.
+
+### Changed: Chords and Arp are views, not sheets over the whole plugin
+
+Both opened as an overlay that dimmed and covered the entire editor, including the
+keyboard. Editing an arpeggiator while unable to play a note is backwards for an
+instrument you perform, and it made the plugin feel like it had opened a second window.
+
+- **The tool row is now a view bar**: `Perform | Chords | Arp`. Each swaps what the middle
+  of the editor shows; the header rows and the keyboard stay put and stay playable.
+- **Clicking the lit tab folds the centre away**, which is how the middle section
+  minimizes. It needs no chevron of its own.
+- The panels' `Close` buttons now return to Perform rather than dismissing an overlay.
+
+### Fixed: a grey band smeared across the bottom of every key
+
+The white keys' front lip was a 10 px band two steps darker than the key body with a 30%
+black line above it. Meant as the 3D step under the playing surface, it read as a shadow
+someone had left on the keybed. It is now a thin, barely-darker bevel with a hairline
+separator: the keys still have a front face, without the dirt.
+
 ### Added: the keyboard lights up for notes you did not play
 
 The on-screen piano only ever showed your own mouse gestures. Its three states come
