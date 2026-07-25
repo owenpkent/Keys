@@ -29,6 +29,36 @@ which is an accelerator not everyone reaches for. A plain left click now release
 so a chord with a wrong note in it can be taken apart a note at a time instead of started
 over.
 
+### Fixed: Strum was doing nothing
+
+Chord-pad Strum spreads a chord's note-ons over up to 200 ms. It never did. It passed the
+delay to `noteOn`, which timestamps the message and hands it to `juce::MidiMessageCollector`
+— and that empties its **entire** queue into the current block on every callback, clamping
+each event into it. Anything beyond one buffer (~10 ms at 512 samples) was flattened onto
+the end of that buffer, so every chord landed as a block however far the slider was pushed.
+
+Strum now schedules its notes on the message thread and emits each when it comes due, the
+same approach the MCP bridge already used for deferred notes. The timer only runs while
+something is pending. Every path that stops sound (stopping a pad, panic) also drops what
+is still queued, because a note-on that fires after its note-off is a stuck note nothing
+clears.
+
+A comment in `PluginProcessor.h` had named strum as the "one real use" for that delay
+argument, which is what kept the bug hidden; it now says the opposite.
+
+### Removed: the Humanize Timing spread
+
+It rode the same broken path, and fixing it would not have been worth it: a random 0-30 ms
+nudge is inaudible on a single clicked note, and on a chord it is Strum's job, done better
+and with a direction. The parameter is retained but no longer read.
+
+### Changed: only the chevron folds a section
+
+The whole section bar was the target, so a click that missed a tab or a chip by a few
+pixels folded the section instead. Now just the chevron end does — still a full 40x34 hit
+box, and the hover highlight sits on it rather than lighting the whole bar, so where to
+click is visible rather than remembered.
+
 ### Changed: one velocity control, not two
 
 There were two: a fixed Velocity slider that only applied while Humanize was **off**, and

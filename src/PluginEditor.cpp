@@ -103,15 +103,6 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addAndMakeVisible(humanizeVelSlider);
 
-    styleLabel(humanizeTimeLabel, "Timing");
-    addAndMakeVisible(humanizeTimeLabel);
-    humanizeTimeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    humanizeTimeSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
-    humanizeTimeSlider.setRange(0, 30, 1);
-    humanizeTimeSlider.setTextValueSuffix(" ms");
-    addAndMakeVisible(humanizeTimeSlider);
-    humanizeTimeAtt = std::make_unique<SliderAtt>(processor.apvts, "humanizeTime", humanizeTimeSlider);
-
     // Chord-pad strum (Octavium "Drift"): spread a pad's note-ons over N ms, in a direction.
     styleLabel(chordStrumLabel, "Strum");
     addAndMakeVisible(chordStrumLabel);
@@ -533,7 +524,7 @@ void KeysEditor::syncSectionControls()
              &title, &sizeBox, &sizeLabel, &rootBox, &rootLabel, &scaleBox, &scaleLabel,
              &octaveSlider, &octaveLabel, &scaleLockButton, &polyphonyBox, &polyphonyLabel,
              &channelBox, &channelLabel, &humanizeButton,
-             &humanizeVelSlider, &humanizeVelLabel, &humanizeTimeSlider, &humanizeTimeLabel,
+             &humanizeVelSlider, &humanizeVelLabel,
              &chordStrumSlider, &chordStrumLabel, &chordStrumDirBox, &chordStrumDirLabel })
         c->setVisible(lay.controls);
 
@@ -811,8 +802,6 @@ void KeysEditor::timerCallback()
     // velocity control whether Humanize is on or off (it plays the band's midpoint when
     // off), so disabling it would grey out the only way to set how hard Keys plays.
     const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
-    humanizeTimeSlider.setEnabled(hum);
-    humanizeTimeLabel.setEnabled(hum);
 
     // Keep the two-handle velocity range synced to its params and show the numbers. With
     // Humanize off the two ends are one value as far as playing goes, so read out the
@@ -1066,7 +1055,6 @@ void KeysEditor::resized()
 
     toggleCell(rowB, 96, humanizeButton);
     cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
-    cell(rowB, 130, humanizeTimeLabel, humanizeTimeSlider);
     cell(rowB, 150, chordStrumLabel, chordStrumSlider);
     cell(rowB, 100, chordStrumDirLabel, chordStrumDirBox);
 

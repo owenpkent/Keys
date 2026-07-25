@@ -11,8 +11,13 @@ namespace keys
 //
 // It is a juce::Button, not a hand-rolled Component, so it inherits the mouse-only
 // contract for free: single left-click, no modifiers, and a real accessible name for the
-// UI Automation path the screenshot script uses. The whole bar is the target — 34 px tall
-// and full width, well past the 34 px floor.
+// UI Automation path the screenshot script uses.
+//
+// Only the chevron end folds the section, not the whole bar. The bar carries the section's
+// own controls (tabs, chips, the theme swatch), and with the entire strip live, a click
+// that missed one of those by a few pixels folded the section instead — an easy mistake to
+// make and an annoying one to undo. The hit zone is still a full 40x34 box, well past the
+// mouse-only floor; it is only the *glyph* inside it that is small.
 //
 // The bar is not just chrome: callers hang the section's own small controls in the space
 // to the right of the caption (see KeysEditor::resized), which is why it exposes
@@ -41,6 +46,13 @@ public:
         repaint();
     }
 
+    // The only part of the bar that reacts to a click.
+    juce::Rectangle<int> chevronZone() const { return getLocalBounds().withWidth(40); }
+
+    // Clicks outside the chevron fall through to whatever is under them, so the bar can
+    // stay full-width for painting without swallowing anything.
+    bool hitTest(int x, int y) override { return chevronZone().contains(x, y); }
+
     // Where a caller may put section controls: right of the caption, inset from the ends.
     // In the *parent's* coordinates, because those controls are the bar's siblings, not
     // its children — the bar is a Button and must keep the whole of itself clickable.
@@ -54,10 +66,19 @@ public:
         const auto b = getLocalBounds().toFloat();
         const bool open = getToggleState();
 
-        g.setColour(skin::headerTop.withAlpha(highlighted || down ? 1.0f : 0.75f));
+        g.setColour(skin::headerTop.withAlpha(0.75f));
         g.fillRoundedRectangle(b, skin::radius);
         g.setColour(juce::Colours::white.withAlpha(0.04f));
         g.fillRoundedRectangle(b.withHeight(1.0f).reduced(skin::radius, 0.0f), 0.5f);
+
+        // Light only the chevron end under the mouse. The whole bar used to light up,
+        // which advertised the whole bar as the target - and it was. Now the highlight
+        // says exactly where the click has to land.
+        if (highlighted || down)
+        {
+            g.setColour(juce::Colours::white.withAlpha(down ? 0.10f : 0.06f));
+            g.fillRoundedRectangle(chevronZone().toFloat().reduced(3.0f, 3.0f), skin::radius);
+        }
 
         // Disclosure chevron: down when open, right when folded away.
         const auto centre = juce::Point<float>(15.0f, b.getCentreY());

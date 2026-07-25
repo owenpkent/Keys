@@ -17,7 +17,8 @@ class KeysMcp; // src/mcp/KeysMcp.h; only PluginProcessor.cpp needs the full typ
 // the track output, to drive whatever instrument sits downstream. All settings
 // (size, scale-lock, octave, channel, velocity, sustain, latch) persist with the
 // DAW session via the APVTS.
-class KeysProcessor : public juce::AudioProcessor
+class KeysProcessor : public juce::AudioProcessor,
+                      private juce::Timer // strum scheduling; see scheduleNoteOn
 {
 public:
     KeysProcessor();
@@ -52,11 +53,15 @@ public:
 
     // Note I/O: called from the UI thread; queued and drained on the audio thread.
     // delaySeconds nudges the note-on (or, on noteOff, the note-off) later, and is only
-    // good for sub-block waits: chord-pad strum spread is the one real use. It is NOT a
-    // scheduler. juce::MidiMessageCollector empties its queue into the current block on
-    // every callback and clamps each event into it, so a delay long enough to matter is
-    // simply thrown away. Anything that has to happen meaningfully later has to be held
-    // and emitted at real time (see src/mcp/KeysMcp.cpp).
+    // good for sub-block waits. It is NOT a scheduler. juce::MidiMessageCollector empties
+    // its queue into the current block on every callback and clamps each event into it, so
+    // a delay longer than one buffer (~10 ms at 512 samples) is simply thrown away.
+    //
+    // This comment used to name chord-pad strum as its "one real use". That was wrong, and
+    // it hid the bug: Strum asks for up to 200 ms, so the spread was flattened and every
+    // chord landed as a block. Strum now goes through scheduleNoteOn instead. Anything
+    // that has to happen meaningfully later has to be held and emitted at real time (see
+    // scheduleNoteOn here, and src/mcp/KeysMcp.cpp).
     // channelOverride 1..16 sends on that channel instead of the global param (0 = global);
     // the Pad Grid surface uses it so drums land on their own channel.
     void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0);
@@ -187,6 +192,30 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     void stopChordPad(int i);
+
+    // Hold a note-on and emit it `delayMs` from now, on the message thread.
+    //
+    // noteOn's own delaySeconds cannot do this. It timestamps the message and hands it to
+    // juce::MidiMessageCollector, which empties its *entire* queue into the current block
+    // on every callback and clamps each event into it - so anything beyond one buffer
+    // (~10 ms at 512 samples) collapses onto the end of that buffer. Strum asks for up to
+    // 200 ms, so the spread was simply thrown away and every chord landed as a block.
+    //
+    // Message thread only, same approach as the MCP bridge's deferred notes. The timer
+    // runs only while something is pending, so an idle plugin costs nothing.
+    void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot);
+    void cancelScheduledNotes(int padSlot); // -1 cancels everything
+    void timerCallback() override;
+
+    struct DeferredNote
+    {
+        int note;
+        float vel01;
+        int channel;
+        double atMs;
+        int padSlot; // so stopping one pad drops only its own un-fired notes
+    };
+    std::vector<DeferredNote> deferred; // sorted by atMs; message thread only
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread

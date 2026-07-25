@@ -173,11 +173,10 @@ private:
     std::unique_ptr<KeyboardWindow> keyboardWindow;
 
     RangeSlider humanizeVelSlider; // a two-value range whose band drags as one; see RangeSlider.h
-    juce::Slider humanizeTimeSlider;
-    juce::Label humanizeVelLabel, humanizeTimeLabel;
+    juce::Label humanizeVelLabel;
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
-    std::unique_ptr<SliderAtt> octaveAtt, humanizeTimeAtt, chordStrumAtt;
+    std::unique_ptr<SliderAtt> octaveAtt, chordStrumAtt;
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;

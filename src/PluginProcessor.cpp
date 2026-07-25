@@ -48,7 +48,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", false));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 1, 127, 64));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 1, 127, 88));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeTime", 1 }, "Timing Spread", 0, 30, 8));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chordExclusive", 1 }, "Chord Exclusive", false));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrum", 1 }, "Chord Strum", 0, 200, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chordStrumDir", 1 }, "Chord Strum Dir",
@@ -93,6 +92,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // released a held note, which left right-click-to-hold as the only path worth having.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
+    // Timing Spread, retained but no longer read. It rode the same broken path Strum did
+    // (see scheduleNoteOn), and even fixed it earned nothing: a random 0-30 ms nudge is
+    // inaudible on a single clicked note, and on a chord it is Strum's job, done better.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeTime", 1 }, "Timing Spread", 0, 30, 8));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padChannel", 1 }, "Pad Grid Channel",
                                                       channelNames(), 9));
 
@@ -173,6 +176,8 @@ KeysProcessor::~KeysProcessor()
 {
     // Stop taking MCP calls before anything else tears down.
     mcpBridge.reset();
+    stopTimer();
+    deferred.clear();
 }
 
 int KeysProcessor::midiChannel() const
@@ -262,6 +267,7 @@ void KeysProcessor::stopChordPad(int i)
 {
     if (i < 0 || i >= numChordPads)
         return;
+    cancelScheduledNotes(i); // a strummed note still queued must never outlive its note-off
     for (int n : chordPadOn[(size_t) i])
         noteOff(n);
     chordPadOn[(size_t) i].clear();
@@ -310,12 +316,65 @@ void KeysProcessor::pressChordPad(int i)
     const int count = (int) order.size();
     for (int k = 0; k < count; ++k)
     {
-        const double delay = (count > 1 && strumMs > 0.0)
-                                 ? (strumMs * (double) k / (double) (count - 1)) * 0.001
-                                 : 0.0;
-        noteOn(order[(size_t) k], vel, delay); // noteOn also adds Humanize per note
+        // Spread across the whole strum time, first note now. Scheduled rather than
+        // stamped: see scheduleNoteOn for why noteOn's own delay could not do this.
+        const double delayMs = (count > 1 && strumMs > 0.0)
+                                   ? strumMs * (double) k / (double) (count - 1)
+                                   : 0.0;
+        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, i); // noteOn adds Humanize per note
     }
     chordPadOn[(size_t) i] = notes;
+}
+
+void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot)
+{
+    if (delayMs <= 0.0)
+    {
+        noteOn(note, vel01, 0.0, channel);
+        return;
+    }
+
+    const double at = juce::Time::getMillisecondCounterHiRes() + delayMs;
+    const DeferredNote d { note, vel01, channel, at, padSlot };
+    // Keep sorted by due time, so timerCallback only ever inspects the front.
+    deferred.insert(std::upper_bound(deferred.begin(), deferred.end(), at,
+                                     [](double t, const DeferredNote& n) { return t < n.atMs; }),
+                    d);
+    if (! isTimerRunning())
+        startTimer(1); // 1 ms: a strum step can be as short as 200/8 = 25 ms
+}
+
+void KeysProcessor::cancelScheduledNotes(int padSlot)
+{
+    // A note-on that fires *after* its note-off is a stuck note that nothing clears, so
+    // every path that stops sound has to drop what is still queued.
+    if (padSlot < 0)
+        deferred.clear();
+    else
+        deferred.erase(std::remove_if(deferred.begin(), deferred.end(),
+                                      [padSlot](const DeferredNote& n) { return n.padSlot == padSlot; }),
+                       deferred.end());
+    if (deferred.empty())
+        stopTimer();
+}
+
+void KeysProcessor::timerCallback()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    size_t due = 0;
+    while (due < deferred.size() && deferred[due].atMs <= now)
+        ++due;
+
+    if (due > 0)
+    {
+        const std::vector<DeferredNote> firing(deferred.begin(), deferred.begin() + (long) due);
+        deferred.erase(deferred.begin(), deferred.begin() + (long) due);
+        for (const auto& n : firing)
+            noteOn(n.note, n.vel01, 0.0, n.channel);
+    }
+
+    if (deferred.empty())
+        stopTimer();
 }
 
 void KeysProcessor::releaseChordPad(int i)
@@ -345,10 +404,6 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
         const int lo = juce::jmin(a, b), hi = juce::jmax(a, b);
         const int rnd = rng.nextInt(juce::Range<int>(lo, hi + 1));
         velocity01 = (float) (rnd - 1) / 126.0f;
-
-        const float spreadMs = apvts.getRawParameterValue("humanizeTime")->load();
-        if (spreadMs > 0.0f)
-            when += (double) (rng.nextFloat() * spreadMs) * 0.001; // 0..spread ms later
     }
 
     auto m = juce::MidiMessage::noteOn(channel, midiNote, juce::jlimit(0.04f, 1.0f, velocity01));
@@ -390,6 +445,7 @@ void KeysProcessor::allNotesOff()
     // envelopes. Octavium also sent CC120 (All Sound Off), but that chokes tails
     // that are still releasing, which reads as a glitch rather than a stop, so it
     // is deliberately gone.
+    cancelScheduledNotes(-1); // nothing queued may fire after a panic
     const double t = nowSeconds();
     for (int ch = 1; ch <= 16; ++ch)
     {
