@@ -130,6 +130,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDirection", 1 }, "Arp Direction",
                                                       StringArray { "Up", "Down", "Up-Down", "Down-Up",
                                                                     "Up & Down", "Down & Up", "As Played", "Reversed" }, 0));
+    // Added after the arp shipped, both additive so an older session still loads: a
+    // missing parameter falls back to its default here rather than shifting any
+    // existing parameter's range. Note the default: arpPattern off means a session
+    // that had per-step lane edits now plays as a plain shape until Shape is set back
+    // to "Pattern". That is deliberate (the step grid was the confusing part) and is
+    // called out in the changelog.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpPattern", 1 }, "Arp Pattern", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLinkLanes", 1 }, "Arp Link Lanes", true));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOctaves", 1 }, "Arp Octaves", 1, 4, 1));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "arpSwing", 1 }, "Arp Swing",
                                                      NormalisableRange<float>(0.0f, 0.75f, 0.01f), 0.0f));
@@ -438,6 +446,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ap.triplet = apvts.getRawParameterValue("arpTrip")->load() > 0.5f;
         ap.anchored = apvts.getRawParameterValue("arpAnchor")->load() > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) apvts.getRawParameterValue("arpDirection")->load();
+        ap.usePattern = apvts.getRawParameterValue("arpPattern")->load() > 0.5f;
         ap.octaveRange = (int) apvts.getRawParameterValue("arpOctaves")->load();
         ap.swing = apvts.getRawParameterValue("arpSwing")->load();
         ap.latch = apvts.getRawParameterValue("arpLatch")->load() > 0.5f;

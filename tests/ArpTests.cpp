@@ -75,6 +75,30 @@ public:
             expect(sawOn, "second step fires the middle note");
         }
 
+        // Step data is only read when the shape is "Pattern"; with usePattern off every
+        // lane reads as its default. The lane tests below therefore need it on.
+        auto lp = p;
+        lp.usePattern = true;
+
+        beginTest("lanes are ignored unless usePattern is on");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneOctave][0].store(2);
+            e.lanes.value[ArpEngine::laneRatchet][0].store(4);
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(p, clock, block, chordOn({ 60 }), out); // p.usePattern is false
+            int ons = 0;
+            for (auto& x : collect(out))
+                if (x.on)
+                {
+                    ++ons;
+                    expectEquals(x.note, 60, "octave lane must not transpose a plain shape");
+                }
+            expectEquals(ons, 1, "ratchet lane must not multiply the hit on a plain shape");
+        }
+
         beginTest("gate 50 percent schedules the note-off half a step later");
         {
             ArpEngine e;
@@ -82,10 +106,10 @@ public:
             e.lanes.value[ArpEngine::laneGate][0].store(50);
             juce::MidiBuffer out;
             clock.ppq = 0.0;
-            e.process(p, clock, block, chordOn({ 60 }), out);
+            e.process(lp, clock, block, chordOn({ 60 }), out);
             juce::MidiBuffer out2;
             clock.ppq = 0.25;
-            e.process(p, clock, block, {}, out2);
+            e.process(lp, clock, block, {}, out2);
             bool offSeen = false;
             for (auto& x : collect(out))
                 if (! x.on && x.note == 60) { offSeen = true; expectWithinAbsoluteError(x.sample, 3000, 2); }
@@ -101,7 +125,7 @@ public:
             e.lanes.value[ArpEngine::laneRatchet][0].store(2);
             juce::MidiBuffer out;
             clock.ppq = 0.0;
-            e.process(p, clock, block, chordOn({ 60 }), out);
+            e.process(lp, clock, block, chordOn({ 60 }), out);
             int ons = 0;
             for (auto& x : collect(out))
                 if (x.on && x.note == 60)
@@ -117,7 +141,7 @@ public:
             e.lanes.value[ArpEngine::laneNote][1].store(-1);
             juce::MidiBuffer out;
             clock.ppq = 0.0;
-            e.process(p, clock, 2 * block, chordOn({ 60 }), out); // two steps in one block
+            e.process(lp, clock, 2 * block, chordOn({ 60 }), out); // two steps in one block
             for (auto& x : collect(out))
                 expect(! x.on, "no note-ons from a 0-probability and a muted step");
         }
@@ -154,10 +178,10 @@ public:
                 v.store(200);
             juce::MidiBuffer out;
             clock.ppq = 0.0;
-            e.process(p, clock, block, chordOn({ 60, 64 }), out);
+            e.process(lp, clock, block, chordOn({ 60, 64 }), out);
             juce::MidiBuffer out2;
             clock.ppq = 32.0; // loop jump
-            e.process(p, clock, block, {}, out2);
+            e.process(lp, clock, block, {}, out2);
             bool offAtZero = false;
             for (auto& x : collect(out2))
                 if (! x.on && x.sample == 0)
@@ -188,7 +212,7 @@ public:
             e.lanes.value[ArpEngine::laneOctave][0].store(2);
             juce::MidiBuffer out;
             clock.ppq = 0.0;
-            e.process(p, clock, block, chordOn({ 60 }), out);
+            e.process(lp, clock, block, chordOn({ 60 }), out);
             bool saw = false;
             for (auto& x : collect(out))
                 if (x.on)

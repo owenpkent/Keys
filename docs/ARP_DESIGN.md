@@ -4,7 +4,14 @@ Distilled from a deep-research pass (2026-07-19) over the Xfer Cthulhu v1.1 manu
 Xfer Serum manual, Kirnu Cream and Devicemeister Stepic reviews and vendor docs, and
 the JUCE ArpeggiatorPluginDemo source. Confidence notes and gaps at the bottom.
 
-![The arpeggiator overlay](../assets/screenshots/arpeggiator.png)
+Shape "Up": no step editor exists, because most of the time you do not want one.
+
+![The arpeggiator on a shape](../assets/screenshots/arpeggiator-shape.png)
+
+Shape "Pattern": lane tabs, the selected lane, its mute row, and one labelled Steps /
+Speed / Link set for the lane you are looking at.
+
+![The arpeggiator in Pattern shape](../assets/screenshots/arpeggiator.png)
 
 ## Placement and contract
 
@@ -51,7 +58,26 @@ math was adversarially refuted as a pattern to copy. Requirements:
 
 Per-parameter step lanes, Cthulhu architecture. Each lane: 1-32 steps, its own
 length, plus a per-lane clock divider (1x, 1/2, 1/4 speed) for polymeter, with a
-**Link Lengths** toggle for the simple case.
+link toggle for the simple case. Shipped as **Link lanes**, and it covers speed as
+well as length, since a lane at half speed drifts against the others exactly the way a
+lane of a different length does.
+
+**"Cthulhu architecture" means tabs, and v1 got this wrong** (fixed 2026-07-24). Cthulhu
+puts its eight graphs in a tab bar and shows exactly one at a time, which is why its
+clock divider is documented as acting on "the currently-selected graph" and why it needs
+only one of each control. Keys v1 stacked all six lanes instead, and the cost was
+structural, not cosmetic: six copies of the length and speed controls crowded onto the
+right edge with no room to label any of them, and the panel wanted ~750 px of height
+against a 660 px default editor (less again in Keys Host, which spends some on its top
+bar), so the Probability lane and the whole pattern row sat below the window edge until
+you enlarged it. Lanes are tabs now, with one labelled Steps control, one Speed control,
+and the Link lanes switch this spec asked for from the start.
+
+**Shape gates the whole editor** (Serum 2's model). Shape holds the eight directions plus
+"Pattern"; the step editor exists only in "Pattern", and `ArpEngine::Params::usePattern`
+carries it into the engine. `laneValue()` is the single place lane data is read, so it is
+the single place the gate lives: with it off, every lane reads as `laneDefaults` and the
+arp runs as a plain shape while edited step data sits untouched, waiting.
 
 Ranked essential (v1):
 

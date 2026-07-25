@@ -5,6 +5,34 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the arpeggiator leads with a Shape, and the step lanes are tabbed
+
+**Saved sessions: two new parameters (`arpPattern`, `arpLinkLanes`).** Both are additive,
+so an older session still loads, but `arpPattern` defaults **off**. A session that had
+per-step lane edits will now play as a plain arpeggiator until you set **Shape** back to
+**Pattern**; the step data itself is untouched and comes back with it.
+
+- **Shape now decides whether there is a step editor at all.** The Shape menu holds the
+  eight directions plus "Pattern"; only "Pattern" shows the grid. Opening the arp on a
+  shape is now one row of controls, not six lanes of teal bars. Modelled on Serum 2,
+  whose pattern editor likewise only exists while SHAPE is "Pattern".
+- **The six lanes are tabs, one on screen at a time** (Note, Octave, Velocity, Gate,
+  Ratchet, Probability), which is the Cthulhu design `docs/ARP_DESIGN.md` always
+  claimed to follow. Stacking all six is what forced six copies of the length and
+  speed controls onto the right edge with no room to label any of them.
+- **One Steps control and one Speed control**, labelled, for the lane you are looking
+  at, plus the **Link lanes** switch the design spec called for and that was never
+  built. Link on (the default) keeps every lane the same length and speed; off is
+  polymeter, per-lane.
+- **Fixed: the bottom of the arp panel was cut off at ordinary window sizes.** Six lanes
+  needed about 750 px of panel height, more than the editor's 660 px default and more
+  than Keys Host leaves once its top bar is in, so the Probability lane and the entire
+  pattern row (A-H, Copy, Randomize) sat below the window edge. You had to enlarge the
+  window to reach them, and nothing said so.
+- **Fixed: tooltips never appeared anywhere in the plugin.** JUCE only shows them when a
+  `TooltipWindow` exists and there was none, so 19 written explanations across the arp
+  and chord panels were dead code.
+
 ### Changed: the instrument picker files VSTs into folders
 - **One collapsible folder per publisher**, opening closed, so a big library reads as a
   short list of publishers instead of one long scroll. The header shows how many
