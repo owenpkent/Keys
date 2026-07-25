@@ -9,7 +9,7 @@ on-screen piano into MIDI. Everything shared with the rest of the line comes fro
 ```
 src/
 ├── PluginProcessor.{h,cpp}   # AudioProcessor: params, MIDI output, chord pads, state
-├── PluginEditor.{h,cpp}      # controls + surface tabs + layout + updater button
+├── PluginEditor.{h,cpp}      # folding sections, centre views, layout, updater button
 ├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
 ├── Chords.h                  # pure chord detector (names a note set), unit-tested
 ├── ScaleModes.h              # 12 modes + a chord quality per degree; Feel presets
@@ -29,6 +29,7 @@ src/
 │   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
 │   ├── ArpPanel.{h,cpp}      # the arp centre view: Shape gates a tabbed lane editor
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
+│   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity range)
 │   ├── KeyboardWindow.h      # the keybed popped out into its own resizable window
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
 ├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
@@ -54,16 +55,19 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 The audio thread does nothing else: `buffer.clear()` (silence) then drain the
 collector. No allocation, no locks.
 
-## Playing surface: one view, the piano
+## Playing surface: one product, one piano
 
-Keys is one view, no tabs: header controls, the knob row, the chord-pad strip, then
-the playing surface — `KeysEditor` builds a `PianoKeyboard`, which derives from
-`NoteSurface`. There used to be five tabbed surfaces (Keys/Hex/Pads/Faders/XY,
-switched by a `surface` parameter); the Pad Grid was cut outright (drums belong to
-Beatform), the Faders and XY surfaces were replaced by the knob row below, and the
-Hex surface moved out to its own repo (`../Hex`) along with Hex Host. The `surface`,
-`uiLayout`, `padChannel`, and `xyCC*` parameters are still registered so old sessions
-load without error, but nothing in the UI reads them any more.
+The **playing surface** is not a choice: `KeysEditor` builds a `PianoKeyboard` (which
+derives from `NoteSurface`), and that is the only surface Keys and Keys Host ship. There
+used to be five tabbed *surfaces* (Keys/Hex/Pads/Faders/XY, switched by a `surface`
+parameter); the Pad Grid was cut outright (drums belong to Beatform), the Faders and XY
+surfaces were replaced by the knob row, and the Hex surface moved out to its own repo
+(`../Hex`) along with Hex Host. Their parameters are still registered — see **Parameters
+and state**.
+
+The tabs that exist now are a different thing: they pick which **centre view** occupies
+the middle of the editor (Perform / Chords / Arp), not which surface you play on. See
+**Folding layout, and the centre view**.
 
 ## Note bookkeeping: one union, one diff (NoteSurface)
 
@@ -106,11 +110,32 @@ turns off correctly even if you change octave or scale while it is held.
 
 ## Humanize
 
-`KeysProcessor::noteOn` applies Humanize when it is on: it draws a uniform-random
-velocity in `[humanizeVelMin, humanizeVelMax]` per note and adds a random `0..humanizeTime`
-ms to the message timestamp, so simultaneous notes spread. Note-offs are never delayed,
-so a note can never release before it sounds. A `juce::Random`, touched only on the
-message thread, drives it.
+The velocity range is the only velocity control. `KeysProcessor::noteOn` draws a
+uniform-random velocity in `[humanizeVelMin, humanizeVelMax]` per note when Humanize is on;
+with it off, `baseVelocity01` returns the band's midpoint. There used to be a fixed
+Velocity slider *as well*, but it only ever applied while Humanize was off, so the two
+were one control in two costumes. Collapsing the band onto a single value is now how you
+ask for a fixed velocity. A `juce::Random`, touched only on the message thread, drives it.
+
+The timing half of Humanize is gone. It nudged the message timestamp, which
+`MidiMessageCollector` flattens (see **Scheduling** below), so it never worked; and even
+working it earned nothing that Strum does not do better.
+
+## Scheduling: why a delay cannot go through the collector
+
+`noteOn`'s `delaySeconds` is not a scheduler. `juce::MidiMessageCollector` empties its
+**entire** queue into the current block on every callback and clamps each event into it,
+so anything beyond one buffer (~10 ms at 512 samples) lands on the end of that buffer.
+
+Chord-pad Strum asks for up to 200 ms and was doing exactly that: every chord arrived as a
+block however far the slider was pushed. `scheduleNoteOn` holds the note and emits it when
+it comes due, on the message thread, the same way the MCP bridge defers notes. Its timer
+runs only while something is pending. Every path that stops sound (`stopChordPad`,
+`allNotesOff`) also calls `cancelScheduledNotes`, because a note-on that fires after its
+note-off is a stuck note nothing clears.
+
+`pressChordPad` and `pressLiveChord` share `fireChord`, so the polyphony cap, the strum
+ordering and the scheduling are one implementation rather than two that drift.
 
 ## Chord pads
 
@@ -122,7 +147,7 @@ selects and indexes by **absolute slot**, so a chord left ringing on another pag
 sounding and a drag can't land on the wrong pad. Sessions saved when pages held eight
 carry a `padsPerPage` marker (absent = 8) and each slot is re-based on load, so every
 pad stays on the page it was on. Build a chord on the
-keyboard (Latch), drag the live card onto a pad to `setChordPad` the sounding notes
+keyboard (Sustain or right-click), drag the live card onto a pad to `setChordPad` the notes
 (named by `keys::chords::detect`), then play it beat-pad style: mouse-down calls
 `pressChordPad` (fire, honouring the `chordExclusive` choke) and mouse-up calls
 `releaseChordPad` (stop, unless Sustain is holding it — the editor releases held pad
@@ -252,15 +277,25 @@ editor to fit rather than shrinking them. Auditioning a chord in the grid reuses
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
-`scaleLock`, `octave`, `channel`, `velocity`, `curve`, `polyphony`, `sustain`, `latch`,
-the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax` / `humanizeTime`, the
+`scaleLock`, `octave`, `channel`, `polyphony`, `sustain`,
+the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir` / `padPage`, the
 generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the note-count and inversion
 toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`faderCC8`
 CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
-`markovLength`. `surface`, `uiLayout`, `padChannel`, `xyCCX` / `xyCCY` are also still
-registered — they named the old five-tab arrangement — but are dead weight now, kept
-only so a session saved with them loads without error. The Mod and
+`markovLength`.
+
+A growing set is **registered but no longer read**, kept only so a session (and any host
+automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,
+`xyCCX` / `xyCCY` from the old five-tab arrangement, and `velocity`, `curve`, `latch`,
+`humanizeTime` from the controls this branch retired. Adding to that list is the standing
+convention here — removing a parameter outright would shift automation in projects that
+already exist.
+
+The folding layout (which sections are open, which centre view, the detached window's
+bounds) and the instance's accent colour are **not** parameters: they change no note, and
+exposing them to automation would only add ways to break a session. They live in
+`KeysProcessor::LayoutState` and ride along in the session tree. The Mod and
 Pitch wheels, knob positions, and the Markov Mood and
 Start pickers are transient performance controls with no parameters (they don't
 persist); Pitch glides back to centre over ~160 ms on release, and the wheels and
@@ -281,8 +316,8 @@ suggestion menu works the chord out from its notes instead.
 `KeysEditor` owns the controls, the knob row, the playing surface, the
 `ChordPads` rows, and the update
 button. It sets the shared `LookAndFeel` (retinted locally toward Octavium's neutral
-grey), wires the playing surface and the pads to `KeysProcessor::baseVelocity01` (velocity
-slider through the curve), pushes the surface's sounding notes into the pads
+grey), wires the playing surface and the pads to `KeysProcessor::baseVelocity01` (the
+midpoint of the velocity range), pushes the surface's sounding notes into the pads
 each timer tick, panics the surface on a channel change (so notes can't strand),
 animates the pitch wheel home after release, and on construction fires
 `okstudio::updater::checkAsync`; if a newer signed

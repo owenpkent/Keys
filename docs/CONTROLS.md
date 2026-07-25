@@ -9,13 +9,14 @@ on-screen equivalent.
 
 | Gesture | Result |
 |---------|--------|
-| Click a key | Play that note (velocity from the Velocity control + Curve) |
+| Click a key | Play that note (velocity from the Velocity range) |
 | Click and drag | Glide across keys; the previous note releases as the next sounds (monophonic) |
-| Right-click a key *(optional)* | Toggle that one note held, without turning Latch mode on — Octavium's per-note latch. **All Off**, or turning **Latch** off, releases it. |
+| Right-click a key *(optional)* | Hold that one note — Octavium's per-note latch. **Left-click it again** to release it, or **All Off**. |
 | Click a **C** | Every C is labelled (C1, C2, …) to help you orient |
 
-Chords come from Latch, Sustain, or right-click — a single mouse can't hold several
-keys at once, so those are how you stack notes.
+Chords come from **Sustain** or **right-click** — a single mouse can't hold several
+keys at once, so those are how you stack notes. Either way, **clicking a held key
+releases it**, so a chord with a wrong note in it can be taken apart a note at a time.
 
 To the **left of the keyboard** are two performance wheels: **Mod**
 sends CC1 and stays where you leave it; **Pitch** bends and glides back to centre over
@@ -23,12 +24,34 @@ a moment when you let go. Both move by **relative drag** — clicking never jump
 value, so a stray click can't slam a bend. They are
 transient (they don't save with the session) and send on the current MIDI channel.
 
+## Folding the window down
+
+Keys is a stack of sections, and each one folds away so the plugin can be squeezed small
+when the screen is busy. **Click the chevron at the left end of a section bar** — only
+that end folds it, so a click that misses a control next to it can't collapse the section
+by accident. The window resizes itself to whatever the folds add up to, and can never be
+dragged smaller than the content it is showing.
+
+| Section | Bar | Folds away |
+|---------|-----|-----------|
+| **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Velocity, Humanize, Strum, Dir |
+| **Perform / Chords / Arp** | middle | Whichever centre view is showing. The three tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** and **Pads** fold the two halves of Perform separately. |
+| **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain and All Off stay put. |
+
+### Detaching the keyboard
+
+**Detach** puts the keybed in its own resizable window, so you can make the keys as large
+as the screen allows without stretching the rest of the plugin. Docked, key height is a
+compromise with everything above it; detached, dragging the window taller genuinely makes
+the keys taller. That window carries its own **Size**, **Wheels** and **Re-dock** controls,
+and its close button re-docks. Its position and size are remembered with the session.
+
 ## Playing surface
 
 Keys is one view, no tabs: the piano fills the playing area in both Keys and Keys
 Host. (The hex-grid Harmonic Table and Hex Host live in their own repo, `../Hex`.)
 
-Latch, Sustain, Voices, Octave, and Humanize all apply to it, and All Off silences
+Sustain, Voices, Octave, and Humanize all apply to it, and All Off silences
 it. The 4x4 note pad grid and the XY pad from earlier builds are gone (drums belong
 to Beatform; the XY pad's two CCs are covered by the knob row below).
 
@@ -49,52 +72,63 @@ click-jump), and nothing is sent until you move one.
 | **Scale Lock** | toggle | On: each played note snaps to the nearest note in (Root, Scale); out-of-scale keys are dimmed so you see the shape. You cannot play a wrong note. |
 | **Octave** | inc/dec | Transpose the whole keyboard, -5..+5 octaves. Click the arrows or scroll. |
 | **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. |
-| **Velocity** | slider | Base note velocity (1–127), used when Humanize is off. Click or scroll. |
-| **Curve** | dropdown | Shapes the velocity response: **Soft** (reach high velocities easily), **Linear**, **Hard** (stays quiet until you push) |
 | **MIDI Ch** | dropdown | Output channel, 1–16 |
-| **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail. Turn off (or click All Off) to release. |
-| **Latch** | toggle | On: clicking a key toggles it on or off and holds it. Drag to paint several on. Build and hold a chord with one finger. |
-| **Humanize** | toggle | On: each note gets a random velocity within the Humanize **Velocity** range plus a small timing offset, so repeats and chords don't sound machine-perfect. |
-| Humanize **Velocity** | two-handle slider | The Min/Max velocity each note is drawn from when Humanize is on (shown as "Velocity 64–88"). Grab either handle. |
-| Humanize **Timing** | slider | Micro-timing spread, 0–30 ms. |
-| **Excl** | toggle | Exclusive chord mode: playing a chord pad chokes the previously-playing pad, so only one pad chord sounds at a time. |
-| **Strum** | slider | Spread a chord pad's notes over 0–200 ms (a strum) instead of playing them together. |
+| **Velocity** | two-handle slider | How hard Keys plays. With **Humanize** off, every note plays the band's midpoint (the readout shows it). With Humanize on, each note takes a random value inside the band. Drag an end to resize it, or **drag the middle to move the whole band**. Collapse it onto one value for a plain fixed velocity. |
+| **Humanize** | toggle | On: each note takes a random velocity from inside the Velocity band, so repeats and chords don't sound machine-perfect. Off: the band's midpoint. |
+| **Strum** | slider | Spread a chord's notes over 0–200 ms instead of playing them together. Applies to chord pads and the live chord card. |
 | **Dir** | dropdown | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. |
-| **All Off** | button | Panic. Stops every note on every channel (per-note offs, then CC120 All Sound Off + CC123 All Notes Off). |
+| **Theme** | swatch | Colours this instance (Cyan, Amber, Lime, Violet, Magenta, Orange, Rose, Ice), so you can tell it from Keys on your other tracks. Per instance, saved with the session. Sits on the *Controls bar*, so it stays reachable with that section folded. |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
-## Notes on Sustain vs Latch
+These sit on the **Keyboard bar** rather than in a section, so folding anything away never
+takes them with it — they are what you reach for while playing:
 
-- **Sustain** is momentary-feeling: notes you play while it's on are caught and held;
-  turning it off releases everything it caught.
-- **Latch** is a toggle set: each key you click flips on or off and stays. Turning
-  Latch off clears the latched notes.
+| Control | Type | What it does |
+|---------|------|--------------|
+| **Exclusive** | toggle | Playing a chord pad chokes the previously-playing pad, so only one pad chord sounds at a time. |
+| **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail. Click a held key to release just that note; turn Sustain off (or click All Off) to release everything. |
+| **All Off** | button | Panic. Stops every note on every channel, and drops anything a strum still had queued. |
 
-Both persist with the DAW session, along with every other control here.
+## Holding notes
+
+A single mouse can't hold several keys, so there are two ways to stack them:
+
+- **Sustain** catches every note you play while it is on.
+- **Right-click** a key to hold that one note (an optional accelerator).
+
+Either way, **left-clicking a held key releases it**. That is why there is no Latch
+toggle any more: once one click both holds and releases, a whole mode for holding notes
+earned nothing.
+
+Everything here persists with the DAW session.
 
 ## Chord pads
 
 Two rows of eight pads (sixteen a page) and a live chord card sit between the controls
 and the playing area. They let you keep a palette of chords a single click away.
 
-1. **Build a chord.** Turn **Latch** on and click the notes you want. The card names
-   the chord it hears (for example `Cm7`).
-2. **Capture it.** Drag the card onto a pad. The pad stores that chord, auto-labelled.
-3. **Play it, beat-pad style.** Press and hold a filled pad to sound its chord; release
-   to stop. Turn **Sustain** on to keep it ringing after you let go, and **Excl** on so
-   a new pad chokes the previous chord.
-4. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
+1. **Build a chord.** Turn **Sustain** on (or right-click) and click the notes you want.
+   The card names the chord it hears (for example `Cm7`).
+2. **Hear it as a chord.** Press and hold the card. Holding a chord sounds the keys you
+   are holding; the card fires them as one chord, so you hear it strummed, humanized and
+   capped by Voices — the way a pad plays it. Release to stop.
+3. **Capture it.** Drag the card onto a pad. The pad stores that chord, auto-labelled.
+   (A drag beats the press, so capturing never leaves a note ringing.)
+4. **Play it, beat-pad style.** Press and hold a filled pad to sound its chord; release
+   to stop. Turn **Sustain** on to keep it ringing after you let go, and **Exclusive** on
+   so a new pad chokes the previous chord.
+5. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
    the rows to empty it, or drag a pad onto the live card to bring its notes back onto
-   the keyboard (latched) for editing — capture in reverse.
+   the keyboard (held) for editing — capture in reverse.
 
 Pad chords play through the same output as the keys, so **Humanize** gives each chord
 tone its own velocity and the **Strum** control spreads them into a strum. A pad also
 respects the **Voices** limit: if a chord has more notes than the cap allows, its lowest
 notes are the ones that sound. The pads save with the DAW session.
 
-There are **four pages** of sixteen pads. `<` and `>` move between them, and the label
-between shows where you are. A chord left ringing on one page keeps sounding while you
-work on another, so you can hold a bass chord on page 1 and play page 2 over it.
+There are **four pages** of sixteen pads, picked by the four numbered buttons directly
+under the strip. A chord left ringing on one page keeps sounding while you work on
+another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ## Chord generator
 
@@ -171,7 +205,7 @@ ignored them). Locked pads are never overwritten, same as the algorithmic source
 ## Arpeggiator
 
 Opens from the **Arp** button next to Chords. It takes whatever is currently sounding
-(keyboard, latch, a chord pad) and plays it one note at a time.
+(keyboard, a held note, a chord pad) and plays it one note at a time.
 
 **Shape decides how much of the panel exists.** The eight directions are plain
 arpeggios and show nothing but the controls below. The ninth entry, **Pattern**, opens

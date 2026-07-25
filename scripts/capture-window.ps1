@@ -9,7 +9,11 @@
 #   ... -InvokeButtons Chords            # open an overlay first (UIA Invoke by name)
 #   ... -KeepOpen                        # leave the app running (repeat captures)
 param(
-    [Parameter(Mandatory = $true)] [string]$ExePath,
+    # Not mandatory: with -ProcessId you are reusing a running instance and there is
+    # nothing to launch. -SetValues runs *before* -InvokeButtons, so reaching a control
+    # that only exists inside a view means two passes: one to open it with -KeepOpen,
+    # then one with -ProcessId to drive it.
+    [string]$ExePath,
     [Parameter(Mandatory = $true)] [string]$OutPath,
     [int]$SettleMs = 2500,
     [string[]]$InvokeButtons = @(),
@@ -38,7 +42,14 @@ $launched = $false
 if ($ProcessId -ne 0) {
     $proc = Get-Process -Id $ProcessId
 } else {
-    $proc = Start-Process -FilePath $ExePath -PassThru
+    if (-not $ExePath) { throw "Pass -ExePath to launch, or -ProcessId to reuse a running instance." }
+    # Smart App Control blocks the first launch of a freshly linked unsigned exe while its
+    # reputation check runs, then allows the same file moments later (see docs/BUILD.md).
+    # Absorb that here, the same way run.py does, instead of failing a docs capture.
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        try { $proc = Start-Process -FilePath $ExePath -PassThru; break }
+        catch { if ($attempt -eq 8) { throw }; Start-Sleep -Milliseconds 1200 }
+    }
     $launched = $true
 }
 

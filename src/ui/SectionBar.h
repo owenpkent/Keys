@@ -29,7 +29,11 @@ public:
 
     explicit SectionBar(const juce::String& caption) : juce::Button(caption), title(caption)
     {
-        setTitle(caption); // accessible name; a Button's own is its (empty) button text
+        // Accessible name (a Button's own is its empty button text). "... section" and not
+        // the bare caption, because the centre bar's caption follows the view and would
+        // otherwise collide with the tab of the same name — ambiguous for a screen reader,
+        // and it made UI Automation fold the section when asked to click the tab.
+        setTitle(caption + " section");
         setTooltip("Show or hide " + caption.toLowerCase() + ".");
         setClickingTogglesState(true);
         setToggleState(true, juce::dontSendNotification); // open
@@ -42,7 +46,7 @@ public:
         if (c == title)
             return;
         title = c;
-        setTitle(c); // keep the accessible name honest
+        setTitle(c + " section"); // keep the accessible name honest, and still distinct
         repaint();
     }
 
