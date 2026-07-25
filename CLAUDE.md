@@ -16,17 +16,22 @@ drums, Keys = the played keyboard). Where those two generate, Keys is performed.
 
 ## Build & Run
 
-**Default dev loop: `.\run.ps1`.** Do not send Owen to Ableton to try a change. `run.ps1`
-closes the running standalone, builds exactly one Standalone target, and relaunches it:
-about 5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real
-instrument VST3 in-process, so a click makes sound with no DAW involved and no rescan.
-It remembers the loaded synth between launches, which is why the script asks the app to
-close politely (a forced kill skips JUCE's settings write and loses it).
+**Default dev loop: `run.py`.** Do not send Owen to Ableton to try a change. It closes
+the running standalone, builds exactly one Standalone target, and relaunches it: about
+5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real instrument VST3
+in-process, so a click makes sound with no DAW involved and no rescan. It remembers the
+loaded synth between launches, which is why the script asks the app to close politely (a
+forced kill skips JUCE's settings write and loses it).
+
+**Owen runs it by double-clicking `run.py` in Explorer** — no arguments, no terminal, and
+the console holds open on failure so he can read the error. Never tell him to type a
+command when he could click the file instead. `run.ps1` is a thin shim over `run.py`, so
+there is one copy of the logic; either is fine from a terminal.
 
 ```powershell
-.\run.ps1              # build + launch Keys Host standalone (makes sound)
-.\run.ps1 -Keys        # plain Keys instead (MIDI only, silent)
-.\run.ps1 -NoBuild     # just relaunch what is already built
+py run.py              # build + launch Keys Host standalone (makes sound)
+py run.py --keys       # plain Keys instead (MIDI only, silent)
+py run.py --no-build   # just relaunch what is already built
 ```
 
 Go to a real Live load test only for what the standalone genuinely cannot show: bus

@@ -17,15 +17,27 @@ dev/
 └── Keys/
 ```
 
-## Testing a change (run.ps1)
+## Testing a change (run.py)
 
 The everyday loop. Builds exactly one Standalone target and relaunches it: about 5s
 after touching a .cpp, ~1s for a no-op. No VST3, no signing, no DAW rescan.
 
+**Double-click `run.py`** in Explorer (or right-click → Open) to build and launch Keys
+Host. No arguments, no terminal: this is the mouse-only path, and it is the reason the
+loop is a Python script rather than only a PowerShell one. If the build fails, the
+console stays open so the error can be read instead of flashing past.
+
+From a terminal, either entry point works and both do the same thing — `run.ps1` is a
+thin shim over `run.py`, so there is one copy of the logic:
+
 ```powershell
-./run.ps1                   # build + launch Keys Host standalone
-./run.ps1 -Keys             # plain Keys instead (MIDI only, makes no sound)
-./run.ps1 -NoBuild          # just relaunch what is already built
+py run.py                   # build + launch Keys Host standalone
+py run.py --keys            # plain Keys instead (MIDI only, makes no sound)
+py run.py --no-build        # just relaunch what is already built
+
+./run.ps1                   # same three, with PowerShell-style switches
+./run.ps1 -Keys
+./run.ps1 -NoBuild
 ```
 
 Keys Host standalone runs a real instrument VST3 in-process, so clicking a key makes
@@ -34,7 +46,7 @@ sound with no DAW involved. Load a synth into it once; it remembers between laun
 Reach for `build.ps1` below when a change needs a real Ableton load test: bus layout,
 plugin classification, the installer, the updater, or host automation.
 
-Two things `run.ps1` absorbs so they don't look like build failures. Keys Host owns two
+Two things `run.py` absorbs so they don't look like build failures. Keys Host owns two
 top-level windows, and Windows picks `MainWindowHandle` between them heuristically, so
 the close is aimed at the window titled after the product (closing the instrument
 window only hides it, which would cost you a force-kill and the loaded synth). And if
