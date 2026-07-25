@@ -126,6 +126,12 @@ public:
     void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive
     void releaseChordPad(int i);         // stop it, unless Sustain is holding
     void stopAllChordPads();
+
+    // The live card's chord: whatever the keyboard is holding, fired as one gesture so it
+    // is heard strummed and humanized the way a pad plays it, rather than as the sum of
+    // the keys under your mouse. Same press/release contract as a pad.
+    void pressLiveChord(const std::vector<int>& notes);
+    void releaseLiveChord(bool force = false);
     int padPage() const;                 // 0-based; the page the editor is showing
     int padPageOffset() const { return padPage() * padsPerPage; }
 
@@ -192,6 +198,12 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     void stopChordPad(int i);
+
+    // Shared by the pads and the live card: cap, order, strum-schedule a chord. Returns
+    // the notes actually fired (post polyphony cap), for the caller to remember.
+    std::vector<int> fireChord(const std::vector<int>& notes, int tag);
+    static constexpr int liveChordTag = -2; // scheduling tag; pads use their own slot
+    std::vector<int> liveChordOn;
 
     // Hold a note-on and emit it `delayMs` from now, on the message thread.
     //

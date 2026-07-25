@@ -57,6 +57,7 @@ private:
 
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
     int playing = -1;      // pad held down and sounding (beat-pad momentary play)
+    bool playingLive = false; // the live card is held down and sounding its chord
     bool dragging = false;
     juce::Point<float> downPos, dragPos;
 

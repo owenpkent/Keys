@@ -277,6 +277,7 @@ void KeysProcessor::stopAllChordPads()
 {
     for (int i = 0; i < numChordPads; ++i)
         stopChordPad(i);
+    releaseLiveChord(true); // the live card is a chord source too; a stop means all of them
 }
 
 void KeysProcessor::pressChordPad(int i)
@@ -295,7 +296,16 @@ void KeysProcessor::pressChordPad(int i)
     // fires as one gesture, so there is no "oldest" within it — drop the highest notes and
     // keep the lowest, matching how the keyboard resolves a too-big simultaneous chord.
     // (The cap applies per source: a pad and the keyboard each fit under it separately.)
-    std::vector<int> notes = chordPads[(size_t) i].notes;
+    chordPadOn[(size_t) i] = fireChord(chordPads[(size_t) i].notes, i);
+}
+
+std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int tag)
+{
+    // Honour the Voices cap. The keyboard steals oldest-first across its own notes; a chord
+    // fires as one gesture, so there is no "oldest" within it — drop the highest notes and
+    // keep the lowest, matching how the keyboard resolves a too-big simultaneous chord.
+    // (The cap applies per source: a chord and the keyboard each fit under it separately.)
+    std::vector<int> notes = source;
     std::sort(notes.begin(), notes.end());
     const int cap = polyphonyCap();
     if (cap > 0 && (int) notes.size() > cap)
@@ -321,9 +331,32 @@ void KeysProcessor::pressChordPad(int i)
         const double delayMs = (count > 1 && strumMs > 0.0)
                                    ? strumMs * (double) k / (double) (count - 1)
                                    : 0.0;
-        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, i); // noteOn adds Humanize per note
+        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, tag); // noteOn adds Humanize per note
     }
-    chordPadOn[(size_t) i] = notes;
+    return notes;
+}
+
+void KeysProcessor::pressLiveChord(const std::vector<int>& notes)
+{
+    // The live card fires the chord you are holding as one gesture, so you hear it the way
+    // a pad would play it — strummed, humanized, capped — rather than as the sum of the
+    // individual keys you happen to be holding down. Re-pressing re-triggers.
+    if (notes.empty())
+        return;
+    releaseLiveChord(true);
+    if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
+        stopAllChordPads();
+    liveChordOn = fireChord(notes, liveChordTag);
+}
+
+void KeysProcessor::releaseLiveChord(bool force)
+{
+    if (! force && apvts.getRawParameterValue("sustain")->load() > 0.5f)
+        return; // pedal down: leave it ringing, same as a pad
+    cancelScheduledNotes(liveChordTag);
+    for (int n : liveChordOn)
+        noteOff(n);
+    liveChordOn.clear();
 }
 
 void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot)

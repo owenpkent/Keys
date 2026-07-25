@@ -29,6 +29,27 @@ which is an accelerator not everyone reaches for. A plain left click now release
 so a chord with a wrong note in it can be taken apart a note at a time instead of started
 over.
 
+### Changed: the performance controls live on the Keyboard bar
+
+Exclusive, Sustain and All Off now sit next to Wheels and Detach, and — unlike those two —
+they stay visible whatever the Keyboard section is doing. They are what you reach for
+*while playing*, so a fold must not take them away. They no longer follow the centre
+view either, so they are there in Chords and Arp too.
+
+### Added: the live chord card plays
+
+Holding a chord sounds the keys you are holding. Clicking the "hold a chord" card now
+fires those same notes as one chord, so you hear it the way a pad would play it: strummed,
+humanized, and capped by Voices. Press and hold to sound it, release to stop (Sustain
+holds it). Dragging still captures the chord onto a pad — the drag wins the moment the
+mouse actually moves.
+
+### Changed: chord-pad pages are four buttons, under the pads
+
+`< 1/4 >` sat up on the view bar, far from the pads it paged, and read as a fraction. It
+is now four numbered buttons directly beneath the pad strip: one click reaches any page,
+and what they page is obvious from where they are.
+
 ### Fixed: Strum was doing nothing
 
 Chord-pad Strum spreads a chord's note-ons over up to 200 ms. It never did. It passed the

@@ -10,6 +10,7 @@
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
 #include <okstudio/Updater.h>
+#include <array>
 #include <memory>
 
 // The playing surface, the piano, is picked at compile time, not by a tab: one
@@ -49,7 +50,6 @@ private:
     void addCombo(juce::ComboBox&, juce::Label&, const juce::String& text, const juce::StringArray& items,
                   const juce::String& paramID, std::unique_ptr<ComboAtt>&);
     void showUpdate(const okstudio::updater::UpdateInfo&);
-    void stepPadPage(int delta);
     void toggleEditPad(int slot); // link a chord pad to the keyboard for editing
     void endPadEdit();
 
@@ -135,9 +135,8 @@ private:
     // Chord-pad page navigation, and the three centre-view tabs. The tabs are toggles:
     // clicking the lit one folds the centre away, which is how the centre section is
     // minimized (it needs no chevron of its own, unlike the other sections).
-    juce::TextButton pagePrevButton { "<" }, pageNextButton { ">" };
+    std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
     juce::TextButton performButton { "Perform" }, chordsButton { "Chords" }, arpButton { "Arp" };
-    juce::Label pageLabel;
 
     // Only the centre view currently showing is alive; both are heavy (the generator
     // builds 16 chord cards, the arp six step lanes) and neither is worth keeping warm.

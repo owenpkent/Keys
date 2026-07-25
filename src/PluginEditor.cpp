@@ -23,6 +23,7 @@ namespace
     constexpr int viewBarH = 34;                      // centre-view tabs + pad transport
     constexpr int knobRowH = 110;
     constexpr int padRowH = 96;
+    constexpr int pageRowH = 34;                      // the four page buttons, under the pads
     constexpr int dockedKeybedH = 212;                // 185 px of key plus a little body
 
     juce::StringArray channelItems()
@@ -159,8 +160,6 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Chord-pad pages: four pages of sixteen (Octavium's 4x4 per page), so a session can
     // hold several keys' worth of chords without the strip shrinking below a comfortable
     // target.
-    pagePrevButton.onClick = [this] { stepPadPage(-1); };
-    pageNextButton.onClick = [this] { stepPadPage(1); };
 
     // Centre-view tabs. Each picks a view; the section's own chevron folds it away, the
     // same as Controls and Keyboard. The tabs stay visible while it is folded, so picking
@@ -175,12 +174,22 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     tab(performButton, viewPerform, "Knobs and chord pads.");
     tab(chordsButton, viewChords, "Generate chords for this page.");
     tab(arpButton, viewArp, "Arpeggiator: per-step lanes.");
-
-    for (auto* b : { &pagePrevButton, &pageNextButton })
-        addAndMakeVisible(*b);
-    styleLabel(pageLabel, "1/4");
-    pageLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(pageLabel);
+    // Four explicit page buttons, sat with the pads rather than a "1/4" transport parked
+    // up on the view bar. One click reaches any page, and what it pages is obvious from
+    // where it is.
+    for (int p = 0; p < KeysProcessor::numPadPages; ++p)
+    {
+        auto& b = pageButtons[(size_t) p];
+        b.setButtonText(juce::String(p + 1));
+        b.setTooltip("Chord-pad page " + juce::String(p + 1) + " of " + juce::String(KeysProcessor::numPadPages) + ".");
+        b.setClickingTogglesState(false); // the timer owns the lit state
+        b.onClick = [this, p]
+        {
+            if (auto* param = processor.apvts.getParameter("padPage"))
+                param->setValueNotifyingHost(param->convertTo0to1((float) p));
+        };
+        addAndMakeVisible(b);
+    }
 
     // Section folds. The bars carry their own toggle state; the sub-section chips
     // (Knobs / Pads / Wheels) are plain toggles on the bar they belong to.
@@ -397,15 +406,6 @@ void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::S
     att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
 }
 
-void KeysEditor::stepPadPage(int delta)
-{
-    if (auto* param = processor.apvts.getParameter("padPage"))
-    {
-        const int next = juce::jlimit(0, KeysProcessor::numPadPages - 1, processor.padPage() + delta);
-        param->setValueNotifyingHost(param->convertTo0to1((float) next));
-    }
-}
-
 void KeysEditor::setCentreView(int view)
 {
     processor.layout.view = juce::jlimit(0, 2, view);
@@ -511,10 +511,10 @@ void KeysEditor::syncSectionControls()
     // the pad strip. None of them mean anything under another view, or under a folded one.
     // The three tabs stay visible either way: they are how a folded centre comes back.
     const bool perform = lay.view == viewPerform && lay.centre;
-    for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &knobsButton, &padsButton, &chordExclusiveButton,
-             &pagePrevButton, &pageNextButton, &pageLabel })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &knobsButton, &padsButton })
         c->setVisible(perform);
+    for (auto& b : pageButtons)
+        b.setVisible(perform && lay.pads); // they page the pads; pointless without them
     knobBank.setVisible(perform && lay.knobs);
     chordPads.setVisible(perform && lay.pads);
 
@@ -530,6 +530,13 @@ void KeysEditor::syncSectionControls()
 
     wheelsButton.setVisible(lay.keyboard);
     detachButton.setVisible(lay.keyboard);
+
+    // Exclusive, Sustain and All Off sit on the Keyboard bar but do not belong to the
+    // keybed: they are what you reach for while playing, so folding the keyboard away
+    // must not take them with it. Deliberately outside every fold, in all three views.
+    chordExclusiveButton.setVisible(true);
+    sustainButton.setVisible(true);
+    panicButton.setVisible(true);
     // The holder is visible whenever the section is open, wherever it is parented; being
     // detached is a change of parent, not of visibility. Folding the section while it is
     // detached hides the window instead of the slot, so one control means one thing.
@@ -560,7 +567,7 @@ int KeysEditor::centreHeight() const
     if (lay.knobs)
         h += knobRowH;
     if (lay.pads)
-        h += (h > 0 ? 6 : 0) + padRowH;
+        h += (h > 0 ? 6 : 0) + padRowH + 4 + pageRowH; // the pads plus their page buttons
     return h;
 }
 
@@ -815,11 +822,8 @@ void KeysEditor::timerCallback()
                              juce::dontSendNotification);
 
     // Pad page: label and the ends of the range.
-    const int page = processor.padPage();
-    pageLabel.setText(juce::String(page + 1) + "/" + juce::String(KeysProcessor::numPadPages),
-                      juce::dontSendNotification);
-    pagePrevButton.setEnabled(page > 0);
-    pageNextButton.setEnabled(page < KeysProcessor::numPadPages - 1);
+    const int page = processor.padPage();    for (int p = 0; p < KeysProcessor::numPadPages; ++p)
+        pageButtons[(size_t) p].setToggleState(p == page, juce::dontSendNotification);
 
     // Keyboard-edit link: the edited pad follows the keyboard's sounding set. An
     // all-notes-removed state is not written (Clear is the explicit wipe), and
@@ -976,15 +980,25 @@ void KeysEditor::resized()
 
     area.removeFromTop(6);
     keyboardBar.setBounds(area.removeFromTop(SectionBar::height));
-    if (! lay.detached)
     {
-        // Wheels and Detach ride on the Keyboard bar: they are the section's own controls,
-        // and putting them here means folding the section takes them with it. Detached,
-        // they are not our children at all - layoutKeybed() places them in that window.
+        // The Keyboard bar carries two kinds of control, and they behave differently when
+        // the section folds. Wheels and Detach belong to the keybed, so they go with it
+        // (and detached, they are not our children at all - layoutKeybed places them in
+        // that window). Exclusive, Sustain and All Off are what you reach for *while
+        // playing*, so they stay put whatever the keybed is doing.
         auto bar = keyboardBar.contentArea();
-        detachButton.setBounds(bar.removeFromRight(104).reduced(2, 0));
+        if (! lay.detached)
+        {
+            detachButton.setBounds(bar.removeFromRight(104).reduced(2, 0));
+            bar.removeFromRight(6);
+            wheelsButton.setBounds(bar.removeFromRight(84).reduced(2, 0));
+            bar.removeFromRight(14);
+        }
+        panicButton.setBounds(bar.removeFromRight(84).reduced(0, 3));
         bar.removeFromRight(6);
-        wheelsButton.setBounds(bar.removeFromRight(84).reduced(2, 0));
+        sustainButton.setBounds(bar.removeFromRight(96).withSizeKeepingCentre(94, 24));
+        bar.removeFromRight(6);
+        chordExclusiveButton.setBounds(bar.removeFromRight(104).withSizeKeepingCentre(102, 24));
     }
 
     if (lay.keyboard && ! lay.detached)
@@ -1006,7 +1020,19 @@ void KeysEditor::resized()
         if (lay.knobs && lay.pads)
             perform.removeFromTop(6);
         if (lay.pads)
+        {
             chordPads.setBounds(perform.removeFromTop(padRowH));
+            perform.removeFromTop(4);
+
+            // Page buttons directly under the pads they page. Left-aligned with the strip
+            // so the connection is positional, not something to work out from a label.
+            auto pageRow = perform.removeFromTop(pageRowH);
+            for (auto& b : pageButtons)
+            {
+                b.setBounds(pageRow.removeFromLeft(46).reduced(1, 0));
+                pageRow.removeFromLeft(4);
+            }
+        }
     }
 
     if (! lay.controls)
@@ -1076,20 +1102,6 @@ void KeysEditor::layoutToolRow(juce::Rectangle<int> row)
     knobsButton.setBounds(row.removeFromLeft(66).reduced(0, 2));
     row.removeFromLeft(4);
     padsButton.setBounds(row.removeFromLeft(60).reduced(0, 2));
-    row.removeFromLeft(14);
+    row.removeFromLeft(14);}
 
-    pagePrevButton.setBounds(row.removeFromLeft(34).reduced(0, 2));
-    pageLabel.setBounds(row.removeFromLeft(28));
-    pageNextButton.setBounds(row.removeFromLeft(34).reduced(0, 2));
-    row.removeFromLeft(8);
-    chordExclusiveButton.setBounds(row.removeFromLeft(104).withSizeKeepingCentre(102, 24));
-
-    // Sustain and All Off ride here rather than in the Controls section, at Owen's
-    // request. They are the two controls you reach for *while playing*, and Controls is
-    // the section most likely to be folded away, which was taking them with it.
-    row.removeFromLeft(12);
-    sustainButton.setBounds(row.removeFromLeft(96).withSizeKeepingCentre(94, 24));
-    row.removeFromLeft(4);
-    panicButton.setBounds(row.removeFromLeft(84).reduced(0, 3));
-}
 } // namespace keys

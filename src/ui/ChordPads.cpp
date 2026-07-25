@@ -247,6 +247,15 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         processor.pressChordPad(dragSource);
         playing = dragSource;
     }
+    else if (dragSource == -2 && isChord(currentNotes))
+    {
+        // The live card plays too. Holding a chord on the keyboard sounds the keys you
+        // are holding; clicking the card fires the same notes as one chord, so you hear
+        // it strummed and humanized the way a pad would play it. A drag still captures
+        // (mouseDrag stops this the moment the mouse actually moves).
+        processor.pressLiveChord(currentNotes);
+        playingLive = true;
+    }
     repaint();
 }
 
@@ -264,6 +273,11 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
         }
         else if (dragSource == -2 && isChord(currentNotes))
         {
+            if (playingLive)
+            {
+                processor.releaseLiveChord(true); // a press that became a drag is a capture
+                playingLive = false;
+            }
             dragging = true; // dragging the live card to capture it
         }
         else
@@ -277,7 +291,12 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
 
 void ChordPads::mouseUp(const juce::MouseEvent& e)
 {
-    if (playing >= 0)
+    if (playingLive)
+    {
+        processor.releaseLiveChord(); // Sustain holds it, same as a pad
+        playingLive = false;
+    }
+    else if (playing >= 0)
     {
         processor.releaseChordPad(playing); // beat-pad: release stops it (Sustain holds it)
         playing = -1;
