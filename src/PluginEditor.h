@@ -7,6 +7,7 @@
 #include "ui/KeyboardWindow.h"
 #include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
+#include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
 #include <okstudio/Updater.h>
 #include <memory>
@@ -117,8 +118,8 @@ private:
     KnobBank knobBank; // eight CC knobs, replaces the old Fader/XY surfaces
     ChordPads chordPads;
 
-    juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, curveBox, chordStrumDirBox, polyphonyBox;
-    juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, curveLabel, chordStrumDirLabel, polyphonyLabel;
+    juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
+    juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
     juce::Slider velocitySlider, octaveSlider, chordStrumSlider;
     juce::Label velocityLabel, octaveLabel, chordStrumLabel;
     juce::Slider modWheel, pitchWheel;  // transient performance wheels (no persistence)
@@ -172,10 +173,11 @@ private:
     // order for a window that borrows a component is too subtle to leave implicit.
     std::unique_ptr<KeyboardWindow> keyboardWindow;
 
-    juce::Slider humanizeVelSlider, humanizeTimeSlider; // velocity is a two-value range
+    RangeSlider humanizeVelSlider; // a two-value range whose band drags as one; see RangeSlider.h
+    juce::Slider humanizeTimeSlider;
     juce::Label humanizeVelLabel, humanizeTimeLabel;
 
-    std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, curveAtt, chordStrumDirAtt, polyphonyAtt;
+    std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
     std::unique_ptr<SliderAtt> velocityAtt, octaveAtt, humanizeTimeAtt, chordStrumAtt;
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 

@@ -45,8 +45,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
                                                       juce::StringArray { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "channel", 1 }, "MIDI Channel", channelNames(), 0));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
-    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "curve", 1 }, "Velocity Curve",
-                                                      juce::StringArray { "Soft", "Linear", "Hard" }, 1));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "sustain", 1 }, "Sustain", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", false));
@@ -85,6 +83,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // dropping them would break older saved sessions that carry them.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "surface", 1 }, "Surface",
                                                       juce::StringArray { "Keys", "Hex", "Pads", "Faders", "XY" }, 0));
+    // Velocity Curve, likewise retained but no longer read. It shaped the Velocity
+    // slider's own constant, so it only ever remapped one fixed number to another - which
+    // is what moving the slider does. Between it, the slider and the Humanize range there
+    // were three overlapping ways to set velocity; this is the one that earned nothing.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "curve", 1 }, "Velocity Curve",
+                                                      juce::StringArray { "Soft", "Linear", "Hard" }, 1));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padChannel", 1 }, "Pad Grid Channel",
                                                       channelNames(), 9));
 
@@ -187,21 +191,10 @@ int KeysProcessor::padPage() const
     return juce::jlimit(0, numPadPages - 1, (int) apvts.getRawParameterValue("padPage")->load());
 }
 
-float KeysProcessor::curved(float pos01) const
-{
-    const float pos = juce::jlimit(0.0f, 1.0f, pos01);
-    switch ((int) apvts.getRawParameterValue("curve")->load())
-    {
-        case 0:  return std::pow(pos, 0.6f); // Soft: easier to reach high velocities
-        case 2:  return std::pow(pos, 1.7f); // Hard: leans quiet until you push
-        default: return pos;                 // Linear
-    }
-}
-
 float KeysProcessor::baseVelocity01() const
 {
     const float v = apvts.getRawParameterValue("velocity")->load();
-    return curved((v - 1.0f) / 126.0f);
+    return (v - 1.0f) / 126.0f;
 }
 
 bool KeysProcessor::chordPadActive(int i) const
@@ -339,7 +332,7 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
         const int b = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
         const int lo = juce::jmin(a, b), hi = juce::jmax(a, b);
         const int rnd = rng.nextInt(juce::Range<int>(lo, hi + 1));
-        velocity01 = curved((float) (rnd - 1) / 126.0f); // same curve as the fixed velocity
+        velocity01 = (float) (rnd - 1) / 126.0f;
 
         const float spreadMs = apvts.getRawParameterValue("humanizeTime")->load();
         if (spreadMs > 0.0f)

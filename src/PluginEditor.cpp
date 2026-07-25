@@ -59,7 +59,6 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addCombo(rootBox, rootLabel, "Root", okstudio::scales::noteNames(), "root", rootAtt);
     addCombo(scaleBox, scaleLabel, "Scale", okstudio::scales::names(), "scale", scaleAtt);
     addCombo(channelBox, channelLabel, "MIDI Ch", channelItems(), "channel", channelAtt);
-    addCombo(curveBox, curveLabel, "Curve", { "Soft", "Linear", "Hard" }, "curve", curveAtt);
     addCombo(polyphonyBox, polyphonyLabel, "Voices",
              { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, "polyphony", polyphonyAtt);
 
@@ -92,9 +91,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // no APVTS attachment (two values), so it is synced to the params by hand.
     styleLabel(humanizeVelLabel, "Velocity");
     addAndMakeVisible(humanizeVelLabel);
-    humanizeVelSlider.setSliderStyle(juce::Slider::TwoValueHorizontal);
-    humanizeVelSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    humanizeVelSlider.setRange(1, 127, 1);
+    humanizeVelSlider.setRange(1, 127, 1); // style/textbox are RangeSlider's own
+    humanizeVelSlider.setTooltip("Each note takes a random velocity in this range. "
+                                 "Drag an end to resize it, or the middle to move it.");
     humanizeVelSlider.setMinAndMaxValues(processor.apvts.getRawParameterValue("humanizeVelMin")->load(),
                                          processor.apvts.getRawParameterValue("humanizeVelMax")->load(),
                                          juce::dontSendNotification);
@@ -192,10 +191,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         b.onClick = [this, view] { setCentreView(view); };
         addAndMakeVisible(b);
     };
-    tab(performButton, viewPerform, "The knob bank and the chord-pad strip.");
-    tab(chordsButton, viewChords, "Generate chords for this page, and find what could follow them.");
-    tab(arpButton, viewArp,
-        "Arpeggiator: per-step lanes for note, octave, velocity, gate, ratchet, probability.");
+    tab(performButton, viewPerform, "Knobs and chord pads.");
+    tab(chordsButton, viewChords, "Generate chords for this page.");
+    tab(arpButton, viewArp, "Arpeggiator: per-step lanes.");
 
     for (auto* b : { &pagePrevButton, &pageNextButton })
         addAndMakeVisible(*b);
@@ -218,8 +216,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addAndMakeVisible(centreBar);
     addAndMakeVisible(keyboardBar);
 
-    themeButton.setTooltip("Colour this instance, so you can tell it apart from Keys on "
-                           "your other tracks. Saved with the session.");
+    themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
     themeButton.onClick = [this] { showThemeMenu(); };
     addAndMakeVisible(themeButton);
@@ -545,8 +542,8 @@ void KeysEditor::syncSectionControls()
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &title, &sizeBox, &sizeLabel, &rootBox, &rootLabel, &scaleBox, &scaleLabel,
              &octaveSlider, &octaveLabel, &scaleLockButton, &polyphonyBox, &polyphonyLabel,
-             &velocitySlider, &velocityLabel, &curveBox, &curveLabel, &channelBox, &channelLabel,
-             &sustainButton, &latchButton, &panicButton, &humanizeButton,
+             &velocitySlider, &velocityLabel, &channelBox, &channelLabel,
+             &latchButton, &humanizeButton,
              &humanizeVelSlider, &humanizeVelLabel, &humanizeTimeSlider, &humanizeTimeLabel,
              &chordStrumSlider, &chordStrumLabel, &chordStrumDirBox, &chordStrumDirLabel })
         c->setVisible(lay.controls);
@@ -607,8 +604,10 @@ int KeysEditor::minWidthForView() const
 {
     // The generator and the arp carry far more controls than the player, and every one of
     // them has to stay at a full-size target. Grow rather than shrink the targets.
+    // 960, not the old 820: the centre bar now also carries Sustain and All Off, and
+    // below this the tabs and the pad transport start colliding.
     const auto& lay = processor.layout;
-    return (! lay.centre || lay.view == viewPerform) ? 820 : 1010;
+    return (! lay.centre || lay.view == viewPerform) ? 960 : 1010;
 }
 
 void KeysEditor::applyLayout()
@@ -630,6 +629,14 @@ void KeysEditor::applyLayout()
     {
         const int w = juce::jmax(getWidth(), minWidthForView());
         const int h = idealHeight();
+
+        // The floor moves with the folds. Owen could drag the window down to the old
+        // fixed minimum with every section open, and the layout does not degrade
+        // gracefully at that point - rows just get carved off the bottom and controls
+        // vanish. The content's own size *is* the minimum; anything above it is slack the
+        // keybed absorbs as instrument body.
+        setResizeLimits(minWidthForView(), h, 2600, 1400);
+
         if (w != getWidth() || h != getHeight())
         {
             setSize(w, h); // triggers resized()
@@ -955,7 +962,7 @@ void KeysEditor::resized()
     controlsBar.setBounds(area.removeFromTop(SectionBar::height));
     {
         auto bar = controlsBar.contentArea();
-        themeButton.setBounds(bar.removeFromRight(96).reduced(2, 0));
+        themeButton.setBounds(bar.removeFromRight(112).reduced(2, 0));
         bar.removeFromRight(6);
         if (updateButton.isVisible())
             updateButton.setBounds(bar.removeFromRight(170).reduced(0, 1));
@@ -1063,11 +1070,8 @@ void KeysEditor::resized()
     cell(rowA, 90, polyphonyLabel, polyphonyBox);
 
     cell(rowB, 210, velocityLabel, velocitySlider);
-    cell(rowB, 110, curveLabel, curveBox);
     cell(rowB, 70, channelLabel, channelBox);
-    toggleCell(rowB, 100, sustainButton);
     toggleCell(rowB, 90, latchButton);
-    toggleCell(rowB, 90, panicButton);
 
     toggleCell(rowC, 96, humanizeButton);
     cell(rowC, 208, humanizeVelLabel, humanizeVelSlider);
@@ -1098,7 +1102,15 @@ void KeysEditor::layoutToolRow(juce::Rectangle<int> row)
     pagePrevButton.setBounds(row.removeFromLeft(34).reduced(0, 2));
     pageLabel.setBounds(row.removeFromLeft(28));
     pageNextButton.setBounds(row.removeFromLeft(34).reduced(0, 2));
-    row.removeFromLeft(10);
-    chordExclusiveButton.setBounds(row.removeFromLeft(112).withSizeKeepingCentre(110, 24));
+    row.removeFromLeft(8);
+    chordExclusiveButton.setBounds(row.removeFromLeft(104).withSizeKeepingCentre(102, 24));
+
+    // Sustain and All Off ride here rather than in the Controls section, at Owen's
+    // request. They are the two controls you reach for *while playing*, and Controls is
+    // the section most likely to be folded away, which was taking them with it.
+    row.removeFromLeft(12);
+    sustainButton.setBounds(row.removeFromLeft(96).withSizeKeepingCentre(94, 24));
+    row.removeFromLeft(4);
+    panicButton.setBounds(row.removeFromLeft(84).reduced(0, 3));
 }
 } // namespace keys

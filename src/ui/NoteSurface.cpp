@@ -235,15 +235,20 @@ void NoteSurface::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    // Sustain: a key the pedal is already holding releases when you click it again.
-    // Without this the pedal was a one-way door - every note you touched stayed on until
-    // Sustain came off entirely, so building a chord meant getting it right first time.
-    // Checked before `pressed` so the click reads as "stop that note", not a re-trigger,
-    // and the gesture is marked so the drag and mouse-up below cannot put it straight
-    // back (mouseUp's pedal-catch would otherwise re-sustain the note we just released).
-    if (sustain && sustained.count(d))
+    // A note already being held releases when you click it again, whether the pedal
+    // caught it (Sustain) or a right-click toggled it on. Both were one-way doors: the
+    // sustained note stayed until Sustain came off entirely, and the right-latched note
+    // needed a second right-click, which is an accelerator not everyone reaches for. So
+    // the plain left click is now the way out of both, and a chord with a wrong note in
+    // it can be taken apart a note at a time.
+    //
+    // Checked before `pressed` so the click reads as "stop that note" rather than a
+    // re-trigger, and the gesture is marked so the drag and mouse-up below cannot put it
+    // straight back (mouseUp's pedal-catch would otherwise re-sustain what we released).
+    if (sustained.count(d) || latched.count(d))
     {
         sustained.erase(d);
+        latched.erase(d);
         releaseGesture = true;
         dragDrawn = -1;
         refresh();

@@ -55,6 +55,53 @@ namespace skin
     }
 } // namespace skin
 
+namespace
+{
+    juce::Font tooltipFont() { return skin::ui(11.5f); }
+    constexpr int tooltipMaxWidth = 260; // wrap sooner than JUCE's 400
+    constexpr int tooltipPadX = 9, tooltipPadY = 5;
+
+    juce::TextLayout layoutTooltip(const juce::String& text, int maxWidth)
+    {
+        juce::AttributedString s;
+        s.setJustification(juce::Justification::centredLeft);
+        s.append(text, tooltipFont(), skin::text);
+        juce::TextLayout layout;
+        layout.createLayout(s, (float) maxWidth);
+        return layout;
+    }
+} // namespace
+
+juce::Rectangle<int> KeysLookAndFeel::getTooltipBounds(const juce::String& tip,
+                                                       juce::Point<int> screenPos,
+                                                       juce::Rectangle<int> parentArea)
+{
+    const auto layout = layoutTooltip(tip, tooltipMaxWidth);
+    const int w = (int) std::ceil(layout.getWidth()) + tooltipPadX * 2;
+    const int h = (int) std::ceil(layout.getHeight()) + tooltipPadY * 2;
+
+    // Offset below-right of the pointer, flipped near an edge, then clamped inside the
+    // parent - the same placement rule as JUCE's, just at our size.
+    return juce::Rectangle<int>(screenPos.x > parentArea.getCentreX() ? screenPos.x - (w + 12) : screenPos.x + 18,
+                                screenPos.y > parentArea.getCentreY() ? screenPos.y - (h + 6) : screenPos.y + 6,
+                                w, h)
+        .constrainedWithin(parentArea);
+}
+
+void KeysLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, int width, int height)
+{
+    const auto r = juce::Rectangle<float>((float) width, (float) height);
+    g.setColour(juce::Colour(0xf21e2127));
+    g.fillRoundedRectangle(r, 4.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.10f));
+    g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
+
+    layoutTooltip(text, width - tooltipPadX * 2)
+        .draw(g, juce::Rectangle<float>((float) tooltipPadX, (float) tooltipPadY,
+                                        (float) (width - tooltipPadX * 2),
+                                        (float) (height - tooltipPadY * 2)));
+}
+
 void KeysLookAndFeel::setAccent(int newIndex)
 {
     using namespace juce;

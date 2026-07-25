@@ -21,11 +21,46 @@ knobs, keys, the fallboard rail, tick marks, slider tracks, the wheel LEDs.
   behind a fold would defeat it.
 - Saved with the session. Cyan stays the default and the line's colour.
 
-### Added: Sustain releases a note when you click it again
+### Added: clicking a held key releases it
 
-The pedal was a one-way door. Every key you touched stayed on until Sustain came off
-entirely, so a chord with a wrong note in it meant starting over. Clicking a key the pedal
-is holding now releases just that key.
+Both ways of holding a note were one-way doors. A key the pedal caught stayed on until
+Sustain came off entirely; a key toggled on with a right-click needed a second right-click,
+which is an accelerator not everyone reaches for. A plain left click now releases either,
+so a chord with a wrong note in it can be taken apart a note at a time instead of started
+over.
+
+### Changed: Velocity Curve is gone from the UI
+
+It shaped the Velocity slider's own constant, so it only ever remapped one fixed number to
+another — which is what moving the slider does. Between it, the slider and the Humanize
+range there were three overlapping ways to set velocity, and this was the one that earned
+nothing. The parameter is **retained but no longer read**, alongside `surface`,
+`padChannel` and the XY pad's, so existing sessions and any host automation still load.
+
+### Changed: the Humanize velocity range drags as a band
+
+Only the two ends were grabbable, so shifting a range meant dragging one end, then the
+other, then fixing the width by eye: three careful gestures for what is conceptually one.
+Grabbing between the ends now moves the whole band and keeps its width. The ends still
+resize it, and nothing needs a modifier key.
+
+### Changed: Sustain and All Off moved next to Exclusive
+
+They are the two controls you reach for *while playing*, and they were in the Controls
+section — the one most likely to be folded away, which was taking them with it.
+
+### Fixed: the window could be dragged smaller than its own contents
+
+The minimum size was fixed while the layout is not, so with every section open the window
+could be pulled well under what it needed and rows were simply carved off the bottom. The
+floor now moves with the folds: the content's own height *is* the minimum.
+
+### Fixed: tooltips were oversized, and long colour names were clipped
+
+Tooltips used JUCE's 13 px default in a box up to 400 px wide, which next to this skin's
+10 px micro-caps read like a different application. Smaller type, tighter padding, a
+narrower wrap, and the longest tooltip strings cut down. The theme swatch also grew enough
+to fit "Magenta".
 
 ### Changed: the centre section folds like the others
 

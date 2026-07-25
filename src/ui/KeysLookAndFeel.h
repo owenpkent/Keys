@@ -160,6 +160,13 @@ public:
                                     bool drawTitleTextOnLeft) override;
     juce::Button* createDocumentWindowButton(int buttonType) override;
 
+    // Tooltips: JUCE's default is a 13 px font in a box up to 400 px wide, which next to
+    // this skin's 10 px micro-caps reads like a different application shouting. Smaller
+    // type, tighter padding, narrower wrap.
+    juce::Rectangle<int> getTooltipBounds(const juce::String& tip, juce::Point<int> screenPos,
+                                          juce::Rectangle<int> parentArea) override;
+    void drawTooltip(juce::Graphics&, const juce::String& text, int width, int height) override;
+
     void drawPopupMenuBackground(juce::Graphics&, int width, int height) override;
     void drawPopupMenuItem(juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator,
                            bool isActive, bool isHighlighted, bool isTicked, bool hasSubMenu,

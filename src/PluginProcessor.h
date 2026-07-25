@@ -86,7 +86,7 @@ public:
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
     int octaveShift() const;   // -5..+5, in octaves
-    float baseVelocity01() const; // velocity slider through the curve, 0..1 (Humanize aside)
+    float baseVelocity01() const; // the Velocity slider as 0..1 (Humanize aside)
     int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes
 
     // Chord pads: capture a chord's notes into a slot, click to play/stop it. The pad
@@ -187,7 +187,6 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     void stopChordPad(int i);
-    float curved(float pos01) const; // shape a 0..1 velocity position by the Curve param
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread
