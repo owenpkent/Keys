@@ -96,7 +96,7 @@ KeysMcp::KeysMcp(KeysProcessor& p)
     server.addTool(toolRecallArpPattern());
     server.addTool(toolStoreArpPattern());
     server.start();
-    startTimer(30);
+    startTimer(5); // was 30: chord releases tolerate it, scheduled notes do not
 }
 
 KeysMcp::~KeysMcp()
@@ -104,6 +104,7 @@ KeysMcp::~KeysMcp()
     server.stop();  // message thread; no request can be mid-flight into `processor` after this
     stopTimer();
     pendingReleases.clear();
+    pendingNotes.clear();
 }
 
 juce::String KeysMcp::productSlug()
@@ -129,6 +130,48 @@ void KeysMcp::timerCallback()
             processor.releaseChordPad(slot);
         }
     }
+
+    // pendingNotes is kept sorted by atMs, so everything due sits at the front. Take
+    // that run in one pass and erase it in one go, and emit in order so a note-off can
+    // never overtake the note-on it belongs to.
+    if (pendingNotes.empty())
+        return;
+
+    size_t due = 0;
+    while (due < pendingNotes.size() && pendingNotes[due].atMs <= now)
+        ++due;
+    if (due == 0)
+        return;
+
+    const std::vector<PendingNote> firing(pendingNotes.begin(), pendingNotes.begin() + (long) due);
+    pendingNotes.erase(pendingNotes.begin(), pendingNotes.begin() + (long) due);
+
+    for (const auto& n : firing)
+    {
+        if (n.isOn)
+            processor.noteOn(n.note, n.vel01, 0.0, n.channel);
+        else
+            processor.noteOff(n.note, n.channel);
+    }
+}
+
+void KeysMcp::scheduleNote(double atMs, int note, int channel, float vel01, bool isOn)
+{
+    const PendingNote pn { atMs, note, channel, vel01, isOn };
+    // Insert in place rather than sorting the whole vector each time: callers append
+    // in mostly-ascending order, so this lands at or near the back.
+    //
+    // At equal times a note-off sorts before a note-on. Nothing in play_sequence
+    // requires the caller's steps to arrive in chronological order, and on a note that
+    // repeats back-to-back, ordering by time alone lets the second attack be inserted
+    // ahead of the first release: the release then kills the note that just started and
+    // the phrase drops a note. Time first, off-before-on second, is a strict weak
+    // ordering, so upper_bound keeps working.
+    const auto before = [](const PendingNote& a, const PendingNote& b)
+    {
+        return a.atMs != b.atMs ? a.atMs < b.atMs : (! a.isOn && b.isOn);
+    };
+    pendingNotes.insert(std::upper_bound(pendingNotes.begin(), pendingNotes.end(), pn, before), pn);
 }
 
 void KeysMcp::cancelPendingRelease(int slot)
@@ -164,6 +207,9 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("arpOn", text("arpOn"));
         obj->setProperty("arpRate", text("arpRate"));
         obj->setProperty("arpDirection", text("arpDirection"));
+        // Without this a client cannot tell why lanes it just wrote are silent: the step
+        // lanes are only read while arpPattern is on (Shape "Pattern").
+        obj->setProperty("arpPattern", text("arpPattern"));
         obj->setProperty("arpOctaves", text("arpOctaves"));
         obj->setProperty("arpLatch", text("arpLatch"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
@@ -309,10 +355,14 @@ okstudio::mcp::Tool KeysMcp::toolPlayNotes()
         const int channel = (int) args.getProperty("channel", 0);
         const float vel01 = velocity / 127.0f;
 
+        // The note-on is immediate; only the release waits. Handing the release to the
+        // collector as a delayed message would drag it into the same block as the
+        // note-on and the note would never sound (see the note in KeysMcp.h).
+        const double offAtMs = juce::Time::getMillisecondCounterHiRes() + (double) durationMs;
         for (int n : notes)
         {
             processor.noteOn(n, vel01, 0.0, channel);
-            processor.noteOff(n, channel, durationMs * 0.001);
+            scheduleNote(offAtMs, n, channel, 0.0f, false);
         }
 
         auto* obj = new juce::DynamicObject();
@@ -330,8 +380,9 @@ okstudio::mcp::Tool KeysMcp::toolPlaySequence()
     t.description = "Schedule a whole phrase in one call: an array of steps, each "
                      "{note, startMs, durationMs, velocity?}, all timed from now. This is "
                      "the tool for writing a melody rather than triggering single notes. "
-                     "Limits: at most 256 steps, and the phrase must finish inside "
-                     "120000ms (start + duration of every step).";
+                     "Steps may be listed in any order; they are scheduled by their own "
+                     "startMs. Limits: at most 256 steps, and the phrase must finish "
+                     "inside 120000ms (start + duration of every step).";
     t.params = { { "steps", "array", "Notes to schedule, each {note (0..127), startMs, durationMs, velocity? (1..127, default the Velocity control)}.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
@@ -383,10 +434,13 @@ okstudio::mcp::Tool KeysMcp::toolPlaySequence()
             return {};
         }
 
+        // Every step is measured from one base taken here, so the phrase's internal
+        // timing is exact no matter how the poll interval lands on any single event.
+        const double baseMs = juce::Time::getMillisecondCounterHiRes();
         for (const auto& s : steps)
         {
-            processor.noteOn(s.note, s.vel01, s.startMs * 0.001);
-            processor.noteOff(s.note, 0, (s.startMs + s.durationMs) * 0.001);
+            scheduleNote(baseMs + s.startMs, s.note, 0, s.vel01, true);
+            scheduleNote(baseMs + s.startMs + s.durationMs, s.note, 0, 0.0f, false);
         }
 
         auto* obj = new juce::DynamicObject();
@@ -402,9 +456,12 @@ okstudio::mcp::Tool KeysMcp::toolAllNotesOff()
     okstudio::mcp::Tool t;
     t.name = "all_notes_off";
     t.description = "Stop every sounding note on every channel gently (per-note note-offs "
-                     "plus CC123), exactly what the on-screen All Off button does.";
+                     "plus CC123), exactly what the on-screen All Off button does. Also "
+                     "abandons anything play_notes or play_sequence still had scheduled, so "
+                     "this stops a phrase mid-flight rather than just muting its current note.";
     t.run = [this](const juce::var&, juce::String&) -> juce::var
     {
+        pendingNotes.clear(); // drop scheduled notes first, or a queued note-on resurrects after the stop
         processor.allNotesOff();
         return juce::var(true);
     };

@@ -64,6 +64,14 @@ private:
     juce::Rectangle<int> titleCaption; // "OK STUDIO" wordmark, painted under the title
     juce::Component::SafePointer<juce::DocumentWindow> styledWindow; // standalone chrome we skinned
 
+    // Nothing was displaying the setTooltip text scattered through the arp and chord
+    // panels: JUCE only shows tooltips if a TooltipWindow exists, and there was none, so
+    // 19 explanations across the plugin were dead code. Parented to the editor rather
+    // than the desktop so it stays inside the plugin window in a host, and one instance
+    // only (Keys Host embeds exactly one KeysEditor). Short delay: the point is to
+    // answer "what is this" quickly, and holding a mouse still is work here.
+    juce::TooltipWindow tooltips { this, 450 };
+
     // The one playing surface this product builds: the piano, for Keys and Keys Host.
     PianoKeyboard keyboard;
 

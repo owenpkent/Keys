@@ -254,9 +254,11 @@ ArpPanel::ArpPanel(KeysProcessor& p) : processor(p)
 {
     okstudio::ui::makeMouseOnly(*this);
     buildControls();
+    selectLane(selectedLane); // tab toggles + which grid is visible
+    refreshShape();           // and whether the step editor is showing at all
     refreshLaneReadouts();
     refreshPatternButtons();
-    startTimerHz(10); // repaints the lane grids so edits made elsewhere stay current
+    startTimerHz(10); // repaints the lane grid so edits made elsewhere stay current
 }
 
 ArpPanel::~ArpPanel()
@@ -266,52 +268,127 @@ ArpPanel::~ArpPanel()
 
 void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::String& name, int loVal, int hiVal)
 {
-    styleLabel(row.name, name);
-    addAndMakeVisible(row.name);
+    row.tab.setButtonText(name);
+    row.tab.onClick = [this, lane] { selectLane((int) lane); };
+    addAndMakeVisible(row.tab);
 
     row.grid = std::make_unique<LaneGrid>(processor, lane, loVal, hiVal);
-    addAndMakeVisible(*row.grid);
-
-    row.lengthReadout.setJustificationType(juce::Justification::centred);
-    row.lengthReadout.setFont(juce::Font(juce::FontOptions(12.0f)));
-    addAndMakeVisible(row.lengthReadout);
-
-    row.lenMinus.onClick = [this, lane]
-    {
-        auto& len = processor.arp.lanes.length[(size_t) lane];
-        len.store(juce::jlimit(1, ArpEngine::maxSteps, len.load(std::memory_order_relaxed) - 1), std::memory_order_relaxed);
-        refreshLaneReadouts();
-    };
-    row.lenPlus.onClick = [this, lane]
-    {
-        auto& len = processor.arp.lanes.length[(size_t) lane];
-        len.store(juce::jlimit(1, ArpEngine::maxSteps, len.load(std::memory_order_relaxed) + 1), std::memory_order_relaxed);
-        refreshLaneReadouts();
-    };
-    addAndMakeVisible(row.lenMinus);
-    addAndMakeVisible(row.lenPlus);
-
-    row.clockDiv.onClick = [this, lane] { cycleClockDiv(lane); };
-    row.clockDiv.setTooltip("Step speed for this lane: full speed, half, or quarter (polymeter).");
-    addAndMakeVisible(row.clockDiv);
+    addChildComponent(*row.grid); // only the selected lane's grid is ever visible
 }
 
-void ArpPanel::cycleClockDiv(ArpEngine::Lane lane)
+void ArpPanel::selectLane(int lane)
 {
-    auto& div = processor.arp.lanes.clockDiv[(size_t) lane];
-    div.store((div.load(std::memory_order_relaxed) + 1) % 3, std::memory_order_relaxed);
+    selectedLane = juce::jlimit(0, ArpEngine::numLanes - 1, lane);
+    for (int i = 0; i < ArpEngine::numLanes; ++i)
+    {
+        auto& row = laneRows[(size_t) i];
+        row.tab.setToggleState(i == selectedLane, juce::dontSendNotification);
+        if (row.grid != nullptr)
+            row.grid->setVisible(patternMode() && i == selectedLane);
+    }
+    refreshLaneReadouts();
+    resized();
+}
+
+// Link on is the simple case and the default: every lane keeps the same length and
+// speed, so the pattern is just "eight steps". Off is polymeter, where lanes of
+// different lengths drift against each other. Cthulhu ships the same switch.
+void ArpPanel::nudgeLength(int delta)
+{
+    const bool linked = processor.apvts.getRawParameterValue("arpLinkLanes")->load() > 0.5f;
+    const int from = linked ? 0 : selectedLane;
+    const int to = linked ? ArpEngine::numLanes - 1 : selectedLane;
+    const int target = juce::jlimit(1, ArpEngine::maxSteps,
+                                    processor.arp.lanes.length[(size_t) selectedLane]
+                                            .load(std::memory_order_relaxed) + delta);
+    for (int i = from; i <= to; ++i)
+        processor.arp.lanes.length[(size_t) i].store(target, std::memory_order_relaxed);
+    refreshLaneReadouts();
+}
+
+void ArpPanel::cycleClockDiv()
+{
+    const bool linked = processor.apvts.getRawParameterValue("arpLinkLanes")->load() > 0.5f;
+    const int next = (processor.arp.lanes.clockDiv[(size_t) selectedLane].load(std::memory_order_relaxed) + 1) % 3;
+    const int from = linked ? 0 : selectedLane;
+    const int to = linked ? ArpEngine::numLanes - 1 : selectedLane;
+    for (int i = from; i <= to; ++i)
+        processor.arp.lanes.clockDiv[(size_t) i].store(next, std::memory_order_relaxed);
     refreshLaneReadouts();
 }
 
 void ArpPanel::refreshLaneReadouts()
 {
+    const auto li = (size_t) selectedLane;
+    const int len = processor.arp.lanes.length[li].load(std::memory_order_relaxed);
+    stepsReadout.setText(juce::String(len), juce::dontSendNotification);
+    const int div = juce::jlimit(0, 2, processor.arp.lanes.clockDiv[li].load(std::memory_order_relaxed));
+    speedButton.setButtonText(clockDivNames[div]);
+}
+
+bool ArpPanel::patternMode() const
+{
+    return processor.apvts.getRawParameterValue("arpPattern")->load() > 0.5f;
+}
+
+void ArpPanel::applyShapeChoice()
+{
+    const int chosen = shapeBox.getSelectedItemIndex(); // 0..7 = a direction, 8 = Pattern
+    auto& apvts = processor.apvts;
+    // Gestures by hand. Every other control here is an APVTS attachment and gets its
+    // begin/end for free; Shape spans two parameters so it cannot be one, and without
+    // the brackets a host in touch or latch never arms on a Shape change.
+    if (auto* pat = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpPattern")))
+    {
+        pat->beginChangeGesture();
+        *pat = chosen >= ArpEngine::numDirections;
+        pat->endChangeGesture();
+    }
+    if (chosen >= 0 && chosen < ArpEngine::numDirections)
+        if (auto* dir = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpDirection")))
+        {
+            dir->beginChangeGesture();
+            *dir = chosen; // "Pattern" leaves the direction alone; lanes can still follow it
+            dir->endChangeGesture();
+        }
+    refreshShape();
+}
+
+// Parameters are the truth (a host can automate them), so the combo and the step
+// editor's visibility are both derived, never assumed.
+void ArpPanel::refreshShape()
+{
+    const bool pattern = patternMode();
+    const int dir = (int) processor.apvts.getRawParameterValue("arpDirection")->load();
+    const int wanted = pattern ? ArpEngine::numDirections : juce::jlimit(0, ArpEngine::numDirections - 1, dir);
+    if (shapeBox.getSelectedItemIndex() != wanted)
+        shapeBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
+
     for (int i = 0; i < ArpEngine::numLanes; ++i)
     {
-        auto& row = laneRows[(size_t) i];
-        const int len = processor.arp.lanes.length[(size_t) i].load(std::memory_order_relaxed);
-        row.lengthReadout.setText(juce::String(len), juce::dontSendNotification);
-        const int div = juce::jlimit(0, 2, processor.arp.lanes.clockDiv[(size_t) i].load(std::memory_order_relaxed));
-        row.clockDiv.setButtonText(clockDivNames[div]);
+        laneRows[(size_t) i].tab.setVisible(pattern);
+        if (laneRows[(size_t) i].grid != nullptr)
+            laneRows[(size_t) i].grid->setVisible(pattern && i == selectedLane);
+    }
+    muteRowLabel.setVisible(pattern);
+    if (muteRow != nullptr)
+        muteRow->setVisible(pattern);
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &stepsLabel, &speedLabel, &stepsReadout, &stepsMinus, &stepsPlus, &speedButton, &linkButton })
+        c->setVisible(pattern);
+    for (auto& b : patternButtons)
+        b.setVisible(pattern);
+    copyButton.setVisible(pattern);
+    cancelButton.setVisible(pattern && copyArmed);
+    randomizeButton.setVisible(pattern);
+
+    // The card changes height with the mode, so relayout and repaint - but only on an
+    // actual change, since refreshShape() runs on the 10 Hz timer.
+    if (lastPatternMode != (int) pattern)
+    {
+        lastPatternMode = (int) pattern;
+        resized();
+        repaint();
     }
 }
 
@@ -341,7 +418,7 @@ void ArpPanel::refreshPatternButtons()
                                  ? "Copy from " + juce::String::charToString((juce::juce_wchar) ('A' + copyFromIndex))
                                  : juce::String("Copy"));
     copyButton.setToggleState(copyArmed, juce::dontSendNotification);
-    cancelButton.setVisible(copyArmed);
+    cancelButton.setVisible(copyArmed && patternMode());
 }
 
 void ArpPanel::buildControls()
@@ -371,12 +448,14 @@ void ArpPanel::buildControls()
     anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpAnchor", anchorButton);
     anchorButton.setTooltip("Anchored: locked to the host bar grid. Free: never jumps, may drift.");
 
-    styleLabel(directionLabel, "Direction");
-    addAndMakeVisible(directionLabel);
-    directionBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up",
-                               "Up & Down", "Down & Up", "As Played", "Reversed" }, 1);
-    addAndMakeVisible(directionBox);
-    directionAtt = std::make_unique<ComboAtt>(processor.apvts, "arpDirection", directionBox);
+    styleLabel(shapeLabel, "Shape");
+    addAndMakeVisible(shapeLabel);
+    shapeBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up",
+                           "Up & Down", "Down & Up", "As Played", "Reversed" }, 1);
+    shapeBox.addItem("Pattern", ArpEngine::numDirections + 1);
+    shapeBox.onChange = [this] { applyShapeChoice(); };
+    shapeBox.setTooltip("A shape arpeggiates the held chord. \"Pattern\" opens the step editor.");
+    addAndMakeVisible(shapeBox);
 
     styleLabel(octavesLabel, "Octaves");
     addAndMakeVisible(octavesLabel);
@@ -413,6 +492,32 @@ void ArpPanel::buildControls()
     addAndMakeVisible(muteRowLabel);
     muteRow = std::make_unique<MuteRow>(processor);
     addAndMakeVisible(*muteRow);
+
+    // One length and one speed control, for whichever lane is showing, finally with
+    // room to say what they are. Both were previously repeated once per lane, unlabelled.
+    styleLabel(stepsLabel, "Steps");
+    styleLabel(speedLabel, "Speed");
+    addAndMakeVisible(stepsLabel);
+    addAndMakeVisible(speedLabel);
+
+    stepsReadout.setJustificationType(juce::Justification::centred);
+    stepsReadout.setFont(juce::Font(juce::FontOptions(14.0f)));
+    addAndMakeVisible(stepsReadout);
+
+    stepsMinus.onClick = [this] { nudgeLength(-1); };
+    stepsPlus.onClick = [this] { nudgeLength(1); };
+    stepsMinus.setTooltip("How many steps this pattern runs before repeating (1-32).");
+    stepsPlus.setTooltip(stepsMinus.getTooltip());
+    addAndMakeVisible(stepsMinus);
+    addAndMakeVisible(stepsPlus);
+
+    speedButton.onClick = [this] { cycleClockDiv(); };
+    speedButton.setTooltip("Step speed: full, half or quarter. Different speeds per lane give polymeter.");
+    addAndMakeVisible(speedButton);
+
+    linkButton.setTooltip("On: every lane shares one length and speed. Off: each lane keeps its own (polymeter).");
+    addAndMakeVisible(linkButton);
+    linkAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpLinkLanes", linkButton);
 
     // Patterns: A-H recall, Copy (arm, then click a target letter), Randomize.
     for (int i = 0; i < (int) patternButtons.size(); ++i)
@@ -453,10 +558,15 @@ void ArpPanel::buildControls()
 
 void ArpPanel::timerCallback()
 {
+    refreshShape(); // the host can automate arpPattern/arpDirection out from under us
     refreshLaneReadouts();
     refreshPatternButtons();
-    for (auto& row : laneRows)
-        row.grid->repaint();
+    if (! patternMode())
+        return; // nothing of the step editor is on screen to repaint
+
+    auto& grid = laneRows[(size_t) selectedLane].grid;
+    if (grid != nullptr)
+        grid->repaint();
     if (muteRow != nullptr)
         muteRow->repaint();
 }
@@ -466,10 +576,21 @@ void ArpPanel::mouseDown(const juce::MouseEvent&)
     // The overlay is opaque to clicks: nothing behind it should react while it is up.
 }
 
+// Heights of the two layouts, kept next to the resized() that spends them: title + the
+// two globals rows, plus (in Pattern) tabs, grid, mute row, the steps row and the
+// pattern row, with the 12 px inner padding at both ends.
+juce::Rectangle<int> ArpPanel::cardBounds() const
+{
+    constexpr int shapeH = 12 + (28 + 8) + (40 + 6) + 40 + 12;
+    constexpr int patternH = shapeH + (34 + 6) + (150 + 6) + (14 + 2) + (34 + 10) + (48 + 8) + 40;
+    const auto full = getLocalBounds().reduced(8);
+    return full.withHeight(juce::jmin(full.getHeight(), patternMode() ? patternH : shapeH));
+}
+
 void ArpPanel::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colours::black.withAlpha(0.78f)); // dim whatever is behind the overlay
-    const auto b = getLocalBounds().reduced(8).toFloat();
+    const auto b = cardBounds().toFloat();
     g.setColour(juce::Colour(0xff1c1f24));
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
@@ -479,7 +600,7 @@ void ArpPanel::paint(juce::Graphics& g)
 
 void ArpPanel::resized()
 {
-    auto area = getLocalBounds().reduced(8).reduced(12);
+    auto area = cardBounds().reduced(12);
 
     auto top = area.removeFromTop(28);
     title.setBounds(top.removeFromLeft(160));
@@ -503,11 +624,11 @@ void ArpPanel::resized()
 
     auto globalsA = area.removeFromTop(40);
     area.removeFromTop(6);
+    cell(globalsA, 160, shapeLabel, shapeBox); // Shape leads: it decides what else exists
     cell(globalsA, 110, rateLabel, rateBox);
     toggleCell(globalsA, 60, dotButton);
     toggleCell(globalsA, 60, tripButton);
     toggleCell(globalsA, 80, anchorButton);
-    cell(globalsA, 160, directionLabel, directionBox);
 
     auto globalsB = area.removeFromTop(40);
     area.removeFromTop(8);
@@ -516,41 +637,52 @@ void ArpPanel::resized()
     toggleCell(globalsB, 80, latchButton);
     toggleCell(globalsB, 100, retriggerButton);
 
-    // Six lane rows: name | grid | length -/+ and clock-div on the right. The note
-    // lane's mute row goes immediately under it, aligned to the same grid columns.
-    constexpr int laneRowH = 76;
-    for (int i = 0; i < ArpEngine::numLanes; ++i)
+    // Everything below exists only in Pattern shape. Laying it out regardless is
+    // harmless (it is all invisible) and keeps this function free of a second branch.
+
+    // Lane tabs, then the one lane they select, then the mute row beneath it. Six
+    // stacked lanes needed ~750 px and the panel gets ~600, so the Probability lane and
+    // the whole pattern row used to be cut off the bottom of the window entirely.
+    auto tabsRow = area.removeFromTop(34);
+    area.removeFromTop(6);
+    const int tabW = juce::jmax(70, (tabsRow.getWidth() - 5 * 4) / ArpEngine::numLanes);
+    for (auto& lr : laneRows)
     {
-        auto row = area.removeFromTop(laneRowH);
-        area.removeFromTop(6);
-
-        auto& lr = laneRows[(size_t) i];
-        lr.name.setBounds(row.removeFromLeft(90));
-        row.removeFromLeft(8);
-        auto rightCol = row.removeFromRight(120);
-        row.removeFromRight(8);
-        lr.grid->setBounds(row);
-
-        auto lenRow = rightCol.removeFromTop(34);
-        lr.lenMinus.setBounds(lenRow.removeFromLeft(34));
-        lr.lenPlus.setBounds(lenRow.removeFromRight(34));
-        lr.lengthReadout.setBounds(lenRow);
-        rightCol.removeFromTop(6);
-        lr.clockDiv.setBounds(rightCol.removeFromTop(34));
-
-        if (i == (int) ArpEngine::laneNote)
-        {
-            auto muteArea = area.removeFromTop(34);
-            area.removeFromTop(6);
-            muteRowLabel.setBounds(muteArea.removeFromLeft(90));
-            muteArea.removeFromLeft(8);
-            muteArea.removeFromRight(120);
-            muteArea.removeFromRight(8);
-            muteRow->setBounds(muteArea);
-        }
+        lr.tab.setBounds(tabsRow.removeFromLeft(tabW));
+        tabsRow.removeFromLeft(4);
     }
 
+    auto gridArea = area.removeFromTop(150);
     area.removeFromTop(6);
+    for (auto& lr : laneRows)
+        if (lr.grid != nullptr)
+            lr.grid->setBounds(gridArea); // all share the slot; only one is visible
+
+    // The mute strip divides its own width into the same step count the grid does, so it
+    // only reads as "the steps above, muted" while the two share an origin and a width.
+    // The caption therefore goes above the strip, not beside it: a left gutter on one and
+    // not the other silently slid every mute cell off the step it belongs to.
+    muteRowLabel.setBounds(area.removeFromTop(14));
+    area.removeFromTop(2);
+    auto muteArea = area.removeFromTop(34);
+    area.removeFromTop(10);
+    muteRow->setBounds(muteArea); // same x and width as gridArea, both carved off `area`
+
+    auto stepsRow = area.removeFromTop(48);
+    area.removeFromTop(8);
+    auto stepsCell = stepsRow.removeFromLeft(150);
+    stepsLabel.setBounds(stepsCell.removeFromTop(14));
+    stepsMinus.setBounds(stepsCell.removeFromLeft(34));
+    stepsPlus.setBounds(stepsCell.removeFromRight(34));
+    stepsReadout.setBounds(stepsCell);
+    stepsRow.removeFromLeft(12);
+
+    auto speedCell = stepsRow.removeFromLeft(90);
+    speedLabel.setBounds(speedCell.removeFromTop(14));
+    speedButton.setBounds(speedCell);
+    stepsRow.removeFromLeft(16);
+    linkButton.setBounds(stepsRow.removeFromLeft(130).withTrimmedTop(14));
+
     auto patternRow = area.removeFromTop(40);
     for (auto& b : patternButtons)
     {

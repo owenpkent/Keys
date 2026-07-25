@@ -91,10 +91,20 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   window. After constructing it, call `keysEditor.setResizable(false, false)` to
   kill its own corner-resizer; give it ≥1010×640 (its gen-panel growth floor,
   `PluginEditor.cpp:317`).
-- `InstrumentPicker` groups by publisher: bundle `moduleinfo.json` "Factory
-  Info"/"Vendor", else the DLL version-resource CompanyName (Windows,
-  `version.lib` via `#pragma comment`), else the vendor subfolder name; unknowns
-  group last as "Other".
+- `InstrumentPicker` files instruments into one **collapsible folder per publisher**:
+  bundle `moduleinfo.json` "Factory Info"/"Vendor", else the DLL version-resource
+  CompanyName (Windows, `version.lib` via `#pragma comment`), else the vendor
+  subfolder name; unknowns group last as "Other". Folders open closed, since a large
+  library listed flat is a long scroll and scrolling is the expensive gesture here.
+  Which folders are open survives Rescan (`openFolderNames`, by name). Closed folders
+  hide their rows and take no layout space.
+- **Folders and instruments must not share a look.** Both are `TextButton`s, and on the
+  skin's default that means one centred raised pill each, leaving a 26 px indent and a
+  triangle as the only difference — instruments read as more folders. So the picker
+  carries two LookAndFeels: `FolderLookAndFeel` keeps the raised chip with a bright
+  semibold left-aligned caption, while `ItemLookAndFeel` draws **no background at all**
+  at rest and lights the row with a `skin::accent` edge on hover. Dimming the
+  instrument chip instead of removing it was tried first and was not enough.
 - **Updater gating**: the embedded `KeysEditor` runs the Keys updater check in its
   ctor (`PluginEditor.cpp:240-250`). The KeysHost target compiles its own copy of the
   sources, so gate it with a `KEYS_HOST=1` compile definition (same pattern as

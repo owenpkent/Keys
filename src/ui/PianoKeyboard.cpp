@@ -121,11 +121,18 @@ void PianoKeyboard::paint(juce::Graphics& g)
 
     // Three visual states, matching Octavium: momentary press (hot accent), held
     // via latch/sustain (deeper accent), and resting.
+    //
+    // A note sounding from somewhere other than this surface (an MCP tool, a chord pad)
+    // paints as `held` as well: it is ringing with no finger on it, which is what held
+    // already means. Checked last, so a key the user is genuinely pressing still reads
+    // as their own gesture.
     enum class State { normal, active, held };
-    const auto stateOf = [this](int drawn) -> State
+    const auto external = externallySounding();
+    const auto stateOf = [this, &external](int drawn) -> State
     {
-        if (pressed.count(drawn))                       return State::active;
+        if (pressed.count(drawn))                           return State::active;
         if (latched.count(drawn) || sustained.count(drawn)) return State::held;
+        if (external.count(drawn) > 0)                      return State::held;
         return State::normal;
     };
     const auto vGrad = [](juce::Colour a, juce::Colour b, float top, float bot)

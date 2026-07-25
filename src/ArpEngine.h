@@ -32,6 +32,11 @@ public:
 
     enum Lane { laneNote = 0, laneOctave, laneVelocity, laneGate, laneRatchet, laneProbability };
 
+    // The value each lane holds when it is doing nothing. Also what every lane reads as
+    // while Params::usePattern is false, which is how "Shape: Up" behaves like a plain
+    // arpeggiator even after the step lanes have been edited.
+    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100 };
+
     // Per-step values, editor-writable. Meanings per lane:
     //   note:        0 = follow the direction mode, 1..8 = fixed chord-note index,
     //                -1 = muted step
@@ -50,11 +55,10 @@ public:
 
         void resetToDefaults()
         {
-            static constexpr int defaults[numLanes] = { 0, 0, 100, 100, 1, 100 };
             for (int l = 0; l < numLanes; ++l)
             {
                 for (auto& v : value[(size_t) l])
-                    v.store(defaults[l], std::memory_order_relaxed);
+                    v.store(laneDefaults[l], std::memory_order_relaxed);
                 length[(size_t) l].store(8, std::memory_order_relaxed);
                 clockDiv[(size_t) l].store(0, std::memory_order_relaxed);
             }
@@ -62,6 +66,7 @@ public:
     };
 
     enum class Direction { up = 0, down, upDown, downUp, upAndDown, downAndUp, asPlayed, asPlayedReverse };
+    static constexpr int numDirections = 8; // keep in step with Direction; the Shape combo lists these then "Pattern"
 
     struct Params
     {
@@ -71,6 +76,7 @@ public:
         bool triplet = false;
         bool anchored = true;     // affixed to the host bar grid vs free-running
         Direction direction = Direction::up;
+        bool usePattern = false;  // false: plain arpeggiator, the step lanes are not read
         int octaveRange = 1;      // 1..4, for direction modes
         float swing = 0.0f;       // 0..0.75, delays odd steps by that fraction of a step
         bool latch = false;
@@ -243,8 +249,14 @@ private:
             }
     }
 
-    int laneValue(Lane l, long long globalStep) const
+    // The one place lane data is read, so it is also the one place the pattern gate
+    // belongs: with usePattern false every lane reads as its default and the arp runs
+    // as a plain shape, leaving edited step data untouched and waiting.
+    int laneValue(const Params& p, Lane l, long long globalStep) const
     {
+        if (! p.usePattern)
+            return laneDefaults[l];
+
         const auto li = (size_t) l;
         const int div = lanes.clockDiv[li].load(std::memory_order_relaxed);
         const int len = juce::jlimit(1, maxSteps, lanes.length[li].load(std::memory_order_relaxed));
@@ -311,10 +323,10 @@ private:
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
                   juce::MidiBuffer& out)
     {
-        const int noteVal = laneValue(laneNote, globalStep);
+        const int noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal < 0)
             return; // muted step
-        if ((int) (rng() % 100u) >= laneValue(laneProbability, globalStep))
+        if ((int) (rng() % 100u) >= laneValue(p, laneProbability, globalStep))
             return; // 100 always fires, 0 never does
 
         buildSequence(p);
@@ -329,11 +341,11 @@ private:
 
         const int note = juce::jlimit(0, 127,
                                       src.note + entry.octaveOffset
-                                          + 12 * juce::jlimit(-3, 3, laneValue(laneOctave, globalStep)));
+                                          + 12 * juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep)));
         const float vel = juce::jlimit(0.05f, 1.0f,
-                                       src.velocity * (float) laneValue(laneVelocity, globalStep) / 100.0f);
-        const int ratchets = juce::jlimit(1, 4, laneValue(laneRatchet, globalStep));
-        const double gate = juce::jlimit(5, 200, laneValue(laneGate, globalStep)) / 100.0;
+                                       src.velocity * (float) laneValue(p, laneVelocity, globalStep) / 100.0f);
+        const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
+        const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep)) / 100.0;
 
         const double subLen = stepSamplesF / ratchets;
         for (int r = 0; r < ratchets; ++r)

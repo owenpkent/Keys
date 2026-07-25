@@ -94,24 +94,36 @@ private:
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
-    // One lane's full row: name, the grid, and the length/clock-div controls to its
-    // right. Bundled so buildLanes() can loop instead of repeating six times.
+    // One lane: the tab that selects it and the grid it shows. Length and clock
+    // division used to live here, per lane, which meant six copies of both on screen at
+    // once with no room left to label any of them. With one lane visible there is one
+    // of each, shared, below the grid.
     struct LaneRow
     {
-        juce::Label name;
+        juce::TextButton tab;
         std::unique_ptr<LaneGrid> grid;
-        juce::Label lengthReadout;
-        juce::TextButton lenMinus { "-" }, lenPlus { "+" };
-        juce::TextButton clockDiv;
     };
 
     void timerCallback() override;
     void buildControls();
     void buildLaneRow(LaneRow&, ArpEngine::Lane, const juce::String& name, int loVal, int hiVal);
-    void cycleClockDiv(ArpEngine::Lane);
+    void selectLane(int lane);
+    void nudgeLength(int delta); // selected lane, or every lane while Link is on
+    void cycleClockDiv();
     void refreshLaneReadouts();
     void refreshPatternButtons();
     void recallOrCopy(int index);
+
+    bool patternMode() const; // Shape == "Pattern": the step editor is in play
+    void applyShapeChoice();  // combo -> parameters
+    void refreshShape();      // parameters -> combo, and show/hide the step editor
+
+    // The card the panel draws, sized to the controls actually in it. The overlay still
+    // covers the editor (it dims what's behind and swallows clicks), but on a shape
+    // there are two rows to show and no reason to draw a full-height empty box.
+    juce::Rectangle<int> cardBounds() const;
+
+    int lastPatternMode = -1; // -1 = not yet laid out; else the last bool seen
 
     KeysProcessor& processor;
 
@@ -119,16 +131,25 @@ private:
     juce::ToggleButton onButton { "On" };
     juce::TextButton closeButton { "Close" };
 
-    juce::ComboBox rateBox, directionBox;
-    juce::Label rateLabel, directionLabel;
+    // Shape carries the eight directions plus "Pattern", after Serum 2, whose step
+    // editor only exists while SHAPE is "Pattern". It cannot be a plain APVTS
+    // attachment because it spans two parameters (arpDirection + arpPattern).
+    juce::ComboBox rateBox, shapeBox;
+    juce::Label rateLabel, shapeLabel;
     juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
     juce::Slider octavesSlider, swingSlider;
     juce::Label octavesLabel, swingLabel;
     juce::ToggleButton latchButton { "Latch" }, retriggerButton { "Retrigger" };
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
+    int selectedLane = (int) ArpEngine::laneNote;
     std::unique_ptr<MuteRow> muteRow;
     juce::Label muteRowLabel;
+
+    // The shared length / clock-division controls for whichever lane is showing.
+    juce::Label stepsLabel, speedLabel, stepsReadout;
+    juce::TextButton stepsMinus { "-" }, stepsPlus { "+" }, speedButton;
+    juce::ToggleButton linkButton { "Link lanes" };
 
     std::array<juce::TextButton, KeysProcessor::numArpPatterns> patternButtons;
     juce::TextButton copyButton { "Copy" };
@@ -137,8 +158,8 @@ private:
     bool copyArmed = false;
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> onAtt, dotAtt, tripAtt, anchorAtt, latchAtt, retriggerAtt;
-    std::unique_ptr<ComboAtt> rateAtt, directionAtt;
+    std::unique_ptr<ButtonAtt> onAtt, dotAtt, tripAtt, anchorAtt, latchAtt, retriggerAtt, linkAtt;
+    std::unique_ptr<ComboAtt> rateAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)

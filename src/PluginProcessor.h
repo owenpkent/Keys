@@ -4,6 +4,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <array>
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -50,15 +51,28 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     // Note I/O: called from the UI thread; queued and drained on the audio thread.
-    // delaySeconds nudges the note-on (or, on noteOff, the note-off) later; noteOn
-    // uses it for chord-pad strum, noteOff for MCP-scheduled note durations
-    // (src/mcp/KeysMcp.cpp). A delayed note-off can never race the note-on it
-    // matches, since both stamp off the same collector clock.
+    // delaySeconds nudges the note-on (or, on noteOff, the note-off) later, and is only
+    // good for sub-block waits: chord-pad strum spread is the one real use. It is NOT a
+    // scheduler. juce::MidiMessageCollector empties its queue into the current block on
+    // every callback and clamps each event into it, so a delay long enough to matter is
+    // simply thrown away. Anything that has to happen meaningfully later has to be held
+    // and emitted at real time (see src/mcp/KeysMcp.cpp).
     // channelOverride 1..16 sends on that channel instead of the global param (0 = global);
     // the Pad Grid surface uses it so drums land on their own channel.
     void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0);
     void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0);
     void allNotesOff();
+
+    // What is sounding, for display only. Every note this processor emits is counted
+    // here, whichever source asked for it: the surface, a chord pad, or an MCP tool.
+    // The surface paints its own gestures from `pressed`/`latched`/`sustained`, so this
+    // is what lets a key light up for a note nobody clicked. Refcounted, because the
+    // same note can be asked for twice (a pad and the keyboard) before either releases.
+    //
+    // soundingGeneration() bumps on every change, so a component can poll cheaply and
+    // repaint only when something actually moved.
+    bool isNoteSounding(int midiNote) const;
+    juce::uint32 soundingGeneration() const { return soundingGen.load(); }
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
@@ -154,6 +168,12 @@ private:
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread
+
+    // Display-only refcount of what is sounding, per MIDI note (see isNoteSounding).
+    // Atomic because the emitting side is the message thread while readers are paint
+    // and timer callbacks; nothing here reaches the audio thread.
+    std::array<std::atomic<int>, 128> noteRefs {};
+    std::atomic<juce::uint32> soundingGen { 0 };
 
     std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
     int activeArpPattern = 0;                            // message thread only

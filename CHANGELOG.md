@@ -5,6 +5,126 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the keyboard lights up for notes you did not play
+
+The on-screen piano only ever showed your own mouse gestures. Its three states come
+from `pressed`, `latched` and `sustained`, which are filled by the surface's own mouse
+handling, so a note from an MCP tool or a chord pad sounded with the keybed sitting
+completely still. Driving Keys from Claude was audible but invisible, and a chord pad
+gave no indication of which notes it was holding.
+
+- **`KeysProcessor` now refcounts what is sounding**, per MIDI note, whichever source
+  asked for it, exposed as `isNoteSounding()` plus a `soundingGeneration()` counter that
+  bumps on every change. Display only; nothing here touches the audio thread. The count
+  clamps at zero so an unmatched note-off (a panic, a pad released twice) cannot leave a
+  key lit forever.
+- **`NoteSurface` polls that generation every 30ms** and repaints only when it moves,
+  and offers `externallySounding()`, which maps sounding notes back to drawn ids through
+  the existing `drawnForOutputNote()`. Every surface in the line gets this, not just the
+  piano.
+- **Those keys paint as `held`**, the state that already means "ringing with no finger on
+  it", and they are checked after `pressed`/`latched`, so a key you are genuinely holding
+  still reads as your own gesture.
+- **Notes the surface is already playing are excluded**, rather than inverse-mapped back
+  onto a key. `drawnForOutputNote()` is only the inverse of `outputNote()` while nothing
+  has moved between them, and two ordinary things move: Scale Lock snaps an out-of-scale
+  key onto its neighbour (those keys are dimmed, not disabled, so clicking one is normal
+  use), and the octave can change while a note is latched and still ringing at its
+  press-time pitch. Both would otherwise light a second, wrong key next to the one you
+  actually touched.
+
+### Fixed: `play_notes` and `play_sequence` made no sound at all
+
+Both MCP note tools were silent from the day they shipped. `play_notes` reported
+`{"played": 1}` and `play_sequence` reported its full step count and horizon, so from
+the client side the failure looked like a synth or routing problem. Clicking the
+on-screen keyboard worked, and so did `press_chord_pad`, which is what made it
+confusing.
+
+The cause is that both tools handed their timing to `juce::MidiMessageCollector`, which
+cannot do it. The collector is built for live input: `removeNextBlockOfMessages()` ends
+in `incomingMessages.clear()` and places every event with
+`jlimit (0, numSamples - 1, pos)`, so it empties its whole queue into the block that
+happens to be playing and clamps anything in the future into that same block. A
+`play_notes` note-on and its delayed note-off therefore landed microseconds apart, and
+an entire `play_sequence` phrase collapsed into a single buffer: a 113-second phrase
+played correctly, in about eleven milliseconds. `press_chord_pad` escaped it only
+because its release comes from this bridge's timer rather than from a delayed message.
+
+- **Scheduled notes are now held in `KeysMcp` and emitted at real time**, the same way
+  timed chord-pad releases always were. `play_notes` fires its note-on immediately and
+  schedules only the release; `play_sequence` schedules every event against one base
+  timestamp taken when the tool runs, so a phrase's internal timing is exact and the
+  poll interval costs each event at most one tick of lateness instead of accumulating
+  drift across the phrase.
+- **The bridge's timer now polls at 5ms rather than 30ms.** Chord-pad releases never
+  cared; notes do.
+- **`all_notes_off` abandons anything still scheduled**, so it stops a phrase
+  mid-flight. Previously it could only silence the current note while the rest of the
+  queue carried on.
+- **`play_sequence` accepts steps in any order.** The queue sorts by time, and at equal
+  times a note-off goes before a note-on, so a note that repeats back-to-back releases
+  before it re-attacks. Ordering by time alone let an unsorted phrase drop notes: the
+  second attack could land ahead of the first release, which then killed it.
+- `noteOn`/`noteOff` keep their `delaySeconds` parameters, which remain correct for the
+  sub-block use they were written for (chord strum spread). Nothing outside this bridge
+  relied on them for longer waits.
+
+### Changed: the arpeggiator leads with a Shape, and the step lanes are tabbed
+
+**Saved sessions: two new parameters (`arpPattern`, `arpLinkLanes`).** Both are additive,
+so an older session still loads, but `arpPattern` defaults **off**. A session that had
+per-step lane edits will now play as a plain arpeggiator until you set **Shape** back to
+**Pattern**; the step data itself is untouched and comes back with it.
+
+- **Shape now decides whether there is a step editor at all.** The Shape menu holds the
+  eight directions plus "Pattern"; only "Pattern" shows the grid. Opening the arp on a
+  shape is now one row of controls, not six lanes of teal bars. Modelled on Serum 2,
+  whose pattern editor likewise only exists while SHAPE is "Pattern".
+- **The six lanes are tabs, one on screen at a time** (Note, Octave, Velocity, Gate,
+  Ratchet, Probability), which is the Cthulhu design `docs/ARP_DESIGN.md` always
+  claimed to follow. Stacking all six is what forced six copies of the length and
+  speed controls onto the right edge with no room to label any of them.
+- **One Steps control and one Speed control**, labelled, for the lane you are looking
+  at, plus the **Link lanes** switch the design spec called for and that was never
+  built. Link on (the default) keeps every lane the same length and speed; off is
+  polymeter, per-lane.
+- **Fixed: the bottom of the arp panel was cut off at ordinary window sizes.** Six lanes
+  needed about 750 px of panel height, more than the editor's 660 px default and more
+  than Keys Host leaves once its top bar is in, so the Probability lane and the entire
+  pattern row (A-H, Copy, Randomize) sat below the window edge. You had to enlarge the
+  window to reach them, and nothing said so.
+- **Fixed: tooltips never appeared anywhere in the plugin.** JUCE only shows them when a
+  `TooltipWindow` exists and there was none, so 19 written explanations across the arp
+  and chord panels were dead code.
+- Shape brackets its writes in `beginChangeGesture`/`endChangeGesture`. It spans two
+  parameters, so it cannot be an APVTS attachment, and the attachment is what normally
+  supplies those: without them a host in touch or latch mode would not arm on a Shape
+  change the way it does on every other arp control.
+
+### Changed: the instrument picker files VSTs into folders
+- **One collapsible folder per publisher**, opening closed, so a big library reads as a
+  short list of publishers instead of one long scroll. The header shows how many
+  instruments are inside; one click opens it, another closes it, and several can be
+  open at once. Which folders you left open survives Rescan.
+- **Folders are the only raised chips; instruments are plain indented text.** On the
+  standard button both were the same centred pill, so an indent and a small triangle
+  were all that separated them and the instruments still read as more folders. Rows are
+  left-aligned, folder captions are bright and semibold, and an instrument lights up
+  with an accent edge under the mouse instead of carrying a chip of its own.
+
+### Fixed: the hosted instrument's window could open unmovable
+- **Keys Host's instrument window opened with its title bar off the top of the screen**,
+  and since that window has no resize frame, its title bar is the only thing you can
+  drag: the window was stuck wherever it landed, permanently. Two causes, both fixed.
+  `placeInstrumentWindow` clamped the window into the display work area using *component*
+  coordinates, which exclude a native title bar, so pinning to the top edge put the bar
+  itself at y = -30. And it ran before the editor had a screen position, so it read the
+  keyboard window's origin as (0, 0) and took that clamp path on every single launch.
+- The clamp now accounts for the window frame (`okstudio::ui::ensureWindowReachable` in
+  the kit, so the whole line gets it), and placement defers one message-loop turn when
+  the editor isn't on screen yet, with a single retry rather than an unbounded re-post.
+
 ### Added: edit chord pads on the keyboard, and chord cards that show their notes
 - **Right-click a pad on the main page → "Edit on keyboard".** The pad's notes latch
   onto the piano (latch behaviour is forced on while editing), clicking keys adds and

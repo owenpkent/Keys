@@ -27,10 +27,12 @@ namespace keys
 // of the on-screen Latch toggle, never the only path (accessibility contract). It feeds
 // the same `latched` set, so Latch-off and panic clear it; Octavium's right-latched
 // notes survived panic forever, which was a bug, not a behaviour to keep.
-class NoteSurface : public juce::Component
+class NoteSurface : public juce::Component,
+                    private juce::Timer
 {
 public:
     explicit NoteSurface(KeysProcessor&);
+    ~NoteSurface() override;
 
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
@@ -62,6 +64,15 @@ protected:
 
     void refresh(); // diff the sounding set, emit note on/off
 
+    // Drawn ids whose output note is sounding right now but which this surface did not
+    // play: MCP tools, chord pads, anything else that emits through the processor. A
+    // subclass's paint() should treat these as held, AFTER checking its own pressed and
+    // latched sets, so a key the user is actually holding still paints as their gesture.
+    // Built from the processor's refcounts and mapped back through drawnForOutputNote,
+    // so a note with no key on this surface is simply skipped, and notes already in
+    // `sounding` are excluded outright (see the .cpp for why that matters).
+    std::set<int> externallySounding() const;
+
     KeysProcessor& processor;
     bool scaleLock = false;
     int rootPc = 0, scaleIndex = 0;
@@ -75,6 +86,10 @@ protected:
     std::vector<int> voiceOrder; // drawn ids in the order they started (FIFO, for stealing)
     int dragDrawn = -1;
     bool rightGesture = false;   // a right-click toggle is in flight; ignore its drag/up
+
+private:
+    void timerCallback() override; // polls the processor's sounding generation, repaints on change
+    juce::uint32 lastSoundingGen = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoteSurface)
 };

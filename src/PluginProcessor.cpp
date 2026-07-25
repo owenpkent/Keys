@@ -130,6 +130,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDirection", 1 }, "Arp Direction",
                                                       StringArray { "Up", "Down", "Up-Down", "Down-Up",
                                                                     "Up & Down", "Down & Up", "As Played", "Reversed" }, 0));
+    // Added after the arp shipped, both additive so an older session still loads: a
+    // missing parameter falls back to its default here rather than shifting any
+    // existing parameter's range. Note the default: arpPattern off means a session
+    // that had per-step lane edits now plays as a plain shape until Shape is set back
+    // to "Pattern". That is deliberate (the step grid was the confusing part) and is
+    // called out in the changelog.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpPattern", 1 }, "Arp Pattern", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLinkLanes", 1 }, "Arp Link Lanes", true));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOctaves", 1 }, "Arp Octaves", 1, 4, 1));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "arpSwing", 1 }, "Arp Swing",
                                                      NormalisableRange<float>(0.0f, 0.75f, 0.01f), 0.0f));
@@ -341,6 +349,9 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     auto m = juce::MidiMessage::noteOn(channel, midiNote, juce::jlimit(0.04f, 1.0f, velocity01));
     m.setTimeStamp(when);
     collector.addMessageToQueue(m);
+
+    noteRefs[(size_t) midiNote].fetch_add(1);
+    soundingGen.fetch_add(1);
 }
 
 void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySeconds)
@@ -351,6 +362,20 @@ void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySecon
     auto m = juce::MidiMessage::noteOff(channel, midiNote);
     m.setTimeStamp(nowSeconds() + delaySeconds);
     collector.addMessageToQueue(m);
+
+    // Clamp at zero: a note-off with no matching note-on (panic, a pad released twice)
+    // must not push the count negative and leave the key lit forever.
+    auto& ref = noteRefs[(size_t) midiNote];
+    int cur = ref.load();
+    while (cur > 0 && ! ref.compare_exchange_weak(cur, cur - 1)) {}
+    soundingGen.fetch_add(1);
+}
+
+bool KeysProcessor::isNoteSounding(int midiNote) const
+{
+    if (midiNote < 0 || midiNote > 127)
+        return false;
+    return noteRefs[(size_t) midiNote].load() > 0;
 }
 
 void KeysProcessor::allNotesOff()
@@ -373,6 +398,10 @@ void KeysProcessor::allNotesOff()
         m.setTimeStamp(t);
         collector.addMessageToQueue(m);
     }
+
+    for (auto& ref : noteRefs)
+        ref.store(0);
+    soundingGen.fetch_add(1);
 }
 
 void KeysProcessor::sendCC(int controller, int value)
@@ -438,6 +467,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ap.triplet = apvts.getRawParameterValue("arpTrip")->load() > 0.5f;
         ap.anchored = apvts.getRawParameterValue("arpAnchor")->load() > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) apvts.getRawParameterValue("arpDirection")->load();
+        ap.usePattern = apvts.getRawParameterValue("arpPattern")->load() > 0.5f;
         ap.octaveRange = (int) apvts.getRawParameterValue("arpOctaves")->load();
         ap.swing = apvts.getRawParameterValue("arpSwing")->load();
         ap.latch = apvts.getRawParameterValue("arpLatch")->load() > 0.5f;
