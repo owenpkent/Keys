@@ -40,6 +40,26 @@ fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` and `.cpp`.
 | `recall_arp_pattern` | Make a stored pattern the active/live one. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
 
+## How scheduled notes are timed
+
+`play_notes` sounds its notes immediately and schedules only the release. `play_sequence`
+schedules every event against a single base timestamp taken when the call arrives, so the
+phrase's internal timing is exact: the start of the whole phrase can be late by up to one
+poll (5ms), but that lateness does not accumulate from step to step.
+
+Both are dispatched by `KeysMcp`'s timer on the message thread, deliberately, not by
+timestamping messages into the audio path. `juce::MidiMessageCollector` cannot hold a
+future message: it empties its queue into the current block on every callback and clamps
+each event into that block, so a delayed note-off arrives alongside its own note-on and
+the note never sounds. Anything that must happen later has to be held and emitted at real
+time. If you add a tool that plays notes, follow the same route.
+
+This also means timing is message-thread timing, not sample-accurate. It is well inside
+what a sparse phrase needs; it is not a sequencer, and a dense pattern that has to lock to
+the host grid belongs in the arp lanes or in Contour, not here.
+
+`all_notes_off` discards anything still queued, so it stops a phrase mid-flight.
+
 ## Setting it up in Claude Code
 
 ```

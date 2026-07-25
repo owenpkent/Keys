@@ -17,10 +17,18 @@ class KeysProcessor;
 // tool bodies call straight into KeysProcessor/APVTS exactly the way the UI does.
 // No locking, no thread-safety wrapper needed here.
 //
-// Also owns a small 30ms-poll Timer, used only to fire a delayed chord-pad release:
-// releaseChordPad() has no delay parameter (unlike noteOff, which now does). Note
-// scheduling itself (play_notes/play_sequence) goes through the collector's own
-// message timestamping instead, no timer involved.
+// Also owns a small 5ms-poll Timer that fires everything this bridge schedules for
+// later: delayed chord-pad releases, and the note-ons/note-offs of play_notes and
+// play_sequence.
+//
+// Note scheduling CANNOT go through the collector's own message timestamping, which
+// is what it used to do. juce::MidiMessageCollector is built for live input:
+// removeNextBlockOfMessages() empties its whole queue into the current block every
+// callback and clamps each event with jlimit(0, numSamples - 1, pos), so a
+// future-stamped message is not held, it is dragged into the block that happens to be
+// playing. A play_notes note-on and its note-off therefore landed microseconds apart
+// (silent), and a whole play_sequence phrase collapsed into a single buffer. Anything
+// that must happen later has to be held here and emitted at real time instead.
 class KeysMcp : private juce::Timer
 {
 public:
@@ -30,6 +38,7 @@ public:
 private:
     void timerCallback() override;
     void cancelPendingRelease(int slot);
+    void scheduleNote(double atMs, int note, int channel, float vel01, bool isOn);
     static juce::String productSlug();
 
     okstudio::mcp::Tool toolGetState();
@@ -59,6 +68,21 @@ private:
         int slot;
     };
     std::vector<PendingRelease> pendingReleases;
+
+    // Notes that play_notes / play_sequence scheduled for later, kept sorted by
+    // atMs and emitted by timerCallback once their time arrives. Relative timing
+    // survives exactly (every event is measured from one base taken when the tool
+    // ran), so the poll interval costs each event up to one tick of lateness rather
+    // than accumulating drift across a phrase.
+    struct PendingNote
+    {
+        double atMs;   // absolute juce::Time::getMillisecondCounterHiRes() stamp
+        int note;
+        int channel;   // 0 = follow the MIDI Channel control, as noteOn/noteOff expect
+        float vel01;
+        bool isOn;
+    };
+    std::vector<PendingNote> pendingNotes;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysMcp)
 };

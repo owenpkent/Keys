@@ -5,6 +5,39 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: `play_notes` and `play_sequence` made no sound at all
+
+Both MCP note tools were silent from the day they shipped. `play_notes` reported
+`{"played": 1}` and `play_sequence` reported its full step count and horizon, so from
+the client side the failure looked like a synth or routing problem. Clicking the
+on-screen keyboard worked, and so did `press_chord_pad`, which is what made it
+confusing.
+
+The cause is that both tools handed their timing to `juce::MidiMessageCollector`, which
+cannot do it. The collector is built for live input: `removeNextBlockOfMessages()` ends
+in `incomingMessages.clear()` and places every event with
+`jlimit (0, numSamples - 1, pos)`, so it empties its whole queue into the block that
+happens to be playing and clamps anything in the future into that same block. A
+`play_notes` note-on and its delayed note-off therefore landed microseconds apart, and
+an entire `play_sequence` phrase collapsed into a single buffer: a 113-second phrase
+played correctly, in about eleven milliseconds. `press_chord_pad` escaped it only
+because its release comes from this bridge's timer rather than from a delayed message.
+
+- **Scheduled notes are now held in `KeysMcp` and emitted at real time**, the same way
+  timed chord-pad releases always were. `play_notes` fires its note-on immediately and
+  schedules only the release; `play_sequence` schedules every event against one base
+  timestamp taken when the tool runs, so a phrase's internal timing is exact and the
+  poll interval costs each event at most one tick of lateness instead of accumulating
+  drift across the phrase.
+- **The bridge's timer now polls at 5ms rather than 30ms.** Chord-pad releases never
+  cared; notes do.
+- **`all_notes_off` abandons anything still scheduled**, so it stops a phrase
+  mid-flight. Previously it could only silence the current note while the rest of the
+  queue carried on.
+- `noteOn`/`noteOff` keep their `delaySeconds` parameters, which remain correct for the
+  sub-block use they were written for (chord strum spread). Nothing outside this bridge
+  relied on them for longer waits.
+
 ### Changed: the arpeggiator leads with a Shape, and the step lanes are tabbed
 
 **Saved sessions: two new parameters (`arpPattern`, `arpLinkLanes`).** Both are additive,
