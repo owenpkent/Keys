@@ -5,6 +5,27 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the keyboard lights up for notes you did not play
+
+The on-screen piano only ever showed your own mouse gestures. Its three states come
+from `pressed`, `latched` and `sustained`, which are filled by the surface's own mouse
+handling, so a note from an MCP tool or a chord pad sounded with the keybed sitting
+completely still. Driving Keys from Claude was audible but invisible, and a chord pad
+gave no indication of which notes it was holding.
+
+- **`KeysProcessor` now refcounts what is sounding**, per MIDI note, whichever source
+  asked for it, exposed as `isNoteSounding()` plus a `soundingGeneration()` counter that
+  bumps on every change. Display only; nothing here touches the audio thread. The count
+  clamps at zero so an unmatched note-off (a panic, a pad released twice) cannot leave a
+  key lit forever.
+- **`NoteSurface` polls that generation every 30ms** and repaints only when it moves,
+  and offers `externallySounding()`, which maps sounding notes back to drawn ids through
+  the existing `drawnForOutputNote()`. Every surface in the line gets this, not just the
+  piano.
+- **Those keys paint as `held`**, the state that already means "ringing with no finger on
+  it", and they are checked after `pressed`/`latched`, so a key you are genuinely holding
+  still reads as your own gesture.
+
 ### Fixed: `play_notes` and `play_sequence` made no sound at all
 
 Both MCP note tools were silent from the day they shipped. `play_notes` reported

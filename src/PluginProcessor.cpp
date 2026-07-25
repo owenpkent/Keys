@@ -349,6 +349,9 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     auto m = juce::MidiMessage::noteOn(channel, midiNote, juce::jlimit(0.04f, 1.0f, velocity01));
     m.setTimeStamp(when);
     collector.addMessageToQueue(m);
+
+    noteRefs[(size_t) midiNote].fetch_add(1);
+    soundingGen.fetch_add(1);
 }
 
 void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySeconds)
@@ -359,6 +362,20 @@ void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySecon
     auto m = juce::MidiMessage::noteOff(channel, midiNote);
     m.setTimeStamp(nowSeconds() + delaySeconds);
     collector.addMessageToQueue(m);
+
+    // Clamp at zero: a note-off with no matching note-on (panic, a pad released twice)
+    // must not push the count negative and leave the key lit forever.
+    auto& ref = noteRefs[(size_t) midiNote];
+    int cur = ref.load();
+    while (cur > 0 && ! ref.compare_exchange_weak(cur, cur - 1)) {}
+    soundingGen.fetch_add(1);
+}
+
+bool KeysProcessor::isNoteSounding(int midiNote) const
+{
+    if (midiNote < 0 || midiNote > 127)
+        return false;
+    return noteRefs[(size_t) midiNote].load() > 0;
 }
 
 void KeysProcessor::allNotesOff()
@@ -381,6 +398,10 @@ void KeysProcessor::allNotesOff()
         m.setTimeStamp(t);
         collector.addMessageToQueue(m);
     }
+
+    for (auto& ref : noteRefs)
+        ref.store(0);
+    soundingGen.fetch_add(1);
 }
 
 void KeysProcessor::sendCC(int controller, int value)

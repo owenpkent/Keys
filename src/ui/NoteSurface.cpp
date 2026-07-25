@@ -7,6 +7,38 @@ namespace keys
 NoteSurface::NoteSurface(KeysProcessor& p) : processor(p)
 {
     okstudio::ui::makeMouseOnly(*this);
+    lastSoundingGen = processor.soundingGeneration();
+    // 30ms is a repaint poll, not a note clock: it only decides how soon a key lights
+    // for a note this surface did not play. Nothing musical depends on it.
+    startTimer(30);
+}
+
+NoteSurface::~NoteSurface()
+{
+    stopTimer();
+}
+
+void NoteSurface::timerCallback()
+{
+    const auto gen = processor.soundingGeneration();
+    if (gen == lastSoundingGen)
+        return;
+    lastSoundingGen = gen;
+    repaint();
+}
+
+std::set<int> NoteSurface::externallySounding() const
+{
+    std::set<int> out;
+    for (int note = 0; note < 128; ++note)
+    {
+        if (! processor.isNoteSounding(note))
+            continue;
+        const int drawn = drawnForOutputNote(note);
+        if (drawn >= 0)
+            out.insert(drawn);
+    }
+    return out;
 }
 
 void NoteSurface::setScaleLock(bool on, int rootPitchClass, int scale)
