@@ -117,10 +117,10 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
         const auto filled = bar.withTop(bar.getBottom() - bar.getHeight() * frac);
         if (filled.getHeight() > 0.5f)
         {
-            g.setGradientFill({ skin::accent.withAlpha(0.55f), 0.0f, filled.getY(),
-                                skin::accentDeep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
+            g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.55f), 0.0f, filled.getY(),
+                                skin::accentOf(*this).deep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
             g.fillRect(filled);
-            g.setColour(skin::accentHot.withAlpha(0.9f));
+            g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
             g.fillRect(filled.getX(), filled.getY(), filled.getWidth(), 1.5f);
         }
 
@@ -156,7 +156,7 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
                       .constrainedWithin(getLocalBounds());
         g.setColour(juce::Colour(0xff1e2127));
         g.fillRoundedRectangle(box.toFloat(), 4.0f);
-        g.setColour(skin::accent);
+        g.setColour(skin::accentOf(*this).base);
         g.drawRoundedRectangle(box.toFloat(), 4.0f, 1.0f);
         g.setColour(skin::text);
         g.setFont(f);
@@ -231,10 +231,10 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
         }
         else
         {
-            g.setGradientFill({ skin::accent.withAlpha(0.5f), 0.0f, cell.getY(),
-                                skin::accentDeep.withAlpha(0.45f), 0.0f, cell.getBottom(), false });
+            g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.5f), 0.0f, cell.getY(),
+                                skin::accentOf(*this).deep.withAlpha(0.45f), 0.0f, cell.getBottom(), false });
             g.fillRoundedRectangle(cell, 3.0f);
-            g.setColour(skin::accentHot.withAlpha(0.5f));
+            g.setColour(skin::accentOf(*this).hot.withAlpha(0.5f));
             g.fillRect(cell.getX() + 2.0f, cell.getY() + 1.0f, cell.getWidth() - 4.0f, 1.5f);
         }
 
@@ -621,7 +621,7 @@ void ArpPanel::paint(juce::Graphics& g)
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, b, skin::panelRadius, skin::accent, inlineMode ? 0.30f : 0.55f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accentOf(*this).base, inlineMode ? 0.30f : 0.55f);
 }
 
 void ArpPanel::resized()

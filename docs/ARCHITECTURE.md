@@ -188,9 +188,29 @@ section's own small controls laid out as its siblings in `contentArea()`.
 
 The middle of the editor is a *view*, not a stack of overlays. `Perform` is the knob bank
 plus the chord-pad strip; `Chords` and `Arp` swap `ChordGenPanel` / `ArpPanel` into the
-same slot. Clicking the lit tab folds the centre away entirely, so the centre needs no
-chevron of its own. Only the view on show exists — both panels are heavy and neither is
-worth keeping warm behind the other.
+same slot, and the three tabs ride on the centre's own `SectionBar`. Only the view on show
+exists — both panels are heavy and neither is worth keeping warm behind the other, and a
+folded centre holds neither.
+
+The bars are full-width translucent Buttons and the controls on them are *siblings*, not
+children (a `SectionBar` has to stay clickable end to end). Z-order therefore matters:
+they are sent `toBack()` after construction, or each bar paints over its own tabs.
+
+## The accent is per instance
+
+Keys used to have exactly one accent, the OK Studio cyan. It is now one of eight, chosen
+per instance, because a session with Keys on two tracks gave two identical windows.
+
+This is deliberately **not** a global. A DAW loads every instance into one process, so a
+mutable global would repaint every track's Keys together. The live triple (base / hot /
+deep) hangs off each editor's `KeysLookAndFeel`; components call `skin::accentOf(*this)`,
+which resolves through the LookAndFeel chain JUCE already walks up to the editor. Paint
+loops hoist that call rather than paying a `dynamic_cast` per key or per step.
+
+Two things are easy to miss when adding a colour path. The kit bakes several JUCE
+`ColourId`s from the accent at construction (tick marks, slider tracks, the popup
+highlight), so `setAccent` re-applies every one of them. And `wheelLnf` is a *second*
+LookAndFeel instance with its own copy, so it has to be re-tinted alongside `lnf`.
 
 This replaced full-editor overlays that dimmed and covered everything, including the
 keyboard. Editing an arp while unable to play a note was backwards for an instrument you

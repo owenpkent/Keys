@@ -251,7 +251,7 @@ void InstrumentPicker::ItemLookAndFeel::drawButtonBackground(juce::Graphics& g, 
     const auto r = b.getLocalBounds().toFloat().reduced(0.5f);
     g.setColour(skin::well.withAlpha(down ? 1.0f : 0.85f));
     g.fillRoundedRectangle(r, skin::radius);
-    g.setColour(skin::accent.withAlpha(down ? 0.55f : 0.32f));
+    g.setColour(skin::accentOf(b).base.withAlpha(down ? 0.55f : 0.32f)); // the row, not the LnF
     g.drawRoundedRectangle(r.reduced(0.5f), skin::radius, 1.0f);
 }
 
@@ -301,7 +301,7 @@ void InstrumentPicker::paint(juce::Graphics& g)
     g.fillRoundedRectangle(panel, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(panel.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, panel, skin::panelRadius, skin::accent, 0.55f);
+    skin::glowRect(g, panel, skin::panelRadius, skin::accentOf(*this).base, 0.55f);
 }
 
 void InstrumentPicker::resized()

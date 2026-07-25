@@ -42,7 +42,11 @@ namespace
 
     // A card's mini keyboard: two octaves (three when the chord spills over) from the
     // low note's C, held keys lit in accent. Purely informative, not a target.
-    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes)
+    //
+    // The accent is passed in rather than looked up: this is a free function with no
+    // component to resolve it from, and the accent is per instance now.
+    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes,
+                          skin::Accent ac)
     {
         if (notes.empty())
             return;
@@ -61,7 +65,7 @@ namespace
             const int note = base + (i / 7) * 12 + whitePc[i % 7];
             const auto key = juce::Rectangle<float>(r.getX() + ww * (float) i, r.getY(),
                                                     ww, r.getHeight()).reduced(0.5f, 0.0f);
-            g.setColour(held(note) ? skin::accent : juce::Colours::white.withAlpha(0.30f));
+            g.setColour(held(note) ? ac.base : juce::Colours::white.withAlpha(0.30f));
             g.fillRoundedRectangle(key, 1.0f);
         }
 
@@ -73,7 +77,7 @@ namespace
             {
                 const int note = base + o * 12 + blackPc[b];
                 const float x = r.getX() + ww * (float) (o * 7 + blackAfterWhite[b] + 1) - bw * 0.5f;
-                g.setColour(held(note) ? skin::accentHot : juce::Colour(0xff101216));
+                g.setColour(held(note) ? ac.hot : juce::Colour(0xff101216));
                 g.fillRoundedRectangle(x, r.getY(), bw, bh, 1.0f);
             }
     }
@@ -109,9 +113,9 @@ namespace
             if (isItemHighlighted())
             {
                 const auto r = getLocalBounds().toFloat().reduced(2.0f, 1.0f);
-                g.setColour(skin::accent.withAlpha(0.15f));
+                g.setColour(skin::accentOf(*this).base.withAlpha(0.15f));
                 g.fillRoundedRectangle(r, 4.0f);
-                g.setColour(skin::accent.withAlpha(0.4f));
+                g.setColour(skin::accentOf(*this).base.withAlpha(0.4f));
                 g.drawRoundedRectangle(r, 4.0f, 1.0f);
             }
             g.setColour(isItemHighlighted() ? juce::Colour(0xffeafcff) : skin::text);
@@ -156,7 +160,7 @@ void ChordGenPanel::PadButton::paintButton(juce::Graphics& g, bool over, bool do
     g.setFont(skin::micro(10.0f));
     g.drawText(noteListText(notes), noteLine.toNearestInt(), juce::Justification::centred, true);
 
-    drawMiniKeyboard(g, kb, notes);
+    drawMiniKeyboard(g, kb, notes, skin::accentOf(*this));
 
     if (locked)
     {
@@ -762,7 +766,7 @@ void ChordGenPanel::paint(juce::Graphics& g)
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, b, skin::panelRadius, skin::accent, inlineMode ? 0.30f : 0.55f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accentOf(*this).base, inlineMode ? 0.30f : 0.55f);
 }
 
 void ChordGenPanel::resized()

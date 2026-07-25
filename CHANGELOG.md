@@ -5,6 +5,41 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: each instance wears its own colour
+
+A session with Keys on the pad track and Keys on the bass track gave you two identical
+windows. Every instance now picks from eight accents (Cyan, Amber, Lime, Violet, Magenta,
+Orange, Rose, Ice) from a swatch on the Controls bar, and it colours the whole plugin:
+knobs, keys, the fallboard rail, tick marks, slider tracks, the wheel LEDs.
+
+- **The accent is per instance, not global.** A DAW loads every instance into one
+  process, so a global would have repainted every track's Keys at once. It hangs off each
+  editor's `KeysLookAndFeel` and components resolve it through the LookAndFeel chain JUCE
+  already walks up to the editor (`skin::accentOf`).
+- **The swatch sits on the Controls *bar*, not inside the section**, so it stays reachable
+  with Controls folded away. Telling instances apart is the point; hiding the control
+  behind a fold would defeat it.
+- Saved with the session. Cyan stays the default and the line's colour.
+
+### Added: Sustain releases a note when you click it again
+
+The pedal was a one-way door. Every key you touched stayed on until Sustain came off
+entirely, so a chord with a wrong note in it meant starting over. Clicking a key the pedal
+is holding now releases just that key.
+
+### Changed: the centre section folds like the others
+
+Perform / Chords / Arp used to fold by clicking whichever tab was already lit, which was
+its own gesture to learn. The centre now has a `SectionBar` with a chevron, the same as
+Controls and Keyboard, and the three tabs ride on that bar. They stay visible while it is
+folded, so picking one both unfolds and switches.
+
+### Added: the detached keyboard carries its own Size selector
+
+Key count lives in the Controls section, which is exactly the section you fold away once
+the keyboard is in its own window. The detached window now has its own, on the same
+parameter.
+
 ### Changed: the dev loop is `run.py`, so it can be launched with a double-click
 
 `run.ps1` had to be typed at a prompt. Typing is real effort here, and the dev loop is the

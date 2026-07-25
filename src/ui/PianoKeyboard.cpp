@@ -121,6 +121,7 @@ void PianoKeyboard::paint(juce::Graphics& g)
 {
     using namespace okstudio;
     const auto full = getLocalBounds().toFloat();
+    const auto ac = skin::accentOf(*this); // once per paint, not once per key
 
     // Instrument body above the keybed.
     g.setGradientFill({ juce::Colour(0xff121317), 0.0f, 0.0f,
@@ -200,9 +201,9 @@ void PianoKeyboard::paint(juce::Graphics& g)
 
         if (lit)
         {
-            g.setColour(skin::accent.withAlpha(0.45f));
+            g.setColour(ac.base.withAlpha(0.45f));
             g.strokePath(key, juce::PathStrokeType(2.0f));
-            g.setColour(skin::accent.withAlpha(0.15f));
+            g.setColour(ac.base.withAlpha(0.15f));
             g.strokePath(key, juce::PathStrokeType(5.0f));
         }
 
@@ -252,7 +253,7 @@ void PianoKeyboard::paint(juce::Graphics& g)
         else if (dim)                { faceTop = juce::Colour(0xff4a515b); faceLow = juce::Colour(0xff2a3037); }
         g.setGradientFill(vGrad(faceTop, faceLow, face.getY(), face.getBottom()));
         g.fillRoundedRectangle(face, 2.0f);
-        g.setColour(lit ? skin::accentHot.withAlpha(0.55f) : juce::Colours::white.withAlpha(0.10f));
+        g.setColour(lit ? ac.hot.withAlpha(0.55f) : juce::Colours::white.withAlpha(0.10f));
         g.fillRect(face.getX() + 1.0f, face.getBottom(), face.getWidth() - 2.0f, 1.5f);
 
         g.setColour(juce::Colours::black.withAlpha(0.6f));
@@ -260,9 +261,9 @@ void PianoKeyboard::paint(juce::Graphics& g)
 
         if (lit)
         {
-            g.setColour(skin::accent.withAlpha(0.35f));
+            g.setColour(ac.base.withAlpha(0.35f));
             g.drawRoundedRectangle(b.expanded(1.0f), 4.0f, 2.0f);
-            g.setColour(skin::accent.withAlpha(0.12f));
+            g.setColour(ac.base.withAlpha(0.12f));
             g.drawRoundedRectangle(b.expanded(2.5f), 5.0f, 4.0f);
         }
     }
@@ -271,9 +272,9 @@ void PianoKeyboard::paint(juce::Graphics& g)
     // ambient shadow the board casts down the keys.
     g.setColour(juce::Colour(0xff0a0b0d));
     g.fillRect(full.getX(), keysTop, full.getWidth(), 2.0f);
-    g.setGradientFill({ skin::accent, full.getX(), 0.0f, skin::accentDeep, full.getRight(), 0.0f, false });
+    g.setGradientFill({ ac.base, full.getX(), 0.0f, ac.deep, full.getRight(), 0.0f, false });
     g.fillRect(full.getX(), keysTop + 2.0f, full.getWidth(), 2.5f);
-    g.setGradientFill(vGrad(skin::accent.withAlpha(0.16f), juce::Colours::transparentBlack,
+    g.setGradientFill(vGrad(ac.base.withAlpha(0.16f), juce::Colours::transparentBlack,
                             keysTop + 4.5f, keysTop + 13.0f));
     g.fillRect(full.getX(), keysTop + 4.5f, full.getWidth(), 8.5f);
     g.setGradientFill(vGrad(juce::Colours::black.withAlpha(0.45f), juce::Colours::transparentBlack,

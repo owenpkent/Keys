@@ -44,7 +44,34 @@ namespace skin
         g.fillEllipse(juce::Rectangle<float>(r * 0.9f, r * 0.55f)
                           .withCentre({ c.x - r * 0.25f, c.y - r * 0.45f }));
     }
+    Accent accentOf(const juce::Component& c)
+    {
+        // JUCE already walks the LookAndFeel up the hierarchy to the editor, so a
+        // component gets its own instance's accent without knowing who owns it. Anything
+        // painting outside a Keys editor (a bare unit test) gets the line's cyan.
+        if (auto* lnf = dynamic_cast<const KeysLookAndFeel*>(&c.getLookAndFeel()))
+            return lnf->accent();
+        return cyanAccent;
+    }
 } // namespace skin
+
+void KeysLookAndFeel::setAccent(int newIndex)
+{
+    using namespace juce;
+    index = jlimit(0, skin::numAccents - 1, newIndex);
+    accentColours = skin::accentAt(index);
+    const auto a = accentColours;
+
+    // The ColourIds the kit bakes from the accent at construction. Every one of them has
+    // to be re-set here or a recoloured instance keeps cyan tick marks and slider tracks.
+    setColour(PopupMenu::highlightedBackgroundColourId, a.base.withAlpha(0.15f));
+    setColour(TextButton::buttonOnColourId, skin::control.interpolatedWith(a.base, 0.32f));
+    setColour(Slider::trackColourId, a.base);
+    setColour(Slider::thumbColourId, a.hot);
+    setColour(TextEditor::highlightColourId, a.base.withAlpha(0.35f));
+    setColour(TextEditor::focusedOutlineColourId, a.base.withAlpha(0.6f));
+    setColour(ToggleButton::tickColourId, a.base);
+}
 
 KeysLookAndFeel::KeysLookAndFeel()
 {
@@ -60,30 +87,25 @@ KeysLookAndFeel::KeysLookAndFeel()
 
     setColour(PopupMenu::backgroundColourId, Colour(0xff1e2127));
     setColour(PopupMenu::textColourId, skin::text);
-    setColour(PopupMenu::highlightedBackgroundColourId, skin::accent.withAlpha(0.15f));
     setColour(PopupMenu::highlightedTextColourId, Colour(0xffeafcff));
 
     setColour(TextButton::buttonColourId, skin::control);
-    setColour(TextButton::buttonOnColourId, skin::control.interpolatedWith(skin::accent, 0.32f));
     setColour(TextButton::textColourOffId, skin::text);
     setColour(TextButton::textColourOnId, Colour(0xffeafcff));
 
     setColour(Slider::backgroundColourId, skin::well);
-    setColour(Slider::trackColourId, skin::accent);
-    setColour(Slider::thumbColourId, skin::accentHot);
     setColour(Slider::textBoxTextColourId, skin::text);
     setColour(Slider::textBoxBackgroundColourId, Colours::transparentBlack); // values float
     setColour(Slider::textBoxOutlineColourId, Colours::transparentBlack);
 
     setColour(TextEditor::backgroundColourId, skin::well);
     setColour(TextEditor::textColourId, skin::text);
-    setColour(TextEditor::highlightColourId, skin::accent.withAlpha(0.35f));
-    setColour(TextEditor::focusedOutlineColourId, skin::accent.withAlpha(0.6f));
     setColour(TextEditor::outlineColourId, Colours::transparentBlack);
 
     setColour(ToggleButton::textColourId, skin::text);
-    setColour(ToggleButton::tickColourId, skin::accent);
     setColour(ToggleButton::tickDisabledColourId, skin::textDim);
+
+    setAccent(0); // fills in every ColourId derived from the accent
 }
 
 // A machined knob: shadowed cap with a top-lit face and specular, a dark groove
@@ -115,11 +137,11 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     {
         juce::Path value;
         value.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, angle, true);
-        g.setColour(skin::accent.withAlpha(0.16f));
+        g.setColour(accent().base.withAlpha(0.16f));
         g.strokePath(value, { lw * 2.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
-        g.setColour(skin::accent.withAlpha(0.55f));
+        g.setColour(accent().base.withAlpha(0.55f));
         g.strokePath(value, { lw * 1.15f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
-        g.setColour(skin::accentHot);
+        g.setColour(accent().hot);
         g.strokePath(value, { lw * 0.55f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
     }
 
@@ -161,10 +183,10 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
         juce::Path pointer;
         pointer.addRoundedRectangle(-t * 0.5f, -capR * 0.86f, t, capR * 0.58f, t * 0.5f);
         pointer.applyTransform(juce::AffineTransform::rotation(angle).translated(centre));
-        g.setColour(skin::accent.withAlpha(0.30f));
+        g.setColour(accent().base.withAlpha(0.30f));
         g.strokePath(pointer, juce::PathStrokeType(t * 1.6f, juce::PathStrokeType::curved,
                                                    juce::PathStrokeType::rounded));
-        g.setColour(skin::accentHot);
+        g.setColour(accent().hot);
         g.fillPath(pointer);
     }
 
@@ -208,9 +230,9 @@ void KeysLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int widt
     if (fillR > fillL + 0.5f)
     {
         const auto fill = juce::Rectangle<float>(fillL, track.getY(), fillR - fillL, track.getHeight());
-        g.setGradientFill({ skin::accentDeep, fill.getX(), 0.0f, skin::accent, fill.getRight(), 0.0f, false });
+        g.setGradientFill({ accent().deep, fill.getX(), 0.0f, accent().base, fill.getRight(), 0.0f, false });
         g.fillRoundedRectangle(fill, 3.0f);
-        g.setColour(skin::accent.withAlpha(0.18f));
+        g.setColour(accent().base.withAlpha(0.18f));
         g.drawRoundedRectangle(fill.expanded(1.5f), 4.0f, 2.5f);
     }
 
@@ -238,9 +260,9 @@ juce::Label* KeysLookAndFeel::createSliderTextBox(juce::Slider& slider)
     label->setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
     label->setColour(juce::Label::textColourId, skin::text);
     label->setColour(juce::TextEditor::backgroundColourId, skin::well);
-    label->setColour(juce::TextEditor::outlineColourId, skin::accent.withAlpha(0.4f));
+    label->setColour(juce::TextEditor::outlineColourId, accent().base.withAlpha(0.4f));
     label->setColour(juce::TextEditor::textColourId, skin::text);
-    label->setColour(juce::TextEditor::highlightColourId, skin::accent.withAlpha(0.35f));
+    label->setColour(juce::TextEditor::highlightColourId, accent().base.withAlpha(0.35f));
     return label;
 }
 
@@ -265,7 +287,7 @@ void KeysLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& butt
                      base.darker(down ? 0.05f : 0.16f), ! down);
 
     if (button.getToggleState())
-        skin::glowRect(g, r, skin::radius, skin::accent);
+        skin::glowRect(g, r, skin::radius, accent().base);
 
     if (dim < 1.0f)
         g.endTransparencyLayer();
@@ -296,9 +318,9 @@ void KeysLookAndFeel::drawToggleButton(juce::Graphics& g, juce::ToggleButton& bu
 
     if (on)
     {
-        g.setGradientFill({ skin::accentHot, 0.0f, box.getY(), skin::accent, 0.0f, box.getBottom(), false });
+        g.setGradientFill({ accent().hot, 0.0f, box.getY(), accent().base, 0.0f, box.getBottom(), false });
         g.fillRoundedRectangle(box, 5.0f);
-        skin::glowRect(g, box, 5.0f, skin::accent, 0.9f);
+        skin::glowRect(g, box, 5.0f, accent().base, 0.9f);
 
         juce::Path check;
         check.startNewSubPath(box.getX() + boxS * 0.26f, box.getY() + boxS * 0.54f);
@@ -339,7 +361,7 @@ void KeysLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, boo
     skin::raisedFill(g, r, skin::radius, base.brighter(0.05f), base.darker(0.16f));
 
     if (box.isPopupActive())
-        skin::glowRect(g, r, skin::radius, skin::accent, 0.7f);
+        skin::glowRect(g, r, skin::radius, accent().base, 0.7f);
 
     // Chevron.
     const float cx = (float) width - 13.0f, cy = (float) height * 0.5f;
@@ -347,7 +369,7 @@ void KeysLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, boo
     chevron.startNewSubPath(cx - 4.5f, cy - 2.5f);
     chevron.lineTo(cx, cy + 2.5f);
     chevron.lineTo(cx + 4.5f, cy - 2.5f);
-    g.setColour(box.isPopupActive() ? skin::accent : skin::textDim);
+    g.setColour(box.isPopupActive() ? accent().base : skin::textDim);
     g.strokePath(chevron, { 1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
 
     if (dim < 1.0f)
@@ -412,14 +434,14 @@ juce::Button* KeysLookAndFeel::createDocumentWindowButton(int buttonType)
         juce::Path dash;
         dash.startNewSubPath(0.0f, 5.0f);
         dash.lineTo(10.0f, 5.0f);
-        button = new juce::ShapeButton("minimise", skin::textDim, skin::accentHot, skin::accent);
+        button = new juce::ShapeButton("minimise", skin::textDim, accent().hot, accent().base);
         button->setShape(stroked(dash), false, true, false);
     }
     else
     {
         juce::Path square;
         square.addRoundedRectangle(0.0f, 0.0f, 10.0f, 10.0f, 2.0f);
-        button = new juce::ShapeButton("maximise", skin::textDim, skin::accentHot, skin::accent);
+        button = new juce::ShapeButton("maximise", skin::textDim, accent().hot, accent().base);
         button->setShape(stroked(square), false, true, false);
     }
     button->setBorderSize(juce::BorderSize<int>(13));
@@ -450,15 +472,15 @@ void KeysLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle
     const auto r = area.toFloat().reduced(3.0f, 1.0f);
     if (isHighlighted && isActive)
     {
-        g.setColour(skin::accent.withAlpha(0.15f));
+        g.setColour(accent().base.withAlpha(0.15f));
         g.fillRoundedRectangle(r, 4.0f);
-        g.setColour(skin::accent.withAlpha(0.4f));
+        g.setColour(accent().base.withAlpha(0.4f));
         g.drawRoundedRectangle(r, 4.0f, 1.0f);
     }
 
     if (isTicked)
     {
-        g.setColour(skin::accent);
+        g.setColour(accent().base);
         g.fillEllipse(juce::Rectangle<float>(6.0f, 6.0f)
                           .withCentre({ r.getX() + 10.0f, r.getCentreY() }));
     }

@@ -30,6 +30,17 @@ public:
         setToggleState(true, juce::dontSendNotification); // open
     }
 
+    // The centre bar's caption follows whichever view is showing, so it is not fixed at
+    // construction like the other two.
+    void setCaption(const juce::String& c)
+    {
+        if (c == title)
+            return;
+        title = c;
+        setTitle(c); // keep the accessible name honest
+        repaint();
+    }
+
     // Where a caller may put section controls: right of the caption, inset from the ends.
     // In the *parent's* coordinates, because those controls are the bar's siblings, not
     // its children — the bar is a Button and must keep the whole of itself clickable.
@@ -63,7 +74,7 @@ public:
             chevron.lineTo(centre.x + 2.5f, centre.y);
             chevron.lineTo(centre.x - 2.0f, centre.y + 4.5f);
         }
-        g.setColour(open ? skin::accent : skin::textDim);
+        g.setColour(open ? skin::accentOf(*this).base : skin::textDim);
         g.strokePath(chevron, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
                                                    juce::PathStrokeType::rounded));
 

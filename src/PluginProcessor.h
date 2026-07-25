@@ -159,12 +159,14 @@ public:
     struct LayoutState
     {
         bool controls = true;   // the three header rows
+        bool centre = true;     // the centre view (Perform / Chords / Arp)
         bool knobs = true;      // the CC knob bank
         bool pads = true;       // the chord-pad strip
         bool wheels = true;     // mod + pitch, left of the keybed
         bool keyboard = true;   // the keybed itself
         bool detached = false;  // keybed lives in its own resizable window
-        int  view = 0;          // centre view: 0 = perform, 1 = chords, 2 = arp
+        int  view = 0;          // which centre view: 0 = perform, 1 = chords, 2 = arp
+        int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
         juce::Rectangle<int> detachedBounds {}; // empty = never detached yet, so centre it
     };
     LayoutState layout;

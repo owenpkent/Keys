@@ -57,9 +57,10 @@ private:
     // used to be sheets thrown over the whole plugin, which hid the keyboard behind the
     // thing you were editing; they are now views that swap in where the knob bank and
     // chord pads sit. `folded` is the fourth state: no centre at all.
-    enum CentreView { viewPerform = 0, viewChords = 1, viewArp = 2, viewFolded = 3 };
+    enum CentreView { viewPerform = 0, viewChords = 1, viewArp = 2 };
 
-    void setCentreView(int view);      // builds/destroys the panel, then relayouts
+    void setCentreView(int view);      // picks a view, unfolding the section if needed
+    void refreshCentrePanels();        // creates/destroys the panel the state calls for
     void syncSectionControls();        // toggle states + visibility from processor.layout
     int  centreHeight() const;         // height the current centre view asks for, 0 if folded
     int  idealHeight() const;          // total height with the current folds
@@ -147,9 +148,24 @@ private:
     // squeezed small when the screen is busy; the state lives on the processor
     // (KeysProcessor::LayoutState) so it survives the editor being closed and reopened.
     SectionBar controlsBar { "Controls" };
+    SectionBar centreBar { "Perform" };  // caption follows the view; the tabs ride on it
     SectionBar keyboardBar { "Keyboard" };
     juce::TextButton knobsButton { "Knobs" }, padsButton { "Pads" };
     juce::TextButton wheelsButton { "Wheels" }, detachButton { "Detach" };
+
+    // A second Size selector, for the detached keyboard window. The keybed's key count
+    // lives in the Controls section, which is exactly the section you fold away once the
+    // keyboard is in its own window - so the detached window carries its own, attached to
+    // the same parameter. Two attachments on one parameter is fine; both follow it.
+    juce::ComboBox detachedSizeBox;
+    std::unique_ptr<ComboAtt> detachedSizeAtt;
+
+    // Which colour this instance wears. Lives on the Controls bar rather than inside the
+    // Controls section, so it stays reachable with that section folded away - the whole
+    // point is telling one track's Keys from another's at a glance.
+    juce::TextButton themeButton;
+    void showThemeMenu();
+    void applyAccent(int index);
 
     // Alive only while the keybed is popped out. Declared after keybedHolder so it is
     // destroyed first; ~KeysEditor resets it explicitly too, since relying on member

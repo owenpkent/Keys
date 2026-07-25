@@ -642,12 +642,14 @@ juce::ValueTree KeysProcessor::layoutToTree() const
 {
     juce::ValueTree tree { "layout" };
     tree.setProperty("controls", layout.controls, nullptr);
+    tree.setProperty("centre", layout.centre, nullptr);
     tree.setProperty("knobs", layout.knobs, nullptr);
     tree.setProperty("pads", layout.pads, nullptr);
     tree.setProperty("wheels", layout.wheels, nullptr);
     tree.setProperty("keyboard", layout.keyboard, nullptr);
     tree.setProperty("detached", layout.detached, nullptr);
     tree.setProperty("view", layout.view, nullptr);
+    tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     return tree;
 }
@@ -660,12 +662,19 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     const auto flag = [&tree](const char* id, bool fallback)
     { return (bool) tree.getProperty(id, fallback); };
     layout.controls = flag("controls", true);
+    layout.centre = flag("centre", true);
     layout.knobs = flag("knobs", true);
     layout.pads = flag("pads", true);
     layout.wheels = flag("wheels", true);
     layout.keyboard = flag("keyboard", true);
     layout.detached = flag("detached", false);
-    layout.view = juce::jlimit(0, 2, (int) tree.getProperty("view", 0));
+    // "view" briefly carried a fourth value meaning "folded away" before the centre got
+    // its own chevron like the other sections. Map it onto the flag it became.
+    const int storedView = (int) tree.getProperty("view", 0);
+    if (storedView == 3)
+        layout.centre = false;
+    layout.view = juce::jlimit(0, 2, storedView);
+    layout.accent = juce::jlimit(0, 7, (int) tree.getProperty("accent", 0));
 
     const auto bounds = juce::Rectangle<int>::fromString(tree.getProperty("detachedBounds").toString());
     if (! bounds.isEmpty())

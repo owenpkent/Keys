@@ -91,9 +91,9 @@ void ChordPads::paint(juce::Graphics& g)
 
         if (has)
         {
-            g.setColour(skin::accent.withAlpha(0.10f));
+            g.setColour(skin::accentOf(*this).base.withAlpha(0.10f));
             g.fillRoundedRectangle(b, kRadius);
-            skin::glowRect(g, b, kRadius, skin::accent, 0.9f);
+            skin::glowRect(g, b, kRadius, skin::accentOf(*this).base, 0.9f);
         }
         else
         {
@@ -105,7 +105,7 @@ void ChordPads::paint(juce::Graphics& g)
         g.drawText(has ? currentName : juce::String("hold a chord"), b.reduced(6.0f),
                    juce::Justification::centred);
         if (recallHover)
-            skin::glowRect(g, b, kRadius, skin::accentHot);
+            skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
     }
 
     // Pads: the current page's slice, drawn two rows of eight. Empty slots are
@@ -129,9 +129,9 @@ void ChordPads::paint(juce::Graphics& g)
         }
         else if (active)
         {
-            g.setGradientFill({ skin::accentHot, 0.0f, b.getY(), skin::accent, 0.0f, b.getBottom(), false });
+            g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(), skin::accentOf(*this).base, 0.0f, b.getBottom(), false });
             g.fillRoundedRectangle(b, kRadius);
-            skin::glowRect(g, b, kRadius, skin::accent);
+            skin::glowRect(g, b, kRadius, skin::accentOf(*this).base);
             g.setColour(inkOnAccent);
             g.setFont(skin::uiSemi(13.5f));
             g.drawText(pad.name, b.reduced(4.0f), juce::Justification::centred);
@@ -158,13 +158,13 @@ void ChordPads::paint(juce::Graphics& g)
         }
 
         if (dropHere)
-            skin::glowRect(g, b, kRadius, skin::accentHot);
+            skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
 
         // The pad currently linked to the keyboard for editing.
         if (i == editingSlot)
         {
-            skin::glowRect(g, b, kRadius, skin::accentHot);
-            g.setColour(skin::accentHot);
+            skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
+            g.setColour(skin::accentOf(*this).hot);
             g.setFont(skin::micro(8.0f));
             g.drawText("EDIT", b.reduced(6.0f, 3.0f).toNearestInt(), juce::Justification::topLeft);
         }
@@ -177,7 +177,7 @@ void ChordPads::paint(juce::Graphics& g)
         auto ghost = juce::Rectangle<float>(0.0f, 0.0f, 84.0f, 26.0f).withCentre(dragPos);
         g.setColour(juce::Colours::black.withAlpha(0.35f));
         g.fillRoundedRectangle(ghost.translated(0.0f, 2.0f), kRadius);
-        g.setGradientFill({ skin::accentHot, 0.0f, ghost.getY(), skin::accent, 0.0f, ghost.getBottom(), false });
+        g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, ghost.getY(), skin::accentOf(*this).base, 0.0f, ghost.getBottom(), false });
         g.fillRoundedRectangle(ghost, kRadius);
         g.setColour(inkOnAccent);
         g.setFont(skin::uiSemi(12.0f));
