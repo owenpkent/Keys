@@ -167,3 +167,53 @@ from real progressions instead of weighting a candidate pool:
 chord it replaces. The note-count, inversion, compliance, and lock-influence controls
 don't apply to Markov chords and grey out (Octavium left them clickable and silently
 ignored them). Locked pads are never overwritten, same as the algorithmic source.
+
+## Arpeggiator
+
+Opens from the **Arp** button next to Chords. It takes whatever is currently sounding
+(keyboard, latch, a chord pad) and plays it one note at a time.
+
+**Shape decides how much of the panel exists.** The eight directions are plain
+arpeggios and show nothing but the controls below. The ninth entry, **Pattern**, opens
+the step editor.
+
+| Control | What it does |
+|---------|--------------|
+| **On** | Arp on or off. Everything else stays editable while it is off. |
+| **Shape** | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, or **Pattern** (opens the step editor). |
+| **Rate** | Step length, 16 bars down to 1/64. |
+| **Dot** / **Trip** | Dotted or triplet feel on the rate. |
+| **Anchor** | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. |
+| **Octaves** | 1–4. How many octaves a direction shape climbs before repeating. |
+| **Swing** | 0–0.75. Delays the offbeat steps. |
+| **Latch** | Keep arpeggiating after you let go, until a new chord arrives. |
+| **Retrigger** | Restart at step 1 when a note arrives on an empty set. |
+
+### The step editor (Shape → Pattern)
+
+Six lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. Click a
+step to set it, or drag across the grid to paint several in one gesture; a readout
+follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
+
+| Lane | Range | Meaning |
+|------|-------|---------|
+| **Note** | 1–8, or follow | Which note of the held chord this step plays. "Follow" (the dot) leaves it to the shape. |
+| **Octave** | −3 – +3 | Octaves added to this step. |
+| **Velocity** | 10–200% | Scales the velocity you played at. |
+| **Gate** | 5–200% | Note length as a share of the step. Over 100% ties into the next step. |
+| **Ratchet** | 1–4 | Sub-hits packed into this step. |
+| **Probability** | 0–100% | Chance this step fires at all. |
+
+The **Mute** row under the grid silences individual steps without disturbing their
+values, so you can take a step out and put it back unchanged.
+
+**Steps** sets how many steps the pattern runs before repeating (1–32), and **Speed**
+runs the lane at full, half or quarter rate. Both apply to the lane you are looking at.
+
+**Link lanes** (on by default) keeps every lane the same length and speed, which is the
+usual case. Turn it off and each lane keeps its own: a 4-step note lane against a 3-step
+octave lane gives you polymeter, patterns that take several bars to come back around.
+
+**A–H** are eight pattern slots. Click a letter to recall it. **Copy** arms a copy from
+the current slot: click it, then click the letter to copy into. **Randomize** rerolls the
+current pattern.

@@ -164,6 +164,9 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("arpOn", text("arpOn"));
         obj->setProperty("arpRate", text("arpRate"));
         obj->setProperty("arpDirection", text("arpDirection"));
+        // Without this a client cannot tell why lanes it just wrote are silent: the step
+        // lanes are only read while arpPattern is on (Shape "Pattern").
+        obj->setProperty("arpPattern", text("arpPattern"));
         obj->setProperty("arpOctaves", text("arpOctaves"));
         obj->setProperty("arpLatch", text("arpLatch"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());

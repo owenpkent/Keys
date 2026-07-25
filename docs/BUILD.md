@@ -17,6 +17,30 @@ dev/
 └── Keys/
 ```
 
+## Testing a change (run.ps1)
+
+The everyday loop. Builds exactly one Standalone target and relaunches it: about 5s
+after touching a .cpp, ~1s for a no-op. No VST3, no signing, no DAW rescan.
+
+```powershell
+./run.ps1                   # build + launch Keys Host standalone
+./run.ps1 -Keys             # plain Keys instead (MIDI only, makes no sound)
+./run.ps1 -NoBuild          # just relaunch what is already built
+```
+
+Keys Host standalone runs a real instrument VST3 in-process, so clicking a key makes
+sound with no DAW involved. Load a synth into it once; it remembers between launches.
+
+Reach for `build.ps1` below when a change needs a real Ableton load test: bus layout,
+plugin classification, the installer, the updater, or host automation.
+
+Two things `run.ps1` absorbs so they don't look like build failures. Keys Host owns two
+top-level windows, and Windows picks `MainWindowHandle` between them heuristically, so
+the close is aimed at the window titled after the product (closing the instrument
+window only hides it, which would cost you a force-kill and the loaded synth). And if
+Smart App Control is enforced, it blocks the first launch of a freshly linked unsigned
+exe while its reputation check runs, then allows it moments later — the launch retries.
+
 ## Quick build (build.ps1)
 
 ```powershell

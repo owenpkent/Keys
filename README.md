@@ -21,7 +21,8 @@ Built with **JUCE 8** and **CMake**, on the shared
 
 - **Keys**: the keyboard itself, driving a downstream instrument over MIDI.
 - **Keys Host**: the keyboard *plus one hosted instrument VST3* in a single plugin
-  on a single track. Pick the synth from an in-window, publisher-grouped list; its
+  on a single track. Pick the synth from an in-window browser that files every installed
+  VST3 into a collapsible folder per publisher; its
   GUI opens in its own floating window; its complete state (including MIDI Learn
   mappings) saves inside the DAW project. The 8 knobs auto-bind to the synth's
   likeliest parameters (cutoff, resonance, envelope, and so on) by name. See

@@ -24,7 +24,7 @@ fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` and `.cpp`.
 
 | Tool | Purpose |
 |------|---------|
-| `get_state` | Snapshot the load-bearing controls, active arp pattern, pad page, and how many chord pads are loaded. Call this first. |
+| `get_state` | Snapshot the load-bearing controls, whether the arp is reading its step lanes (`arpPattern`), the active arp pattern, pad page, and how many chord pads are loaded. Call this first. |
 | `list_params` | Every parameter Keys exposes, with its current value and legal range/choices. |
 | `set_params` | Set one or more parameters at once, by id. |
 | `play_notes` | Play one or more notes now, release them after a duration. |
@@ -71,4 +71,8 @@ A short session once `keys mcp` is connected:
 1. `set_params { "values": { "scale": "Dorian", "root": "D" } }`: set the key.
 2. `set_chord_pad { "slot": 0, "notes": [50, 53, 57, 60], "name": "Dm7" }`: write a chord to the first pad.
 3. `press_chord_pad { "slot": 0, "durationMs": 1500 }`: hear it.
-4. `set_arp_pattern { "gate": [60, 80, 100, 100], "ratchet": [1, 1, 2, 1] }`: write a four-step feel into the live arp lanes, then `set_params { "values": { "arpOn": true } }` to hear it against whatever's held.
+4. `set_arp_pattern { "gate": [60, 80, 100, 100], "ratchet": [1, 1, 2, 1] }`: write a four-step feel into the live arp lanes, then `set_params { "values": { "arpOn": true, "arpPattern": true } }` to hear it against whatever's held.
+
+`arpPattern` is not optional there. The step lanes are only read when it is on (it is the
+Shape menu's "Pattern" entry); with it off the arp runs as a plain shape and lanes you
+have written sit silent. `get_state` reports it for exactly this reason.

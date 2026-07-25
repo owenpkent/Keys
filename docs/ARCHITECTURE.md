@@ -17,14 +17,24 @@ src/
 ├── ChordSuggest.h            # pure "what could follow this chord", unit-tested
 ├── ChordMarkov.h             # pure Markov progression source, unit-tested
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
-└── ui/
-    ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
-    ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
-    │                         # built by Keys and Keys Host
-    ├── KnobBank.{h,cpp}      # eight assignable CC rotary knobs above the playing surface
-    ├── CCMenu.h              # the one-click CC picker the knob row uses
-    ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-    └── ChordGenPanel.{h,cpp} # the chord generator overlay (algorithmic + Markov)
+├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
+│                             # reader in Keys (docs/ARP_DESIGN.md)
+├── ui/
+│   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
+│   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
+│   │                         # built by Keys and Keys Host
+│   ├── KnobBank.{h,cpp}      # eight assignable CC rotary knobs above the playing surface
+│   ├── CCMenu.h              # the one-click CC picker the knob row uses
+│   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
+│   ├── ChordGenPanel.{h,cpp} # the chord generator overlay (algorithmic + Markov)
+│   ├── ArpPanel.{h,cpp}      # the arp overlay: Shape gates a tabbed lane editor
+│   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
+├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
+│   ├── KeysHostProcessor.{h,cpp} # KeysProcessor + one hosted instrument VST3
+│   └── KeysHostEditor.{h,cpp}    # top bar, instrument picker, floating instrument window
+└── mcp/
+    └── KeysMcp.{h,cpp}       # MCP tool registrations; every handler runs on the
+                              # message thread (docs/MCP.md)
 ```
 
 ## Threading: UI → audio note path
