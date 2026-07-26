@@ -121,7 +121,9 @@ Ch** on Keys and filter by channel on the receiving tracks. Otherwise leave it a
 
 Arm the instrument track and record; the notes you click land as a normal MIDI clip.
 Scale Lock, octave, and velocity all apply to what's recorded, because Keys sends the
-already-resolved notes.
+already-resolved notes. With the Arp section's **On** lit, what lands is the arpeggiated
+stream rather than the chord you clicked: the arp rewrites the note stream on its way out
+of the plugin, so the clip holds what you heard.
 
 ## Troubleshooting
 

@@ -1,8 +1,10 @@
 # Keys Host — design
 
 **Status: implemented (2026-07-19).** VST3 + Standalone build; the standalone
-launches and renders correctly. Still owed: a real Ableton Live load test (the MIDI
-input bus invariant is only provable in Live) and a first hosted-instrument session.
+launches and renders correctly. The hosting side is exercised daily: `run.py` launches
+the Keys Host standalone with a real instrument VST3 in-process, and that is this repo's
+default dev loop. Still owed: a real Ableton Live load test (the MIDI input bus invariant
+is only provable in Live).
 The design below is as-built; deviations would be bugs.
 
 ## What it is
@@ -25,7 +27,7 @@ instrument. So this is a one-slot host, not a chainer.
 
 Subclassing works because the playing surface takes a concrete `KeysProcessor&`
 (`src/ui/NoteSurface.h`), and `KeysProcessor` already declares a real stereo output
-bus that it clears every block (`PluginProcessor.cpp` ~113, ~368). The subclass fills
+bus that it clears every block (`PluginProcessor.cpp` ~171, ~589). The subclass fills
 that bus with the hosted instrument's audio.
 
 - Members: `juce::AudioPluginFormatManager` (VST3 format only),
@@ -35,7 +37,8 @@ that bus with the hosted instrument's audio.
   follows load/eject.
 - `processBlock`: call `KeysProcessor::processBlock(buffer, midi)` first (clears
   audio, drains the collector's UI notes/CCs into `midi`), then
-  `instrument->processBlock(proxy, midi)` on a channel-count-matched proxy over
+  `instrument->processBlock(proxy, instrumentMidi)` (a copy of `midi`, see the trade-off
+  below) on a channel-count-matched proxy over
   `hostBuffer`, then copy the first channels into `buffer` (duplicate ch0 if the
   instrument is mono-out). No instrument loaded → silence, exactly today's Keys.
 - **Swap without audio-thread locks** (repo invariant): loading/ejecting happens on
@@ -61,13 +64,15 @@ that bus with the hosted instrument's audio.
 ## State
 
 Small refactor in `KeysProcessor`: extract pad serialization
-(`PluginProcessor.cpp:375-437`) into protected `chordPadsToTree()` /
+(`PluginProcessor.cpp:649-708`) into protected `chordPadsToTree()` /
 `chordPadsFromTree(root)`, used by the base get/setState unchanged (same "KEYS" root
 tag — sessions stay interchangeable between Keys and Keys Host). The host override
-saves `okstudio::state::save(apvts, "KEYS", dest, { chordPadsToTree(),
-hostedInstrumentTree() })` where `hostedInstrumentTree` holds the `.vst3` path, name,
-and the instrument's full state blob base64'd. Restore: load pads, then re-load the
-instrument from the path and apply its blob.
+saves `okstudio::state::save(apvts, "KEYS", dest, { chordPadsToTree(), arpToTree(),
+layoutToTree(), hosted })` where `hosted` is a locally built `hostedInstrument` tree
+holding the `.vst3` path, name, and the instrument's full state blob base64'd. All four
+trees matter: drop one and a Keys Host session comes back without its arp slots or its
+folds. Restore: load pads, arp and layout, then re-load the instrument from the path and
+apply its blob.
 
 Because the instrument's *complete* state is saved in the Live set, its own MIDI
 Learn mappings (e.g. Keys fader CC → filter cutoff) persist with the project. This
@@ -88,9 +93,16 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   about to change" callback so the editor closes the old GUI first, then the
   processor swaps, then broadcasts.
 - Below the bar: an embedded `KeysEditor` (it is just a Component) fills the plugin
-  window. After constructing it, call `keysEditor.setResizable(false, false)` to
-  kill its own corner-resizer; give it ≥1010×640 (its gen-panel growth floor,
-  `PluginEditor.cpp:317`).
+  window. After constructing it, call `keysEditor.setResizable(false, false)` to kill its
+  own corner-resizer and `keysEditor.setEmbedded(true)` so it never calls `setSize` on
+  itself: here the host owns geometry. Its height is no longer a floor, because every
+  section folds. It reports what the current folds add up to through
+  `keysEditor.onIdealHeightChanged`, and the host follows it in both directions, resizing
+  to `barHeight + wanted` (`KeysHostEditor.cpp:403-408`) inside
+  `setResizeLimits(1010, barHeight + absMinKeysHeight, 2600, 1700)`. It opens at
+  `1010 x (barHeight + minKeysHeight)`: a comfortable default, not a minimum. Detaching the
+  keybed or the arpeggiator drops their height out of that number, since a detached section
+  lives in its own window.
 - `InstrumentPicker` files instruments into one **collapsible folder per publisher**:
   bundle `moduleinfo.json` "Factory Info"/"Vendor", else the DLL version-resource
   CompanyName (Windows, `version.lib` via `#pragma comment`), else the vendor
@@ -106,7 +118,7 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   at rest and lights the row with a `skin::accent` edge on hover. Dimming the
   instrument chip instead of removing it was tried first and was not enough.
 - **Updater gating**: the embedded `KeysEditor` runs the Keys updater check in its
-  ctor (`PluginEditor.cpp:240-250`). The KeysHost target compiles its own copy of the
+  ctor (`PluginEditor.cpp:283-297`). The KeysHost target compiles its own copy of the
   sources, so gate it with a `KEYS_HOST=1` compile definition (same pattern as
   `KEYS_MIDI_EFFECT`).
 
@@ -118,7 +130,7 @@ BUNDLE_SUFFIX keyshost ${_keysCopy})`, `keys_configure_target(KeysHost)`, then
 additionally: the two `src/host/*.cpp` sources, `KEYS_HOST=1`, and
 `JUCE_PLUGINHOST_VST3=1` (set nowhere in Keys or the kit today; JUCE bundles the
 VST3 hosting headers, no external SDK needed). `createPluginFilter` lives at
-`PluginProcessor.cpp:445` — it must return `KeysHostProcessor` for this target
+`PluginProcessor.cpp:1067` — it must return `KeysHostProcessor` for this target
 (gate on `KEYS_HOST`). `okstudio_add_plugin` is already called twice in this repo;
 nothing in the kit assumes one plugin per repo.
 
@@ -157,9 +169,12 @@ nothing in the kit assumes one plugin per repo.
   Bindings are message-thread state, recomputed per load, deliberately not
   persisted. Owen: instrument control matters; DAW-wide control does not (decided
   2026-07-19).
-- **Single view, no tabs** (see CHANGELOG): Keys dropped the five tabbed surfaces
-  and the `uiLayout`-selected Classic/Performer arrangement for one fixed layout —
-  header, knob row, chord pads, playing surface. Keys and Keys Host build the piano
-  only; the Harmonic Table and Hex Host moved out to their own repo (`../Hex`).
+- **One surface, folding sections** (see CHANGELOG): Keys dropped the five tabbed
+  surfaces and the `uiLayout`-selected Classic/Performer arrangement. The surface is
+  picked at compile time now, and the rest of the editor is a stack of foldable sections:
+  Controls, a centre view (Perform or Chords, chosen by tabs on the centre bar), Arp,
+  Pads, Keyboard. The keybed and the arp each detach into a window of their own, and every
+  fold changes the height Keys Host is asked for. Keys and Keys Host build the piano only;
+  the Harmonic Table and Hex Host moved out to their own repo (`../Hex`).
   `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session compatibility
   but are no longer read by the UI.

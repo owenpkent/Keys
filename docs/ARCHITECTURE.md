@@ -27,10 +27,12 @@ src/
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
 │   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
-│   ├── ArpPanel.{h,cpp}      # the arp centre view: Shape gates a tabbed lane editor
+│   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
+│   │                         # plus the control band and twelve launchable slots
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity range)
-│   ├── KeyboardWindow.h      # the keybed popped out into its own resizable window
+│   ├── DetachedWindow.h      # a section popped out into its own resizable window
+│   │                         # (the keybed, and the arp; was KeyboardWindow.h)
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
 ├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
 │   ├── KeysHostProcessor.{h,cpp} # KeysProcessor + one hosted instrument VST3
@@ -48,6 +50,13 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 - `PianoKeyboard` calls `KeysProcessor::noteOn/noteOff/allNotesOff`.
 - Those build a `juce::MidiMessage`, stamp it with `Time::getMillisecondCounterHiRes()`,
   and hand it to a `juce::MidiMessageCollector`.
+- **One note-on per sounding pitch.** `noteRefs` counts how many sources own each pitch,
+  and MIDI is emitted only on the 0→1 transition and released only on 1→0. Four sources
+  can want the same pitch at once (a chord pad, the live chord card, a chord held into the
+  arpeggiator, and the keybed); emitting a second note-on for a pitch already sounding
+  means one source's release ends it for everybody, which left keys lit with nothing
+  sounding and leaked the arpeggiator's held set. Any new chord source must go through
+  these two functions rather than the collector.
 - `processBlock` calls `collector.removeNextBlockOfMessages(midi, numSamples)`, which
   drops the queued events into the block at the right offsets. Any MIDI already on
   the track (a clip, another device) passes through untouched.
@@ -66,7 +75,7 @@ surfaces were replaced by the knob row, and the Hex surface moved out to its own
 and state**.
 
 The tabs that exist now are a different thing: they pick which **centre view** occupies
-the middle of the editor (Perform / Chords / Arp), not which surface you play on. See
+the middle of the editor (Perform or Chords), not which surface you play on. See
 **Folding layout, and the centre view**.
 
 ## Note bookkeeping: one union, one diff (NoteSurface)
@@ -211,15 +220,27 @@ All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`
 
 The editor is a stack of sections, each of which folds away so the window can be squeezed
 small when the screen is busy: **Controls** (the three header rows), the **centre view**,
-and the **Keyboard** (with the wheels as a sub-fold). `SectionBar` is the affordance — a
-`juce::Button` so the mouse-only contract and the accessible name come for free, with the
-section's own small controls laid out as its siblings in `contentArea()`.
+the **Arp**, the **Pads**, and the **Keyboard** (with the wheels as a sub-fold).
+`SectionBar` is the affordance — a `juce::Button` so the mouse-only contract and the
+accessible name come for free, with the section's own small controls laid out as its
+siblings in `contentArea()`.
 
 The middle of the editor is a *view*, not a stack of overlays. `Perform` is the knob bank
-plus the chord-pad strip; `Chords` and `Arp` swap `ChordGenPanel` / `ArpPanel` into the
-same slot, and the three tabs ride on the centre's own `SectionBar`. Only the view on show
-exists — both panels are heavy and neither is worth keeping warm behind the other, and a
-folded centre holds neither.
+and `Chords` swaps `ChordGenPanel` into the same slot, with both tabs riding on the centre's
+own `SectionBar`. Only the view on show exists — the generator builds sixteen chord cards
+and is not worth keeping warm behind the knobs, and a folded centre holds neither.
+
+The **arpeggiator is a section of its own** rather than a third centre view (changed
+2026-07-25). Competing with the knobs and the generator was backwards for a panel that runs
+while you play, and the arp is the one thing you want on screen *next to* a chord. Its bar
+carries the **On** toggle and a **Detach**, so both survive folding the panel away: folding
+it destroys the view, never the arpeggiator.
+
+The **chord pads are a section of their own** too, below the arp, so they are on screen
+under either centre view. They used to live inside Perform, which meant the arpeggiator —
+the one panel whose whole job is to chew on a chord — was also the one place you could not
+reach a chord. Their page buttons ride on the Pads bar, alongside the **To Arp** toggle
+that turns a card click into "hand this chord to the arp and leave it there".
 
 The bars are full-width translucent Buttons and the controls on them are *siblings*, not
 children (a `SectionBar` has to stay clickable end to end). Z-order therefore matters:
@@ -252,10 +273,15 @@ height; embedded in Keys Host it reports the number through `onIdealHeightChange
 host grows to fit, because a tall centre view would otherwise push the keybed off the end.
 
 The keybed and the wheels live inside one `KeybedHolder`, so **Detach** is a single
-re-parent into a `KeyboardWindow`. Detached, `PianoKeyboard`'s 185 px key-height cap comes
+re-parent into a `DetachedWindow`. Detached, `PianoKeyboard`'s 185 px key-height cap comes
 off: dragging that window is meant to resize the keys, which is the whole point of the
 feature for a player working with one mouse. The window borrows the holder and owns
 nothing, so `~KeysEditor` tears it down explicitly before anything else.
+
+The arp plays the same trick through an `ArpHolder`, and `DetachedWindow` (which was
+`KeyboardWindow` until the arp wanted it too) is parameterised by title and minimum size
+for the two of them. A detached section contributes no height to the main window, so
+`arpHeight()` returns 0 while it is out, exactly as the keybed does.
 
 All of it (folds, current view, detached window bounds) is in `KeysProcessor::LayoutState`
 rather than the editor, so it survives the window closing, and it is saved in the session

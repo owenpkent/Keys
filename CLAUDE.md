@@ -74,6 +74,25 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   locked chords. `ScaleModes.h` is deliberately *not* the kit's scale table: that one
   answers "is this note in the scale", generation also needs a quality per degree.
   All of it (plus `ChordSuggest.h`) is UI-free so it unit-tests.
+- **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
+  chord, a shape and a rate; launching one installs all of it and holds the chord into the
+  arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
+  scheduling). Held means held: no note-off follows until something replaces it, so
+  `allNotesOff()` has to forget it explicitly.
+- **The chord pads and the arpeggiator are each a section of their own**, stacked between
+  the centre view and the keyboard, so a chord card is on screen whatever else is open. The
+  centre views are Perform and Chords only: the arp stopped being a third one on
+  2026-07-25. The arp bar carries its On toggle and a Detach, both of which survive folding
+  the section shut. `DetachedWindow` (was `KeyboardWindow`) serves the keybed and the arp.
+  See `docs/ARP_DESIGN.md`.
+- **One note-on per sounding pitch, released by the last owner.** Four sources can ask for
+  the same pitch at once (a chord pad, the live card, a chord held into the arp, the
+  keybed). `KeysProcessor::noteOn` emits MIDI only on the 0→1 transition of `noteRefs` and
+  `noteOff` only on 1→0; `ArpEngine::Held::ons` counts owners the same way downstream.
+  Break this and one source's release silences another's notes while the keys stay lit,
+  and the arp's held set leaks so a released chord arpeggiates forever. Any new chord
+  source has to go through `noteOn`/`noteOff`, and `Exclusive` has to reach it
+  (`stopAllChordPads`).
 - **MCP bridge.** Keys embeds an MCP server (`okstudio::mcp::Server`, transport in
   the kit at `okstudio/Mcp.h`) so Claude Code or any local MCP client can drive it.
   Tools are registered in `src/mcp/KeysMcp.cpp`; every handler runs on the message
@@ -92,14 +111,23 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   failure is silent-looking ("This VST3 plug-in could not be opened") and pluginval
   passes without the bus, so only a real Live load test catches it.
 - **Mouse-only UI**: single left-click or drag; targets ≥ ~34 px; no
-  keyboard/double-click/modifiers. Latch and Sustain are on-screen toggles by design,
-  never modifier keys. Right-click is normally only an optional accelerator with a
-  left-click equivalent (per-note latch on the note surfaces, at Owen's request).
+  keyboard/double-click/modifiers. Sustain is an on-screen toggle by design, never a
+  modifier key (the separate Latch toggle is gone: a left click on a held note releases
+  it, which left nothing for the mode to do). Right-click is normally only an optional
+  accelerator with a left-click equivalent (per-note latch on the note surfaces, at
+  Owen's request).
   One owner-directed exception (2026-07-22): chord-pad card menus are right-click —
   in the generator (Lock / New chord / Next, restoring Octavium's card menu; the
   page-wide left-click Fill/Regen/Clear stay as the bulk path) and on the main-page
-  strip (Edit on keyboard / Clear). Do not add further right-click-only paths
-  without Owen's explicit say-so.
+  strip (Edit on keyboard / Clear, plus **Send to arp slot** since 2026-07-25 — the
+  only item in the plugin with no left-click twin, since binding a chord to one
+  particular slot needs a target picker; the Pads bar's To Arp toggle is the
+  left-click way to get a card into the arp). Do not add further right-click-only
+  paths without Owen's explicit say-so.
+  The arp slot cards also carry a right-click menu, but it is an ordinary accelerator:
+  Launch is a click on the card, and Clear chord, Copy and Randomize all have buttons
+  under the slot row (Copy and Clear arm, then take a slot click). Randomize is greyed
+  in the menu outside Pattern shape, because that is where its button lives.
   The feature-request template requires an accessibility answer — hold PRs to it.
 - **Audio thread**: no allocation, no locks. It only drains the collector.
 - Parameter-layout changes break saved sessions — changelog loudly.

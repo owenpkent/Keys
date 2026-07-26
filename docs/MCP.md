@@ -17,8 +17,8 @@ the same way the editor does.
 ```
 
 The transport (`okstudio::mcp::Server`, `okstudio/Mcp.h`) lives in
-`../okstudio-juce-kit`; Keys only registers tools and owns the small timer that
-fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` and `.cpp`.
+`../okstudio-juce-kit`; Keys only registers tools and owns the small timer that emits
+scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` and `.cpp`.
 
 ## Tools
 
@@ -35,9 +35,9 @@ fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` and `.cpp`.
 | `clear_chord_pad` | Empty a pad slot. |
 | `press_chord_pad` | Fire a pad now, optionally auto-releasing after a duration. |
 | `release_chord_pad` | Stop a pad (unless Sustain is holding it). |
-| `get_arp_pattern` | Read a pattern's six per-step lanes: the live lanes, or a stored slot (0..7, A-H). |
+| `get_arp_pattern` | Read a pattern's six per-step lanes: the live lanes, or a stored slot (0..11). |
 | `set_arp_pattern` | Write one or more lanes of a pattern: the live lanes, or a stored slot. |
-| `recall_arp_pattern` | Make a stored pattern the active/live one. |
+| `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
 
 ## How scheduled notes are timed

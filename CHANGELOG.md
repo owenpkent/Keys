@@ -5,6 +5,168 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the arpeggiator is a section of its own, and it detaches
+
+It was one of three centre views, so picking it put the knobs and the generator away — the
+opposite of what you want from a thing that runs while you play. It now has its own bar and
+chevron between the centre view and the pads, so the arp, the knobs (or the generator), the
+chord cards and the keyboard are all on screen together. **Detach** puts it in its own
+resizable window, the way the keyboard already does; its **On** toggle and Detach ride on the
+bar, so both survive folding the panel away. Perform and Chords are the two remaining tabs.
+
+The panel's own title, On and Close are gone with it — the bar says all three, and two On
+toggles bound to one parameter is just a thing to get wrong.
+
+The section starts folded, because open it is the tallest thing in the editor. A session
+saved on the old Arp *view* opens with the section unfolded instead, so it looks the same.
+`KeyboardWindow` became `DetachedWindow`; nothing in it was keyboard-specific but the title
+and the minimum size, which are parameters now.
+
+### Fixed: Exclusive and Sustain went wrong once a card was held in the arp
+
+Handing a chord to the arpeggiator added a fourth chord source (pads, the live card, the arp
+hold, the keybed) and they had no shared rule. Eight defects, three of them stuck notes:
+
+- **Two sources owning one pitch left notes stuck.** The processor emitted a second note-on
+  for a pitch already sounding, so downstream the first note-off ended it for everyone: the
+  arp lost notes out of its chord, keys stayed lit with nothing sounding, and the arpeggiator's
+  own held-set counter leaked permanently — with Latch on, a released chord arpeggiated forever
+  and every card after it stacked on top. **A pitch is now emitted once and released when the
+  last owner lets go.** Re-pressing still retriggers, because every path that re-fires releases
+  first. `ArpEngine` counts owners per held pitch to match.
+- **Exclusive only worked in one direction.** It never choked a chord held in the arp, and
+  handing a card to the arp never choked a sounding pad. It is a rule about *sources* now: one
+  chord at a time whichever surface started it.
+- **Clearing the card that was feeding the arp orphaned the chord.** The ring vanished, the
+  empty pad stopped accepting clicks, and the only way out was All Off. Clearing releases it,
+  and the ring is drawn (and clickable) even on a cleared card.
+- **To Arp was lost when the plugin window closed**, while the chord stayed held — leaving the
+  pads back in momentary mode with a lit ring and no gesture that released it. The mode lives
+  on the processor now and persists with the session.
+- **Only the pad strip honoured To Arp.** The live chord card and the generator's pad grid
+  played momentarily instead, and their note-offs silenced whatever the arp was chewing on.
+- **Moving a card left the ring behind**, pointing at the wrong slot.
+- **Releasing the live card or an arp-held chord wiped every other source's pending strum
+  notes**, because `cancelScheduledNotes` treated any negative tag as "cancel everything" —
+  true only while -1 was the sole negative tag. A pad mid-strum lost the rest of its chord.
+  This one predates the arp work.
+
+Sustain is deliberately unchanged: it defers the release a mouse-up would have caused, and a
+chord held into the arp is not released by a mouse-up at all.
+
+### Fixed: All Off did not match the buttons beside it
+
+It was laid out 20 px tall where Sustain, Exclusive, Wheels and Detach are 24–26, and the
+skin's button font scales with height, so its label came out smaller too.
+
+### Fixed: every arp note-off was one audio block late
+
+`ArpEngine::process()` retires owed note-offs at the *top* of the block, before any step
+fires — so a note-off parked by `fireStep()` was first judged a block later, with its
+countdown still measured from the block it was born in. Every note the arpeggiator played
+therefore ran one buffer long, and a note whose gate ended inside its own block never ended
+inside it at all: it was held until the next one.
+
+`active[].samplesLeft` now has one stated meaning — an offset from the start of the block being
+processed — and the drain moved. Each hit closes what it lands on top of immediately before its
+own note-on, and whatever is still owed is drained at the end of the block and rebased once.
+A note that ends inside the block it started in is emitted there and then, never parked.
+
+Doing the drain up front instead is what **broke ties**: at gate 101–200% a note overlaps into
+the next step, and on a repeating pitch the owed note-off has to be pulled back to just before
+the retrigger. Drained early, it landed *after* the note-on that superseded it — two note-ons
+for one pitch with nothing between them, which hangs a voice on any synth that allocates per
+note-on. That is why the close happens per hit rather than per block.
+
+Mostly inaudible at 512 samples (~11 ms) until now, which is why it survived: it took making
+**Gate** a knob you can turn to 5% on any shape to make it easy to hear. Nine regression tests
+cover it, including one across uneven block sizes (512 / 480 / 1024), where the old code put
+the note-off at sample 2012 instead of 1500 — late by exactly the first block — and five that
+pin the tie and event-ordering behaviour so this cannot be "fixed" the wrong way again. One of
+those deliberately puts *both* hits of a tie inside a single buffer, which is the shape the rest
+of the suite structurally could not reach and where an earlier attempt at this fix stacked two
+note-ons on one pitch.
+
+Out of note-tracking slots (64 sounding arp notes), the fallback now ends the note at the edge
+of the block rather than stamping an event past the end of the buffer.
+
+### Fixed: run.py crashed with a raw traceback instead of building
+
+Smart App Control is enforced on the dev machine, and the `cmake` on PATH is pip's *launcher*
+(`Scripts\cmake.exe`), which is unsigned. SAC blocks it, `CreateProcess` fails, and Python
+turned that into an `OSError` traceback out of `subprocess` — the exact thing run.py exists to
+avoid, since it is meant to be double-clicked and read.
+
+run.py now looks for a cmake that will actually start, preferring signed ones: `$CMAKE`, then
+Visual Studio's bundled copy, then pip's real signed payload in `site-packages/cmake/data/bin`
+(which the blocked launcher was merely wrapping), then a normal install, then PATH. If none
+starts it says which were blocked and why, instead of a traceback.
+
+The launch retry after a build was also too impatient — 5 tries over 3.5 s, tuned when SAC's
+reputation check cleared almost immediately. It has been measured at ~3 minutes on this
+machine, so a slow launch read as "it's broken" and the advice printed was to run the same
+command again. It now waits up to 4 minutes and says what it is waiting for.
+
+### Changed: the chord pads are their own section
+
+The pads used to live inside the Perform view, which meant picking Chords or Arp put them
+away — so the arpeggiator, whose whole job is to chew on a chord, was the one place you
+could not reach a chord. They now sit in a **Pads** section of their own between the centre
+view and the keyboard, visible under all three views and folding on their own chevron. Their
+page buttons moved onto the Pads bar, where the row of four used to cost 34 px under the
+strip. Perform is the knob bank alone now, so the Pads chip on the view bar is gone.
+
+### Added: cards go into the arpeggiator, two ways
+
+- **To Arp**, a toggle on the Pads bar. Lit, a click on a chord card hands its chord to the
+  arp and *leaves it there* — the notes are held with no note-off until you click the lit
+  card again or click another. The card wears a bright ring while it is the one feeding the
+  arp. Unlit, pads behave exactly as before; this is a visible toggle rather than an implicit
+  "the arp is on" mode, so a pad never quietly does something different than it did a minute
+  ago. (With the arp bypassed the chord simply sustains, which is honest.)
+- **Send to arp slot**, in a pad's right-click card menu. Parks a copy of the chord in one of
+  the twelve slots, to be launched later. A copy, not a reference: regenerating the pad page
+  must not silently rewrite what a slot plays.
+
+### Changed: the arpeggiator is laid out like an arpeggiator
+
+Owen asked for the hardware-arp arrangement: controls gathered into ruled, captioned groups
+instead of strung across two loose rows.
+
+- **PATTERN** (Shape, Rate, Trip, Dot), **PLAYBACK** (Swing, Gate, Chance, Octaves, Anchor,
+  Latch, Retrigger) and **STEPS** (Steps, Speed, Link), the last appearing only in Pattern
+  shape, where it belongs with the editor it drives.
+- **`<` and `>` step buttons beside Shape and Rate.** Walking to the next shape is the
+  commonest thing you do to an arp and it cost a click, a travel down a menu and a second
+  click. They clamp at the ends rather than wrapping, so one click too many on "Up" cannot
+  drop you in "Pattern" and throw the whole step editor open.
+- Swing, Gate and Chance are knobs with their value beneath them.
+
+### Added: Gate and Chance work on any shape
+
+Both existed only as per-step lanes, and the lanes are gated behind Shape being "Pattern" —
+so on a plain "Up" there was no way to shorten the notes or thin the run out at all. Two new
+parameters, `arpGate` (5–200%) and `arpChance` (0–100%), **multiply** the lane value, so the
+defaults leave an edited pattern exactly as drawn and the controls mean the same thing in
+both shapes. **Parameter layout change: sessions saved before this will load, but the two
+new parameters come up at their defaults, which is a no-op.**
+
+### Changed: arp patterns became twelve launchable slots
+
+A–H were eight lettered memories that only appeared in Pattern shape. They are now twelve
+cards that show what they will play — the chord they hold, the shape and the rate they will
+install — with a launch triangle, and they are on screen in **both** shapes, because
+launching a chord through "Up" is as much a thing you do as launching one through an edited
+pattern. One click launches: it installs the pattern, applies the slot's shape and rate, and
+holds the slot's chord. Clicking the launched slot again releases it, and a new **Stop**
+button releases it without reaching for All Off. A slot with no chord launches the pattern
+alone and arpeggiates whatever you are already holding.
+
+Right-clicking a slot opens Launch / Clear chord / Copy / Randomize — an accelerator only;
+every one of those has a left-click path on the buttons beside the row.
+
+Slots 9–12 come up empty in a session saved with eight.
+
 ### Added: each instance wears its own colour
 
 A session with Keys on the pad track and Keys on the bass track gave you two identical

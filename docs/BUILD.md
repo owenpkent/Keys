@@ -46,20 +46,36 @@ sound with no DAW involved. Load a synth into it once; it remembers between laun
 Reach for `build.ps1` below when a change needs a real Ableton load test: bus layout,
 plugin classification, the installer, the updater, or host automation.
 
-Two things `run.py` absorbs so they don't look like build failures. Keys Host owns two
-top-level windows, and Windows picks `MainWindowHandle` between them heuristically, so
-the close is aimed at the window titled after the product (closing the instrument
-window only hides it, which would cost you a force-kill and the loaded synth). And if
-Smart App Control is enforced, it blocks the first launch of a freshly linked unsigned
-exe while its reputation check runs, then allows it moments later — the launch retries.
+Three things `run.py` absorbs so they don't look like build failures.
+
+It does not just run whatever `cmake` is on PATH. pip installs cmake behind a small
+unsigned launcher in `Scripts`, and Smart App Control refuses to start it — which surfaces
+as a bare `OSError` traceback out of `subprocess`, since Windows error 4551 has no errno
+mapping. run.py tries a `CMAKE` environment override, Visual Studio's signed copy, pip's
+real signed payload under `site-packages/cmake/data/bin`, an MSI install, and only then
+PATH, taking the first that actually launches and saying which it picked when that is not
+the one on PATH. If none starts, it names each one that was blocked instead of a traceback.
+
+Keys Host can own up to four top-level windows (its own, the hosted instrument's GUI, and
+the keybed and arpeggiator when they are detached), and Windows picks `MainWindowHandle`
+between them heuristically, so the close is aimed at the window titled after the product
+(closing the instrument window only hides it, which would cost you a force-kill and the
+loaded synth).
+
+And if Smart App Control is enforced, it blocks the first launch of a freshly linked
+unsigned exe while its reputation check runs, then lets the same file through once the
+check clears. That has been measured at up to three minutes here, so run.py keeps retrying
+for four, says it is waiting, and prints `Cleared.` when the launch goes through. A long
+pause there is the check, not a hang.
 
 ## Quick build (build.ps1)
 
 ```powershell
-./build.ps1                 # Release VST3, copied to %USERPROFILE%\Ableton\vst3
-./build.ps1 -Standalone     # also build the standalone app
+./build.ps1                 # Release VST3s (Keys + Keys Host), copied to %USERPROFILE%\Ableton\vst3
+./build.ps1 -Standalone     # also build both standalone apps
 ./build.ps1 -Installer      # also build (and sign) the installer -> release/
-./build.ps1 -NoSign         # dev build without signing
+./build.ps1 -Sign           # sign the binaries with the OK Studio EV cert (needs the eToken)
+./build.ps1 -NoSign         # force signing off, even with -Installer
 ```
 
 `build.ps1` owns the copy into the DAW folder, so if Ableton has Keys loaded (file
@@ -95,15 +111,19 @@ Artifacts:
 
 ## Tests
 
-Unit tests (JUCE UnitTest) cover the pure note-resolution logic. They build as a
-separate console target, so normal plugin builds stay fast:
+Unit tests (JUCE UnitTest) cover the UI-free logic: note resolution, chord detection, the
+scale modes, chord generation and suggestion, the Markov progression model, and the
+arpeggiator engine's scheduling. They build as a separate console target, so normal plugin
+builds stay fast:
 
 ```powershell
 cmake --build build --config Release --target Keys_tests
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-CI builds and runs them on every push. The line's testing convention (what to test,
+CI builds and runs them on every push to `main` and on every pull request, except for
+changes that only touch Markdown, `docs/` or `assets/` (`paths-ignore`). The line's
+testing convention (what to test,
 how to keep it testable) is in
 [okstudio-juce-kit/docs/TESTING.md](../../okstudio-juce-kit/docs/TESTING.md).
 
@@ -115,6 +135,9 @@ how to keep it testable) is in
 | `OKSTUDIO_KIT_PATH` | `../okstudio-juce-kit` | kit checkout to use |
 | `KEYS_COPY_PLUGIN` | `ON` | copy the built VST3 to `KEYS_VST3_COPY_DIR` after build |
 | `KEYS_VST3_COPY_DIR` | `%USERPROFILE%/Ableton/vst3` | where the copy lands |
+| `KEYS_BUILD_HOST` | `ON` | build Keys Host (an instrument VST3 hosted inside Keys). Turning this off leaves `run.py`'s default target missing |
+| `KEYS_BUILD_MCP_SHIM` | `ON` | build `keys-mcp.exe`, the stdio bridge (see [MCP.md](MCP.md)) |
+| `KEYS_BUILD_MIDI_EFFECT` | `OFF` | also build Keys FX, the MIDI-effect variant Ableton rejects |
 
 ## Troubleshooting
 

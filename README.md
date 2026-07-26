@@ -4,9 +4,9 @@ An accessibility-first, **mouse-only playable MIDI keyboard** as a VST3 (and
 standalone app). Keys makes no sound of its own: you click the on-screen piano and
 it sends MIDI to whatever instrument sits downstream, in your DAW or over a virtual
 port. Built for creators who work entirely with a mouse, including users with motor
-disabilities: every control is a single click, a drag, or a scroll. No keyboard, no
-modifier keys, and nothing ever *requires* a right-click (one optional right-click
-accelerator exists: it holds a note, and a plain left click releases it again).
+disabilities: every control is a single click, a drag, or a scroll. No keyboard and no
+modifier keys. Right-click is only ever an accelerator, with one exception Owen asked for:
+**Send to arp slot**, in a chord card's menu, has no left-click twin.
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain, the Humanize settings, which sections you
@@ -31,10 +31,10 @@ Built with **JUCE 8** and **CMake**, on the shared
 
 The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex).
 
-One view, no tabs: header controls, a centre view (knobs and chord pads, the chord
-generator, or the arpeggiator), then the playing surface. Every section folds away so
-the window can be squeezed small, and the keyboard detaches into its own resizable
-window.
+One view, no tabs: header controls, a centre view (the eight knobs, or the chord
+generator), then the arpeggiator, the chord pads, and the playing surface. Every section
+folds away so the window can be squeezed small, and the keyboard and the arpeggiator each
+detach into a resizable window of their own.
 
 ![Keys](assets/screenshots/keys.png)
 
@@ -54,8 +54,8 @@ window.
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
-toggle, not a modifier key, on purpose; right-click exists only as the optional shortcut
-above, and never as the only way to do something.
+toggle, not a modifier key, on purpose. Right-click opens the card menus on the chord pads,
+the generator's cards and the arp slots; only **Send to arp slot** lives nowhere else.
 
 ## Controls
 
@@ -72,10 +72,12 @@ above, and never as the only way to do something.
 | **Sustain** | Hold notes after release (pedal) |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
-| **Chord pads** | Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** spreads a chord's notes Up / Down / Random. Four numbered buttons under the strip pick the page |
+| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** spreads a chord's notes Up / Down / Random. Four numbered buttons on the Pads bar pick the page |
+| **To Arp** | On the Pads bar. Lit, clicking a chord card hands that chord to the arpeggiator and leaves it there until you click the card again |
+| **Arp** | Its own section too. The bar carries an **On** toggle and a **Detach**, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs |
 | **Chords** | The chord generator — see below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
-| **Detach** | Put the keyboard in its own resizable window |
+| **Detach** | Put the keyboard in its own resizable window. The Arp bar has a Detach of its own |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).
@@ -102,8 +104,9 @@ match so Scale Lock agrees. Then **Fill Page**.
 | **Notes** / **Inversions** | Generate triads, 7ths and/or 9ths; allow root position and inversions |
 | **Source** | **Algorithmic** (the weighted pool above) or **Markov**: real-progression chains per Major / Minor / Modal, with **Temperature** (conservative to adventurous), **Length**, a **Mood** filter, and a **Start chord** |
 
-Press any chord in the grid to hear it. Every action is an on-screen button: nothing
-here needs a right-click either.
+Press any chord in the grid to hear it. The page-wide actions are on-screen buttons: Fill
+Page, Regen Unlocked, Clear Page. Lock, New and Next act on one card, so they live in that
+card's right-click menu.
 
 ## Driving it with Claude
 
@@ -151,10 +154,10 @@ Details and troubleshooting: [docs/BUILD.md](docs/BUILD.md).
 
 Keys exists because most on-screen keyboards and controllers quietly assume two
 hands and a keyboard. Its rules: every function is reachable with single left-clicks,
-drags, and scrolls; no keyboard shortcut is ever required; no double-clicks, no
-modifier keys, no precision gestures on the critical path; large targets and high
-contrast. If something doesn't work for you with a mouse, that's a bug — open an
-issue.
+drags, and scrolls, bar the chord-card menus Owen asked to be right-click; no keyboard
+shortcut is ever required; no double-clicks, no modifier keys, no precision gestures on
+the critical path; large targets and high contrast. If something doesn't work for you
+with a mouse, that's a bug — open an issue.
 
 ## License
 

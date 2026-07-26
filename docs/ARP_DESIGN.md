@@ -4,12 +4,13 @@ Distilled from a deep-research pass (2026-07-19) over the Xfer Cthulhu v1.1 manu
 Xfer Serum manual, Kirnu Cream and Devicemeister Stepic reviews and vendor docs, and
 the JUCE ArpeggiatorPluginDemo source. Confidence notes and gaps at the bottom.
 
-Shape "Up": no step editor exists, because most of the time you do not want one.
+Shape "Up": no step editor exists, because most of the time you do not want one. The
+control band, the twelve launchable slots and the chord cards below are there either way.
 
 ![The arpeggiator on a shape](../assets/screenshots/arpeggiator-shape.png)
 
-Shape "Pattern": lane tabs, the selected lane, its mute row, and one labelled Steps /
-Speed / Link set for the lane you are looking at.
+Shape "Pattern": the STEPS group joins the band, and lane tabs, the selected lane and its
+mute row appear between the band and the slots.
 
 ![The arpeggiator in Pattern shape](../assets/screenshots/arpeggiator.png)
 
@@ -40,6 +41,29 @@ math was adversarially refuted as a pattern to copy. Requirements:
 - Derive step boundaries from `ppqPosition`/bpm fresh each block; never accumulate
   counters, so tempo changes and transport jumps self-correct.
 - Emit note on/off at computed sample offsets within the block.
+- **`active[].samplesLeft` is an offset from the start of the block being processed.** That is
+  the whole contract, and it is stated above `retireDue()`. `advanceBlock()` rebases the
+  survivors exactly once, at the end of `process()`. Getting this frame wrong shipped every
+  note-off one buffer late for the whole of v1 (fixed 2026-07-25).
+- **Owed note-offs are closed per hit, not per block**, inside `fireStep()` immediately before
+  each note-on: anything already due ends at its own offset, and the pitch being retriggered,
+  if still owed past this hit (a tie at gate > 100%), is pulled back to `on - 1`. Draining the
+  whole block up front instead is the obvious-looking fix and it is wrong: the tie's note-off
+  then lands *after* the note-on that superseded it, giving two note-ons for one pitch with
+  nothing between them. `tests/ArpTests.cpp` pins this.
+- **Every note is parked in `active[]`, however short.** Emitting a short note's off straight
+  into the buffer is the obvious optimisation and it is wrong: it hides the note from the close
+  loop, so a same-pitch hit later in the *same* block finds nothing to close and stacks a second
+  note-on. It needs a tie plus a buffer long enough for two hits of one pitch — an ordinary 2048
+  samples at a fast rate — and the note-off is only correct at some buffer sizes, which is the
+  same class of bug as the one being fixed. Nothing is lost by parking: a later hit ends the
+  note at its own gate, or pulls it back if it is a tie, and the end-of-block drain does the
+  rest. `tests/ArpTests.cpp` pins this with a tie whose two hits share one buffer, which is the
+  shape the rest of the suite structurally cannot reach.
+- The end-of-block drain sits **outside** the "arp enabled / notes held" guard, so a note owed
+  by the last step before the keys came up still ends on time.
+- The regression tests cover uneven block sizes, since a host may change `numSamples` between
+  calls.
 - Track owed note-offs across block boundaries (ratchets, ties, pattern-length
   boundaries); a transport jump mid-ratchet must flush owed offs, never leak them.
 - Clock spec follows Serum's documented design: a division list (1 bar .. 1/64,
@@ -85,7 +109,7 @@ Ranked essential (v1):
 |------|----------------|---------|
 | Note | chord-note index 1..8, or "follow direction mode"; drag below 1 = step mute | follow |
 | Octave | -3..+3 | 0 |
-| Velocity | 1..127 scale | as played |
+| Velocity | 10..200% of the played velocity | 100 |
 | Gate | 5%..200%; >=100% into next step = tie | 100% |
 | Ratchet | 1..4 sub-hits per step (Stepic's step-divider) | 1 |
 | Probability | 0..100% chance the step fires | 100% |
@@ -97,6 +121,13 @@ up-and-down, down-and-up, fingered top, fingered bottom), octave range 1..4 for
 directional modes, swing (applied to offbeat steps), latch (on-screen toggle:
 ignore note-offs until a new chord), retrigger (restart at step 1 on new note),
 rate + dot/trip + anchor.
+
+**Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
+behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or
+thin a run out at all - the two most reached-for arp controls on any hardware unit were
+unreachable on the default shape. `Params::gate` and `Params::chance` **multiply** the lane
+value in `fireStep`, so 100 leaves an edited pattern exactly as drawn, and each control
+means the same thing in both shapes.
 
 v2 and later (nice-to-have per the research ranking): timing-offset (Late) lane,
 probability / random-select lane, harmony lane (second note within +/-1 octave),
@@ -112,13 +143,58 @@ Keys already owns Root/Scale. The arp editor flags out-of-key results visually
 output can never leave the scale when Lock is on. This is a differentiator the
 stock arps lack; it comes almost free here.
 
-## Patterns
+## Patterns, which became slots
 
-8 named patterns (A-H) per session, one-click switching, with on-screen **Copy**,
-**Paste**, and **Randomize** buttons (Cthulhu hides copy behind alt-drag; that is a
-modifier gesture and is banned here). Per-pattern rate and lane data. Patterns
-persist in the session state (a `ValueTree` next to the chord pads) and are
-MCP-addressable later.
+Originally 8 lettered patterns (A-H) per session. **Twelve launchable slots since
+2026-07-25**, at Owen's request, after a reference layout where the pattern memories are
+cards you fire rather than letters you recall.
+
+A slot carries its lane data *and* a chord, a shape and a rate. Launching it (one left
+click, anywhere on the card) installs the pattern, moves the Shape and Rate parameters
+through the host the way the combo boxes do, and holds the chord into the arp. Clicking the
+launched slot again releases it; **Stop** does the same without reaching for All Off. A slot
+with no chord launches the pattern alone and arpeggiates whatever is already sounding.
+
+The card paints what it will play - chord name, shape, rate - so a row of twelve reads as a
+progression. Two lit states, deliberately distinct: *active* (a soft ring) means these are
+the lanes the step editor is editing; *launched* (a bright ring and a lit triangle) means
+this slot's chord is what the arp is chewing on. They are different things and are often
+true of different slots.
+
+The slot row is on screen in **both** shapes. Hiding it outside Pattern was what made the
+old A-H buttons read as an appendix to the step editor rather than as the way you drive the
+arp.
+
+On-screen **Copy**, **Clear**, **Cancel** and **Randomize** (Cthulhu hides copy behind
+alt-drag; that is a modifier gesture and is banned here). Copy and Clear arm and then take
+a slot click, which keeps both on a pure left-click path. A slot's right-click menu offers
+Launch, Clear chord, Copy and Randomize, as an accelerator only; Randomize is greyed there
+outside Pattern shape, because that is where its button lives.
+
+Slots persist in the session state (a `ValueTree` next to the chord pads) and are
+MCP-addressable. Slots 9-12 read as empty in a session saved with eight.
+
+## Chords into the arp
+
+The engine has always taken its input from the block's merged MIDI stream, so a chord pad
+already fed the arp - but the arp was a centre view and picking it put the pads away, and a
+pad was momentary anyway. Two paths close that, both added 2026-07-25 (the section move
+closed the first half):
+
+- **To Arp**, a toggle on the Pads bar. Lit, a click on a card calls
+  `KeysProcessor::holdArpChordFromPad`, which emits the note-ons and never the note-offs
+  until the next call. A visible toggle rather than an implicit "the arp is on" mode: a pad
+  must not quietly do something different than it did a minute ago. The flag lives on the
+  processor (`LayoutState::toArp`), because the chord it holds outlives the editor and the
+  generator's chord grid has to honour the same mode; every surface showing a chord card
+  reads it.
+- **Send to arp slot**, in the pad's card menu, which copies the chord into a slot for
+  later. A copy and not a reference, so regenerating the pad page cannot silently rewrite
+  what a slot plays.
+
+The held chord is tagged `arpChordTag` so it never collides with pad or live-card
+scheduling, and `allNotesOff()` forgets it - otherwise a panic silences the chord while the
+launched slot still paints as playing.
 
 ## Mouse-only interaction (the part nobody else got right)
 
@@ -136,17 +212,51 @@ Concrete remaps:
   readout follows the cursor. Click sets a single step.
 - Step mute: a dedicated mute-button row under the lane (>=34 px), not a hidden
   drag zone (Cthulhu's drag-below-1 stays as an accelerator, never required).
-- Pattern operations: Copy/Paste/Randomize as buttons.
+- Pattern operations: Copy/Clear/Randomize as buttons, arming and then taking a slot
+  click where they need a target. (Shipped without a Paste: an arm-then-pick Copy is the
+  same two clicks and needs no clipboard to explain.)
 - Grid snap and edit modes: on-screen toggles, never modifier keys.
 - Lane length: drag a handle at the lane's right edge, or - / + buttons.
 
-## UI placement (decided: a centre view)
+## UI placement (decided: a section of its own)
 
-An **Arp** tab (view bar, next to Perform and Chords) swaps the lane editor into the
-middle of the editor, where the knob bank and chord-pad strip sit; a compact on/off
-toggle rides in the panel's own header. (Decided by Owen, 2026-07-19; originally a
-full-editor overlay, changed to a centre view 2026-07-25 at Owen's request, because the
-overlay dimmed and covered the keyboard you are meant to be playing while you edit.)
+The arp is a foldable **section**, between the centre view and the chord pads, with its
+**On** toggle and a **Detach** button on its own bar. Folding the section destroys the
+editor, never the arpeggiator, which is why both of those live on the bar rather than
+inside the panel. Detach moves the whole panel into a resizable window (`DetachedWindow`,
+shared with the keybed); a detached section takes no height in the main window.
+
+It got there in three steps, all at Owen's request. A full-editor overlay first, changed to
+a centre view on 2026-07-25 because the overlay dimmed and covered the keyboard you are
+meant to be playing while you edit. Then a section later the same day, because as one of
+three centre views it competed with the knobs and the generator: picking the arp put away
+the chord cards it exists to chew on. The centre views are Perform and Chords now.
+
+**The chord pads are their own section** (2026-07-25), between the centre view and the
+keyboard, so they are on screen under Perform, Chords *and* Arp. This is the layout change
+the whole "cards into the arp" feature rests on: the arpeggiator's job is to chew on a
+chord, and it was the one view from which you could not reach one.
+
+## Control band layout
+
+Three ruled, captioned groups, after the hardware-arp arrangement Owen asked for:
+
+| Group | Holds | Visible |
+|-------|-------|---------|
+| PATTERN  | Shape + `<` `>`, Rate + `<` `>`, Trip, Dot | always |
+| PLAYBACK | Swing, Gate, Chance (knobs), Octaves, Anchor, Latch, Retrigger | always |
+| STEPS    | Steps, Speed, Link | Pattern shape only |
+
+The `<` `>` pairs matter more than they look: stepping to the next shape is the commonest
+thing you do to an arp and it used to cost a click, a travel down a menu and a second click.
+They **clamp** rather than wrap, so one click too many on "Up" cannot land on "Pattern" and
+throw the step editor open under you.
+
+Sizing note for anyone editing `ArpPanel::resized()`: every number in there is a *logical*
+pixel and the panel is only about 950 of them wide at the editor's minimum. On a 150%
+display a screenshot is 1.5x that, which is exactly how the first pass ended up with widths
+three times too generous and a row of controls clipped to ellipses. Measure with UI
+Automation (`BoundingRectangle`, divided by the display scale), not with a ruler on a PNG.
 
 ## v1 implementation notes
 

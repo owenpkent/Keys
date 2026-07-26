@@ -35,16 +35,23 @@ dragged smaller than the content it is showing.
 | Section | Bar | Folds away |
 |---------|-----|-----------|
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Velocity, Humanize, Strum, Dir |
-| **Perform / Chords / Arp** | middle | Whichever centre view is showing. The three tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** and **Pads** fold the two halves of Perform separately. |
+| **Perform / Chords** | middle | Whichever centre view is showing. Both tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** folds the knob bank inside Perform. |
+| **Arp** | below the centre | The arpeggiator. Its **On** toggle and **Detach** ride on the bar, so the arp can be switched on, off and detached with the panel folded shut — folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
+| **Pads** | below the arp | The chord-pad strip, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons and the **To Arp** toggle ride on the bar. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain and All Off stay put. |
 
-### Detaching the keyboard
+### Detaching the keyboard, and the arp
 
 **Detach** puts the keybed in its own resizable window, so you can make the keys as large
 as the screen allows without stretching the rest of the plugin. Docked, key height is a
 compromise with everything above it; detached, dragging the window taller genuinely makes
 the keys taller. That window carries its own **Size**, **Wheels** and **Re-dock** controls,
 and its close button re-docks. Its position and size are remembered with the session.
+
+The **Arp** bar has a Detach of its own, and it works the same way: the arpeggiator moves
+into a resizable window, its close button re-docks it, and its position is remembered. A
+detached section takes no height in the main window, so this is the way to keep the
+arpeggiator open and the plugin window small at the same time.
 
 ## Playing surface
 
@@ -204,24 +211,36 @@ ignored them). Locked pads are never overwritten, same as the algorithmic source
 
 ## Arpeggiator
 
-Opens from the **Arp** button next to Chords. It takes whatever is currently sounding
-(keyboard, a held note, a chord pad) and plays it one note at a time.
+A section of its own, between the centre view and the pads. It takes whatever is currently
+sounding (keyboard, a held note, a chord pad) and plays it one note at a time. The chord
+pads sit directly below it, so a chord is always one click away, and the knobs or the
+generator stay on screen above.
+
+**On** and **Detach** live on the Arp bar rather than inside the panel, so folding the
+panel away leaves the arpeggiator running and still switchable. The section starts folded.
 
 **Shape decides how much of the panel exists.** The eight directions are plain
 arpeggios and show nothing but the controls below. The ninth entry, **Pattern**, opens
-the step editor.
+the step editor and adds the STEPS group to the band.
 
-| Control | What it does |
-|---------|--------------|
-| **On** | Arp on or off. Everything else stays editable while it is off. |
-| **Shape** | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, or **Pattern** (opens the step editor). |
-| **Rate** | Step length, 16 bars down to 1/64. |
-| **Dot** / **Trip** | Dotted or triplet feel on the rate. |
-| **Anchor** | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. |
-| **Octaves** | 1–4. How many octaves a direction shape climbs before repeating. |
-| **Swing** | 0–0.75. Delays the offbeat steps. |
-| **Latch** | Keep arpeggiating after you let go, until a new chord arrives. |
-| **Retrigger** | Restart at step 1 when a note arrives on an empty set. |
+Controls are grouped: **PATTERN** is what it plays, **PLAYBACK** is how it behaves, and
+**STEPS** (Pattern shape only) drives the step editor. The `<` and `>` buttons beside Shape
+and Rate step to the next entry without opening the menu; they stop at the ends rather than
+wrapping round.
+
+| Control | Group | What it does |
+|---------|-------|--------------|
+| **On** | header | Arp on or off. Everything else stays editable while it is off. |
+| **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, or **Pattern** (opens the step editor). |
+| **Rate** | Pattern | Step length, 16 bars down to 1/64. |
+| **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. |
+| **Swing** | Playback | 0–0.75. Delays the offbeat steps. |
+| **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
+| **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
+| **Octaves** | Playback | 1–4. How many octaves a direction shape climbs before repeating. |
+| **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. |
+| **Latch** | Playback | Keep arpeggiating after you let go, until a new chord arrives. |
+| **Retrigger** | Playback | Restart at step 1 when a note arrives on an empty set. |
 
 ### The step editor (Shape → Pattern)
 
@@ -244,10 +263,43 @@ values, so you can take a step out and put it back unchanged.
 **Steps** sets how many steps the pattern runs before repeating (1–32), and **Speed**
 runs the lane at full, half or quarter rate. Both apply to the lane you are looking at.
 
-**Link lanes** (on by default) keeps every lane the same length and speed, which is the
-usual case. Turn it off and each lane keeps its own: a 4-step note lane against a 3-step
-octave lane gives you polymeter, patterns that take several bars to come back around.
+**Link** (on by default) keeps every lane the same length and speed, which is the usual
+case. Turn it off and each lane keeps its own: a 4-step note lane against a 3-step octave
+lane gives you polymeter, patterns that take several bars to come back around.
 
-**A–H** are eight pattern slots. Click a letter to recall it. **Copy** arms a copy from
-the current slot: click it, then click the letter to copy into. **Randomize** rerolls the
-current pattern.
+### The twelve slots
+
+The row of cards along the bottom is on screen in **both** shapes. Each slot holds a
+pattern, and can also hold a chord with the shape and rate that were up when you sent it
+there — the card shows you all three. **Click a slot to launch it**: it installs the
+pattern, sets Shape and Rate back to what it remembers, and starts arpeggiating its chord.
+Click the launched slot again to release it, or press **Stop**. A slot with no chord shows
+"--", launches the pattern alone, and arpeggiates whatever you are already holding.
+
+A soft ring means *this slot's lanes are the ones the step editor is editing*. A bright ring
+and a lit triangle mean *this slot's chord is what you are hearing*. They are different
+things and often belong to different slots.
+
+| Button | What it does |
+|--------|--------------|
+| **Copy** | Arms a copy from the live pattern: click it, then click the slot to copy into. |
+| **Clear** | Arms a clear: click it, then click a slot to take its chord away. The pattern stays. |
+| **Cancel** | Disarms Copy or Clear. Only appears while one of them is armed. |
+| **Stop** | Releases the chord a slot is holding, without the blunt instrument of All Off. |
+| **Randomize** | Rerolls the live pattern's lanes. Pattern shape only, since a plain shape has no lanes. |
+
+Right-clicking a slot offers Launch, Clear chord, Copy and Randomize, if you prefer a menu.
+
+### Getting a chord into the arp
+
+Two ways, both from the Pads section under the panel:
+
+- **To Arp** on the Pads bar. Lit, clicking a pad hands its chord to the arp and leaves it
+  there: the pad wears a bright ring while it is the one feeding the arp, so click the lit
+  pad to release it, or another to swap. The generator's chord grid obeys the mode too, so
+  a chord can reach the arp while you are still filling the page. The live chord card hands
+  its chord over the same way, but takes no ring and no second click — use **Stop**, or
+  another card, to move off it. Unlit, the pads play exactly as they always have. The mode
+  is remembered with the session, because the chord it holds outlives the window.
+- **Send to arp slot**, in a pad's right-click menu, parks a copy of that chord in one of
+  the twelve slots to launch later.
