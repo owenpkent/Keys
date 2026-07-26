@@ -9,15 +9,22 @@
 
 namespace keys
 {
-// The arpeggiator editor (docs/ARP_DESIGN.md). Six per-parameter step lanes (Cthulhu
-// architecture) sit under a globals row, with pattern recall/copy/randomize along the
-// bottom.
+// The arpeggiator editor (docs/ARP_DESIGN.md). A band of captioned control groups, the
+// six per-parameter step lanes (Cthulhu architecture) when Shape is "Pattern", and a row
+// of twelve launchable slots along the bottom.
+//
+// The band and the slot row follow a hardware-arp layout Owen asked for (2026-07-25):
+// controls gathered into ruled, captioned groups rather than strung across two loose
+// rows, and the pattern memories turned from lettered buttons into cards that show what
+// they will play - a chord name, a shape and a rate - with a launch triangle. Launching a
+// slot is the one-click "pass a card into the arpeggiator" gesture: it installs the
+// pattern, applies the slot's shape and rate, and holds the slot's chord into the arp.
 //
 // It lives inline, as the editor's centre view: picking Arp swaps it in where the knob
-// bank and chord pads were, instead of throwing a dimmed sheet over the whole plugin.
-// The old behaviour hid the keyboard behind the panel, which is backwards for a plugin
-// you play while you edit the arp. setInlineMode(false) restores the overlay look (no
-// caller does today; kept because the class is shared with Keys Host).
+// bank sat, instead of throwing a dimmed sheet over the whole plugin. The old behaviour
+// hid the keyboard behind the panel, which is backwards for a plugin you play while you
+// edit the arp. setInlineMode(false) restores the overlay look (no caller does today;
+// kept because the class is shared with Keys Host).
 //
 // Lane data lives in processor.arp.lanes as arrays of std::atomic<int>, written here
 // on the message thread and read on the audio thread; no locking, so every edit is a
@@ -104,6 +111,28 @@ public:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MuteRow)
     };
 
+    // One launchable slot. It paints what it will play - the chord it holds, the shape and
+    // the rate it will install - so a row of twelve reads as a progression rather than as
+    // twelve identical letters. Left-click launches it. Right-click opens its menu, an
+    // accelerator only: everything in there has a left-click path on the buttons below the
+    // row (the same arrangement the chord pads use, per the CLAUDE.md exception).
+    class SlotCard : public juce::Button
+    {
+    public:
+        SlotCard(KeysProcessor&, int index);
+
+        void paintButton(juce::Graphics&, bool over, bool down) override;
+        void mouseDown(const juce::MouseEvent&) override;
+
+        std::function<void()> onRightClick;
+
+    private:
+        KeysProcessor& processor;
+        int index;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SlotCard)
+    };
+
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -128,6 +157,20 @@ private:
     void refreshLaneReadouts();
     void refreshPatternButtons();
     void recallOrCopy(int index);
+    void launchSlot(int index);   // left-click on a slot card
+    void showSlotMenu(int index); // right-click accelerator; everything in it is also a button
+    void stepCombo(juce::ComboBox&, int delta); // the < > pair beside Shape and Rate
+
+    // The captioned, ruled group boxes the band is drawn as. Filled in by resized() and
+    // painted by paint(), because a caption and a rule are two lines of Graphics each and
+    // do not justify six more child components.
+    struct Group
+    {
+        juce::String caption;
+        juce::Rectangle<int> bounds;
+        bool visible = true;
+    };
+    std::array<Group, 3> groups;
 
     bool patternMode() const; // Shape == "Pattern": the step editor is in play
     void applyShapeChoice();  // combo -> parameters
@@ -143,18 +186,21 @@ private:
 
     KeysProcessor& processor;
 
-    juce::Label title;
-    juce::ToggleButton onButton { "On" };
-    juce::TextButton closeButton { "Close" };
+    // No title, On or Close: the Arp section bar above the panel carries all three, and two
+    // On toggles bound to the same parameter is just a thing to get wrong.
 
     // Shape carries the eight directions plus "Pattern", after Serum 2, whose step
     // editor only exists while SHAPE is "Pattern". It cannot be a plain APVTS
     // attachment because it spans two parameters (arpDirection + arpPattern).
     juce::ComboBox rateBox, shapeBox;
     juce::Label rateLabel, shapeLabel;
+    // The < > pairs beside Shape and Rate. Not decoration: stepping to the next shape is
+    // the commonest thing you do to an arp, and a button is one click where the combo is a
+    // click, a travel and a second click.
+    juce::TextButton shapePrev { "<" }, shapeNext { ">" }, ratePrev { "<" }, rateNext { ">" };
     juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
-    juce::Slider octavesSlider, swingSlider;
-    juce::Label octavesLabel, swingLabel;
+    juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
+    juce::Label octavesLabel, swingLabel, gateLabel, chanceLabel;
     juce::ToggleButton latchButton { "Latch" }, retriggerButton { "Retrigger" };
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
@@ -165,18 +211,29 @@ private:
     // The shared length / clock-division controls for whichever lane is showing.
     juce::Label stepsLabel, speedLabel, stepsReadout;
     juce::TextButton stepsMinus { "-" }, stepsPlus { "+" }, speedButton;
-    juce::ToggleButton linkButton { "Link lanes" };
+    juce::ToggleButton linkButton { "Link" }; // "Link lanes" no longer fits the STEPS group
 
-    std::array<juce::TextButton, KeysProcessor::numArpPatterns> patternButtons;
+    // Twelve slot cards, alive in both shapes: launching a chord is as useful on a plain
+    // "Up" as it is on an edited pattern, so unlike the lane editor these never hide.
+    std::array<std::unique_ptr<SlotCard>, KeysProcessor::numArpPatterns> slotCards;
     juce::TextButton copyButton { "Copy" };
+    juce::TextButton clearButton { "Clear" };
     juce::TextButton cancelButton { "Cancel" };
     juce::TextButton randomizeButton { "Randomize" };
-    bool copyArmed = false;
+    juce::TextButton stopButton { "Stop" }; // release the launched chord, without a panic
+
+    // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
+    // mouse-only contract wants a left-click path for everything). Both arm: click the
+    // button, then click the slot. One state, not two flags, so arming one disarms the
+    // other rather than leaving two half-armed modes fighting over the next click.
+    enum Armed { armNone = 0, armCopy, armClear };
+    Armed armed = armNone;
+    void setArmed(Armed, int fromIndex = -1);
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> onAtt, dotAtt, tripAtt, anchorAtt, latchAtt, retriggerAtt, linkAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, retriggerAtt, linkAtt;
     std::unique_ptr<ComboAtt> rateAtt;
-    std::unique_ptr<SliderAtt> octavesAtt, swingAtt;
+    std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)
 };

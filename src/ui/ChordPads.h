@@ -43,6 +43,17 @@ public:
     std::function<void(int)> onEditToggle;
     void setEditingSlot(int slot); // absolute slot being edited, or -1
 
+    // "To Arp", a toggle on the Pads section bar. On, a left-click on a chord card holds its
+    // chord into the arpeggiator rather than playing it for as long as the button is down:
+    // click it again to release, click another to swap. Off, the pads behave exactly as they
+    // always have. A visible toggle rather than an implicit "the arp is on" mode, so a pad
+    // never quietly does a different thing than it did a minute ago.
+    //
+    // The flag itself lives on the processor (KeysProcessor::LayoutState::toArp), because the
+    // chord it holds outlives this editor and the generator's pad grid has to honour the same
+    // mode. This just applies a change and repaints.
+    void setToArp(bool);
+
 private:
     juce::Rectangle<float> cardBounds() const;
     juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1: row = i/8, col = i%8
@@ -51,6 +62,7 @@ private:
     void showPadMenu(int slot);
 
     KeysProcessor& processor;
+    bool toArp() const; // processor.layout.toArp; see setToArp
     int editingSlot = -1;
     std::vector<int> currentNotes;
     juce::String currentName;

@@ -142,12 +142,38 @@ public:
     // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
     // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
     ArpEngine arp;
-    static constexpr int numArpPatterns = 8;
+    // Twelve, not the original eight: the slots stopped being lettered pattern memories and
+    // became launchable cards carrying a chord as well as a pattern, and twelve of them fit
+    // a bar of the strip. Slots 9-12 come up empty in a session saved with eight.
+    static constexpr int numArpPatterns = 12;
     int arpActivePattern() const { return activeArpPattern; }
     void storeActiveArpPattern();          // lanes -> snapshot slot (call before switching)
     void recallArpPattern(int index);      // snapshot slot -> lanes, becomes active
     void copyArpPattern(int from, int to); // whole-pattern copy (the no-modifier answer)
     void randomizeActiveArpPattern();
+
+    // Launch a slot: recall its pattern, apply the shape and rate it remembers, and hold
+    // its chord into the arp. That is the whole "pass a card into the arpeggiator" gesture
+    // in one click. A slot with no chord launches the pattern alone and arpeggiates
+    // whatever is already sounding.
+    void launchArpSlot(int index);
+    void stopArpSlot();                  // release the launched chord; the pattern stays
+    int arpLaunchedSlot() const { return launchedSlot; }
+    void setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name);
+    void clearArpSlotChord(int index);
+
+    // Hold a chord into the arp without going through a slot: the Pads section's "To Arp"
+    // toggle sends a card here. Held means exactly that - the note-ons are emitted and no
+    // note-off follows until the next call, so the arp keeps chewing on it whether or not
+    // its own Latch is on. With the arp bypassed the chord simply sustains, which is honest.
+    void holdArpChord(const std::vector<int>& notes, const juce::String& name);
+    void releaseArpChord();
+    const std::vector<int>& arpHeldNotes() const { return arpChordOn; }
+
+    // Hold a chord pad's chord into the arp, remembering which pad it came from so the
+    // strip can light it. Same one-at-a-time rule as a slot: a second call swaps.
+    void holdArpChordFromPad(int padSlot);
+    int arpHeldPad() const { return arpPadSlot; }
 
     // A stored pattern slot (A-H), independent of whichever pattern is currently
     // active/live. Public so the MCP bridge can read or write an arbitrary slot
@@ -158,6 +184,15 @@ public:
         std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
         std::array<int, ArpEngine::numLanes> length {};
         std::array<int, ArpEngine::numLanes> clockDiv {};
+
+        // What launching the slot plays, and how. The chord is a copy of a card, not a
+        // reference to one: re-generating the pad page must not silently rewrite what a
+        // slot launches. -1 on shape or rate means "leave that control alone", which is
+        // what a slot that has never been told a shape does.
+        std::vector<int> chordNotes;
+        juce::String chordName;
+        int shape = -1;  // 0..numDirections-1 a direction, numDirections = Pattern
+        int rate = -1;   // index into the arpRate choice list
     };
     const ArpPattern& arpPatternSlot(int index) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
@@ -170,15 +205,24 @@ public:
     struct LayoutState
     {
         bool controls = true;   // the three header rows
-        bool centre = true;     // the centre view (Perform / Chords / Arp)
+        bool centre = true;     // the centre view (Perform / Chords)
         bool knobs = true;      // the CC knob bank
         bool pads = true;       // the chord-pad strip
+        bool arp = false;       // the arpeggiator section (off by default: it is tall)
+        // "To Arp": a click on a chord card hands its chord to the arpeggiator. It lives here
+        // rather than in the pad strip because it is a *mode*, and the chord it holds outlives
+        // the editor. A host that destroys the window on close was dropping the flag while the
+        // chord kept sounding, which left the pads back in momentary mode with a lit ring and
+        // no gesture that released it. Every surface showing a chord card reads this.
+        bool toArp = false;
         bool wheels = true;     // mod + pitch, left of the keybed
         bool keyboard = true;   // the keybed itself
         bool detached = false;  // keybed lives in its own resizable window
-        int  view = 0;          // which centre view: 0 = perform, 1 = chords, 2 = arp
+        bool arpDetached = false; // ditto the arp panel
+        int  view = 0;          // which centre view: 0 = perform, 1 = chords
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
-        juce::Rectangle<int> detachedBounds {}; // empty = never detached yet, so centre it
+        juce::Rectangle<int> detachedBounds {};    // empty = never detached yet, so centre it
+        juce::Rectangle<int> arpDetachedBounds {};
     };
     LayoutState layout;
 
@@ -202,8 +246,17 @@ private:
     // Shared by the pads and the live card: cap, order, strum-schedule a chord. Returns
     // the notes actually fired (post polyphony cap), for the caller to remember.
     std::vector<int> fireChord(const std::vector<int>& notes, int tag);
-    static constexpr int liveChordTag = -2; // scheduling tag; pads use their own slot
+    // Scheduling tags. Pads use their own slot (>= 0); everything else is negative, and
+    // cancelScheduledNotes must compare against the exact tag, never `< 0` - see the comment
+    // there for the stuck-note this caused.
+    static constexpr int panicTag = -1;     // cancelScheduledNotes only: cancel *everything*
+    static constexpr int liveChordTag = -2; // the live "current chord" card
+    static constexpr int arpChordTag = -3;  // the chord held into the arp
     std::vector<int> liveChordOn;
+    std::vector<int> arpChordOn;   // notes currently held into the arp (empty = none)
+    juce::String arpChordName;
+    int launchedSlot = -1;         // arp slot whose chord is held, or -1
+    int arpPadSlot = -1;           // chord pad whose chord is held, or -1
 
     // Hold a note-on and emit it `delayMs` from now, on the message thread.
     //

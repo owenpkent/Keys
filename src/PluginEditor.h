@@ -4,7 +4,7 @@
 #include "ui/ArpPanel.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
-#include "ui/KeyboardWindow.h"
+#include "ui/DetachedWindow.h"
 #include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
 #include "ui/RangeSlider.h"
@@ -54,22 +54,31 @@ private:
     void endPadEdit();
 
     // --- Folding layout ------------------------------------------------------------
-    // Which panel occupies the centre of the editor. The generator and the arpeggiator
-    // used to be sheets thrown over the whole plugin, which hid the keyboard behind the
-    // thing you were editing; they are now views that swap in where the knob bank and
-    // chord pads sit. `folded` is the fourth state: no centre at all.
-    enum CentreView { viewPerform = 0, viewChords = 1, viewArp = 2 };
+    // Which panel occupies the centre of the editor. The generator used to be a sheet thrown
+    // over the whole plugin, which hid the keyboard behind the thing you were editing; it is
+    // now a view that swaps in where the knob bank sits. `folded` is the third state: no
+    // centre at all.
+    //
+    // The arpeggiator was a third view here until Owen asked for it to stop competing with
+    // the other two (2026-07-25). It is a section of its own now, like the pads, so the arp
+    // and the knobs (or the generator) can be on screen together.
+    enum CentreView { viewPerform = 0, viewChords = 1 };
 
     void setCentreView(int view);      // picks a view, unfolding the section if needed
     void refreshCentrePanels();        // creates/destroys the panel the state calls for
+    void refreshArpPanel();            // the arp section's panel follows its own fold
     void syncSectionControls();        // toggle states + visibility from processor.layout
     int  centreHeight() const;         // height the current centre view asks for, 0 if folded
+    int  arpHeight() const;            // height the arp section asks for, 0 if folded/detached
     int  idealHeight() const;          // total height with the current folds
     int  minWidthForView() const;      // the centre views carry more controls than the player
     void applyLayout();                // resize to fit the folds (unless embedded), then resized()
     void setKeyboardDetached(bool);    // move the keybed in/out of its own window
+    void setArpDetached(bool);         // move the arp panel in/out of its own window
     void rememberDetachedBounds();
+    void rememberArpDetachedBounds();
     void layoutKeybed();               // wheels + keys inside keybedHolder, wherever it lives
+    void layoutArpHolder();            // the arp panel inside arpHolder, wherever it lives
     void layoutToolRow(juce::Rectangle<int>);
 
     // Wheels + keybed as one unit, so detaching re-parents a single component instead of
@@ -136,11 +145,22 @@ private:
     // clicking the lit one folds the centre away, which is how the centre section is
     // minimized (it needs no chevron of its own, unlike the other sections).
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
-    juce::TextButton performButton { "Perform" }, chordsButton { "Chords" }, arpButton { "Arp" };
+    juce::TextButton performButton { "Perform" }, chordsButton { "Chords" };
 
-    // Only the centre view currently showing is alive; both are heavy (the generator
-    // builds 16 chord cards, the arp six step lanes) and neither is worth keeping warm.
+    // Only the centre view currently showing is alive; the generator builds 16 chord cards
+    // and is not worth keeping warm behind the knob bank.
     std::unique_ptr<ChordGenPanel> genPanel;
+
+    // The arp panel lives in its own section, inside a holder so that detaching it is one
+    // re-parent (the same trick keybedHolder plays for the keyboard). Alive whenever the
+    // section is open, wherever that section currently is.
+    struct ArpHolder : juce::Component
+    {
+        std::function<void()> layout;
+        void resized() override { if (layout) layout(); }
+        void paint(juce::Graphics& g) override { g.fillAll(skin::bgBot); }
+    };
+    ArpHolder arpHolder;
     std::unique_ptr<ArpPanel> arpPanel;
 
     // Section folds. Every section of the editor can be minimized so the window can be
@@ -148,8 +168,25 @@ private:
     // (KeysProcessor::LayoutState) so it survives the editor being closed and reopened.
     SectionBar controlsBar { "Controls" };
     SectionBar centreBar { "Perform" };  // caption follows the view; the tabs ride on it
+    // The chord pads are their own section, below the centre view rather than inside the
+    // Perform one. Owen asked for this so a card stays reachable while the generator or the
+    // arp is up: you click a chord and hear it arpeggiated without leaving the view you are
+    // editing. Its page buttons ride on its own bar, where they used to sit under the strip.
+    SectionBar padsBar { "Pads" };
+    // The arpeggiator, a section in its own right since 2026-07-25. Its bar carries an On
+    // toggle and a Detach button, so the two things you reach for while it runs stay reachable
+    // with the section folded shut.
+    SectionBar arpBar { "Arp" };
     SectionBar keyboardBar { "Keyboard" };
-    juce::TextButton knobsButton { "Knobs" }, padsButton { "Pads" };
+    juce::TextButton knobsButton { "Knobs" };
+    juce::ToggleButton arpOnButton { "On" };
+    juce::TextButton arpDetachButton { "Detach" };
+    std::unique_ptr<ButtonAtt> arpOnAtt;
+    // Lit, a click on a chord card hands its chord to the arpeggiator and leaves it there.
+    // It rides on the Pads bar because that is what it changes the meaning of, and it is a
+    // visible toggle rather than an implied "the arp is on" mode: a pad should never
+    // quietly start doing a different thing than it did a minute ago.
+    juce::TextButton toArpButton { "To Arp" };
     juce::TextButton wheelsButton { "Wheels" }, detachButton { "Detach" };
 
     // A second Size selector, for the detached keyboard window. The keybed's key count
@@ -166,10 +203,11 @@ private:
     void showThemeMenu();
     void applyAccent(int index);
 
-    // Alive only while the keybed is popped out. Declared after keybedHolder so it is
-    // destroyed first; ~KeysEditor resets it explicitly too, since relying on member
-    // order for a window that borrows a component is too subtle to leave implicit.
-    std::unique_ptr<KeyboardWindow> keyboardWindow;
+    // Alive only while their section is popped out. Declared after the holders so they are
+    // destroyed first; ~KeysEditor resets them explicitly too, since relying on member order
+    // for a window that borrows a component is too subtle to leave implicit.
+    std::unique_ptr<DetachedWindow> keyboardWindow;
+    std::unique_ptr<DetachedWindow> arpWindow;
 
     RangeSlider humanizeVelSlider; // a two-value range whose band drags as one; see RangeSlider.h
     juce::Label humanizeVelLabel;

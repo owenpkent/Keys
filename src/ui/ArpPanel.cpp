@@ -373,13 +373,17 @@ void ArpPanel::refreshShape()
     muteRowLabel.setVisible(pattern);
     if (muteRow != nullptr)
         muteRow->setVisible(pattern);
+    // The STEPS group is the only part of the band that belongs to the step editor, so it
+    // is the only part that goes with it.
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &stepsLabel, &speedLabel, &stepsReadout, &stepsMinus, &stepsPlus, &speedButton, &linkButton })
         c->setVisible(pattern);
-    for (auto& b : patternButtons)
-        b.setVisible(pattern);
-    copyButton.setVisible(pattern);
-    cancelButton.setVisible(pattern && copyArmed);
+    groups[2].visible = pattern;
+
+    // The slot row stays on both shapes. Launching a chord through "Up" is as much a thing
+    // you do as launching one through an edited pattern, and hiding the row was what made
+    // the old A-H buttons feel like an appendix to the step editor rather than the way you
+    // drive the arp. Randomize is the exception: there is nothing to randomize but lanes.
     randomizeButton.setVisible(pattern);
 
     // The card changes height with the mode, so relayout and repaint - but only on an
@@ -396,46 +400,214 @@ void ArpPanel::refreshShape()
     }
 }
 
+void ArpPanel::stepCombo(juce::ComboBox& box, int delta)
+{
+    const int n = box.getNumItems();
+    if (n <= 0)
+        return;
+    // Clamp rather than wrap. Wrapping means one click too many on "Up" drops you at
+    // "Pattern" and the whole step editor appears, which is a big surprise for a small
+    // button; at the ends the button simply does nothing, which is easy to feel.
+    const int next = juce::jlimit(0, n - 1, box.getSelectedItemIndex() + delta);
+    if (next != box.getSelectedItemIndex())
+        box.setSelectedItemIndex(next); // notifies, so the attachment/onChange runs
+}
+
+void ArpPanel::setArmed(Armed a, int fromIndex)
+{
+    if (armed == a && copyFromIndex == fromIndex)
+        return;
+    armed = a;
+    copyFromIndex = fromIndex;
+    refreshPatternButtons();
+    resized(); // Copy, Clear and Cancel all change width with the armed state
+    repaint();
+}
+
 void ArpPanel::recallOrCopy(int index)
 {
-    if (copyArmed)
+    switch (armed)
     {
-        if (index != copyFromIndex)
-            processor.copyArpPattern(copyFromIndex, index);
-        copyArmed = false;
-        copyFromIndex = -1;
+        case armCopy:
+            if (index != copyFromIndex)
+                processor.copyArpPattern(copyFromIndex, index);
+            break;
+        case armClear:
+            processor.clearArpSlotChord(index);
+            break;
+        case armNone:
+            launchSlot(index);
+            refreshPatternButtons();
+            return; // launching does not disarm anything; there is nothing armed
     }
-    else
+    setArmed(armNone);
+}
+
+void ArpPanel::launchSlot(int index)
+{
+    // Clicking the slot that is already holding its chord releases it, so one control both
+    // starts and stops a slot; anything else needs the Stop button to undo a launch.
+    if (processor.arpLaunchedSlot() == index)
     {
-        processor.recallArpPattern(index);
+        processor.stopArpSlot();
+        return;
     }
-    refreshPatternButtons();
+    processor.launchArpSlot(index);
+    refreshShape(); // the slot may have moved Shape, and that decides what is on screen
+}
+
+void ArpPanel::showSlotMenu(int index)
+{
+    juce::PopupMenu m;
+    const auto& slot = processor.arpPatternSlot(index);
+    const bool hasChord = ! slot.chordNotes.empty();
+
+    m.addSectionHeader("Slot " + juce::String(index + 1));
+    m.addItem(1, "Launch", true, processor.arpLaunchedSlot() == index);
+    m.addItem(2, "Clear chord", hasChord);
+    m.addSeparator();
+    m.addItem(3, "Copy this pattern to" + juce::String::fromUTF8("\xe2\x80\xa6"));
+    // Only in Pattern shape, which is where the Randomize *button* lives. Enabled on a plain
+    // shape it would be the one thing in the arp reachable by right-click alone, and there
+    // would be nothing for it to randomize anyway.
+    m.addItem(4, "Randomize this pattern", patternMode());
+
+    juce::Component::SafePointer<ArpPanel> safe(this);
+    m.showMenuAsync(juce::PopupMenu::Options {}.withParentComponent(getTopLevelComponent()),
+                    [safe, index](int r)
+    {
+        auto* self = safe.getComponent();
+        if (self == nullptr || r == 0)
+            return;
+        if (r == 1)
+            self->launchSlot(index);
+        else if (r == 2)
+            self->processor.clearArpSlotChord(index);
+        else if (r == 3)
+        {
+            // Same arm-then-pick gesture the Copy button uses, seeded from this slot: the
+            // menu cannot show a target picker without nesting a second async menu.
+            self->setArmed(armCopy, index);
+        }
+        else if (r == 4)
+        {
+            self->processor.recallArpPattern(index);
+            self->processor.randomizeActiveArpPattern();
+        }
+        self->refreshPatternButtons();
+    });
 }
 
 void ArpPanel::refreshPatternButtons()
 {
-    const int active = processor.arpActivePattern();
-    for (int i = 0; i < (int) patternButtons.size(); ++i)
-        patternButtons[(size_t) i].setToggleState(! copyArmed && i == active, juce::dontSendNotification);
+    for (auto& c : slotCards)
+        if (c != nullptr)
+            c->repaint(); // the card paints active/launched itself, from the processor
 
-    copyButton.setButtonText(copyArmed
-                                 ? "Copy from " + juce::String::charToString((juce::juce_wchar) ('A' + copyFromIndex))
-                                 : juce::String("Copy"));
-    copyButton.setToggleState(copyArmed, juce::dontSendNotification);
-    cancelButton.setVisible(copyArmed && patternMode());
+    // Armed, the two buttons say what they are waiting for. "Pick a slot" is the whole
+    // instruction, and Cancel appears next to it so the gesture is never a trap.
+    copyButton.setButtonText(armed == armCopy ? "Copy from " + juce::String(copyFromIndex + 1)
+                                              : juce::String("Copy"));
+    clearButton.setButtonText(armed == armClear ? juce::String("Clear: pick a slot")
+                                                : juce::String("Clear"));
+    copyButton.setToggleState(armed == armCopy, juce::dontSendNotification);
+    clearButton.setToggleState(armed == armClear, juce::dontSendNotification);
+    if (cancelButton.isVisible() != (armed != armNone))
+    {
+        cancelButton.setVisible(armed != armNone);
+        resized(); // Cancel's width appears and disappears with it; see the action row
+    }
+    stopButton.setEnabled(processor.arpLaunchedSlot() >= 0 || ! processor.arpHeldNotes().empty());
+}
+
+// ---------------------------------------------------------------------------
+// SlotCard
+
+ArpPanel::SlotCard::SlotCard(KeysProcessor& p, int i)
+    : juce::Button("Arp slot " + juce::String(i + 1)), processor(p), index(i)
+{
+    okstudio::ui::makeMouseOnly(*this);
+    setTitle("Arp slot " + juce::String(i + 1)); // accessible name for the capture script
+}
+
+void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        if (onRightClick)
+            onRightClick();
+        return; // never a launch, never shows the down state
+    }
+    juce::Button::mouseDown(e);
+}
+
+void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
+{
+    const auto b = getLocalBounds().toFloat().reduced(1.0f);
+    const auto accent = skin::accentOf(*this).base;
+    const auto& slot = processor.arpPatternSlot(index);
+    const bool active = processor.arpActivePattern() == index;   // its lanes are the live ones
+    const bool launched = processor.arpLaunchedSlot() == index;  // its chord is sounding
+
+    skin::raisedFill(g, b, skin::radius,
+                     launched ? accent.withAlpha(0.34f) : skin::control.withAlpha(down ? 0.7f : 1.0f),
+                     launched ? accent.withAlpha(0.20f) : skin::controlBot);
+    if (over)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.06f));
+        g.fillRoundedRectangle(b, skin::radius);
+    }
+    // Active = these are the lanes the step editor is editing. Launched = its chord is
+    // what the arp is chewing on. They are different things and both need to be visible.
+    if (active || launched)
+    {
+        g.setColour(launched ? accent : accent.withAlpha(0.55f));
+        g.drawRoundedRectangle(b.reduced(0.75f), skin::radius, launched ? 1.6f : 1.0f);
+    }
+
+    auto area = b.reduced(5.0f, 4.0f);
+
+    g.setColour(launched ? accent : skin::textFaint);
+    g.setFont(skin::micro(9.0f));
+    g.drawText(juce::String(index + 1), area.removeFromTop(11.0f), juce::Justification::topLeft);
+
+    // The chord it will play, which is the whole reason a slot is a card and not a letter.
+    g.setColour(slot.chordNotes.empty() ? skin::textFaint : skin::text);
+    g.setFont(skin::uiSemi(13.0f));
+    g.drawText(slot.chordName.isNotEmpty() ? slot.chordName
+                                           : (slot.chordNotes.empty() ? juce::String("--")
+                                                                      : juce::String("Chord")),
+               area.removeFromTop(17.0f), juce::Justification::centred, false);
+
+    // What it will install: the shape and the rate, or "--" where the slot leaves the
+    // current setting alone.
+    static const char* shapeNames[] = { "Up", "Down", "Up-Dn", "Dn-Up",
+                                        "Up&Dn", "Dn&Up", "Played", "Rev", "Pattern" };
+    static const char* rateNames[] = { "16 bar", "8 bar", "4 bar", "2 bar", "1 bar",
+                                       "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" };
+    juce::String sub;
+    if (slot.shape >= 0 && slot.shape <= ArpEngine::numDirections)
+        sub = shapeNames[slot.shape];
+    if (slot.rate >= 0 && slot.rate < (int) (sizeof(rateNames) / sizeof(rateNames[0])))
+        sub += (sub.isEmpty() ? "" : " ") + juce::String(rateNames[slot.rate]);
+    g.setColour(skin::textDim);
+    g.setFont(skin::ui(10.0f));
+    g.drawText(sub.isEmpty() ? juce::String("--") : sub, area.removeFromTop(13.0f),
+               juce::Justification::centred, false);
+
+    // The launch triangle, bottom-right: the eye's target, though the whole card is live.
+    const auto tri = area.removeFromBottom(12.0f).removeFromRight(16.0f);
+    juce::Path p;
+    p.addTriangle(tri.getX(), tri.getY(), tri.getX(), tri.getBottom(), tri.getRight(), tri.getCentreY());
+    g.setColour(launched ? accent : skin::textFaint);
+    g.fillPath(p);
 }
 
 void ArpPanel::buildControls()
 {
-    title.setText("Arpeggiator", juce::dontSendNotification);
-    title.setFont(skin::uiSemi(16.0f).withExtraKerningFactor(0.04f));
-    addAndMakeVisible(title);
-
-    addAndMakeVisible(onButton);
-    onAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpOn", onButton);
-
-    closeButton.onClick = [this] { if (onClose) onClose(); };
-    addAndMakeVisible(closeButton);
+    // No title, On or Close here: the Arp section bar above the panel carries all three
+    // (see KeysEditor). They are still members so the overlay mode this class kept for
+    // Keys Host has something to fall back on, but nothing parents them any more.
 
     // Globals: rate + feel.
     styleLabel(rateLabel, "Rate");
@@ -461,21 +633,63 @@ void ArpPanel::buildControls()
     shapeBox.setTooltip("A shape arpeggiates the held chord. \"Pattern\" opens the step editor.");
     addAndMakeVisible(shapeBox);
 
+    // Step buttons beside both lists. Walking the shapes is what you actually do to an arp
+    // while it plays, and a combo costs a click, a travel down the menu and a second click
+    // to do it; these cost one click each and never move the pointer off the panel.
+    for (auto* b : { &shapePrev, &shapeNext, &ratePrev, &rateNext })
+        addAndMakeVisible(*b);
+    shapePrev.onClick = [this] { stepCombo(shapeBox, -1); };
+    shapeNext.onClick = [this] { stepCombo(shapeBox, 1); };
+    ratePrev.onClick = [this] { stepCombo(rateBox, -1); };
+    rateNext.onClick = [this] { stepCombo(rateBox, 1); };
+    shapePrev.setTooltip("Previous shape.");
+    shapeNext.setTooltip("Next shape.");
+    ratePrev.setTooltip("Slower rate.");
+    rateNext.setTooltip("Faster rate.");
+    // A button's accessible name is its text, and all four of these say "<" or ">". Name
+    // them properly: a screen reader gets something meaningful, and the screenshot script
+    // can drive one particular stepper through UI Automation instead of the first match.
+    shapePrev.setTitle("Previous shape");
+    shapeNext.setTitle("Next shape");
+    ratePrev.setTitle("Slower rate");
+    rateNext.setTitle("Faster rate");
+
     styleLabel(octavesLabel, "Octaves");
     addAndMakeVisible(octavesLabel);
     octavesSlider.setSliderStyle(juce::Slider::IncDecButtons);
-    octavesSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 40, 26);
+    octavesSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 34, 26);
     octavesSlider.setRange(1, 4, 1);
     addAndMakeVisible(octavesSlider);
     octavesAtt = std::make_unique<SliderAtt>(processor.apvts, "arpOctaves", octavesSlider);
 
-    styleLabel(swingLabel, "Swing");
-    addAndMakeVisible(swingLabel);
-    swingSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    swingSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 26);
-    swingSlider.setRange(0.0, 0.75, 0.01);
-    addAndMakeVisible(swingSlider);
+    // Swing, Gate and Chance as knobs with the value in the middle: three continuous
+    // controls side by side, where three labelled horizontal sliders would have eaten the
+    // whole width of the group. The knob is the skin's machined rotary (KnobBank uses the
+    // same one), and 46 px clears the mouse-only floor comfortably.
+    const auto knob = [this](juce::Slider& s, juce::Label& lab, const juce::String& text,
+                             double lo, double hi, double step, const juce::String& tip)
+    {
+        styleLabel(lab, text);
+        addAndMakeVisible(lab);
+        s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+        s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 52, 16);
+        s.setRange(lo, hi, step);
+        s.setTooltip(tip);
+        addAndMakeVisible(s);
+    };
+    knob(swingSlider, swingLabel, "Swing", 0.0, 0.75, 0.01,
+         "Delay the offbeat steps, as a fraction of a step.");
     swingAtt = std::make_unique<SliderAtt>(processor.apvts, "arpSwing", swingSlider);
+
+    knob(gateSlider, gateLabel, "Gate", 5.0, 200.0, 1.0,
+         "How much of each step the note sounds for. Over 100% ties into the next step. "
+         "Multiplies the Gate lane, so it works on any shape.");
+    gateAtt = std::make_unique<SliderAtt>(processor.apvts, "arpGate", gateSlider);
+
+    knob(chanceSlider, chanceLabel, "Chance", 0.0, 100.0, 1.0,
+         "How likely each step is to fire. Multiplies the Probability lane, so it thins a "
+         "run out on any shape.");
+    chanceAtt = std::make_unique<SliderAtt>(processor.apvts, "arpChance", chanceSlider);
 
     for (auto* b : { &latchButton, &retriggerButton })
         addAndMakeVisible(*b);
@@ -523,36 +737,38 @@ void ArpPanel::buildControls()
     addAndMakeVisible(linkButton);
     linkAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpLinkLanes", linkButton);
 
-    // Patterns: A-H recall, Copy (arm, then click a target letter), Randomize.
-    for (int i = 0; i < (int) patternButtons.size(); ++i)
+    // Twelve launchable slots. Left-click launches (or, while Copy is armed, is the copy
+    // target); right-click opens the slot menu, which is an accelerator for the buttons
+    // beside the row.
+    for (int i = 0; i < (int) slotCards.size(); ++i)
     {
-        auto& b = patternButtons[(size_t) i];
-        b.setButtonText(juce::String::charToString((juce::juce_wchar) ('A' + i)));
-        b.onClick = [this, i] { recallOrCopy(i); };
-        addAndMakeVisible(b);
+        auto card = std::make_unique<SlotCard>(processor, i);
+        card->onClick = [this, i] { recallOrCopy(i); };
+        card->onRightClick = [this, i] { showSlotMenu(i); };
+        card->setTooltip("Launch slot " + juce::String(i + 1) + ": its pattern, its shape and "
+                         "rate, and the chord it holds.");
+        addAndMakeVisible(*card);
+        slotCards[(size_t) i] = std::move(card);
     }
+
+    stopButton.onClick = [this] { processor.stopArpSlot(); refreshPatternButtons(); };
+    stopButton.setTooltip("Release the chord a slot is holding. The pattern stays put.");
+    addAndMakeVisible(stopButton);
+
     copyButton.onClick = [this]
     {
-        if (copyArmed)
-        {
-            copyArmed = false;
-            copyFromIndex = -1;
-        }
-        else
-        {
-            copyArmed = true;
-            copyFromIndex = processor.arpActivePattern();
-        }
-        refreshPatternButtons();
+        setArmed(armed == armCopy ? armNone : armCopy, processor.arpActivePattern());
     };
+    copyButton.setTooltip("Copy the live pattern, then click the slot to copy it into.");
     addAndMakeVisible(copyButton);
 
-    cancelButton.onClick = [this]
-    {
-        copyArmed = false;
-        copyFromIndex = -1;
-        refreshPatternButtons();
-    };
+    // Clearing a slot's chord needs a left-click path of its own: it is in the slot's
+    // right-click menu too, but that menu is only ever an accelerator (see CLAUDE.md).
+    clearButton.onClick = [this] { setArmed(armed == armClear ? armNone : armClear); };
+    clearButton.setTooltip("Click, then click a slot to take its chord away. The pattern stays.");
+    addAndMakeVisible(clearButton);
+
+    cancelButton.onClick = [this] { setArmed(armNone); };
     addAndMakeVisible(cancelButton);
     cancelButton.setVisible(false);
 
@@ -592,11 +808,21 @@ void ArpPanel::setInlineMode(bool b)
 
 namespace
 {
-    // Heights of the two layouts, kept next to the resized() that spends them: title +
-    // the two globals rows, plus (in Pattern) tabs, grid, mute row, the steps row and
-    // the pattern row, with the 12 px inner padding at both ends.
-    constexpr int arpShapeH = 12 + (28 + 8) + (40 + 6) + 40 + 12;
-    constexpr int arpPatternH = arpShapeH + (34 + 6) + (150 + 6) + (14 + 2) + (34 + 10) + (48 + 8) + 40;
+    // Heights of the two layouts, kept next to the resized() that spends them. Every arp
+    // has the title row, the control band and the slot row with its buttons; Pattern adds
+    // the lane tabs, the grid and the mute row between the two. 12 px padding at each end.
+    // The band: a caption rule, then two 42 px control rows. A knob column spans both.
+    constexpr int arpBandTop = 18;               // caption rule + its clearance
+    constexpr int arpBandRow = 42;
+    constexpr int arpBandInner = arpBandRow * 2 + 6;
+    constexpr int arpBandH = arpBandTop + arpBandInner + 4;
+    constexpr int arpSlotsH = 58;
+    constexpr int arpShapeH = 12 + (arpBandH + 12) + (arpSlotsH + 8) + 34 + 12;
+    constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10);
+
+    // The band's three groups. Weights, not pixels: the panel is as wide as the editor and
+    // the groups share whatever that is.
+    constexpr int groupWeights[3] = { 36, 42, 22 }; // Pattern, Playback, Steps
 } // namespace
 
 int ArpPanel::preferredHeight() const
@@ -622,49 +848,203 @@ void ArpPanel::paint(juce::Graphics& g)
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
     skin::glowRect(g, b, skin::panelRadius, skin::accentOf(*this).base, inlineMode ? 0.30f : 0.55f);
+
+    // The band's group boxes: a hairline frame and a micro-caps caption sitting in a gap
+    // punched through the top rule, after the hardware panels this layout follows. Drawn
+    // rather than built from components - it is four lines of Graphics per group.
+    g.setFont(skin::micro(9.5f).withExtraKerningFactor(0.16f));
+    for (const auto& grp : groups)
+    {
+        if (! grp.visible || grp.bounds.isEmpty())
+            continue;
+        const auto r = grp.bounds.toFloat();
+        const auto caption = grp.caption.toUpperCase();
+        const auto textW = juce::GlyphArrangement::getStringWidth(skin::micro(9.5f).withExtraKerningFactor(0.16f),
+                                                                 caption);
+        const float capY = r.getY() + 5.0f;
+
+        g.setColour(juce::Colours::white.withAlpha(0.07f));
+        juce::Path frame;
+        frame.startNewSubPath(r.getCentreX() - textW * 0.5f - 8.0f, capY);
+        frame.lineTo(r.getX() + skin::radius, capY);
+        frame.quadraticTo(r.getX(), capY, r.getX(), capY + skin::radius);
+        frame.lineTo(r.getX(), r.getBottom() - skin::radius);
+        frame.quadraticTo(r.getX(), r.getBottom(), r.getX() + skin::radius, r.getBottom());
+        frame.lineTo(r.getRight() - skin::radius, r.getBottom());
+        frame.quadraticTo(r.getRight(), r.getBottom(), r.getRight(), r.getBottom() - skin::radius);
+        frame.lineTo(r.getRight(), capY + skin::radius);
+        frame.quadraticTo(r.getRight(), capY, r.getRight() - skin::radius, capY);
+        frame.lineTo(r.getCentreX() + textW * 0.5f + 8.0f, capY);
+        g.strokePath(frame, juce::PathStrokeType(1.0f));
+
+        g.setColour(skin::textDim);
+        g.drawText(caption, grp.bounds.withHeight(12).withY((int) capY - 6),
+                   juce::Justification::centred);
+    }
 }
 
 void ArpPanel::resized()
 {
     auto area = cardBounds().reduced(12);
 
-    auto top = area.removeFromTop(28);
-    title.setBounds(top.removeFromLeft(160));
-    closeButton.setBounds(top.removeFromRight(80).withSizeKeepingCentre(80, 28));
-    onButton.setBounds(top.removeFromRight(70).withSizeKeepingCentre(70, 28));
-    area.removeFromTop(8);
+    // No title row. The section bar above says ARP and carries the On toggle and Detach, so a
+    // second "Arpeggiator" caption with its own On and Close was three duplicated controls and
+    // a wasted 38 px of a panel that is already the tallest thing in the editor.
 
+    // --- The control band: three captioned groups sharing the width ---------------
+    auto band = area.removeFromTop(arpBandH);
+    area.removeFromTop(12);
+    {
+        const int gaps = 2 * 10;
+        const int usable = band.getWidth() - gaps;
+        const int total = groupWeights[0] + groupWeights[1] + groupWeights[2];
+        for (int i = 0; i < 3; ++i)
+        {
+            const int w = i == 2 ? band.getWidth() : usable * groupWeights[i] / total;
+            groups[(size_t) i].bounds = band.removeFromLeft(w);
+            if (i < 2)
+                band.removeFromLeft(10);
+        }
+    }
+    groups[0].caption = "Pattern";
+    groups[1].caption = "Playback";
+    groups[2].caption = "Steps";
+
+    // Inside a group: past the caption rule, then two rows of controls, or the full height
+    // for a knob column. A control with a label above it gets `cell`; a bare toggle gets
+    // `toggleCell`, which drops the same 14 px so the two line up.
+    const auto groupInner = [](const juce::Rectangle<int>& g)
+    {
+        return g.reduced(10, 0).withTrimmedTop(arpBandTop).withHeight(arpBandInner);
+    };
+    const auto splitRows = [](juce::Rectangle<int> inner, juce::Rectangle<int>& rowA,
+                              juce::Rectangle<int>& rowB)
+    {
+        rowA = inner.removeFromTop(arpBandRow);
+        inner.removeFromTop(6);
+        rowB = inner.removeFromTop(arpBandRow);
+    };
     const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
     {
         auto c = row.removeFromLeft(w);
         row.removeFromLeft(8);
         lab.setBounds(c.removeFromTop(14));
-        ctl.setBounds(c);
+        ctl.setBounds(c.withSizeKeepingCentre(c.getWidth(), juce::jmin(c.getHeight(), 28)));
     };
     const auto toggleCell = [](juce::Rectangle<int>& row, int w, juce::Component& ctl)
     {
         auto c = row.removeFromLeft(w);
-        row.removeFromLeft(8);
+        row.removeFromLeft(6);
         ctl.setBounds(c.withTrimmedTop(14));
     };
+    // A knob spans the group's whole height: caption, then the rotary, then its value.
+    // Squeezed into one 42 px row it came out a 16 px dot, well under the mouse-only floor.
+    const auto knobColumn = [](juce::Rectangle<int>& area, int w, juce::Label& lab, juce::Slider& s)
+    {
+        auto c = area.removeFromLeft(w);
+        area.removeFromLeft(6);
+        lab.setBounds(c.removeFromTop(12));
+        s.setBounds(c);
+    };
+    const auto stepper = [](juce::Rectangle<int>& row, juce::Component& prev, juce::Component& next)
+    {
+        auto c = row.removeFromLeft(72).withTrimmedTop(14);
+        row.removeFromLeft(8);
+        c = c.withSizeKeepingCentre(c.getWidth(), juce::jmin(c.getHeight(), 28));
+        prev.setBounds(c.removeFromLeft(34));
+        next.setBounds(c.removeFromRight(34));
+    };
 
-    auto globalsA = area.removeFromTop(40);
-    area.removeFromTop(6);
-    cell(globalsA, 160, shapeLabel, shapeBox); // Shape leads: it decides what else exists
-    cell(globalsA, 110, rateLabel, rateBox);
-    toggleCell(globalsA, 60, dotButton);
-    toggleCell(globalsA, 60, tripButton);
-    toggleCell(globalsA, 80, anchorButton);
+    // PATTERN: what it plays and how fast. Shape leads - it decides what else exists.
+    {
+        juce::Rectangle<int> rowA, rowB;
+        splitRows(groupInner(groups[0].bounds), rowA, rowB);
+        // Fixed widths, not "whatever is left": letting the combo soak up the slack starved
+        // Trip and Dot down to an ellipsis while Rate sat wider than its longest entry.
+        // These add up to the ~315 px this group actually gets at the editor's minimum
+        // width, which is a good deal less than it looks on a 150% display - every number
+        // here is logical pixels, and the panel is ~950 of them wide, not ~1450.
+        cell(rowA, juce::jlimit(110, 235, rowA.getWidth() - 80), shapeLabel, shapeBox);
+        stepper(rowA, shapePrev, shapeNext);
+        cell(rowB, 100, rateLabel, rateBox);
+        stepper(rowB, ratePrev, rateNext);
+        toggleCell(rowB, 58, tripButton);
+        toggleCell(rowB, 54, dotButton);
+    }
 
-    auto globalsB = area.removeFromTop(40);
-    area.removeFromTop(8);
-    cell(globalsB, 120, octavesLabel, octavesSlider);
-    cell(globalsB, 180, swingLabel, swingSlider);
-    toggleCell(globalsB, 80, latchButton);
-    toggleCell(globalsB, 100, retriggerButton);
+    // PLAYBACK: how the run behaves once it is going. Three knobs down the left, then the
+    // two rows of discrete controls. Anchor sits here rather than with Rate: it is about
+    // how the clock runs, not about what the pattern is.
+    {
+        auto inner = groupInner(groups[1].bounds);
+        knobColumn(inner, 50, swingLabel, swingSlider);
+        knobColumn(inner, 50, gateLabel, gateSlider);
+        knobColumn(inner, 50, chanceLabel, chanceSlider);
+        inner.removeFromLeft(8);
 
-    // Everything below exists only in Pattern shape. Laying it out regardless is
-    // harmless (it is all invisible) and keeps this function free of a second branch.
+        // ~195 px left after the knobs, and every one of these is spent. A toggle needs
+        // 20 px of tick box plus 9 px of gap before its text starts (see the skin's
+        // drawToggleButton), which is why they look wider than their words.
+        juce::Rectangle<int> rowA, rowB;
+        splitRows(inner, rowA, rowB);
+        cell(rowA, 104, octavesLabel, octavesSlider); // fixed: stretched, its +/- became slabs
+        toggleCell(rowA, 83, anchorButton);
+        toggleCell(rowB, 78, latchButton);
+        toggleCell(rowB, 111, retriggerButton);
+    }
+
+    // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives
+    // rather than floating under the grid where it used to.
+    {
+        juce::Rectangle<int> rowA, rowB;
+        splitRows(groupInner(groups[2].bounds), rowA, rowB);
+        auto stepsCell = rowA.removeFromLeft(juce::jlimit(120, 150, rowA.getWidth()));
+        stepsLabel.setBounds(stepsCell.removeFromTop(14));
+        stepsCell = stepsCell.withSizeKeepingCentre(stepsCell.getWidth(), juce::jmin(stepsCell.getHeight(), 28));
+        stepsMinus.setBounds(stepsCell.removeFromLeft(34));
+        stepsPlus.setBounds(stepsCell.removeFromRight(34));
+        stepsReadout.setBounds(stepsCell);
+        auto speedCell = rowB.removeFromLeft(64);
+        rowB.removeFromLeft(8);
+        speedLabel.setBounds(speedCell.removeFromTop(14));
+        speedButton.setBounds(speedCell.withSizeKeepingCentre(speedCell.getWidth(),
+                                                              juce::jmin(speedCell.getHeight(), 28)));
+        linkButton.setBounds(rowB.withTrimmedTop(14));
+    }
+
+    // --- The slot row and its buttons, at the bottom in both shapes ----------------
+    auto actionRow = area.removeFromBottom(34);
+    area.removeFromBottom(8);
+    auto slotRow = area.removeFromBottom(arpSlotsH);
+    area.removeFromBottom(12);
+    {
+        const int n = (int) slotCards.size();
+        const int gap = 4;
+        const int w = juce::jmax(46, (slotRow.getWidth() - gap * (n - 1)) / n);
+        for (auto& c : slotCards)
+        {
+            if (c != nullptr)
+                c->setBounds(slotRow.removeFromLeft(w));
+            slotRow.removeFromLeft(gap);
+        }
+        copyButton.setBounds(actionRow.removeFromLeft(armed == armCopy ? 130 : 84));
+        actionRow.removeFromLeft(4);
+        clearButton.setBounds(actionRow.removeFromLeft(armed == armClear ? 136 : 84));
+        // Cancel only exists while something is armed, so it only takes width then -
+        // otherwise it leaves a hole that reads as a missing button.
+        if (armed != armNone)
+        {
+            actionRow.removeFromLeft(4);
+            cancelButton.setBounds(actionRow.removeFromLeft(80));
+        }
+        actionRow.removeFromLeft(12);
+        stopButton.setBounds(actionRow.removeFromLeft(84));
+        actionRow.removeFromLeft(12);
+        randomizeButton.setBounds(actionRow.removeFromLeft(110));
+    }
+
+    // Everything left exists only in Pattern shape. Laying it out regardless is harmless
+    // (it is all invisible) and keeps this function free of a second branch.
 
     // Lane tabs, then the one lane they select, then the mute row beneath it. Six
     // stacked lanes needed ~750 px and the panel gets ~600, so the Probability lane and
@@ -678,7 +1058,7 @@ void ArpPanel::resized()
         tabsRow.removeFromLeft(4);
     }
 
-    auto gridArea = area.removeFromTop(150);
+    auto gridArea = area.removeFromTop(140);
     area.removeFromTop(6);
     for (auto& lr : laneRows)
         if (lr.grid != nullptr)
@@ -690,36 +1070,6 @@ void ArpPanel::resized()
     // not the other silently slid every mute cell off the step it belongs to.
     muteRowLabel.setBounds(area.removeFromTop(14));
     area.removeFromTop(2);
-    auto muteArea = area.removeFromTop(34);
-    area.removeFromTop(10);
-    muteRow->setBounds(muteArea); // same x and width as gridArea, both carved off `area`
-
-    auto stepsRow = area.removeFromTop(48);
-    area.removeFromTop(8);
-    auto stepsCell = stepsRow.removeFromLeft(150);
-    stepsLabel.setBounds(stepsCell.removeFromTop(14));
-    stepsMinus.setBounds(stepsCell.removeFromLeft(34));
-    stepsPlus.setBounds(stepsCell.removeFromRight(34));
-    stepsReadout.setBounds(stepsCell);
-    stepsRow.removeFromLeft(12);
-
-    auto speedCell = stepsRow.removeFromLeft(90);
-    speedLabel.setBounds(speedCell.removeFromTop(14));
-    speedButton.setBounds(speedCell);
-    stepsRow.removeFromLeft(16);
-    linkButton.setBounds(stepsRow.removeFromLeft(130).withTrimmedTop(14));
-
-    auto patternRow = area.removeFromTop(40);
-    for (auto& b : patternButtons)
-    {
-        b.setBounds(patternRow.removeFromLeft(38));
-        patternRow.removeFromLeft(4);
-    }
-    patternRow.removeFromLeft(8);
-    copyButton.setBounds(patternRow.removeFromLeft(120));
-    patternRow.removeFromLeft(4);
-    cancelButton.setBounds(patternRow.removeFromLeft(80));
-    patternRow.removeFromLeft(12);
-    randomizeButton.setBounds(patternRow.removeFromLeft(120));
+    muteRow->setBounds(area.removeFromTop(32)); // same x and width as gridArea, both off `area`
 }
 } // namespace keys

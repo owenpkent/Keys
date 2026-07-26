@@ -352,12 +352,26 @@ void ChordGenPanel::buildControls()
         auto row = std::make_unique<PadRow>();
 
         // Press-and-hold auditions the chord: same gesture as the pad strip, same code path.
+        // Including "To Arp" - it is a mode about what clicking a chord card means, so a card
+        // here has to obey it too. It used to be a flag private to the pad strip, which left
+        // this grid playing momentarily while the strip held, and its note-offs then silenced
+        // whatever the arp was chewing on.
         row->play.onStateChange = [this, v]
         {
             auto& r = *padRows[(size_t) v];
             const int slot = processor.padPageOffset() + v;
             const bool down = r.play.isDown();
-            if (down && ! r.playHeld)
+            if (processor.layout.toArp)
+            {
+                if (down && ! r.playHeld)
+                {
+                    if (processor.arpHeldPad() == slot)
+                        processor.releaseArpChord();
+                    else
+                        processor.holdArpChordFromPad(slot);
+                }
+            }
+            else if (down && ! r.playHeld)
                 processor.pressChordPad(slot);
             else if (! down && r.playHeld)
                 processor.releaseChordPad(slot);

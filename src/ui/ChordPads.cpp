@@ -144,6 +144,18 @@ void ChordPads::paint(juce::Graphics& g)
             g.drawText(pad.name, b.reduced(4.0f), juce::Justification::centred);
         }
 
+        // The pad currently feeding the arp. A ring rather than the "active" fill, because
+        // it is a different state: the chord is held for the arp to chew on, not simply
+        // sounding, and both can be true at once.
+        // Not gated on `filled`: a card cleared while it was feeding the arp still owns the
+        // sounding chord, and an invisible ring is a chord you cannot find or stop.
+        if (processor.arpHeldPad() == i)
+        {
+            g.setColour(skin::accentOf(*this).hot);
+            g.drawRoundedRectangle(b.reduced(1.0f), kRadius, 2.0f);
+            skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot, 0.8f);
+        }
+
         // Locked pads carry a corner dot. It is an indicator, not a target: the toggle
         // lives in the Chords panel, where it can be a full-size button.
         if (filled && pad.locked)
@@ -193,6 +205,23 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
+bool ChordPads::toArp() const
+{
+    return processor.layout.toArp;
+}
+
+void ChordPads::setToArp(bool b)
+{
+    if (processor.layout.toArp == b)
+        return;
+    processor.layout.toArp = b;
+    // Leaving the mode must not strand a pad holding, but it has no business stopping a
+    // chord an arp slot launched - that one was not put there from here.
+    if (! b && processor.arpHeldPad() >= 0)
+        processor.releaseArpChord();
+    repaint();
+}
+
 void ChordPads::showPadMenu(int slot)
 {
     const auto& pad = processor.chordPad(slot);
@@ -201,6 +230,21 @@ void ChordPads::showPadMenu(int slot)
     juce::PopupMenu menu;
     menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");
     menu.addItem(2, "Clear pad", ! pad.notes.empty() && ! pad.locked);
+
+    // Bind this card to an arp slot, so launching that slot plays this chord through that
+    // slot's pattern. The other half of the "cards into the arp" pair: To Arp holds a card
+    // right now, this parks one in a slot for later.
+    juce::PopupMenu slots;
+    for (int s = 0; s < KeysProcessor::numArpPatterns; ++s)
+    {
+        const auto& target = processor.arpPatternSlot(s);
+        auto label = juce::String(s + 1);
+        if (target.chordName.isNotEmpty())
+            label += "  (" + target.chordName + ")";
+        slots.addItem(100 + s, label, ! pad.notes.empty());
+    }
+    menu.addSeparator();
+    menu.addSubMenu("Send to arp slot", slots, ! pad.notes.empty());
 
     const auto area = localAreaToGlobal(padBounds(slot - processor.padPageOffset()).toNearestInt());
     juce::Component::SafePointer<ChordPads> safe(this);
@@ -221,6 +265,11 @@ void ChordPads::showPadMenu(int slot)
                 safe->onEditToggle(slot); // end the edit before wiping its target
             safe->processor.clearChordPad(slot);
         }
+        else if (choice >= 100 && choice < 100 + KeysProcessor::numArpPatterns)
+        {
+            const auto& pad = safe->processor.chordPad(slot);
+            safe->processor.setArpSlotChord(choice - 100, pad.notes, pad.name);
+        }
     });
 }
 
@@ -240,6 +289,34 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     dragging = false;
     playing = -1;
     dragSource = cellAt(e.position);
+
+    // To Arp: a filled pad hands its chord to the arpeggiator and it stays there. Not a
+    // beat-pad press, so `playing` stays -1 and mouseUp has nothing to release; a second
+    // click on the same pad takes it back. Checked before the beat-pad branch because in
+    // this mode the click means something else entirely.
+    if (toArp() && dragSource >= 0
+        && (! processor.chordPad(dragSource).notes.empty() || processor.arpHeldPad() == dragSource))
+    {
+        // The second half of that condition matters: a pad whose card was cleared while it
+        // was feeding the arp has no notes left but is still the holder, and it has to stay
+        // clickable or the chord is unreachable.
+        if (processor.arpHeldPad() == dragSource)
+            processor.releaseArpChord();
+        else
+            processor.holdArpChordFromPad(dragSource);
+        dragSource = -1; // and it is not a drag handle in this mode either
+        repaint();
+        return;
+    }
+
+    // The live "current chord" card is a chord card too, and the mode's tooltip says so.
+    if (toArp() && dragSource == -2 && isChord(currentNotes))
+    {
+        processor.holdArpChord(currentNotes, currentName);
+        dragSource = -1;
+        repaint();
+        return;
+    }
 
     // Beat-pad: a filled pad fires the instant you press it (release stops it below).
     if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())

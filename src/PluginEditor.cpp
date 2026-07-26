@@ -23,7 +23,6 @@ namespace
     constexpr int viewBarH = 34;                      // centre-view tabs + pad transport
     constexpr int knobRowH = 110;
     constexpr int padRowH = 96;
-    constexpr int pageRowH = 34;                      // the four page buttons, under the pads
     constexpr int dockedKeybedH = 212;                // 185 px of key plus a little body
 
     juce::StringArray channelItems()
@@ -171,9 +170,8 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         b.onClick = [this, view] { setCentreView(view); };
         addAndMakeVisible(b);
     };
-    tab(performButton, viewPerform, "Knobs and chord pads.");
+    tab(performButton, viewPerform, "The eight CC knobs.");
     tab(chordsButton, viewChords, "Generate chords for this page.");
-    tab(arpButton, viewArp, "Arpeggiator: per-step lanes.");
     // Four explicit page buttons, sat with the pads rather than a "1/4" transport parked
     // up on the view bar. One click reaches any page, and what it pages is obvious from
     // where it is.
@@ -192,19 +190,44 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     }
 
     // Section folds. The bars carry their own toggle state; the sub-section chips
-    // (Knobs / Pads / Wheels) are plain toggles on the bar they belong to.
+    // (Knobs / Wheels) are plain toggles on the bar they belong to.
     auto& lay = processor.layout;
     controlsBar.onClick = [this] { processor.layout.controls = controlsBar.getToggleState(); applyLayout(); };
     keyboardBar.onClick = [this] { processor.layout.keyboard = keyboardBar.getToggleState(); applyLayout(); };
+    padsBar.onClick = [this] { processor.layout.pads = padsBar.getToggleState(); applyLayout(); };
     centreBar.onClick = [this]
     {
         processor.layout.centre = centreBar.getToggleState();
         refreshCentrePanels(); // folded away, the panel it was showing is destroyed
         applyLayout();
     };
+    arpBar.onClick = [this]
+    {
+        processor.layout.arp = arpBar.getToggleState();
+        refreshArpPanel(); // folded away, the panel is destroyed; the arp keeps running
+        applyLayout();
+    };
     addAndMakeVisible(controlsBar);
     addAndMakeVisible(centreBar);
+    addAndMakeVisible(padsBar);
+    addAndMakeVisible(arpBar);
     addAndMakeVisible(keyboardBar);
+
+    // On and Detach ride on the Arp *bar*, not inside the section, so folding the editor
+    // away does not take the arp's power switch with it. Same reasoning as Sustain and All
+    // Off living on the Keyboard bar.
+    arpOnButton.setTooltip("Arpeggiate whatever is sounding.");
+    addAndMakeVisible(arpOnButton);
+    arpOnAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpOn", arpOnButton);
+
+    arpDetachButton.setClickingTogglesState(true);
+    arpDetachButton.setTooltip("Put the arpeggiator in its own window, so it can be as wide as "
+                               "it likes without stretching the rest of the plugin.");
+    arpDetachButton.onClick = [this] { setArpDetached(arpDetachButton.getToggleState()); };
+    addAndMakeVisible(arpDetachButton);
+
+    arpHolder.layout = [this] { layoutArpHolder(); };
+    addAndMakeVisible(arpHolder);
 
     themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
@@ -225,8 +248,16 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         addAndMakeVisible(b);
     };
     chip(knobsButton, lay.knobs, "Show or hide the eight CC knobs.");
-    chip(padsButton, lay.pads, "Show or hide the chord-pad strip.");
     chip(wheelsButton, lay.wheels, "Show or hide the mod and pitch wheels.");
+
+    toArpButton.setClickingTogglesState(true);
+    toArpButton.setTooltip("Lit: clicking a chord card hands its chord to the arpeggiator and "
+                           "leaves it there. Click the lit card again to release it.");
+    toArpButton.onClick = [this] { chordPads.setToArp(toArpButton.getToggleState()); };
+    // The mode lives on the processor, so a window that was closed and reopened comes back
+    // in the state it left - which is what a chord still held into the arp requires.
+    toArpButton.setToggleState(lay.toArp, juce::dontSendNotification);
+    addAndMakeVisible(toArpButton);
 
     detachButton.setClickingTogglesState(true);
     detachButton.setTooltip("Put the keyboard in its own window, so you can resize it "
@@ -288,9 +319,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     applyAccent(lay.accent); // before the first layout, so nothing paints cyan then repaints
     syncSectionControls();
     refreshCentrePanels();
+    refreshArpPanel();
     applyLayout();
     if (lay.detached)
         setKeyboardDetached(true);
+    if (lay.arpDetached)
+        setArpDetached(true);
 
     startTimerHz(30);
 }
@@ -298,12 +332,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 KeysEditor::~KeysEditor()
 {
     stopTimer();
-    // Before anything else: the detached window's content is `keybedHolder`, a member of
-    // this editor. Tear the window down while that is still a live object.
+    // Before anything else: each detached window's content is a holder that is a member of
+    // this editor. Tear the windows down while those are still live objects.
     if (keyboardWindow != nullptr)
     {
         rememberDetachedBounds();
         keyboardWindow.reset();
+    }
+    if (arpWindow != nullptr)
+    {
+        rememberArpDetachedBounds();
+        arpWindow.reset();
     }
     if (styledWindow != nullptr)
         styledWindow->setLookAndFeel(nullptr);
@@ -408,7 +447,7 @@ void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::S
 
 void KeysEditor::setCentreView(int view)
 {
-    processor.layout.view = juce::jlimit(0, 2, view);
+    processor.layout.view = juce::jlimit(0, 1, view);
     processor.layout.centre = true; // picking a view unfolds the section it lives in
     refreshCentrePanels();
     applyLayout();
@@ -416,16 +455,14 @@ void KeysEditor::setCentreView(int view)
 
 void KeysEditor::refreshCentrePanels()
 {
-    // Only the view on show exists, and nothing exists while the section is folded.
-    // Building the generator or the arp is cheap enough to do on a click and expensive
-    // enough not to keep two of them warm behind each other.
+    // Only the view on show exists, and nothing exists while the section is folded. The
+    // generator builds 16 chord cards, which is cheap enough to do on a click and expensive
+    // enough not to keep warm behind the knob bank.
     const auto& lay = processor.layout;
     const int now = lay.centre ? lay.view : -1;
 
     if (now != viewChords)
         genPanel.reset();
-    if (now != viewArp)
-        arpPanel.reset();
 
     if (now == viewChords && genPanel == nullptr)
     {
@@ -435,17 +472,35 @@ void KeysEditor::refreshCentrePanels()
         addAndMakeVisible(*genPanel);
         genPanel->sendLookAndFeelChange(); // its controls were configured pre-parenting
     }
-    if (now == viewArp && arpPanel == nullptr)
+}
+
+void KeysEditor::refreshArpPanel()
+{
+    // The panel is the *view* of the arp, not the arp: destroying it folds the editor away
+    // and leaves the arpeggiator running, which is the whole point of the On toggle staying
+    // out on the bar.
+    if (! processor.layout.arp)
     {
-        arpPanel = std::make_unique<ArpPanel>(processor);
-        arpPanel->setInlineMode(true);
-        arpPanel->onClose = [this] { setCentreView(viewPerform); };
-        // Shape decides whether the step editor exists, so the panel's height changes
-        // under us; re-fit the editor when it does rather than clipping the lanes.
-        arpPanel->onPreferredHeightChanged = [this] { applyLayout(); };
-        addAndMakeVisible(*arpPanel);
-        arpPanel->sendLookAndFeelChange();
+        arpPanel.reset();
+        return;
     }
+    if (arpPanel != nullptr)
+        return;
+
+    arpPanel = std::make_unique<ArpPanel>(processor);
+    arpPanel->setInlineMode(true);
+    arpPanel->onClose = [this]
+    {
+        processor.layout.arp = false;
+        refreshArpPanel();
+        applyLayout();
+    };
+    // Shape decides whether the step editor exists, so the panel's height changes under us;
+    // re-fit the editor when it does rather than clipping the lanes.
+    arpPanel->onPreferredHeightChanged = [this] { applyLayout(); };
+    arpHolder.addAndMakeVisible(*arpPanel);
+    arpPanel->sendLookAndFeelChange();
+    layoutArpHolder();
 }
 
 void KeysEditor::showThemeMenu()
@@ -489,12 +544,15 @@ void KeysEditor::syncSectionControls()
     controlsBar.setToggleState(lay.controls, juce::dontSendNotification);
     centreBar.setToggleState(lay.centre, juce::dontSendNotification);
     centreBar.setCaption(viewNames[juce::jlimit(0, 2, lay.view)]);
+    padsBar.setToggleState(lay.pads, juce::dontSendNotification);
+    arpBar.setToggleState(lay.arp, juce::dontSendNotification);
     keyboardBar.setToggleState(lay.keyboard, juce::dontSendNotification);
     knobsButton.setToggleState(lay.knobs, juce::dontSendNotification);
-    padsButton.setToggleState(lay.pads, juce::dontSendNotification);
     wheelsButton.setToggleState(lay.wheels, juce::dontSendNotification);
     detachButton.setToggleState(lay.detached, juce::dontSendNotification);
     detachButton.setButtonText(lay.detached ? "Re-dock" : "Detach");
+    arpDetachButton.setToggleState(lay.arpDetached, juce::dontSendNotification);
+    arpDetachButton.setButtonText(lay.arpDetached ? "Re-dock" : "Detach");
 
     // The theme button is its own swatch: it wears the colour it sets, so the control and
     // the thing it controls are the same object.
@@ -505,18 +563,30 @@ void KeysEditor::syncSectionControls()
 
     performButton.setToggleState(lay.view == viewPerform, juce::dontSendNotification);
     chordsButton.setToggleState(lay.view == viewChords, juce::dontSendNotification);
-    arpButton.setToggleState(lay.view == viewArp, juce::dontSendNotification);
 
-    // Knobs/Pads belong to the Perform view; the page transport and Exclusive only act on
-    // the pad strip. None of them mean anything under another view, or under a folded one.
-    // The three tabs stay visible either way: they are how a folded centre comes back.
+    // Knobs is all that is left of the Perform view, so its chip is the only one that
+    // hides with another view. The two tabs stay visible either way: they are how a
+    // folded centre comes back.
     const bool perform = lay.view == viewPerform && lay.centre;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &knobsButton, &padsButton })
-        c->setVisible(perform);
-    for (auto& b : pageButtons)
-        b.setVisible(perform && lay.pads); // they page the pads; pointless without them
+    knobsButton.setVisible(perform);
     knobBank.setVisible(perform && lay.knobs);
-    chordPads.setVisible(perform && lay.pads);
+
+    // The arp holder is visible whenever its section is open, wherever it is parented;
+    // detached is a change of parent, not of visibility. On and Detach stay on the bar in
+    // every state, so the arp can be switched off without unfolding it first.
+    arpHolder.setVisible(lay.arp);
+    if (arpWindow != nullptr)
+        arpWindow->setVisible(lay.arp);
+    arpOnButton.setVisible(true);
+    arpDetachButton.setVisible(true);
+
+    // The pads are their own section now, so they and their page buttons follow only their
+    // own fold - not the centre view, and not which view the centre is showing. That is the
+    // whole point of the move: a chord card stays one click away while you edit the arp.
+    chordPads.setVisible(lay.pads);
+    for (auto& b : pageButtons)
+        b.setVisible(lay.pads); // they page the pads; pointless without them
+    toArpButton.setVisible(lay.pads); // it changes what a card click does; no cards, no meaning
 
     // The header rows and the keybed follow their bars; the wheels sit inside the keybed
     // holder, so they can only show when it does.
@@ -557,18 +627,20 @@ int KeysEditor::centreHeight() const
     const auto& lay = processor.layout;
     if (! lay.centre)
         return 0;
-    switch (lay.view)
-    {
-        case viewChords: return ChordGenPanel::preferredHeight;
-        case viewArp:    return arpPanel != nullptr ? arpPanel->preferredHeight() : 0;
-        default: break;
-    }
-    int h = 0;
-    if (lay.knobs)
-        h += knobRowH;
-    if (lay.pads)
-        h += (h > 0 ? 6 : 0) + padRowH + 4 + pageRowH; // the pads plus their page buttons
-    return h;
+    if (lay.view == viewChords)
+        return ChordGenPanel::preferredHeight;
+    // Perform is the knob bank alone since the pads moved out into their own section.
+    return lay.knobs ? knobRowH : 0;
+}
+
+int KeysEditor::arpHeight() const
+{
+    // Detached, the section occupies no height here at all - the same rule the keybed
+    // follows. Folded, likewise.
+    const auto& lay = processor.layout;
+    if (! lay.arp || lay.arpDetached)
+        return 0;
+    return arpPanel != nullptr ? arpPanel->preferredHeight() : 0;
 }
 
 int KeysEditor::idealHeight() const
@@ -581,6 +653,13 @@ int KeysEditor::idealHeight() const
     const int centre = centreHeight();
     if (centre > 0)
         h += 6 + centre;
+    h += 6 + SectionBar::height; // the Arp bar
+    const int arp = arpHeight();
+    if (arp > 0)
+        h += 4 + arp;
+    h += 6 + SectionBar::height; // the Pads bar
+    if (lay.pads)
+        h += 4 + padRowH;
     h += 6 + SectionBar::height; // the Keyboard bar
     if (lay.keyboard && ! lay.detached)
         h += 4 + dockedKeybedH;
@@ -593,8 +672,12 @@ int KeysEditor::minWidthForView() const
     // them has to stay at a full-size target. Grow rather than shrink the targets.
     // 960, not the old 820: the centre bar now also carries Sustain and All Off, and
     // below this the tabs and the pad transport start colliding.
+    //
+    // The arp asks for the wider floor too, but only while it is docked: in its own window
+    // it is free to be any width it likes and has no business setting this one.
     const auto& lay = processor.layout;
-    return (! lay.centre || lay.view == viewPerform) ? 960 : 1010;
+    const bool wide = (lay.centre && lay.view == viewChords) || (lay.arp && ! lay.arpDetached);
+    return wide ? 1010 : 960;
 }
 
 void KeysEditor::applyLayout()
@@ -663,8 +746,9 @@ void KeysEditor::setKeyboardDetached(bool detach)
         keybedHolder.addAndMakeVisible(detachedSizeBox);
         detachedSizeBox.sendLookAndFeelChange(); // configured before it was ever parented
         removeChildComponent(&keybedHolder);
-        keyboardWindow = std::make_unique<KeyboardWindow>(
-            lnf, keybedHolder, lay.detachedBounds,
+        keyboardWindow = std::make_unique<DetachedWindow>(
+            "Keys Keyboard", lnf, keybedHolder, lay.detachedBounds,
+            juce::Point<int> { 420, 190 }, juce::Point<int> { 1000, 300 },
             [this] { setKeyboardDetached(false); },   // its close button re-docks
             [this] { rememberDetachedBounds(); });
     }
@@ -686,6 +770,53 @@ void KeysEditor::rememberDetachedBounds()
 {
     if (keyboardWindow != nullptr)
         processor.layout.detachedBounds = keyboardWindow->getBounds();
+}
+
+void KeysEditor::setArpDetached(bool detach)
+{
+    auto& lay = processor.layout;
+    if (detach == (arpWindow != nullptr))
+    {
+        lay.arpDetached = detach; // already in the asked-for state; keep the flag honest
+        syncSectionControls();
+        return;
+    }
+    lay.arpDetached = detach;
+
+    // Detaching implies showing it: popping a window that then paints nothing would be a
+    // dead end, since the chevron that unfolds it is on a bar in the other window.
+    if (detach)
+    {
+        lay.arp = true;
+        refreshArpPanel();
+        removeChildComponent(&arpHolder);
+        arpWindow = std::make_unique<DetachedWindow>(
+            "Keys Arpeggiator", lnf, arpHolder, lay.arpDetachedBounds,
+            juce::Point<int> { 900, 300 }, juce::Point<int> { 1100, 520 },
+            [this] { setArpDetached(false); },        // its close button re-docks
+            [this] { rememberArpDetachedBounds(); });
+    }
+    else
+    {
+        rememberArpDetachedBounds();
+        arpWindow.reset(); // clears its content, handing arpHolder back
+        addAndMakeVisible(arpHolder);
+    }
+
+    syncSectionControls();
+    applyLayout();
+}
+
+void KeysEditor::rememberArpDetachedBounds()
+{
+    if (arpWindow != nullptr)
+        processor.layout.arpDetachedBounds = arpWindow->getBounds();
+}
+
+void KeysEditor::layoutArpHolder()
+{
+    if (arpPanel != nullptr)
+        arpPanel->setBounds(arpHolder.getLocalBounds());
 }
 
 void KeysEditor::layoutKeybed()
@@ -979,6 +1110,50 @@ void KeysEditor::resized()
     }
 
     area.removeFromTop(6);
+    arpBar.setBounds(area.removeFromTop(SectionBar::height));
+    {
+        // On and Detach sit on the bar, so both survive folding the section away.
+        auto bar = arpBar.contentArea();
+        arpDetachButton.setBounds(bar.removeFromRight(104).reduced(2, 0));
+        bar.removeFromRight(6);
+        arpOnButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
+    }
+    {
+        const int arp = arpHeight();
+        juce::Rectangle<int> arpArea;
+        if (arp > 0)
+        {
+            area.removeFromTop(4);
+            arpArea = area.removeFromTop(arp);
+        }
+        if (! lay.arpDetached)
+            arpHolder.setBounds(arpArea);
+    }
+
+    area.removeFromTop(6);
+    padsBar.setBounds(area.removeFromTop(SectionBar::height));
+    {
+        // The page buttons ride on the Pads bar, where they used to sit in a row of their
+        // own under the strip. One click still reaches any page, and the section keeps its
+        // height for pads instead of spending 34 px on a transport.
+        auto bar = padsBar.contentArea();
+        for (auto& b : pageButtons)
+        {
+            b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
+            bar.removeFromLeft(4);
+        }
+        bar.removeFromLeft(14);
+        toArpButton.setBounds(bar.removeFromLeft(88).reduced(0, 2));
+    }
+    juce::Rectangle<int> padsArea;
+    if (lay.pads)
+    {
+        area.removeFromTop(4);
+        padsArea = area.removeFromTop(padRowH);
+    }
+    chordPads.setBounds(padsArea);
+
+    area.removeFromTop(6);
     keyboardBar.setBounds(area.removeFromTop(SectionBar::height));
     {
         // The Keyboard bar carries two kinds of control, and they behave differently when
@@ -994,7 +1169,10 @@ void KeysEditor::resized()
             wheelsButton.setBounds(bar.removeFromRight(84).reduced(2, 0));
             bar.removeFromRight(14);
         }
-        panicButton.setBounds(bar.removeFromRight(84).reduced(0, 3));
+        // 24 px tall like Sustain and Exclusive beside it, not the old reduced(0, 3) which
+        // left it 20. The skin's button font scales with height, so those 4 px were also
+        // shrinking the label: All Off was the odd one out on the bar for no reason.
+        panicButton.setBounds(bar.removeFromRight(84).withSizeKeepingCentre(84, 24));
         bar.removeFromRight(6);
         sustainButton.setBounds(bar.removeFromRight(96).withSizeKeepingCentre(94, 24));
         bar.removeFromRight(6);
@@ -1010,30 +1188,8 @@ void KeysEditor::resized()
     // The centre views fill the slot the Perform pair would have used.
     if (genPanel != nullptr)
         genPanel->setBounds(centreArea);
-    if (arpPanel != nullptr)
-        arpPanel->setBounds(centreArea);
-    if (lay.view == viewPerform)
-    {
-        auto perform = centreArea;
-        if (lay.knobs)
-            knobBank.setBounds(perform.removeFromTop(knobRowH));
-        if (lay.knobs && lay.pads)
-            perform.removeFromTop(6);
-        if (lay.pads)
-        {
-            chordPads.setBounds(perform.removeFromTop(padRowH));
-            perform.removeFromTop(4);
-
-            // Page buttons directly under the pads they page. Left-aligned with the strip
-            // so the connection is positional, not something to work out from a label.
-            auto pageRow = perform.removeFromTop(pageRowH);
-            for (auto& b : pageButtons)
-            {
-                b.setBounds(pageRow.removeFromLeft(46).reduced(1, 0));
-                pageRow.removeFromLeft(4);
-            }
-        }
-    }
+    if (lay.view == viewPerform && lay.knobs)
+        knobBank.setBounds(centreArea.withHeight(knobRowH));
 
     if (! lay.controls)
     {
@@ -1089,19 +1245,15 @@ void KeysEditor::resized()
 
 void KeysEditor::layoutToolRow(juce::Rectangle<int> row)
 {
-    // The centre bar's content: which view is showing, then the chord-pad transport. The
-    // three tabs are always there (they are how a folded centre comes back); everything to
-    // the right of them only acts on the pad strip, so it hides with the Perform view.
+    // The centre bar's content: which view is showing, then whatever that view folds. Both
+    // tabs are always there (they are how a folded centre comes back); Knobs is all the
+    // Perform view has left to fold now the pads and the arp have sections of their own.
     performButton.setBounds(row.removeFromLeft(78).reduced(0, 2));
     row.removeFromLeft(4);
     chordsButton.setBounds(row.removeFromLeft(72).reduced(0, 2));
-    row.removeFromLeft(4);
-    arpButton.setBounds(row.removeFromLeft(60).reduced(0, 2));
     row.removeFromLeft(14);
 
     knobsButton.setBounds(row.removeFromLeft(66).reduced(0, 2));
-    row.removeFromLeft(4);
-    padsButton.setBounds(row.removeFromLeft(60).reduced(0, 2));
-    row.removeFromLeft(14);}
+}
 
 } // namespace keys

@@ -79,6 +79,12 @@ public:
         bool usePattern = false;  // false: plain arpeggiator, the step lanes are not read
         int octaveRange = 1;      // 1..4, for direction modes
         float swing = 0.0f;       // 0..0.75, delays odd steps by that fraction of a step
+        // Gate and Chance as globals, not only as step lanes. The lanes are gated behind
+        // Shape == "Pattern", so on a plain shape there was no way to shorten a note or
+        // thin a run out at all; these multiply the lane value, so 100 leaves an edited
+        // pattern exactly as drawn and the two controls mean the same thing either way.
+        int gate = 100;           // 5..200 (% of the lane's own gate)
+        int chance = 100;         // 0..100 (% of the lane's own probability)
         bool latch = false;
         bool retrigger = true;    // restart at step 1 when a note arrives on an empty set
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
@@ -163,35 +169,51 @@ public:
             havePrevPpq = false;
         }
 
-        // Retire owed note-offs that fall inside this block.
-        retireActive(numSamples, out);
-
-        if (! p.enabled || heldCount == 0 || stepBeats <= 0.0)
-            return;
-
-        // Fire every step boundary inside [pos, pos + blockBeats).
-        double nextIndexF = std::ceil(pos / stepBeats - 1.0e-9);
-        for (;;)
+        // Owed note-offs are NOT retired up front. Each hit closes what it lands on top of
+        // itself, immediately before its own note-on (see fireStep), because a tie has to be
+        // pulled back to just before the pitch retriggers rather than allowed to fire in the
+        // middle of the note that replaced it. Draining here instead put a tie's note-off
+        // *after* the note-on that superseded it: two note-ons for one pitch with nothing in
+        // between, which hangs a voice on any synth that allocates per note-on.
+        if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
-            const double boundaryBeats = nextIndexF * stepBeats;
-            const long long globalStep = (long long) llround(nextIndexF);
-            double fireBeats = boundaryBeats;
-            if ((globalStep & 1) != 0)
-                fireBeats += stepBeats * p.swing; // swing delays the offbeats
-            const double offsetBeats = fireBeats - pos;
-            const int offset = (int) std::floor(offsetBeats / beatsPerSample);
-            if (offset >= numSamples)
-                break;
-            if (offset >= 0)
-                fireStep(p, globalStep, offset, stepBeats / beatsPerSample, out);
-            nextIndexF += 1.0;
+            // Fire every step boundary inside [pos, pos + blockBeats).
+            double nextIndexF = std::ceil(pos / stepBeats - 1.0e-9);
+            for (;;)
+            {
+                const double boundaryBeats = nextIndexF * stepBeats;
+                const long long globalStep = (long long) llround(nextIndexF);
+                double fireBeats = boundaryBeats;
+                if ((globalStep & 1) != 0)
+                    fireBeats += stepBeats * p.swing; // swing delays the offbeats
+                const double offsetBeats = fireBeats - pos;
+                const int offset = (int) std::floor(offsetBeats / beatsPerSample);
+                if (offset >= numSamples)
+                    break;
+                if (offset >= 0)
+                    fireStep(p, globalStep, offset, stepBeats / beatsPerSample, numSamples, out);
+                nextIndexF += 1.0;
+            }
         }
+
+        // Whatever is still owed inside this block, then rebase the survivors onto the next
+        // block's timebase. Deliberately outside the guard above: a note owed by the last
+        // step before the keys came up, or before the arp was switched off, still has to end
+        // on time instead of hanging until the next flush.
+        retireDue(numSamples - 1, out);
+        advanceBlock(numSamples);
     }
 
     int heldNoteCount() const noexcept { return heldCount; }
 
 private:
-    struct Held { int note; float velocity; int channel; bool physical; };
+    // `ons` counts how many un-matched note-ons this pitch has arrived with. The engine sits
+    // downstream of a merged stream where several chord sources can each ask for the same
+    // pitch, so "is it still held" is a count, not a flag. It used to be a flag plus a
+    // separate physicallyHeld total, and a duplicated pitch leaked that total above zero
+    // permanently - which disabled latch's fresh-chord reset and left chords arpeggiating
+    // forever, stacking every card you handed it afterwards.
+    struct Held { int note; float velocity; int channel; int ons; };
     struct Active { int note; int channel; int samplesLeft; };
 
     double stepLengthBeats(const Params& p) const
@@ -220,24 +242,30 @@ private:
         for (int i = 0; i < heldCount; ++i)
             if (held[(size_t) i].note == note)
             {
+                // Same pitch arriving twice: count it, do not add a second entry. The
+                // matching note-off will decrement, so the two stay paired.
                 held[(size_t) i].velocity = vel;
-                held[(size_t) i].physical = true;
-                ++physicallyHeld;
+                if (held[(size_t) i].ons++ == 0)
+                    ++physicallyHeld; // it was latched-but-released; it is physical again
                 return;
             }
         if (heldCount < maxHeld)
         {
-            held[(size_t) heldCount++] = { note, vel, channel, true };
+            held[(size_t) heldCount++] = { note, vel, channel, 1 };
             ++physicallyHeld;
         }
     }
 
     void noteLeft(int note, const Params& p)
     {
+        // Match on pitch whatever its count: matching only entries still marked physical was
+        // what dropped the count on the floor when two sources owned one pitch, leaving
+        // physicallyHeld stuck above zero for the life of the plugin.
         for (int i = 0; i < heldCount; ++i)
-            if (held[(size_t) i].note == note && held[(size_t) i].physical)
+            if (held[(size_t) i].note == note && held[(size_t) i].ons > 0)
             {
-                held[(size_t) i].physical = false;
+                if (--held[(size_t) i].ons > 0)
+                    return; // another owner still holds this pitch
                 physicallyHeld = juce::jmax(0, physicallyHeld - 1);
                 if (! p.latch)
                 {
@@ -321,12 +349,14 @@ private:
     }
 
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
-                  juce::MidiBuffer& out)
+                  int numSamples, juce::MidiBuffer& out)
     {
         const int noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal < 0)
             return; // muted step
-        if ((int) (rng() % 100u) >= laneValue(p, laneProbability, globalStep))
+        const int chance = laneValue(p, laneProbability, globalStep)
+                         * juce::jlimit(0, 100, p.chance) / 100;
+        if ((int) (rng() % 100u) >= chance)
             return; // 100 always fires, 0 never does
 
         buildSequence(p);
@@ -345,46 +375,107 @@ private:
         const float vel = juce::jlimit(0.05f, 1.0f,
                                        src.velocity * (float) laneValue(p, laneVelocity, globalStep) / 100.0f);
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
-        const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep)) / 100.0;
+        const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
+                          * juce::jlimit(5, 200, p.gate) / 10000.0;
 
         const double subLen = stepSamplesF / ratchets;
         for (int r = 0; r < ratchets; ++r)
         {
             const int on = offset + (int) std::floor(subLen * r);
             const int durSamples = juce::jmax(1, (int) std::floor(subLen * gate));
-            // Same pitch already ringing: close it just before the retrigger.
-            for (int i = 0; i < activeCount; ++i)
-                if (active[(size_t) i].note == note && active[(size_t) i].channel == src.channel)
+
+            // Close whatever this hit lands on top of, before its note-on goes in, so a
+            // note-off can never sort after a note-on it precedes. Two different closes:
+            //   - anything already due by now ends at its own offset, on time;
+            //   - the pitch being retriggered, if it is still owed *past* this hit (a tie,
+            //     gate > 100%), is pulled back to just before the retrigger instead, so one
+            //     pitch never stacks two note-ons with nothing between them.
+            // `on` can sit past the end of the buffer for a ratchet sub-hit (a pre-existing
+            // wart: the sub-hit's own note-on is not clamped either), so clamp the window we
+            // are willing to close within.
+            const int dueBy = juce::jmin(on, numSamples - 1);
+            for (int i = 0; i < activeCount;)
+            {
+                auto& a = active[(size_t) i];
+                if (a.samplesLeft <= dueBy)
                 {
-                    out.addEvent(juce::MidiMessage::noteOff(src.channel, note), juce::jmax(0, on - 1));
-                    active[(size_t) i] = active[(size_t) --activeCount];
-                    break;
+                    out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note),
+                                 juce::jmax(0, a.samplesLeft));
+                    a = active[(size_t) --activeCount];
                 }
+                else if (a.note == note && a.channel == src.channel)
+                {
+                    out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, on - 1));
+                    a = active[(size_t) --activeCount];
+                }
+                else
+                    ++i;
+            }
             out.addEvent(juce::MidiMessage::noteOn(src.channel, note, vel), on);
+
+            // Where this note ends, as an offset from the start of *this* block, which is
+            // the frame active[] is kept in all the way through process(); advanceBlock()
+            // rebases the survivors once, at the very end.
+            const int offAt = on + durSamples;
             if (activeCount < maxActive)
-                active[(size_t) activeCount++] = { note, src.channel, on + durSamples };
+            {
+                // Park it whatever its length. Emitting a short note's off straight into the
+                // buffer looks like a harmless shortcut and is not: it hides the note from
+                // the close loop above, so a same-pitch hit later in the SAME block finds
+                // nothing to close and stacks a second note-on with nothing between them -
+                // exactly what that loop exists to prevent. It needs a tie (gate > 100%) and
+                // a block long enough to hold two hits of one pitch, which is an ordinary
+                // 2048-sample buffer at a fast rate.
+                //
+                // Nothing is lost by parking: a later hit either ends this note at its own
+                // gate (the due branch) or, if it is a tie, pulls it back under the retrigger
+                // (the tie branch), and retireDue() at the end of process() emits whatever is
+                // still owed inside this block.
+                active[(size_t) activeCount++] = { note, src.channel, offAt };
+            }
             else
-                out.addEvent(juce::MidiMessage::noteOff(src.channel, note), on + durSamples - 1);
+            {
+                // Out of tracking slots: end it no later than the edge of this block, rather
+                // than stamping an event past the end of the buffer.
+                out.addEvent(juce::MidiMessage::noteOff(src.channel, note),
+                             juce::jmax(0, juce::jmin(offAt, numSamples - 1)));
+            }
         }
         ++stepCounter;
     }
 
-    void retireActive(int numSamples, juce::MidiBuffer& out)
+    // THE CONTRACT for active[].samplesLeft: it is the note-off's sample offset measured
+    // from the start of the block currently being processed. fireStep writes it in that
+    // frame, every read during the block is in that frame, and advanceBlock() rebases the
+    // survivors exactly once, at the end of process(). Getting this frame wrong is what
+    // shipped every arp note-off one whole buffer late for the life of v1.
+
+    // Emit the note-off for every entry due at or before `limit` (an offset into the block
+    // being processed), each at its own offset, and drop it. Entries not yet due are left
+    // untouched, so this is safe to call as often as a block needs: an entry is emitted once
+    // and removed with it, so there is no double-off and nothing leaks.
+    void retireDue(int limit, juce::MidiBuffer& out)
     {
         for (int i = 0; i < activeCount;)
         {
             auto& a = active[(size_t) i];
-            if (a.samplesLeft < numSamples)
+            if (a.samplesLeft <= limit)
             {
                 out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, a.samplesLeft));
                 a = active[(size_t) --activeCount];
             }
             else
-            {
-                a.samplesLeft -= numSamples;
                 ++i;
-            }
         }
+    }
+
+    // Rebase the survivors onto the next block's timebase. Called once per block, right
+    // after retireDue(numSamples - 1), so every survivor is due at numSamples or later and
+    // samplesLeft stays >= 0. numSamples == 0 is a no-op, as it must be.
+    void advanceBlock(int numSamples) noexcept
+    {
+        for (int i = 0; i < activeCount; ++i)
+            active[(size_t) i].samplesLeft -= numSamples;
     }
 
     struct SeqEntry { int heldIndex; int octaveOffset; };

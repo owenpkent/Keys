@@ -644,9 +644,9 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                      "gate, ratchet, probability), each trimmed to its own length, plus "
                      "its per-lane clock dividers and which pattern is active. Without "
                      "slot, reads the live lanes (what's currently playing/showing in the "
-                     "editor); with slot, reads that stored pattern (0..7, A-H) without "
+                     "editor); with slot, reads that stored pattern (0..11) without "
                      "disturbing what's live.";
-    t.params = { { "slot", "integer", "Pattern slot 0..7 (A-H). Omit to read the live lanes.", false } };
+    t.params = { { "slot", "integer", "Pattern slot 0..11. Omit to read the live lanes.", false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         auto* obj = new juce::DynamicObject();
@@ -655,7 +655,7 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
             const int slot = (int) args.getProperty("slot", -1);
             if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
             {
-                error = "slot out of range 0..7";
+                error = "slot out of range 0..11";
                 return {};
             }
             const auto& pat = processor.arpPatternSlot(slot);
@@ -695,10 +695,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "arrays make a shorter pattern for that lane, for polymeter against the others. "
         "clockDivs is an optional map of lane name -> 0 (every step) / 1 (every 2nd) / 2 "
         "(every 4th). Without slot, writes the live lanes directly (the same path the "
-        "editor edits through); with slot, writes that stored pattern (0..7, A-H), and "
+        "editor edits through); with slot, writes that stored pattern (0..11), and "
         "refreshes the live lanes too if that slot happens to be the active one.";
     t.params = {
-        { "slot", "integer", "Pattern slot 0..7 to write. Omit to write the live lanes.", false },
+        { "slot", "integer", "Pattern slot 0..11 to write. Omit to write the live lanes.", false },
         { "note", "array", "Per-step note lane (-1..8).", false },
         { "octave", "array", "Per-step octave lane (-3..3).", false },
         { "velocity", "array", "Per-step velocity lane (10..200).", false },
@@ -745,7 +745,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         const int slot = hasSlot ? (int) args.getProperty("slot", -1) : processor.arpActivePattern();
         if (hasSlot && (slot < 0 || slot >= KeysProcessor::numArpPatterns))
         {
-            error = "slot out of range 0..7";
+            error = "slot out of range 0..11";
             return {};
         }
 
@@ -787,16 +787,16 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
 {
     okstudio::mcp::Tool t;
     t.name = "recall_arp_pattern";
-    t.description = "Make a stored pattern (0..7, A-H) the active/live one, same as "
+    t.description = "Make a stored pattern (0..11) the active/live one, same as "
                      "clicking its pattern button. Snapshots the current live lanes into "
                      "their slot first, so nothing being edited is lost.";
-    t.params = { { "slot", "integer", "Pattern slot 0..7 (A-H) to make active.", true } };
+    t.params = { { "slot", "integer", "Pattern slot 0..11 to make active.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
         if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
         {
-            error = "slot out of range 0..7";
+            error = "slot out of range 0..11";
             return {};
         }
         processor.recallArpPattern(slot);
