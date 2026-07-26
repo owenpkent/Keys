@@ -19,9 +19,12 @@ Windows only, like the product. Standard library only, so it runs on a bare Pyth
 
 import argparse
 import ctypes
+import glob
 import os
+import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 from ctypes import wintypes
 
@@ -87,6 +90,117 @@ def hold_window_open() -> None:
         input()
     except (EOFError, KeyboardInterrupt):
         pass
+
+
+# --------------------------------------------------------------------------------------
+# Finding a cmake that will actually start
+# --------------------------------------------------------------------------------------
+
+def _cmake_candidates():
+    """Every cmake worth trying, best first.
+
+    The one on PATH is *not* best. This machine installs cmake through pip, and pip's
+    entry point is a small unsigned launcher at Scripts\\cmake.exe that re-execs the real
+    binary. Smart App Control (enforced here) blocks unsigned executables it does not
+    recognise, so CreateProcess on the launcher fails outright — while the signed binary
+    it wraps, in site-packages/cmake/data/bin, starts perfectly. Prefer anything signed
+    and leave the launcher as the last resort.
+    """
+    override = os.environ.get("CMAKE")
+    if override:
+        yield override
+
+    # Visual Studio ships a Microsoft-signed cmake. Not present on every install, and the
+    # directory is the VS *major version* (18 here), never the marketing year.
+    for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                 os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
+        pattern = os.path.join(base, "Microsoft Visual Studio", "*", "*", "Common7", "IDE",
+                               "CommonExtensions", "Microsoft", "CMake", "CMake", "bin", "cmake.exe")
+        yield from sorted(glob.glob(pattern), reverse=True)
+
+    # pip's real payload, behind the launcher.
+    for key in ("purelib", "platlib"):
+        path = sysconfig.get_paths().get(key)
+        if path:
+            yield os.path.join(path, "cmake", "data", "bin", "cmake.exe")
+
+    # A normal MSI install.
+    for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                 os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
+        yield os.path.join(base, "CMake", "bin", "cmake.exe")
+
+    found = shutil.which("cmake")
+    if found:
+        yield found
+
+
+_cmake_cached = None
+
+
+def find_cmake():
+    """The first cmake that actually launches, or None. Probed once per run."""
+    global _cmake_cached
+    if _cmake_cached is not None:
+        return _cmake_cached
+
+    on_path = shutil.which("cmake")
+    seen = set()
+    blocked = []
+    for cand in _cmake_candidates():
+        cand = os.path.normpath(cand)
+        key = cand.lower()
+        if key in seen or not os.path.exists(cand):
+            continue
+        seen.add(key)
+        try:
+            subprocess.run([cand, "--version"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, check=True)
+        except OSError as exc:
+            blocked.append((cand, exc))
+            continue
+        except subprocess.CalledProcessError:
+            continue
+        # Say so whenever we sidestep PATH. Comparing against `blocked` instead would never
+        # fire: the signed payload is tried first, so the blocked launcher on PATH is not
+        # even probed, and the notice that explains the switch would be dead code.
+        if on_path and os.path.normcase(os.path.normpath(on_path)) != os.path.normcase(cand):
+            print(f"{GREY}cmake on PATH ({on_path}) is not the one being used; using {cand}{RESET}")
+        _cmake_cached = cand
+        return cand
+
+    _report_no_cmake(blocked)
+    return None
+
+
+def _report_no_cmake(blocked) -> None:
+    print(f"{YELLOW}No usable cmake found.{RESET}")
+    for path, exc in blocked:
+        print(f"{YELLOW}  blocked: {path}{RESET}")
+        print(f"{YELLOW}           {exc}{RESET}")
+    if blocked:
+        print(f"{YELLOW}  Smart App Control blocks unsigned executables. Either install CMake "
+              f"from cmake.org (signed), or set CMAKE to a cmake.exe that runs.{RESET}")
+    else:
+        print(f"{YELLOW}  Install CMake, or set the CMAKE environment variable to its path.{RESET}")
+
+
+def run_cmake(args) -> int:
+    """Run cmake with `args`, turning a failure to even start into a readable message.
+
+    subprocess raises OSError out of CreateProcess when the exe is blocked, and the raw
+    traceback that produces is exactly the thing this script exists to avoid: Owen
+    double-clicks it and has to read the console.
+    """
+    exe = find_cmake()
+    if exe is None:
+        return 1
+    try:
+        return subprocess.run([exe] + list(args)).returncode
+    except OSError as exc:
+        print(f"{YELLOW}Could not run cmake ({exe}):{RESET}")
+        print(f"{YELLOW}  {exc}{RESET}")
+        print(f"{YELLOW}  Set the CMAKE environment variable to a cmake.exe that runs.{RESET}")
+        return 1
 
 
 # --------------------------------------------------------------------------------------
@@ -265,15 +379,12 @@ def main() -> int:
         # Only configure on a cold build tree. The VS generator re-runs CMake by itself
         # when CMakeLists.txt changes, so an explicit configure every launch is dead time.
         if not os.path.exists(os.path.join(ROOT, "build", "CMakeCache.txt")):
-            configure = subprocess.run(["cmake", "-B", "build", "-G", "Visual Studio 17 2022",
-                                        "-A", "x64", "-DKEYS_COPY_PLUGIN=OFF"])
-            if configure.returncode != 0:
+            if run_cmake(["-B", "build", "-G", "Visual Studio 17 2022",
+                          "-A", "x64", "-DKEYS_COPY_PLUGIN=OFF"]) != 0:
                 return 1
 
         started = time.monotonic()
-        build = subprocess.run(["cmake", "--build", "build", "--config", args.config,
-                                "--target", target])
-        if build.returncode != 0:
+        if run_cmake(["--build", "build", "--config", args.config, "--target", target]) != 0:
             return 1
         print(f"{GREEN}Built {target} in {time.monotonic() - started:.1f}s{RESET}")
 
@@ -283,11 +394,20 @@ def main() -> int:
 
     # Smart App Control is enforced on this machine and dev builds are unsigned, so it
     # blocks the first launch of a freshly linked exe while its reputation check runs,
-    # then lets the same file through a moment later (CodeIntegrity event 3118). Signing
-    # every iteration would need the EV eToken and a PIN, which defeats a 5-second loop,
-    # so absorb the transient here rather than failing the run or weakening the machine.
+    # then lets the same file through once that finishes (CodeIntegrity event 3118).
+    # Signing every iteration would need the EV eToken and a PIN, which defeats a
+    # 5-second loop, so absorb the transient here rather than weakening the machine.
+    #
+    # The wait used to be 5 tries over 3.5s, which was tuned when the check cleared almost
+    # at once. It does not always: measured at up to ~3 minutes on this machine. Giving up
+    # after three and a half seconds turned a slow launch into "it's broken", and the
+    # advice it printed was to run the same command again. Wait properly instead, and say
+    # what is happening so the pause is legible rather than a hang.
+    launch_timeout = 240.0
+    deadline = time.monotonic() + launch_timeout
     launched = False
-    for attempt in range(5):
+    announced = False
+    while True:
         try:
             # Detached, so the app outlives this console instead of dying with it.
             subprocess.Popen([exe], cwd=ROOT, close_fds=True,
@@ -296,12 +416,19 @@ def main() -> int:
             launched = True
             break
         except OSError:
-            if attempt == 0:
-                print(f"{GREY}Smart App Control blocked the new build; retrying...{RESET}")
-            time.sleep(0.7)
+            if time.monotonic() >= deadline:
+                break
+            if not announced:
+                announced = True
+                print(f"{GREY}Smart App Control is checking the new build; waiting for it "
+                      f"(up to {launch_timeout:.0f}s)...{RESET}")
+            time.sleep(2.0)
+    if launched and announced:
+        print(f"{GREEN}Cleared.{RESET}")
 
     if not launched:
-        print(f"{YELLOW}Could not launch {exe_name} - Smart App Control blocked it 5 times.{RESET}")
+        print(f"{YELLOW}Could not launch {exe_name} - Smart App Control blocked it for "
+              f"{launch_timeout:.0f}s.{RESET}")
         print(f"{YELLOW}  Retry with: py run.py --no-build{RESET}")
         print(f"{YELLOW}  Or build a signed one: .\\build.ps1 -Standalone -Sign "
               f"(needs the eToken plugged in).{RESET}")
