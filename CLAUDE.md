@@ -37,6 +37,12 @@ py run.py --no-build   # just relaunch what is already built
 Go to a real Live load test only for what the standalone genuinely cannot show: bus
 layout, plugin classification, installer, updater, host automation.
 
+**The first configure is slow now.** The Transcribe section pulls a multi-gigabyte prebuilt
+ONNX Runtime into the build tree, and forces the static MSVC runtime on the whole binary (both
+are properties of that library, not choices). `-DKEYS_TRANSCRIBE=OFF` drops the section and
+both costs, and is the right flag for work that never touches transcription. Deleting `build/`
+is no longer cheap.
+
 Full build (VST3 + install to the DAW):
 
 ```powershell
@@ -58,7 +64,8 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
-- **Kit-based.** Theme, scales, state persistence, the mouse-only contract, and the
+- **Kit-based.** Theme, scales, state persistence, the mouse-only contract, the audio-to-MIDI
+  transcription engine, and the
   updater all come from `../okstudio-juce-kit`. Fix shared behaviour there, not here.
 - **UI → audio note path is a `juce::MidiMessageCollector`.** The editor/keyboard
   call `processor.noteOn/noteOff` on the message thread; `processBlock` drains the
@@ -85,6 +92,15 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   2026-07-25. The arp bar carries its On toggle and a Detach, both of which survive folding
   the section shut. `DetachedWindow` (was `KeyboardWindow`) serves the keybed and the arp.
   See `docs/ARP_DESIGN.md`.
+- **Transcribe is the only part of Keys that consumes audio.** Everything else produces MIDI.
+  Keys is an instrument, so a host sends it MIDI and never audio: there is no track input, and
+  `AudioCapture` opens an audio device of its own. That is what makes the section behave the
+  same in the plugin and the standalone, and it is why choosing an input never touches the
+  host's audio setup. The device is open only while the section is on screen or recording.
+  The engine is the kit's (`okstudio/Transcribe.h`, basic-pitch ported from NeuralNote); the
+  model runs on a background thread, never on the audio or message thread, and the panel is
+  built and destroyed with its fold because it holds a device and a network's weights. All of
+  it is behind `KEYS_TRANSCRIBE`, on by default. See `docs/ARCHITECTURE.md`.
 - **One note-on per sounding pitch, released by the last owner.** Four sources can ask for
   the same pitch at once (a chord pad, the live card, a chord held into the arp, the
   keybed). `KeysProcessor::noteOn` emits MIDI only on the 0→1 transition of `noteRefs` and

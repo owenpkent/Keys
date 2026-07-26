@@ -38,6 +38,7 @@ dragged smaller than the content it is showing.
 | **Perform / Chords** | middle | Whichever centre view is showing. Both tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** folds the knob bank inside Perform. |
 | **Arp** | below the centre | The arpeggiator. Its **On** toggle and **Detach** ride on the bar, so the arp can be switched on, off and detached with the panel folded shut — folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
 | **Pads** | below the arp | The chord-pad strip, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons and the **To Arp** toggle ride on the bar. |
+| **Transcribe** | below the pads | Audio to MIDI: the input picker, the waveform, the piano roll and the MIDI drag handle. It starts folded, like the arp, because open it is tall. Folding it also closes the audio input, so Keys is not holding your microphone while it is shut. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain and All Off stay put. |
 
 ### Detaching the keyboard, and the arp
@@ -52,6 +53,31 @@ The **Arp** bar has a Detach of its own, and it works the same way: the arpeggia
 into a resizable window, its close button re-docks it, and its position is remembered. A
 detached section takes no height in the main window, so this is the way to keep the
 arpeggiator open and the plugin window small at the same time.
+
+## Transcribe
+
+The one section that listens rather than plays. Record something, and Keys works out what
+notes you sang or played.
+
+| Control | Gesture | What it does |
+|---------|---------|--------------|
+| **Driver** | click | Which audio driver to list inputs from — Windows Audio, ASIO, DirectSound |
+| **Input** | click | The input to record from. Remembered per machine, not saved in the song, because it describes your desk rather than your track |
+| *(level meter)* | — | Between the input and the buttons. Shows signal arriving, so you can see the mic is working before you record |
+| **Record** / **Stop** | click | Start recording; click again to stop and transcribe. Recording stops itself after two minutes |
+| **Clear** | click | Throw away the recording and the notes |
+| **DRAG MIDI** | **drag** | Drag onto a DAW track to drop the notes there as a MIDI file. The one control here that is a drag rather than a click, because an external file drag has no click equivalent |
+| **Sensitivity** | drag | Higher finds more notes. It re-reads the same recording rather than running the model again, so it answers immediately |
+
+The waveform strip shows what was recorded; the piano roll below it shows the notes that
+came out, laid out over the length of the take with the pitches it actually found.
+
+Transcription is not live and cannot be: the model needs the whole recording before it can
+decide where a note began. A take shorter than about a second produces nothing at all. While
+it works, the rest of Keys keeps playing normally.
+
+If the section is greyed out or missing entirely, Keys was built with
+`-DKEYS_TRANSCRIBE=OFF`.
 
 ## Playing surface
 

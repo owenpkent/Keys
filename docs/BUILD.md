@@ -7,6 +7,8 @@
 - A **JUCE 8** checkout at `../JUCE` (sibling of this repo)
 - The **kit** at `../okstudio-juce-kit` (sibling of this repo)
 - For installers: **Inno Setup 6** (`winget install JRSoftware.InnoSetup`)
+- For the Transcribe section (on by default): a working internet connection the first time
+  you configure, and patience — see below
 
 Layout:
 
@@ -16,6 +18,28 @@ dev/
 ├── okstudio-juce-kit/
 └── Keys/
 ```
+
+## The transcription dependency
+
+The Transcribe section is built on the kit's `okstudio_basicpitch` target, and that brings two
+things with it. Neither is a choice: both are properties of the prebuilt ONNX Runtime the
+engine links, published by the NeuralNote authors because building ONNX Runtime from source is
+its own project.
+
+- **A large download at configure time.** The archive is fetched into the build tree and
+  unpacks to a few gigabytes. It is never committed, and never re-downloaded once it is there,
+  but a fresh build tree pays for it again. Deleting `build/` is not free any more.
+- **The static MSVC runtime.** That library is `/MT`, and MSVC will not link objects that
+  disagree, so `CMAKE_MSVC_RUNTIME_LIBRARY` is set before `add_subdirectory(JUCE)` in the
+  top-level `CMakeLists.txt`. Everything in the binary — JUCE included — is built that way.
+  The upside is one fewer redistributable to worry about; the cost is a slightly larger
+  binary and a full rebuild if you flip the option.
+
+`-DKEYS_TRANSCRIBE=OFF` avoids both, at the cost of the section. Anything that only touches
+the keyboard, the pads, the generator or the arp can be built that way and will configure and
+link much faster from cold.
+
+The engine and its own tests live in the kit; see its `docs/TRANSCRIPTION.md`.
 
 ## Testing a change (run.py)
 
@@ -138,6 +162,7 @@ how to keep it testable) is in
 | `KEYS_BUILD_HOST` | `ON` | build Keys Host (an instrument VST3 hosted inside Keys). Turning this off leaves `run.py`'s default target missing |
 | `KEYS_BUILD_MCP_SHIM` | `ON` | build `keys-mcp.exe`, the stdio bridge (see [MCP.md](MCP.md)) |
 | `KEYS_BUILD_MIDI_EFFECT` | `OFF` | also build Keys FX, the MIDI-effect variant Ableton rejects |
+| `KEYS_TRANSCRIBE` | `ON` | build the Transcribe section. Off drops the section, a multi-gigabyte ONNX Runtime download, and the static-MSVC-runtime requirement below |
 
 ## Troubleshooting
 

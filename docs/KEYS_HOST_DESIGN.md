@@ -173,7 +173,7 @@ nothing in the kit assumes one plugin per repo.
   surfaces and the `uiLayout`-selected Classic/Performer arrangement. The surface is
   picked at compile time now, and the rest of the editor is a stack of foldable sections:
   Controls, a centre view (Perform or Chords, chosen by tabs on the centre bar), Arp,
-  Pads, Keyboard. The keybed and the arp each detach into a window of their own, and every
+  Pads, Transcribe, Keyboard. The keybed and the arp each detach into a window of their own, and every
   fold changes the height Keys Host is asked for. Keys and Keys Host build the piano only;
   the Harmonic Table and Hex Host moved out to their own repo (`../Hex`).
   `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session compatibility

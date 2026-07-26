@@ -19,6 +19,8 @@ src/
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys (docs/ARP_DESIGN.md)
+├── AudioCapture.{h,cpp}      # records from an audio input Keys opens itself, for the
+│                             # Transcribe section. Built only with KEYS_TRANSCRIBE
 ├── ui/
 │   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
 │   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
@@ -29,6 +31,8 @@ src/
 │   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
+│   ├── TranscribePanel.{h,cpp} # the Transcribe section: input picker, waveform, piano
+│   │                         # roll of the transcribed notes, MIDI drag-out
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity range)
 │   ├── DetachedWindow.h      # a section popped out into its own resizable window
@@ -41,6 +45,35 @@ src/
     └── KeysMcp.{h,cpp}       # MCP tool registrations; every handler runs on the
                               # message thread (docs/MCP.md)
 ```
+
+## Transcription
+
+The Transcribe section records audio and turns it into notes. Three pieces, in a deliberate
+order:
+
+- **`AudioCapture`** owns a `juce::AudioDeviceManager` of its own and records to one
+  preallocated mono buffer. Keys is an instrument: hosts send it MIDI and never audio, so
+  there is no track input to record and opening a device directly is the only way in. That
+  it is *our* device, not the host's, is what makes the section behave identically in the
+  plugin and in the standalone, and it means choosing an input never touches the host's
+  setup. The buffer is preallocated because the alternative is allocating on the device
+  thread; recording stops itself at `AudioCapture::maxSeconds` rather than growing forever.
+- **`okstudio::transcribe::Transcriber`** (the kit, `okstudio/Transcribe.h`) is the engine:
+  basic-pitch, ported from NeuralNote. It lives in the kit because Undertow, Beatform and
+  Contour would all have use for it. See the kit's `docs/TRANSCRIPTION.md`.
+- **`TranscribePanel`** is the UI, and owns the threading. The model runs for a good
+  fraction of the recording's length, so it runs on a `juce::Thread` and posts its notes
+  back with `MessageManager::callAsync`; the keyboard keeps playing throughout. Moving the
+  Sensitivity slider calls `retranscribe()`, which reruns only the note-event stage and is
+  cheap enough to follow the slider live.
+
+None of this touches the audio thread that `processBlock` runs on. The capture callback is a
+*different* device's thread, and writes only to its own buffer.
+
+The whole thing is behind `KEYS_TRANSCRIBE`, on by default. Off, `AudioCapture` and
+`TranscribePanel` are not compiled, the section reports zero height, and the kit's engine is
+never built — which also drops a multi-gigabyte ONNX Runtime download and the static MSVC
+runtime it forces on the binary.
 
 ## Threading: UI → audio note path
 
@@ -220,10 +253,17 @@ All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`
 
 The editor is a stack of sections, each of which folds away so the window can be squeezed
 small when the screen is busy: **Controls** (the three header rows), the **centre view**,
-the **Arp**, the **Pads**, and the **Keyboard** (with the wheels as a sub-fold).
+the **Arp**, the **Pads**, **Transcribe**, and the **Keyboard** (with the wheels as a
+sub-fold).
 `SectionBar` is the affordance — a `juce::Button` so the mouse-only contract and the
 accessible name come for free, with the section's own small controls laid out as its
 siblings in `contentArea()`.
+
+**Transcribe** is the odd one out: it is the only part of Keys that consumes audio rather
+than producing MIDI, and the only section whose panel owns a device. Like the arp's, its
+panel is built when the section opens and destroyed when it folds — it holds an open audio
+input and a neural network's weights, neither worth keeping warm behind a folded bar. See
+"Transcription" below.
 
 The middle of the editor is a *view*, not a stack of overlays. `Perform` is the knob bank
 and `Chords` swaps `ChordGenPanel` into the same slot, with both tabs riding on the centre's
