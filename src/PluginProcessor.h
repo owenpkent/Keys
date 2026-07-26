@@ -209,6 +209,7 @@ public:
         bool knobs = true;      // the CC knob bank
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
+        bool transcribe = false; // the Transcribe section (off by default: it is tall too)
         // "To Arp": a click on a chord card hands its chord to the arpeggiator. It lives here
         // rather than in the pad strip because it is a *mode*, and the chord it holds outlives
         // the editor. A host that destroys the window on close was dropping the flag while the

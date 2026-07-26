@@ -9,6 +9,9 @@
 #include "ui/KnobBank.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
+#if KEYS_TRANSCRIBE
+#include "ui/TranscribePanel.h"
+#endif
 #include <okstudio/Updater.h>
 #include <array>
 #include <memory>
@@ -67,9 +70,11 @@ private:
     void setCentreView(int view);      // picks a view, unfolding the section if needed
     void refreshCentrePanels();        // creates/destroys the panel the state calls for
     void refreshArpPanel();            // the arp section's panel follows its own fold
+    void refreshTranscribePanel();     // ditto the Transcribe section
     void syncSectionControls();        // toggle states + visibility from processor.layout
     int  centreHeight() const;         // height the current centre view asks for, 0 if folded
     int  arpHeight() const;            // height the arp section asks for, 0 if folded/detached
+    int  transcribeHeight() const;     // height the Transcribe section asks for, 0 if folded
     int  idealHeight() const;          // total height with the current folds
     int  minWidthForView() const;      // the centre views carry more controls than the player
     void applyLayout();                // resize to fit the folds (unless embedded), then resized()
@@ -177,6 +182,13 @@ private:
     // toggle and a Detach button, so the two things you reach for while it runs stay reachable
     // with the section folded shut.
     SectionBar arpBar { "Arp" };
+    // Audio to MIDI. Built only when the transcription engine is compiled in, and alive only
+    // while its section is open: it holds an audio device and a CNN, neither of which is worth
+    // keeping warm behind a folded bar.
+    SectionBar transcribeBar { "Transcribe" };
+#if KEYS_TRANSCRIBE
+    std::unique_ptr<TranscribePanel> transcribePanel;
+#endif
     SectionBar keyboardBar { "Keyboard" };
     juce::TextButton knobsButton { "Knobs" };
     juce::ToggleButton arpOnButton { "On" };

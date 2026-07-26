@@ -939,6 +939,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("knobs", layout.knobs, nullptr);
     tree.setProperty("pads", layout.pads, nullptr);
     tree.setProperty("arp", layout.arp, nullptr);
+    tree.setProperty("transcribe", layout.transcribe, nullptr);
     tree.setProperty("toArp", layout.toArp, nullptr);
     tree.setProperty("wheels", layout.wheels, nullptr);
     tree.setProperty("keyboard", layout.keyboard, nullptr);
@@ -963,6 +964,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.knobs = flag("knobs", true);
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
+    layout.transcribe = flag("transcribe", false);
     layout.toArp = flag("toArp", false);
     layout.wheels = flag("wheels", true);
     layout.keyboard = flag("keyboard", true);

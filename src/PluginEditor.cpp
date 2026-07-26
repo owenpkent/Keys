@@ -209,6 +209,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addAndMakeVisible(controlsBar);
     addAndMakeVisible(centreBar);
+    transcribeBar.onClick = [this]
+    {
+        processor.layout.transcribe = transcribeBar.getToggleState();
+        refreshTranscribePanel();
+        applyLayout();
+    };
+    addAndMakeVisible(transcribeBar);
+
     addAndMakeVisible(padsBar);
     addAndMakeVisible(arpBar);
     addAndMakeVisible(keyboardBar);
@@ -320,6 +328,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     syncSectionControls();
     refreshCentrePanels();
     refreshArpPanel();
+    refreshTranscribePanel();
     applyLayout();
     if (lay.detached)
         setKeyboardDetached(true);
@@ -546,6 +555,7 @@ void KeysEditor::syncSectionControls()
     centreBar.setCaption(viewNames[juce::jlimit(0, 2, lay.view)]);
     padsBar.setToggleState(lay.pads, juce::dontSendNotification);
     arpBar.setToggleState(lay.arp, juce::dontSendNotification);
+    transcribeBar.setToggleState(lay.transcribe, juce::dontSendNotification);
     keyboardBar.setToggleState(lay.keyboard, juce::dontSendNotification);
     knobsButton.setToggleState(lay.knobs, juce::dontSendNotification);
     wheelsButton.setToggleState(lay.wheels, juce::dontSendNotification);
@@ -643,6 +653,34 @@ int KeysEditor::arpHeight() const
     return arpPanel != nullptr ? arpPanel->preferredHeight() : 0;
 }
 
+int KeysEditor::transcribeHeight() const
+{
+#if KEYS_TRANSCRIBE
+    return processor.layout.transcribe ? TranscribePanel::idealHeight : 0;
+#else
+    return 0;
+#endif
+}
+
+void KeysEditor::refreshTranscribePanel()
+{
+#if KEYS_TRANSCRIBE
+    const bool wanted = processor.layout.transcribe;
+
+    if (wanted && transcribePanel == nullptr)
+    {
+        transcribePanel = std::make_unique<TranscribePanel>();
+        addAndMakeVisible(*transcribePanel);
+        resized();
+    }
+    else if (! wanted && transcribePanel != nullptr)
+    {
+        // Destroyed rather than hidden: it owns an open audio device and the model's weights.
+        transcribePanel.reset();
+    }
+#endif
+}
+
 int KeysEditor::idealHeight() const
 {
     const auto& lay = processor.layout;
@@ -657,6 +695,10 @@ int KeysEditor::idealHeight() const
     const int arp = arpHeight();
     if (arp > 0)
         h += 4 + arp;
+    h += 6 + SectionBar::height; // the Transcribe bar
+    const int transcribe = transcribeHeight();
+    if (transcribe > 0)
+        h += 4 + transcribe;
     h += 6 + SectionBar::height; // the Pads bar
     if (lay.pads)
         h += 4 + padRowH;
@@ -1152,6 +1194,22 @@ void KeysEditor::resized()
         padsArea = area.removeFromTop(padRowH);
     }
     chordPads.setBounds(padsArea);
+
+    area.removeFromTop(6);
+    transcribeBar.setBounds(area.removeFromTop(SectionBar::height));
+    {
+        const int transcribe = transcribeHeight();
+        juce::Rectangle<int> transcribeArea;
+        if (transcribe > 0)
+        {
+            area.removeFromTop(4);
+            transcribeArea = area.removeFromTop(transcribe);
+        }
+#if KEYS_TRANSCRIBE
+        if (transcribePanel != nullptr)
+            transcribePanel->setBounds(transcribeArea);
+#endif
+    }
 
     area.removeFromTop(6);
     keyboardBar.setBounds(area.removeFromTop(SectionBar::height));

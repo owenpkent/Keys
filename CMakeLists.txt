@@ -5,6 +5,19 @@ project(Keys VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Transcription (the Transcribe section) is built in the kit. Both of these have to be set
+# before JUCE is added: the prebuilt ONNX Runtime the engine links is a /MT static-runtime
+# library, and on MSVC every object in the binary — JUCE's included — has to agree about that.
+# Turning it off drops the section and its multi-gigabyte dependency.
+option(KEYS_TRANSCRIBE "Build the audio to MIDI Transcribe section" ON)
+
+if (KEYS_TRANSCRIBE)
+    set(OKSTUDIO_KIT_BASICPITCH ON CACHE BOOL "Kit builds the transcription engine" FORCE)
+    if (MSVC)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+endif()
+
 # JUCE: sibling checkout by default (../JUCE); override with -DKEYS_JUCE_PATH=<path>.
 set(KEYS_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../JUCE" CACHE PATH "Path to a JUCE checkout")
 add_subdirectory("${KEYS_JUCE_PATH}" "${CMAKE_BINARY_DIR}/juce" EXCLUDE_FROM_ALL)
@@ -38,6 +51,12 @@ set(KEYS_SOURCES
     src/ui/ChordGenPanel.cpp
     src/ui/ArpPanel.cpp)
 
+if (KEYS_TRANSCRIBE)
+    list(APPEND KEYS_SOURCES
+        src/AudioCapture.cpp
+        src/ui/TranscribePanel.cpp)
+endif()
+
 # Sources, compile defs and links are identical for the instrument and the MIDI-effect
 # variant; only the plugin classification (set by okstudio_add_plugin) and the
 # KEYS_MIDI_EFFECT gate differ. Configure both through one helper.
@@ -53,6 +72,11 @@ function(keys_configure_target tgt)
 
     if (WIN32)
         target_link_libraries(${tgt} PRIVATE wintrust crypt32)
+    endif()
+
+    if (KEYS_TRANSCRIBE)
+        target_compile_definitions(${tgt} PUBLIC KEYS_TRANSCRIBE=1)
+        target_link_libraries(${tgt} PRIVATE okstudio_basicpitch)
     endif()
 
     target_link_libraries(${tgt}

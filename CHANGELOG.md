@@ -5,6 +5,32 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Transcribe, a section that turns what you sing or play into notes
+
+A new folding section between the pads and the keyboard. Pick an audio input, hit **Record**,
+play or sing, hit **Stop**, and the notes appear in a piano roll. Drag them from **DRAG MIDI**
+onto a track and you have a MIDI file. **Sensitivity** re-reads the same recording, so trying
+a different setting is instant rather than another pass of the model.
+
+The engine is Spotify's basic-pitch, ported from
+[NeuralNote](https://github.com/DamRsn/NeuralNote) (Apache-2.0) and shared through the kit as
+`okstudio/Transcribe.h`, so Undertow, Beatform and Contour can have it too.
+
+Keys is an instrument: a DAW sends it MIDI and never audio, so there is no track input to
+record. The section opens an audio device itself, which means it behaves the same in the
+plugin and in the standalone, and picking an input here never disturbs the host's audio setup.
+The device is only open while the section is showing or while recording, so Keys never sits on
+a microphone in the background, and the chosen input is remembered per machine rather than in
+the song.
+
+It is not live, and cannot be: the model needs the whole recording before it can resolve a
+note, so a take under about a second produces nothing, and recording stops itself at two
+minutes. The model runs on a background thread, so the keyboard keeps playing while it works.
+
+The section starts folded, like the arp, because open it is tall. Building it pulls in a
+multi-gigabyte ONNX Runtime download and forces the static MSVC runtime on the whole binary;
+`-DKEYS_TRANSCRIBE=OFF` drops both along with the section.
+
 ### Changed: the arpeggiator is a section of its own, and it detaches
 
 It was one of three centre views, so picking it put the knobs and the generator away — the
