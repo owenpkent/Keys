@@ -11,6 +11,7 @@ namespace
     constexpr float kGap = 6.0f;
     constexpr float kRadius = 6.0f;
     constexpr int kRows = 2; // two rows of eight, Octavium parity
+    constexpr float kSaveW = 38.0f; // the edit tick's strip at the right end of a pad
     bool isChord(const std::vector<int>& n) { return n.size() >= 2; }
 } // namespace
 
@@ -36,6 +37,11 @@ juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
     const float w = (r.getWidth() - kGap * (float) (cols - 1)) / (float) cols;
     const float h = (r.getHeight() - kGap * (float) (rows - 1)) / (float) rows;
     return { r.getX() + (float) col * (w + kGap), r.getY() + (float) row * (h + kGap), w, h };
+}
+
+juce::Rectangle<float> ChordPads::saveBadgeBounds(juce::Rectangle<float> pad)
+{
+    return pad.removeFromRight(kSaveW).reduced(3.0f); // `pad` is a copy; this trims that copy
 }
 
 int ChordPads::cellAt(juce::Point<float> pos) const
@@ -120,6 +126,12 @@ void ChordPads::paint(juce::Graphics& g)
         const bool dropHere = dragging && hovered == i
                               && ((dragSource == -2 && isChord(currentNotes)) || (dragSource >= 0 && dragSource != i));
 
+        // The pad being edited gives up its right end to the tick that ends the edit, so
+        // the chord name moves over rather than running underneath it.
+        auto nameArea = b;
+        if (i == editingSlot)
+            nameArea.removeFromRight(kSaveW);
+
         if (! filled)
         {
             g.setColour(skin::well.withAlpha(0.55f));
@@ -134,14 +146,14 @@ void ChordPads::paint(juce::Graphics& g)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).base);
             g.setColour(inkOnAccent);
             g.setFont(skin::uiSemi(13.5f));
-            g.drawText(pad.name, b.reduced(4.0f), juce::Justification::centred);
+            g.drawText(pad.name, nameArea.reduced(4.0f), juce::Justification::centred);
         }
         else
         {
             skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
             g.setColour(skin::text);
             g.setFont(skin::uiSemi(13.5f));
-            g.drawText(pad.name, b.reduced(4.0f), juce::Justification::centred);
+            g.drawText(pad.name, nameArea.reduced(4.0f), juce::Justification::centred);
         }
 
         // The pad currently feeding the arp. A ring rather than the "active" fill, because
@@ -172,13 +184,34 @@ void ChordPads::paint(juce::Graphics& g)
         if (dropHere)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
 
-        // The pad currently linked to the keyboard for editing.
+        // The pad currently linked to the keyboard for editing, and the tick that ends the
+        // link. The tick lives on the pad itself (Owen's call, 2026-07-27): the edit is a
+        // thing happening *to this card*, and a button parked on the section bar meant
+        // looking away from the card to finish. It is drawn as a path rather than a glyph,
+        // like every other mark in the skin, so it scales with the pad and never depends on
+        // a font having the character.
         if (i == editingSlot)
         {
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
             g.setColour(skin::accentOf(*this).hot);
             g.setFont(skin::micro(8.0f));
-            g.drawText("EDIT", b.reduced(6.0f, 3.0f).toNearestInt(), juce::Justification::topLeft);
+            g.drawText("EDIT", nameArea.reduced(6.0f, 3.0f).toNearestInt(), juce::Justification::topLeft);
+
+            const auto badge = saveBadgeBounds(b);
+            g.setColour(theme::good.withAlpha(0.22f));
+            g.fillRoundedRectangle(badge, 5.0f);
+            g.setColour(theme::good.withAlpha(0.75f));
+            g.drawRoundedRectangle(badge.reduced(0.5f), 5.0f, 1.0f);
+
+            const auto c = badge.getCentre();
+            const float s = juce::jmin(badge.getWidth(), badge.getHeight()) * 0.28f;
+            juce::Path tick;
+            tick.startNewSubPath(c.x - s, c.y + s * 0.05f);
+            tick.lineTo(c.x - s * 0.25f, c.y + s * 0.75f);
+            tick.lineTo(c.x + s, c.y - s * 0.7f);
+            g.setColour(theme::good);
+            g.strokePath(tick, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved,
+                                                    juce::PathStrokeType::rounded));
         }
     }
 
@@ -207,19 +240,7 @@ void ChordPads::setEditingSlot(int slot)
 
 bool ChordPads::toArp() const
 {
-    return processor.layout.toArp;
-}
-
-void ChordPads::setToArp(bool b)
-{
-    if (processor.layout.toArp == b)
-        return;
-    processor.layout.toArp = b;
-    // Leaving the mode must not strand a pad holding, but it has no business stopping a
-    // chord an arp slot launched - that one was not put there from here.
-    if (! b && processor.arpHeldPad() >= 0)
-        processor.releaseArpChord();
-    repaint();
+    return processor.cardsFeedArp();
 }
 
 void ChordPads::showPadMenu(int slot)
@@ -282,6 +303,26 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         if (cell >= 0)
             showPadMenu(cell);
         return;
+    }
+
+    // The tick on the pad being edited ends the edit, and is checked before anything else
+    // a click on that pad could mean: on this one card, in this one state, the right-hand
+    // end is a button and not the pad. Nothing is set up for a drag or a press, so the
+    // mouseUp that follows has nothing to undo.
+    if (editingSlot >= 0)
+    {
+        const int visible = editingSlot - processor.padPageOffset();
+        if (visible >= 0 && visible < KeysProcessor::padsPerPage
+            && saveBadgeBounds(padBounds(visible)).contains(e.position))
+        {
+            dragging = false;
+            dragSource = -1;
+            playing = -1;
+            if (onEditToggle)
+                onEditToggle(editingSlot); // toggling the slot that is already editing ends it
+            repaint();
+            return;
+        }
     }
 
     downPos = e.position;

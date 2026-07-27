@@ -49,7 +49,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 1, 127, 64));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 1, 127, 88));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chordExclusive", 1 }, "Chord Exclusive", false));
+    // Strum is a *range*, like the humanize velocity beside it: each chord takes a random
+    // spread between the two ends, so repeated stabs do not all rake at exactly the same
+    // speed. "chordStrum" is the low end and keeps its old id, so a session saved with a
+    // single strum value loads with that value as its minimum and nothing moves.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrum", 1 }, "Chord Strum", 0, 200, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrumMax", 1 }, "Chord Strum Max", 0, 200, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chordStrumDir", 1 }, "Chord Strum Dir",
                                                       juce::StringArray { "Up", "Down", "Random" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padPage", 1 }, "Chord Pad Page",
@@ -150,8 +155,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpPattern", 1 }, "Arp Pattern", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLinkLanes", 1 }, "Arp Link Lanes", true));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOctaves", 1 }, "Arp Octaves", 1, 4, 1));
+    // Swing goes both ways from a centred zero (2026-07-27, Owen's ask). Positive delays the
+    // offbeats, the shuffle everyone means by "swing"; negative pulls them early, which is
+    // the rushed, on-top-of-the-beat feel you cannot get by delaying anything. The stored
+    // value is absolute, not normalised, so a session saved on the old 0..0.75 range keeps
+    // exactly the swing it had.
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "arpSwing", 1 }, "Arp Swing",
-                                                     NormalisableRange<float>(0.0f, 0.75f, 0.01f), 0.0f));
+                                                     NormalisableRange<float>(-0.75f, 0.75f, 0.01f), 0.0f));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLatch", 1 }, "Arp Latch", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpRetrigger", 1 }, "Arp Retrigger", true));
     // Gate and Chance as globals as well as step lanes: the lanes only exist while Shape is
@@ -159,6 +169,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // out. They multiply the lane value, so the defaults leave an edited pattern untouched.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpGate", 1 }, "Arp Gate", 5, 200, 100));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpChance", 1 }, "Arp Chance", 0, 100, 100));
+
+    // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
+    // A host that is *playing* always wins: this is what Keys runs at when there is no
+    // transport to follow, which is every moment in the standalone and every stopped
+    // transport in a DAW.
+    //
+    // Appended rather than slotted in beside the arp's other controls, to keep the shuffling
+    // of this layout to a minimum. It is only a tidiness argument: Keys ships VST3 and
+    // Standalone, and JUCE derives a VST3 parameter's id by hashing its string id, so saved
+    // state and existing automation follow the id and not the position. What position still
+    // decides is the order a host's generic parameter list shows - and chordStrumMax above
+    // does insert mid-list, so this branch moves that order regardless.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
 
     return layout;
 }
@@ -367,7 +390,14 @@ std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int ta
         for (int k = (int) order.size() - 1; k > 0; --k)       // Random: Fisher-Yates
             std::swap(order[(size_t) k], order[(size_t) rng.nextInt(k + 1)]);
 
-    const double strumMs = apvts.getRawParameterValue("chordStrum")->load();
+    // One spread per chord, not per note: a strum is a single rake, and re-rolling inside it
+    // would scramble the order the direction just decided.
+    const double strumLo = apvts.getRawParameterValue("chordStrum")->load();
+    const double strumHi = apvts.getRawParameterValue("chordStrumMax")->load();
+    const double strumMs = strumLo == strumHi
+                               ? strumLo
+                               : juce::jmin(strumLo, strumHi)
+                                     + rng.nextDouble() * std::abs(strumHi - strumLo);
     const int count = (int) order.size();
     for (int k = 0; k < count; ++k)
     {
@@ -550,7 +580,59 @@ bool KeysProcessor::isNoteSounding(int midiNote) const
 {
     if (midiNote < 0 || midiNote > 127)
         return false;
-    return noteRefs[(size_t) midiNote].load() > 0;
+    // Notes arriving on the input count as sounding for display: Keys passes them through
+    // to the same instrument its own notes go to, so on screen they *are* sounding, and the
+    // keybed lights them through exactly the path a chord pad's notes already take.
+    return noteRefs[(size_t) midiNote].load() > 0 || inputNoteOn[(size_t) midiNote].load();
+}
+
+void KeysProcessor::watchInputNotes(const juce::MidiBuffer& midi)
+{
+    // Audio thread, and deliberately the first thing processBlock does: after the collector
+    // drains, the buffer also holds the notes this plugin is playing, and lighting those
+    // here would double-count what noteRefs already tracks.
+    bool changed = false;
+    const auto set = [&](int note, bool on)
+    {
+        if (note < 0 || note > 127 || inputNoteOn[(size_t) note].load() == on)
+            return;
+        inputNoteOn[(size_t) note].store(on);
+        changed = true;
+    };
+
+    for (const auto meta : midi)
+    {
+        const auto m = meta.getMessage();
+        if (m.isNoteOn())
+            set(m.getNoteNumber(), true);
+        else if (m.isNoteOff())
+            set(m.getNoteNumber(), false);
+        else if (m.isAllNotesOff() || m.isAllSoundOff() || m.isResetAllControllers())
+            for (int n = 0; n < 128; ++n)
+                set(n, false);
+    }
+
+    if (changed)
+        soundingGen.fetch_add(1); // the surface polls this and repaints only when it moves
+}
+
+void KeysProcessor::clearInputNotes()
+{
+    bool changed = false;
+    for (auto& n : inputNoteOn)
+        if (n.exchange(false))
+            changed = true;
+    if (changed)
+        soundingGen.fetch_add(1);
+}
+
+std::vector<int> KeysProcessor::inputNotes() const
+{
+    std::vector<int> out;
+    for (int n = 0; n < 128; ++n)
+        if (inputNoteOn[(size_t) n].load())
+            out.push_back(n);
+    return out; // ascending by construction
 }
 
 void KeysProcessor::allNotesOff()
@@ -578,6 +660,11 @@ void KeysProcessor::allNotesOff()
     for (auto& ref : noteRefs)
         ref.store(0);
     soundingGen.fetch_add(1);
+
+    // All Off clears the input lights too. Keys cannot make someone's physical keyboard let
+    // go, but if a note-off went missing the lit key it left behind is exactly the kind of
+    // stuck thing this button exists to clear; the next key they press lights again.
+    clearInputNotes();
 
     // The chord held into the arp is the one thing here that outlives a note-off, so a
     // panic has to forget it too - otherwise All Off silences it while the launched slot
@@ -625,6 +712,10 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     juce::ScopedNoDenormals noDenormals;
     buffer.clear(); // Keys makes no sound.
 
+    // Before anything is added to the buffer: note what came *in*, so the keybed can show
+    // someone playing a physical keyboard (or a clip) through Keys. Display only.
+    watchInputNotes(midi);
+
     // Drain queued UI note events into the outgoing buffer. Anything already on the
     // track's MIDI (a clip, another device) is left in place and passes through.
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
@@ -665,17 +756,17 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
             {
                 hc.playing = pos->getIsPlaying();
                 if (auto bpm = pos->getBpm())
-                {
                     hc.bpm = *bpm;
-                    lastKnownBpm = *bpm;
-                }
                 if (auto ppq = pos->getPpqPosition())
                 {
                     hc.ppq = *ppq;
                     hc.hasPpq = true;
                 }
             }
-        ap.fallbackBpm = lastKnownBpm;
+        // No transport to follow: run at the BPM control in the Controls section. It used to
+        // be the host's last-known tempo, which was unreachable in the standalone (where
+        // there is no host at all) and unchangeable everywhere.
+        ap.fallbackBpm = (double) apvts.getRawParameterValue("bpm")->load();
 
         arpScratch.clear();
         arp.process(ap, hc, buffer.getNumSamples(), midi, arpScratch);
@@ -931,6 +1022,67 @@ void KeysProcessor::randomizeActiveArpPattern()
     }
 }
 
+void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
+{
+    // Everything both products restore from a saved session, in one place. Keys Host
+    // overrides setStateInformation to add its hosted instrument, and used to repeat this
+    // list by hand: the strum migration below was written on 2026-07-27, worked in Keys, and
+    // silently did nothing in Keys Host until this became one function. Anything session
+    // shaped belongs here, not in either override.
+    migrateStrumRange(root);
+    chordPadsFromTree(root);
+    arpFromTree(root);
+    layoutFromTree(root);
+}
+
+void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
+{
+    // Strum became a range on 2026-07-27: "chordStrum" is the low end now and "chordStrumMax"
+    // the high one. A session saved before that has no chordStrumMax, so the new parameter
+    // arrives at its default of 0 - which does not mean "unchanged", it means the fixed rake
+    // that session asked for silently becomes a random spread between zero and it. Caught on
+    // Owen's own session, which came back reading "STRUM 0-68 MS" for a 68 ms strum.
+    //
+    // The tell is the *absence* of chordStrumMax, and only that. An out-of-order pair looks
+    // like the same thing and was briefly treated as one, but it is not: both ends are
+    // ordinary automatable parameters, and a host or an MCP client can write max below min
+    // deliberately. Collapsing that to a fixed strum on the next load would silently narrow
+    // a range the user meant. Absence cannot be produced by anything except a session older
+    // than the parameter.
+    //
+    // Read the tree rather than the live parameters: this runs while the state is still being
+    // applied, and the atomics may not have caught up.
+    //
+    // The repair goes through setValueNotifyingHost rather than poking the atomic, so the host
+    // and the UI both learn the new value. That wants the message thread, and every host in
+    // practice calls setStateInformation there; the spec does not actually promise it, so if
+    // one ever turns up that does not, this is the line to move behind a callAsync.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    float low = 0.0f;
+    bool sawLow = false;
+    for (int i = 0; i < params.getNumChildren(); ++i)
+    {
+        const auto child = params.getChild(i);
+        const auto id = child.getProperty("id").toString();
+        if (id == "chordStrumMax")
+            return;                      // saved since the change; whatever it says is meant
+        if (id == "chordStrum")
+        {
+            low = (float) child.getProperty("value");
+            sawLow = true;
+        }
+    }
+
+    if (! sawLow)
+        return;                          // nothing saved either way; the defaults are right
+
+    if (auto* param = apvts.getParameter("chordStrumMax"))
+        param->setValueNotifyingHost(param->convertTo0to1(low));
+}
+
 juce::ValueTree KeysProcessor::layoutToTree() const
 {
     juce::ValueTree tree { "layout" };
@@ -939,15 +1091,23 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("knobs", layout.knobs, nullptr);
     tree.setProperty("pads", layout.pads, nullptr);
     tree.setProperty("arp", layout.arp, nullptr);
-    tree.setProperty("toArp", layout.toArp, nullptr);
+    tree.setProperty("transcribe", layout.transcribe, nullptr);
     tree.setProperty("wheels", layout.wheels, nullptr);
     tree.setProperty("keyboard", layout.keyboard, nullptr);
     tree.setProperty("detached", layout.detached, nullptr);
     tree.setProperty("arpDetached", layout.arpDetached, nullptr);
+    tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
+    tree.setProperty("centreDetached", layout.centreDetached, nullptr);
+    tree.setProperty("padsDetached", layout.padsDetached, nullptr);
+    tree.setProperty("transcribeDetached", layout.transcribeDetached, nullptr);
     tree.setProperty("view", layout.view, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
+    tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
+    tree.setProperty("centreDetachedBounds", layout.centreDetachedBounds.toString(), nullptr);
+    tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
+    tree.setProperty("transcribeDetachedBounds", layout.transcribeDetachedBounds.toString(), nullptr);
     return tree;
 }
 
@@ -963,11 +1123,15 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.knobs = flag("knobs", true);
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
-    layout.toArp = flag("toArp", false);
+    layout.transcribe = flag("transcribe", false);
     layout.wheels = flag("wheels", true);
     layout.keyboard = flag("keyboard", true);
     layout.detached = flag("detached", false);
     layout.arpDetached = flag("arpDetached", false);
+    layout.controlsDetached = flag("controlsDetached", false);
+    layout.centreDetached = flag("centreDetached", false);
+    layout.padsDetached = flag("padsDetached", false);
+    layout.transcribeDetached = flag("transcribeDetached", false);
     // "view" is 0 = Perform, 1 = Chords, and used to carry two more values that have each
     // since become a flag of their own. Both legacy values leave no centre view to restore -
     // they replaced it rather than sitting beside it - so both fall back to Perform, which
@@ -983,12 +1147,20 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.view = (storedView == 0 || storedView == 1) ? storedView : 0;
     layout.accent = juce::jlimit(0, 7, (int) tree.getProperty("accent", 0));
 
-    const auto bounds = juce::Rectangle<int>::fromString(tree.getProperty("detachedBounds").toString());
-    if (! bounds.isEmpty())
-        layout.detachedBounds = bounds;
-    const auto arpBounds = juce::Rectangle<int>::fromString(tree.getProperty("arpDetachedBounds").toString());
-    if (! arpBounds.isEmpty())
-        layout.arpDetachedBounds = arpBounds;
+    // A frame is only restored if the session actually carried one; an empty rectangle
+    // means "never detached yet", which the editor reads as "centre the window".
+    const auto frame = [&tree](const char* id, juce::Rectangle<int>& dest)
+    {
+        const auto r = juce::Rectangle<int>::fromString(tree.getProperty(id).toString());
+        if (! r.isEmpty())
+            dest = r;
+    };
+    frame("detachedBounds", layout.detachedBounds);
+    frame("arpDetachedBounds", layout.arpDetachedBounds);
+    frame("controlsDetachedBounds", layout.controlsDetachedBounds);
+    frame("centreDetachedBounds", layout.centreDetachedBounds);
+    frame("padsDetachedBounds", layout.padsDetachedBounds);
+    frame("transcribeDetachedBounds", layout.transcribeDetachedBounds);
 }
 
 juce::ValueTree KeysProcessor::arpToTree() const
@@ -1085,9 +1257,7 @@ void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
     {
-        chordPadsFromTree(root);
-        arpFromTree(root);
-        layoutFromTree(root);
+        restoreSharedState(root);
     });
 }
 

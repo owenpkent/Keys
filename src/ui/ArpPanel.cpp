@@ -677,8 +677,11 @@ void ArpPanel::buildControls()
         s.setTooltip(tip);
         addAndMakeVisible(s);
     };
-    knob(swingSlider, swingLabel, "Swing", 0.0, 0.75, 0.01,
-         "Delay the offbeat steps, as a fraction of a step.");
+    // Swing starts centred and goes both ways: right delays the offbeats (the shuffle),
+    // left pulls them early (rushed, on top of the beat). Zero is straight.
+    knob(swingSlider, swingLabel, "Swing", -0.75, 0.75, 0.01,
+         "Shift the offbeat steps, as a fraction of a step. Right delays them for a shuffle, "
+         "left pulls them early to rush the beat, centre is straight.");
     swingAtt = std::make_unique<SliderAtt>(processor.apvts, "arpSwing", swingSlider);
 
     knob(gateSlider, gateLabel, "Gate", 5.0, 200.0, 1.0,

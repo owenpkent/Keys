@@ -29,8 +29,8 @@ is exactly today's.
 
 **Contract change, deliberate:** the arp engine reads the host playhead (bpm,
 ppqPosition, isPlaying). Keys historically never reads the playhead; the arp stage
-follows the Contour/Lattice model instead. `CLAUDE.md` must be amended when this
-ships.
+follows the Contour/Lattice model instead. `CLAUDE.md` carries the amendment: the
+arp is the only playhead consumer in Keys.
 
 ## Engine (build from scratch; JUCE's demo is not a reference)
 
@@ -41,6 +41,16 @@ math was adversarially refuted as a pattern to copy. Requirements:
 - Derive step boundaries from `ppqPosition`/bpm fresh each block; never accumulate
   counters, so tempo changes and transport jumps self-correct.
 - Emit note on/off at computed sample offsets within the block.
+- **A step is scheduled by its fire time, not by its boundary** (fixed 2026-07-27). Swing
+  moves the offbeats off their own boundaries, so "the boundary falls in this block" and
+  "the note sounds in this block" stop being the same question. The old loop walked the
+  boundaries inside the block and gave up on any step whose swing carried it past the end,
+  which at a realistic 512-sample buffer silenced most of the offbeats, and it could never
+  fire an early one at all, since a step pulled in front of its boundary belongs to the
+  block *before* it. The loop starts one step back and tests each step's fire time instead:
+  one extra iteration at most, because |swing| < 1 keeps fire times monotonic and each step
+  therefore still fires in exactly one block. `tests/ArpTests.cpp` pins both directions,
+  including at 512 samples.
 - **`active[].samplesLeft` is an offset from the start of the block being processed.** That is
   the whole contract, and it is stated above `retireDue()`. `advanceBlock()` rebases the
   survivors exactly once, at the end of `process()`. Getting this frame wrong shipped every
@@ -66,14 +76,17 @@ math was adversarially refuted as a pattern to copy. Requirements:
   calls.
 - Track owed note-offs across block boundaries (ratchets, ties, pattern-length
   boundaries); a transport jump mid-ratchet must flush owed offs, never leak them.
-- Clock spec follows Serum's documented design: a division list (1 bar .. 1/64,
+- Clock spec follows Serum's documented design: a division list (16 bars .. 1/64,
   default 1/16) with **separate Dot and Trip toggles** (kept out of the division
   list so automation stays on even divisions) and an **Anchor toggle**: anchored =
   affixed to the host bar cycle (position may jump on rate change), free = no jump,
   may drift off the bar.
-- **Transport stopped / standalone:** fall back to an internal clock (last-known or
-  set BPM) so the arp keeps sounding while auditioning. Cthulhu goes silent with the
-  transport stopped and that is a known annoyance. (Decided by Owen, 2026-07-19.)
+- **Transport stopped / standalone:** fall back to an internal clock so the arp keeps
+  sounding while auditioning. Cthulhu goes silent with the transport stopped and that is a
+  known annoyance. (Decided by Owen, 2026-07-19.) The fallback is the **BPM** parameter
+  (40..240, default 120, a slider in the Controls section) since 2026-07-27; it used to be
+  the host's last-known tempo, which the standalone never has and nothing could change. A
+  host that is *playing* still wins.
 - Engine is a pure class (`ArpEngine.h`, UI-free, unit-tested like ChordGen):
   inputs = sounding-note set + params + (ppq, bpm, numSamples); output = timestamped
   note events.
@@ -117,10 +130,11 @@ Ranked essential (v1):
 (Probability promoted from v2 to v1 by Owen, 2026-07-19.)
 
 Global (not per-step) in v1: direction mode (up, down, up/down, down/up,
-up-and-down, down-and-up, fingered top, fingered bottom), octave range 1..4 for
-directional modes, swing (applied to offbeat steps), latch (on-screen toggle:
-ignore note-offs until a new chord), retrigger (restart at step 1 on new note),
-rate + dot/trip + anchor.
+up-and-down, down-and-up, as played, reversed), octave range 1..4 for
+directional modes, swing (-0.75..0.75 of a step, applied to the offbeat steps:
+positive delays them into a shuffle, negative pulls them early to rush the beat,
+and the default 0 is straight), latch (on-screen toggle: ignore note-offs until a
+new chord), retrigger (restart at step 1 on new note), rate + dot/trip + anchor.
 
 **Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
 behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or
@@ -181,13 +195,27 @@ already fed the arp - but the arp was a centre view and picking it put the pads 
 pad was momentary anyway. Two paths close that, both added 2026-07-25 (the section move
 closed the first half):
 
-- **To Arp**, a toggle on the Pads bar. Lit, a click on a card calls
+- **A click on a chord card, while the arp is on.** It calls
   `KeysProcessor::holdArpChordFromPad`, which emits the note-ons and never the note-offs
-  until the next call. A visible toggle rather than an implicit "the arp is on" mode: a pad
-  must not quietly do something different than it did a minute ago. The flag lives on the
-  processor (`LayoutState::toArp`), because the chord it holds outlives the editor and the
-  generator's chord grid has to honour the same mode; every surface showing a chord card
-  reads it.
+  until the next call. This was its own **To Arp** toggle on the Pads bar until 2026-07-27,
+  on the reasoning that a pad must not quietly do something different than it did a minute
+  ago. In practice the separate arming read as a button that did nothing: with the arp off,
+  handing it a chord looks exactly like sustaining one, and that is the state the toggle was
+  most often found in. Owen had it removed, and the arp's own **On** is the mode now
+  (`KeysProcessor::cardsFeedArp`, which every surface showing a chord card asks, so the pads
+  and the generator's grid can never disagree). Switching the arp off releases a chord a
+  card was holding, or it would drone with nothing arpeggiating it and no click left to
+  release it.
+
+  **That release lives in the editor's timer, and there are two edges it does not cover**
+  (found in the 2026-07-27 sweep, not yet closed). It is gated on `arpHeldPad() >= 0`, so a
+  chord handed over from the *live* card, which leaves `arpPadSlot` at -1, is not released.
+  And with no editor open there is nothing polling at all, so host automation or an MCP
+  client writing `arpOn` false leaves the chord sounding. This is the hazard the old To Arp
+  flag was put on the processor to avoid, in a new place: a chord held into the arp outlives
+  the window, so what releases it should too. Moving the check onto the processor closes
+  both, and wants a heartbeat there that does not exist yet (its `juce::Timer` is the 1 ms
+  strum scheduler and stops itself the moment nothing is queued).
 - **Send to arp slot**, in the pad's card menu, which copies the chord into a slot for
   later. A copy and not a reference, so regenerating the pad page cannot silently rewrite
   what a slot plays.
@@ -216,15 +244,21 @@ Concrete remaps:
   click where they need a target. (Shipped without a Paste: an arm-then-pick Copy is the
   same two clicks and needs no clipboard to explain.)
 - Grid snap and edit modes: on-screen toggles, never modifier keys.
-- Lane length: drag a handle at the lane's right edge, or - / + buttons.
+- Lane length: - / + buttons either side of a readout, in the STEPS group. (Shipped
+  without the right-edge drag handle this spec also asked for.)
 
 ## UI placement (decided: a section of its own)
 
 The arp is a foldable **section**, between the centre view and the chord pads, with its
 **On** toggle and a **Detach** button on its own bar. Folding the section destroys the
-editor, never the arpeggiator, which is why both of those live on the bar rather than
-inside the panel. Detach moves the whole panel into a resizable window (`DetachedWindow`,
-shared with the keybed); a detached section takes no height in the main window.
+editor, never the arpeggiator, which is why On lives on the bar rather than inside the
+panel — and why On is one of the few things that stays put when the section folds, while
+Detach hides with it. Detach moves the whole panel into a resizable window
+(`DetachedWindow`, shared with every other section since 2026-07-27); a detached section
+takes no height in the main window, and the Re-dock button travels into the window with it.
+
+Clicking the bar anywhere but on **On** folds the panel away, which makes the arpeggiator
+easy to leave running behind a single dim strip.
 
 It got there in three steps, all at Owen's request. A full-editor overlay first, changed to
 a centre view on 2026-07-25 because the overlay dimmed and covered the keyboard you are

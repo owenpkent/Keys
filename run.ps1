@@ -1,6 +1,7 @@
 param(
     [switch]$Keys,      # run plain Keys (MIDI only, silent) instead of Keys Host
     [switch]$NoBuild,   # skip the build and just relaunch what is already there
+    [switch]$Hold,      # pause on failure (for a console that closes when this returns)
     [string]$Config = "Release"
 )
 
@@ -16,13 +17,24 @@ $exe = if (Get-Command py -ErrorAction SilentlyContinue) { "py" }
        else { $null }
 
 if (-not $exe) {
-    Write-Error "run.py needs Python on PATH (install it, or call cmake --build directly)."
+    # Write-Host, not Write-Error: $ErrorActionPreference = "Stop" above turns Write-Error
+    # into a terminating error, so the `exit 1` under it was unreachable and the caller's
+    # $LASTEXITCODE was left reading as whatever succeeded last.
+    Write-Host "run.py needs Python on PATH (install it, or call cmake --build directly)." `
+        -ForegroundColor Yellow
     exit 1
 }
 
 $argv = @("$PSScriptRoot\run.py", "--config", $Config)
 if ($Keys)    { $argv += "--keys" }
 if ($NoBuild) { $argv += "--no-build" }
+if ($Hold)    { $argv += "--hold" }
 
 & $exe @argv
-exit $LASTEXITCODE
+
+# $LASTEXITCODE is only set by a native command that actually ran. If py.exe never started
+# it is $null (or stale from earlier in the session), and `exit $null` exits 0 - the shim
+# reporting success for a run that never happened.
+$code = $LASTEXITCODE
+if ($null -eq $code) { $code = 1 }
+exit $code

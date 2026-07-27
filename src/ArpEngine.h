@@ -78,7 +78,9 @@ public:
         Direction direction = Direction::up;
         bool usePattern = false;  // false: plain arpeggiator, the step lanes are not read
         int octaveRange = 1;      // 1..4, for direction modes
-        float swing = 0.0f;       // 0..0.75, delays odd steps by that fraction of a step
+        // -0.75..0.75, shifts the odd (offbeat) steps by that fraction of a step: positive
+        // late, the usual shuffle; negative early, which rushes them on top of the beat.
+        float swing = 0.0f;
         // Gate and Chance as globals, not only as step lanes. The lanes are gated behind
         // Shape == "Pattern", so on a plain shape there was no way to shorten a note or
         // thin a run out at all; these multiply the lane value, so 100 leaves an edited
@@ -179,15 +181,22 @@ public:
         // between, which hangs a voice on any synth that allocates per note-on.
         if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
-            // Fire every step boundary inside [pos, pos + blockBeats).
-            double nextIndexF = std::ceil(pos / stepBeats - 1.0e-9);
+            // Fire every step whose *fire time* lands inside [pos, pos + blockBeats). Not
+            // every boundary in that range: swing shifts the offbeats either way, so with a
+            // negative swing a step is pulled in front of its own boundary and can belong to
+            // the block before it. Walking from one step back and testing the fire time is
+            // what makes early swing possible at all - the old ceil-from-pos loop dropped
+            // any step it pulled behind the block start, which silenced every other note.
+            // Costs at most one extra iteration per block, since |swing| < 1 keeps fire
+            // times monotonic and each step therefore still fires in exactly one block.
+            double nextIndexF = std::floor(pos / stepBeats + 1.0e-9) - 1.0;
             for (;;)
             {
                 const double boundaryBeats = nextIndexF * stepBeats;
                 const long long globalStep = (long long) llround(nextIndexF);
                 double fireBeats = boundaryBeats;
                 if ((globalStep & 1) != 0)
-                    fireBeats += stepBeats * p.swing; // swing delays the offbeats
+                    fireBeats += stepBeats * p.swing; // swing shifts the offbeats
                 const double offsetBeats = fireBeats - pos;
                 const int offset = (int) std::floor(offsetBeats / beatsPerSample);
                 if (offset >= numSamples)

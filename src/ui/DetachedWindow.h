@@ -9,11 +9,14 @@ namespace keys
 {
 // A section of the editor, popped out into its own resizable window.
 //
-// Two sections use this. The **keybed**, because Owen plays with one mouse and key width is
-// the accuracy budget: he wants the keyboard as wide and as tall as the screen allows without
-// every other section stretching to match. And the **arpeggiator**, because its control band
-// and twelve slots want more room than a docked row can spare, and because an arp is something
-// you set up once and then leave running while you play.
+// Every section uses this (2026-07-27; before that only two did). The **keybed**, because Owen
+// plays with one mouse and key width is the accuracy budget: he wants the keyboard as wide and
+// as tall as the screen allows without every other section stretching to match. The
+// **arpeggiator**, because its control band and twelve slots want more room than a docked row
+// can spare, and because an arp is something you set up once and then leave running while you
+// play. Owen asked for the rest to follow, and there was nothing section-specific left in here
+// to stop them: one screen's worth of plugin can now be spread across as many windows as the
+// desk has room for.
 //
 // It owns nothing. The editor keeps owning the components and simply re-parents them in and out
 // of `holder`; this window must therefore be destroyed before those components are (KeysEditor's

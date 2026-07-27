@@ -7,6 +7,8 @@
 - A **JUCE 8** checkout at `../JUCE` (sibling of this repo)
 - The **kit** at `../okstudio-juce-kit` (sibling of this repo)
 - For installers: **Inno Setup 6** (`winget install JRSoftware.InnoSetup`)
+- For the Transcribe section (on by default): a working internet connection the first time
+  you configure, and patience — see below
 
 Layout:
 
@@ -16,6 +18,38 @@ dev/
 ├── okstudio-juce-kit/
 └── Keys/
 ```
+
+## The transcription dependency
+
+The Transcribe section is built on the kit's `okstudio_basicpitch` target, and that brings two
+things with it. Neither is a choice: both are properties of the prebuilt ONNX Runtime the
+engine links, published by the NeuralNote authors because building ONNX Runtime from source is
+its own project.
+
+- **A large download at configure time.** The archive is fetched into the build tree and
+  unpacks to a few gigabytes. It is never committed, and never re-downloaded once it is there,
+  but a fresh build tree pays for it again. Deleting `build/` is not free any more.
+
+  Unless you keep it somewhere else: `-DOKSTUDIO_ONNXRUNTIME_CACHE=<dir>` puts the unpacked
+  runtime at a path of your choosing, shared by every build tree that points at it. Worth
+  setting once if you ever delete `build/`. CI uses the same flag with an `actions/cache`
+  step, keyed on the ONNX Runtime release.
+- **The static MSVC runtime.** That library is `/MT`, and MSVC will not link objects that
+  disagree, so `CMAKE_MSVC_RUNTIME_LIBRARY` is set before `add_subdirectory(JUCE)` in the
+  top-level `CMakeLists.txt`. Everything in the binary — JUCE included — is built that way.
+  The upside is one fewer redistributable to worry about; the cost is a slightly larger
+  binary and a full rebuild if you flip the option.
+
+`-DKEYS_TRANSCRIBE=OFF` avoids both, at the cost of the section. Anything that only touches
+the keyboard, the pads, the generator or the arp can be built that way and will configure and
+link much faster from cold.
+
+**Give it its own build tree rather than flipping it in place.** The flag decides the C
+runtime for the entire binary, so toggling it invalidates every object in the tree — and with
+it on, re-configuring is the expensive part. `cmake -B build-notranscribe -DKEYS_TRANSCRIBE=OFF`
+keeps both trees warm and lets you move between them for the cost of a link.
+
+The engine and its own tests live in the kit; see its `docs/TRANSCRIPTION.md`.
 
 ## Testing a change (run.py)
 
@@ -46,7 +80,8 @@ sound with no DAW involved. Load a synth into it once; it remembers between laun
 Reach for `build.ps1` below when a change needs a real Ableton load test: bus layout,
 plugin classification, the installer, the updater, or host automation.
 
-Three things `run.py` absorbs so they don't look like build failures.
+Three things `run.py` absorbs so they don't look like build failures. The third, Smart
+App Control, has the section below to itself.
 
 It does not just run whatever `cmake` is on PATH. pip installs cmake behind a small
 unsigned launcher in `Scripts`, and Smart App Control refuses to start it — which surfaces
@@ -56,17 +91,56 @@ real signed payload under `site-packages/cmake/data/bin`, an MSI install, and on
 PATH, taking the first that actually launches and saying which it picked when that is not
 the one on PATH. If none starts, it names each one that was blocked instead of a traceback.
 
-Keys Host can own up to four top-level windows (its own, the hosted instrument's GUI, and
-the keybed and arpeggiator when they are detached), and Windows picks `MainWindowHandle`
+Keys Host can own a top-level window per detached section on top of its own and the hosted
+instrument's GUI — eight in all, if you pull everything out — and Windows picks `MainWindowHandle`
 between them heuristically, so the close is aimed at the window titled after the product
 (closing the instrument window only hides it, which would cost you a force-kill and the
 loaded synth).
 
-And if Smart App Control is enforced, it blocks the first launch of a freshly linked
-unsigned exe while its reputation check runs, then lets the same file through once the
-check clears. That has been measured at up to three minutes here, so run.py keeps retrying
-for four, says it is waiting, and prints `Cleared.` when the launch goes through. A long
-pause there is the check, not a hang.
+## Smart App Control
+
+SAC is **enforced** on Owen's machine (`HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy` →
+`VerifiedAndReputablePolicyState = 1`) and dev builds are unsigned, so it gates the first
+launch of every freshly linked exe while it decides. It gates a *file hash*, not a path, so
+every relink is a fresh verdict and the same target can be instant one build and blocked the
+next.
+
+What it actually does, measured here on 2026-07-27 from
+`Microsoft-Windows-CodeIntegrity/Operational` (readable without admin):
+
+- One `Keys.exe` build was blocked **175 times over 19 minutes 44 seconds** — and never
+  cleared. It was superseded by a relink. `DefenderMadeCloudCall` was false on 173 of those
+  175 events, i.e. the cloud reputation call was not completing at all.
+- The builds either side of it — `Keys.exe`, `Keys FX.exe`, `keys-mcp.exe`, `Keys Host.exe`
+  — each ran within about two seconds of being linked.
+
+So "wait and it clears" is a coin toss, not a rule, and the old advice here (three minutes,
+retry for four) was optimistic by a factor of five. `run.py` now waits up to twenty minutes
+with a live counter and a Ctrl+C that works, because SAC blocks a launch **two different
+ways**: with a verdict cached it fails `CreateProcess` outright, and while the lookup is in
+flight it *blocks the call*. Only the first was handled, and the second is what used to
+present as a dead hang with nothing on screen.
+
+### Getting out of the wait
+
+There is **no exemption**. No allowlist, no trusted folder, no Developer Mode carve-out, no
+"run anyway" on the block dialog, and a self-signed certificate does not help — SAC only
+honours certificates chaining to a CA in the Microsoft Trusted Root Program. Microsoft's
+answer to developers is "sign your app with a valid certificate", which for this repo means
+the EV eToken and a PIN per build: fine for a release, fatal for a five-second loop.
+
+That leaves turning SAC off, which **used to be a one-way door** — and is not any more.
+KB5079391 (26 March 2026, builds 26200.8116/26100.8116) shipped "You can turn Smart App
+Control (SAC) on or off without needing a clean install", and the consumer FAQ now says
+"Recent Windows updates allow Smart App Control to be re-enabled without requiring a clean
+installation." This machine is on **26200.8875**, well past that. Be aware that Microsoft
+has not retracted the old warning: the Learn "Application Control for Windows" page still
+carries "Once you turn Smart App Control off, it can't be turned on without resetting or
+reinstalling Windows", revised *after* the fix shipped. The free check is to open
+**Settings → Privacy & security → Windows Security → App & browser control → Smart App
+Control settings** and see whether the toggle moves both ways before committing to it.
+
+Owen's machine, Owen's call — nothing in this repo changes that setting.
 
 ## Quick build (build.ps1)
 
@@ -138,6 +212,7 @@ how to keep it testable) is in
 | `KEYS_BUILD_HOST` | `ON` | build Keys Host (an instrument VST3 hosted inside Keys). Turning this off leaves `run.py`'s default target missing |
 | `KEYS_BUILD_MCP_SHIM` | `ON` | build `keys-mcp.exe`, the stdio bridge (see [MCP.md](MCP.md)) |
 | `KEYS_BUILD_MIDI_EFFECT` | `OFF` | also build Keys FX, the MIDI-effect variant Ableton rejects |
+| `KEYS_TRANSCRIBE` | `ON` | build the Transcribe section. Off drops the section, a multi-gigabyte ONNX Runtime download, and the static-MSVC-runtime requirement below |
 
 ## Troubleshooting
 

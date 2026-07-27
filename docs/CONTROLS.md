@@ -1,9 +1,10 @@
 # Controls
 
 Every control is operated with a single left-click, a drag, or the scroll wheel.
-Nothing needs the keyboard, a double-click, or a modifier key, and nothing *requires*
-a right-click: the one right-click gesture below is an optional shortcut with an
-on-screen equivalent.
+Nothing needs the keyboard, a double-click, or a modifier key. The right-click gestures
+below are accelerators, and the work each of them does has a left-click path too. The
+single exception is **Send to arp slot** in a chord pad's menu, which has no left-click
+twin, because binding a chord to one particular slot needs a target picker.
 
 ## The keyboard
 
@@ -18,6 +19,15 @@ Chords come from **Sustain** or **right-click** — a single mouse can't hold se
 keys at once, so those are how you stack notes. Either way, **clicking a held key
 releases it**, so a chord with a wrong note in it can be taken apart a note at a time.
 
+### Watching a physical keyboard
+
+Keys also **shows you what is arriving on its MIDI input**. Play a hardware keyboard into
+it — in the standalone, tick your device under **Options → Audio/MIDI Settings**; in a DAW,
+anything feeding the track — and those keys light up on the on-screen keybed, with the live
+chord card naming the chord so you can capture it to a pad. Keys does not intercept any of
+it: the stream passes through to your instrument exactly as it always has, and **All Off**
+clears the lights if a note-off ever goes missing.
+
 To the **left of the keyboard** are two performance wheels: **Mod**
 sends CC1 and stays where you leave it; **Pitch** bends and glides back to centre over
 a moment when you let go. Both move by **relative drag** — clicking never jumps the
@@ -27,31 +37,82 @@ transient (they don't save with the session) and send on the current MIDI channe
 ## Folding the window down
 
 Keys is a stack of sections, and each one folds away so the plugin can be squeezed small
-when the screen is busy. **Click the chevron at the left end of a section bar** — only
-that end folds it, so a click that misses a control next to it can't collapse the section
-by accident. The window resizes itself to whatever the folds add up to, and can never be
-dragged smaller than the content it is showing.
+when the screen is busy. **Click anywhere on a section bar** to fold it, or on a folded one
+to bring it back — the whole 34 px strip is the button, not just the chevron at its left
+end. The controls that sit on a bar take their own clicks first, so hitting **Detach** or
+**On** does what it says; the bar only gets what they don't want. The window resizes itself
+to whatever the folds add up to, and can never be dragged smaller than the content it is
+showing.
+
+An open section's bar is a solid ruled band with a bright caption and a tick of accent at
+its left end. A folded one goes flat and dim and drops its Detach button. So the shape of
+the window reads at a glance, before you have read a single caption.
 
 | Section | Bar | Folds away |
 |---------|-----|-----------|
-| **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Velocity, Humanize, Strum, Dir |
+| **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Velocity, Humanize, Strum, Dir, BPM |
 | **Perform / Chords** | middle | Whichever centre view is showing. Both tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** folds the knob bank inside Perform. |
 | **Arp** | below the centre | The arpeggiator. Its **On** toggle and **Detach** ride on the bar, so the arp can be switched on, off and detached with the panel folded shut — folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
-| **Pads** | below the arp | The chord-pad strip, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons and the **To Arp** toggle ride on the bar. |
+| **Pads** | below the arp | The chord-pad strip, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons ride on the bar. |
+| **Transcribe** | below the pads | Audio to MIDI: the input picker, the waveform, the piano roll and the MIDI drag handle. It starts folded, like the arp, because open it is tall. Folding it also closes the audio input, so Keys is not holding your microphone while it is shut. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain and All Off stay put. |
 
-### Detaching the keyboard, and the arp
+### Detaching a section
 
-**Detach** puts the keybed in its own resizable window, so you can make the keys as large
-as the screen allows without stretching the rest of the plugin. Docked, key height is a
-compromise with everything above it; detached, dragging the window taller genuinely makes
-the keys taller. That window carries its own **Size**, **Wheels** and **Re-dock** controls,
-and its close button re-docks. Its position and size are remembered with the session.
+**Every open section bar has a Detach button**, at its right-hand end. It puts that section
+in a resizable window of its own, which you can put anywhere on the desk and size to suit.
+Inside that window a **Re-dock** button sits at the top, and the window's close box does the
+same thing; either brings the section home. Each window's position and size are remembered
+with the session, and one that ends up off-screen is pulled back on before it opens.
 
-The **Arp** bar has a Detach of its own, and it works the same way: the arpeggiator moves
-into a resizable window, its close button re-docks it, and its position is remembered. A
-detached section takes no height in the main window, so this is the way to keep the
-arpeggiator open and the plugin window small at the same time.
+A folded section has no Detach button: unfold it first. There was nothing behind the gesture
+anyway — detaching a folded section built a window that opened hidden — and on a bar whose
+whole job is to be quiet, it was the loudest thing left.
+
+A detached section takes no height in the main window, so this is also the way to keep a tall
+section open and the plugin window small at the same time. Folding a detached section hides
+its window rather than its (now empty) slot, so the chevron still means one thing. The bar it
+came from says **IN ITS OWN WINDOW** where its controls used to be.
+
+The **keyboard** is the one that gains the most. Docked, key height is a compromise with
+everything above it; detached, dragging the window taller genuinely makes the keys taller, as
+large as the screen allows. That window carries its own **Size** and **Wheels** controls
+alongside Re-dock, because those belong to the keybed rather than to the editor.
+
+What stays behind on a bar is whatever belongs to the editor rather than to the section: the
+**Perform / Chords** tabs, the arp's **On** toggle, the pad page buttons, and the theme
+swatch. All of them keep working while the section they name is off in a window.
+
+Folding is the other case, and a stricter one: a folded bar keeps only what still means
+something with the section gone — the arp's **On** (so the arpeggiator runs on behind a
+closed panel), the **Perform / Chords** tabs (they are how a folded centre comes back) and
+the theme swatch (it colours the whole plugin). Everything else goes with the section,
+Detach included.
+
+## Transcribe
+
+The one section that listens rather than plays. Record something, and Keys works out what
+notes you sang or played.
+
+| Control | Gesture | What it does |
+|---------|---------|--------------|
+| **Driver** | click | Which audio driver to list inputs from — Windows Audio, ASIO, DirectSound |
+| **Input** | click | The input to record from. Remembered per machine, not saved in the song, because it describes your desk rather than your track |
+| *(level meter)* | — | Between the input and the buttons. Shows signal arriving, so you can see the mic is working before you record |
+| **Record** / **Stop** | click | Start recording; click again to stop and transcribe. Recording stops itself after two minutes |
+| **Clear** | click | Throw away the recording and the notes |
+| **DRAG MIDI** | **drag** | Drag onto a DAW track to drop the notes there as a MIDI file. The one control here that is a drag rather than a click, because an external file drag has no click equivalent |
+| **Sensitivity** | drag | Higher finds more notes. It re-reads the same recording rather than running the model again, so it answers immediately |
+
+The waveform strip shows what was recorded; the piano roll below it shows the notes that
+came out, laid out over the length of the take with the pitches it actually found.
+
+Transcription is not live and cannot be: the model needs the whole recording before it can
+decide where a note began. A take shorter than about a second produces nothing at all. While
+it works, the rest of Keys keeps playing normally.
+
+If the section is greyed out or missing entirely, Keys was built with
+`-DKEYS_TRANSCRIBE=OFF`.
 
 ## Playing surface
 
@@ -82,8 +143,9 @@ click-jump), and nothing is sent until you move one.
 | **MIDI Ch** | dropdown | Output channel, 1–16 |
 | **Velocity** | two-handle slider | How hard Keys plays. With **Humanize** off, every note plays the band's midpoint (the readout shows it). With Humanize on, each note takes a random value inside the band. Drag an end to resize it, or **drag the middle to move the whole band**. Collapse it onto one value for a plain fixed velocity. |
 | **Humanize** | toggle | On: each note takes a random velocity from inside the Velocity band, so repeats and chords don't sound machine-perfect. Off: the band's midpoint. |
-| **Strum** | slider | Spread a chord's notes over 0–200 ms instead of playing them together. Applies to chord pads and the live chord card. |
+| **Strum** | range | Spread a chord's notes instead of playing them together, over a time drawn from this 0–200 ms band — so repeated stabs do not all rake at the same speed. Drag an end to resize the band or the middle to move it; both ends together is a fixed strum. Applies to chord pads and the live chord card. |
 | **Dir** | dropdown | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. |
+| **BPM** | slider | 40–240. The tempo anything timed in beats runs at — today that is the arpeggiator alone — when there is no transport to follow: always in the standalone, and whenever the host is stopped. A host that is *playing* always wins, so this never fights tempo sync. |
 | **Theme** | swatch | Colours this instance (Cyan, Amber, Lime, Violet, Magenta, Orange, Rose, Ice), so you can tell it from Keys on your other tracks. Per instance, saved with the session. Sits on the *Controls bar*, so it stays reachable with that section folded. |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
@@ -127,27 +189,35 @@ and the playing area. They let you keep a palette of chords a single click away.
 5. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
    the rows to empty it, or drag a pad onto the live card to bring its notes back onto
    the keyboard (held) for editing — capture in reverse.
+6. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
+   chord latches onto the keys, and every key you add or remove is written straight back
+   to the pad, with the name re-detected as you go. That pad wears a **✓** at its
+   right-hand end while the link lasts — click it to finish. (The pad is written as you
+   play, so the tick ends the edit rather than committing it; before it existed, finishing
+   meant going back into the right-click menu, which made the last step the hardest one.
+   Folding the Pads section away also ends the edit, since the tick goes with it.)
 
 Pad chords play through the same output as the keys, so **Humanize** gives each chord
 tone its own velocity and the **Strum** control spreads them into a strum. A pad also
 respects the **Voices** limit: if a chord has more notes than the cap allows, its lowest
 notes are the ones that sound. The pads save with the DAW session.
 
-There are **four pages** of sixteen pads, picked by the four numbered buttons directly
-under the strip. A chord left ringing on one page keeps sounding while you work on
-another, so you can hold a bass chord on page 1 and play page 2 over it.
+There are **four pages** of sixteen pads, picked by the four numbered buttons on the
+**Pads bar** above the strip. A chord left ringing on one page keeps sounding while you
+work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ## Chord generator
 
-**Chords** opens the generator over the plugin. It works on the page of pads you are
-looking at, so each page can be a different key. **Close** puts it away.
+**Chords** is the centre view that holds the generator. It works on the page of pads you
+are looking at, so each page can be a different key. **Close** goes back to Perform.
 
 ### Filling a page
 
-1. **Pick a feel.** The **Feel** row (Happy, Sad, Dreamy, Dark, Jazzy, Bluesy, Epic,
-   Chill, Mysterious, Smooth) sets a key and mode in one click, and moves **Root** and
-   **Scale** to match so **Scale Lock** agrees with the chords you're about to get.
-   Or set **Key** and **Mode** yourself — each mode shows the character it carries.
+1. **Pick a key.** Set **Key** and **Mode**: each mode shows the character it carries
+   (Lydian reads "Dreamy, Ethereal, Magical"), so you can choose by feel rather than by
+   name. These two are the generator's own, separate from the **Root** and **Scale** that
+   drive Scale Lock, so move those to match if you want Scale Lock to agree with the
+   chords you're about to get.
 2. **Fill Page.** Every unlocked pad gets a chord. The seven chords that belong to the
    key come first, in order, then the remaining pads get something richer from the key.
 3. **Play them.** Press a chord in the grid to hear it, or close the panel and play the
@@ -164,8 +234,9 @@ looking at, so each page can be a different key. **Close** puts it away.
 
 ### Keeping what you like
 
-**Lock** a chord you want to keep. **Regen Unlocked** gives every other pad a new chord;
-locked ones stay. **Clear Page** empties the unlocked pads.
+**Lock** a chord you want to keep, from its card's right-click menu. **Regen Unlocked**
+gives every other pad a new chord; locked ones stay. **Clear Page** empties the unlocked
+pads.
 
 **Lock Influence** decides how much the locked chords steer the new ones. At a high
 setting, locking three 7th chords biases what you get toward 7ths — it copies the
@@ -173,8 +244,8 @@ setting, locking three 7th chords biases what you get toward 7ths — it copies 
 
 ### Finding the next chord
 
-**New** on a pad gives you a different chord for that pad's place in the scale — same
-role in the key, different colour.
+**New chord**, in that same card menu, gives you a different chord for that pad's place
+in the scale — same role in the key, different colour.
 
 **Next** asks what could follow that chord, and offers four kinds of answer:
 
@@ -234,7 +305,7 @@ wrapping round.
 | **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, or **Pattern** (opens the step editor). |
 | **Rate** | Pattern | Step length, 16 bars down to 1/64. |
 | **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. |
-| **Swing** | Playback | 0–0.75. Delays the offbeat steps. |
+| **Swing** | Playback | −0.75 – +0.75, starting centred. Shifts the offbeat steps: right delays them for a shuffle, left pulls them early to rush the beat, centre is dead straight. |
 | **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
 | **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
 | **Octaves** | Playback | 1–4. How many octaves a direction shape climbs before repeating. |
@@ -294,12 +365,14 @@ Right-clicking a slot offers Launch, Clear chord, Copy and Randomize, if you pre
 
 Two ways, both from the Pads section under the panel:
 
-- **To Arp** on the Pads bar. Lit, clicking a pad hands its chord to the arp and leaves it
+- **Click a chord card while the arp is on.** It hands that chord to the arp and leaves it
   there: the pad wears a bright ring while it is the one feeding the arp, so click the lit
-  pad to release it, or another to swap. The generator's chord grid obeys the mode too, so
-  a chord can reach the arp while you are still filling the page. The live chord card hands
+  pad to release it, or another to swap. The generator's chord grid does the same, so a
+  chord can reach the arp while you are still filling the page. The live chord card hands
   its chord over the same way, but takes no ring and no second click — use **Stop**, or
-  another card, to move off it. Unlit, the pads play exactly as they always have. The mode
-  is remembered with the session, because the chord it holds outlives the window.
+  another card, to move off it. With the arp **off**, the pads play beat-pad style exactly
+  as they always have, and switching the arp off while a card is feeding it releases that
+  chord. (This used to need arming a separate **To Arp** toggle, which looked like it did
+  nothing whenever the arp was off; it went on 2026-07-27.)
 - **Send to arp slot**, in a pad's right-click menu, parks a copy of that chord in one of
   the twelve slots to launch later.

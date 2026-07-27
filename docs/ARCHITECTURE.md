@@ -9,16 +9,18 @@ on-screen piano into MIDI. Everything shared with the rest of the line comes fro
 ```
 src/
 ├── PluginProcessor.{h,cpp}   # AudioProcessor: params, MIDI output, chord pads, state
-├── PluginEditor.{h,cpp}      # folding sections, centre views, layout, updater button
+├── PluginEditor.{h,cpp}      # folding/detaching sections, centre views, layout, updater button
 ├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
 ├── Chords.h                  # pure chord detector (names a note set), unit-tested
-├── ScaleModes.h              # 12 modes + a chord quality per degree; Feel presets
+├── ScaleModes.h              # 12 modes + a chord quality per degree; emotion lines
 ├── ChordGen.h                # pure chord generation (weighted pool), unit-tested
 ├── ChordSuggest.h            # pure "what could follow this chord", unit-tested
 ├── ChordMarkov.h             # pure Markov progression source, unit-tested
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys (docs/ARP_DESIGN.md)
+├── AudioCapture.{h,cpp}      # records from an audio input Keys opens itself, for the
+│                             # Transcribe section. Built only with KEYS_TRANSCRIBE
 ├── ui/
 │   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
 │   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
@@ -29,10 +31,12 @@ src/
 │   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
+│   ├── TranscribePanel.{h,cpp} # the Transcribe section: input picker, waveform, piano
+│   │                         # roll of the transcribed notes, MIDI drag-out
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
-│   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity range)
+│   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── DetachedWindow.h      # a section popped out into its own resizable window
-│   │                         # (the keybed, and the arp; was KeyboardWindow.h)
+│   │                         # (any of them since 2026-07-27; was KeyboardWindow.h)
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
 ├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
 │   ├── KeysHostProcessor.{h,cpp} # KeysProcessor + one hosted instrument VST3
@@ -41,6 +45,35 @@ src/
     └── KeysMcp.{h,cpp}       # MCP tool registrations; every handler runs on the
                               # message thread (docs/MCP.md)
 ```
+
+## Transcription
+
+The Transcribe section records audio and turns it into notes. Three pieces, in a deliberate
+order:
+
+- **`AudioCapture`** owns a `juce::AudioDeviceManager` of its own and records to one
+  preallocated mono buffer. Keys is an instrument: hosts send it MIDI and never audio, so
+  there is no track input to record and opening a device directly is the only way in. That
+  it is *our* device, not the host's, is what makes the section behave identically in the
+  plugin and in the standalone, and it means choosing an input never touches the host's
+  setup. The buffer is preallocated because the alternative is allocating on the device
+  thread; recording stops itself at `AudioCapture::maxSeconds` rather than growing forever.
+- **`okstudio::transcribe::Transcriber`** (the kit, `okstudio/Transcribe.h`) is the engine:
+  basic-pitch, ported from NeuralNote. It lives in the kit because Undertow, Beatform and
+  Contour would all have use for it. See the kit's `docs/TRANSCRIPTION.md`.
+- **`TranscribePanel`** is the UI, and owns the threading. The model runs for a good
+  fraction of the recording's length, so it runs on a `juce::Thread` and posts its notes
+  back with `MessageManager::callAsync`; the keyboard keeps playing throughout. Moving the
+  Sensitivity slider calls `retranscribe()`, which reruns only the note-event stage and is
+  cheap enough to follow the slider live.
+
+None of this touches the audio thread that `processBlock` runs on. The capture callback is a
+*different* device's thread, and writes only to its own buffer.
+
+The whole thing is behind `KEYS_TRANSCRIBE`, on by default. Off, `AudioCapture` and
+`TranscribePanel` are not compiled, the section reports zero height, and the kit's engine is
+never built — which also drops a multi-gigabyte ONNX Runtime download and the static MSVC
+runtime it forces on the binary.
 
 ## Threading: UI → audio note path
 
@@ -60,9 +93,17 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 - `processBlock` calls `collector.removeNextBlockOfMessages(midi, numSamples)`, which
   drops the queued events into the block at the right offsets. Any MIDI already on
   the track (a clip, another device) passes through untouched.
+- Before that drain, `watchInputNotes()` notes which pitches the *incoming* stream turns
+  on and off (`inputNoteOn`, a flag per pitch, never a count — a missed note-off would
+  leak a refcount into a key lit forever). It has to run first: afterwards the same buffer
+  also holds this plugin's own notes, which `noteRefs` already tracks. Nothing is
+  consumed or altered; `isNoteSounding()` simply also answers true for those pitches, so
+  the keybed lights up for someone playing a physical keyboard through Keys and the live
+  chord card can name what is under their hands. Added 2026-07-27.
 
-The audio thread does nothing else: `buffer.clear()` (silence) then drain the
-collector. No allocation, no locks.
+The audio thread does nothing else: `buffer.clear()` (silence), watch the input, drain the
+collector, and, with the arp on, run the arp stage over what came out (`docs/ARP_DESIGN.md`).
+No allocation, no locks.
 
 ## Playing surface: one product, one piano
 
@@ -164,8 +205,10 @@ chords when the pedal lifts). Dropping a pad on the live card runs the other
 direction: `onRecall` hands its notes to the active note surface, which latches the
 drawn keys that produce them (`recallOutputNotes`), so a stored chord comes back for
 editing. Playback reuses `noteOn`, so Humanize colours each tone,
-and `chordStrum` / `chordStrumDir` order the notes and stagger their note-ons into a
-strum (via `noteOn`'s `delaySeconds`). Detection (`Chords.h`) rotates a pitch-class set
+and `chordStrum` / `chordStrumMax` / `chordStrumDir` order the notes and stagger their
+note-ons into a strum: the two ends are a band, and each chord draws one spread from it
+(via `scheduleNoteOn`, for the reason in **Scheduling** above), so repeated stabs do not
+all rake at exactly the same speed. Detection (`Chords.h`) rotates a pitch-class set
 over 12 candidate roots and scores each against a template library — root mandatory,
 3rd and 5th omittable — so it is unit-testable with no UI.
 
@@ -194,8 +237,10 @@ The modes (`ScaleModes.h`) are deliberately **not** the kit's `okstudio::scales`
 table answers "is this note in the scale", which is all Scale Lock needs; generation also
 needs a chord quality per degree. They stay separate rather than one pretending to be the
 other, and `kitScaleIndex` pairs them by comparing intervals — so a rename on either side
-cannot silently mis-pair them. That mapping is what lets a Feel preset move Root and
-Scale along with the generator's own key.
+cannot silently mis-pair them. That mapping is what let a Feel preset move Root and
+Scale along with the generator's own key; the Feel row went in the 2026-07-22 generator
+redesign, so today `modes::emotions()` and `kitScaleIndex` have no caller but the test
+that keeps every mode pairable, and they are kept for whatever brings the presets back.
 
 `ChordSuggest.h` answers "what could follow this chord". Octavium writes each transform
 as its own function; they are all the same shape (shift the root by an interval, maybe
@@ -219,11 +264,22 @@ All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`
 ## Folding layout, and the centre view
 
 The editor is a stack of sections, each of which folds away so the window can be squeezed
-small when the screen is busy: **Controls** (the three header rows), the **centre view**,
-the **Arp**, the **Pads**, and the **Keyboard** (with the wheels as a sub-fold).
-`SectionBar` is the affordance — a `juce::Button` so the mouse-only contract and the
+small when the screen is busy — and, since 2026-07-27, each of which also detaches into a
+window of its own: **Controls** (the two header rows), the **centre view**, the **Arp**, the
+**Pads**, **Transcribe**, and the **Keyboard** (with the wheels as a sub-fold).
+`SectionBar` is the fold affordance — a `juce::Button` so the mouse-only contract and the
 accessible name come for free, with the section's own small controls laid out as its
-siblings in `contentArea()`.
+siblings in `contentArea()`. The whole bar is the target, and it paints open and folded at
+different weights (see below). One trap: `captionWidth()` feeds both the caption's own text
+box and `contentArea()`, so it and `paintButton()` have to measure with the same
+`captionFont()` — measure narrower than you draw and the longest caption ellipsises; vary
+the font with the fold state and every control on the bar shifts when the section folds.
+
+**Transcribe** is the odd one out: it is the only part of Keys that consumes audio rather
+than producing MIDI, and the only section whose panel owns a device. Like the arp's, its
+panel is built when the section opens and destroyed when it folds — it holds an open audio
+input and a neural network's weights, neither worth keeping warm behind a folded bar. See
+"Transcription" below.
 
 The middle of the editor is a *view*, not a stack of overlays. `Perform` is the knob bank
 and `Chords` swaps `ChordGenPanel` into the same slot, with both tabs riding on the centre's
@@ -239,12 +295,28 @@ it destroys the view, never the arpeggiator.
 The **chord pads are a section of their own** too, below the arp, so they are on screen
 under either centre view. They used to live inside Perform, which meant the arpeggiator —
 the one panel whose whole job is to chew on a chord — was also the one place you could not
-reach a chord. Their page buttons ride on the Pads bar, alongside the **To Arp** toggle
-that turns a card click into "hand this chord to the arp and leave it there".
+reach a chord. Their page buttons ride on the Pads bar. What a card click *means* is the
+arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp running, a click hands that
+chord over and leaves it there instead of playing it while the button is down.
 
-The bars are full-width translucent Buttons and the controls on them are *siblings*, not
-children (a `SectionBar` has to stay clickable end to end). Z-order therefore matters:
-they are sent `toBack()` after construction, or each bar paints over its own tabs.
+The bars are full-width Buttons and the controls on them are *siblings*, not children. The
+whole strip answers a click, so folding a section is a 34 px-tall full-width target rather
+than a 40 px box at one end. What keeps that from swallowing the controls riding on it is
+z-order, not hit-testing: the bars are sent `toBack()` after construction, so every sibling
+sits in front and takes its own clicks first, and the bar only ever gets what none of them
+wanted. (That `toBack()` is load-bearing twice over — without it each bar also paints over
+its own tabs.)
+
+`SectionBar` used to narrow its own `hitTest` to the chevron end, on the reasoning that a
+click missing a control by a few pixels would fold the section by accident. It was solving a
+problem z-order already solved, and it cost the thing the mouse-only contract cares about
+most: a full-width strip that looks like a button but only answers along one end makes the
+target *harder* to hit, not safer.
+
+Open and folded bars are painted at deliberately different weights — the open one is a solid
+ruled band with an accent tick, the folded one flat and dim — so a stack of six reads as a
+shape before any caption is read. The Detach button hides with its section for the same
+reason, and because detaching a folded section only ever built a window that opened hidden.
 
 ## The accent is per instance
 
@@ -272,16 +344,30 @@ layout it gets cannot drift. Standalone and in a DAW the editor resizes itself t
 height; embedded in Keys Host it reports the number through `onIdealHeightChanged` and the
 host grows to fit, because a tall centre view would otherwise push the keybed off the end.
 
-The keybed and the wheels live inside one `KeybedHolder`, so **Detach** is a single
-re-parent into a `DetachedWindow`. Detached, `PianoKeyboard`'s 185 px key-height cap comes
-off: dragging that window is meant to resize the keys, which is the whole point of the
-feature for a player working with one mouse. The window borrows the holder and owns
-nothing, so `~KeysEditor` tears it down explicitly before anything else.
+### Every section detaches
 
-The arp plays the same trick through an `ArpHolder`, and `DetachedWindow` (which was
-`KeyboardWindow` until the arp wanted it too) is parameterised by title and minimum size
-for the two of them. A detached section contributes no height to the main window, so
-`arpHeight()` returns 0 while it is out, exactly as the keybed does.
+Each section's content lives in a `Holder` of its own rather than directly in the editor, so
+**Detach** is a single re-parent into a `DetachedWindow` — the holder's parent becomes the
+window's content slot and nothing else changes. The window borrows the holder and owns
+nothing, so `~KeysEditor` tears every one of them down explicitly before anything else.
+
+`KeysEditor::sections` is the table that makes this generic: one `Section` per bar, holding
+its holder, its Detach button, the window it is currently in, the two `LayoutState` flags it
+reads (open, detached) and the frame it remembers. `sectionHeight()`, `idealHeight()`,
+`resized()` and `syncSectionControls()` all loop over it, so a detached section contributes
+no height to the main window and a folded one hides its window instead of its slot — one
+control means one thing wherever the section happens to be.
+
+The keybed was the first to do this and keeps two extras. Detached, `PianoKeyboard`'s 185 px
+key-height cap comes off: dragging that window is meant to resize the keys, which is the whole
+point of the feature for a player working with one mouse. And the **Wheels** chip and a second
+**Size** selector travel with it (`Section::travellers`), because they are the keybed's, not
+the editor's. Every detached window carries the button that undoes the detach on a strip at
+the top, so the control that re-docks a section is never in the window you are not looking at.
+
+Controls that belong to the *editor* rather than to the content stay behind on the bar: the
+centre-view tabs, the arp's **On**, the pads' page buttons, the theme swatch. A bar whose
+section is away says so, in the space its own controls did not use.
 
 All of it (folds, current view, detached window bounds) is in `KeysProcessor::LayoutState`
 rather than the editor, so it survives the window closing, and it is saved in the session
@@ -294,10 +380,12 @@ automation would only add ways to break a session.
 windows, and staying inside the editor keeps every target on the surface the mouse is
 already in. It fills the **current page**, so the four pages can hold four different keys.
 
-Its pad grid repeats the strip at full size on purpose. Everything Octavium reached by
-right-click (lock, regenerate, suggest) is a real on-screen button here, and at strip
-size those targets would be far under the 34 px minimum. Selecting the view grows the
-editor to fit rather than shrinking them. Auditioning a chord in the grid reuses
+Its pad grid repeats the strip at full size on purpose. The per-card actions Octavium
+reached by right-click (Lock, New chord, Next) were on-screen buttons here at first, and
+are a right-click card menu again since 2026-07-22 at Owen's request; the page-wide
+Fill / Regen / Clear stay the left-click bulk path. At strip size none of those targets
+would clear the 34 px minimum. Selecting the view grows the editor to fit rather than
+shrinking them. Auditioning a chord in the grid reuses
 `pressChordPad` / `releaseChordPad`, so it is the same code path as playing the strip.
 
 ## Parameters and state
@@ -305,11 +393,19 @@ editor to fit rather than shrinking them. Auditioning a chord in the grid reuses
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
 `scaleLock`, `octave`, `channel`, `polyphony`, `sustain`,
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
-chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumDir` / `padPage`, the
-generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the note-count and inversion
+chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStrumDir` /
+`padPage`, the generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the
+note-count and inversion
 toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`faderCC8`
 CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
 `markovLength`.
+
+`bpm` (40..240, default 120) is the newest, and is registered last on purpose: appending
+leaves every existing parameter's automation index where the session left it. It is the
+tempo anything timed in beats runs at when there is no transport to follow, which is every
+moment in the standalone and every stopped transport in a DAW; a host that is *playing*
+still wins. It replaced the arp's last-known-host-tempo fallback, which nothing in the
+standalone could ever reach and nobody anywhere could change.
 
 A growing set is **registered but no longer read**, kept only so a session (and any host
 automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,
@@ -318,8 +414,9 @@ automation) saved with them loads without error: `surface`, `uiLayout`, `padChan
 convention here — removing a parameter outright would shift automation in projects that
 already exist.
 
-The folding layout (which sections are open, which centre view, the detached window's
-bounds) and the instance's accent colour are **not** parameters: they change no note, and
+The folding layout (which sections are open, which centre view, where each detached
+window was left) and the instance's accent colour are **not** parameters: they change no
+note, and
 exposing them to automation would only add ways to break a session. They live in
 `KeysProcessor::LayoutState` and ride along in the session tree. The Mod and
 Pitch wheels, knob positions, and the Markov Mood and
@@ -327,8 +424,9 @@ Start pickers are transient performance controls with no parameters (they don't
 persist); Pitch glides back to centre over ~160 ms on release, and the wheels and
 knobs move by relative drag only (no click-jump), Octavium's deliberate feel. The
 editor binds controls
-with attachments — except the two-handle velocity range slider, which has no attachment
-(two values) and is synced to its two params by hand. A 30 Hz timer pushes derived
+with attachments — except the two two-handle range sliders (velocity, strum), which take
+no attachment (two values each) and are synced to their pair of params by hand.
+A 30 Hz timer pushes derived
 config into every note surface and the live chord into the pads. `getStateInformation` /
 `setStateInformation` persist the APVTS via `okstudio::state`, plus the captured chord
 pads as an extra state tree (notes, name, lock, the generator metadata a pad carries,
@@ -347,5 +445,6 @@ midpoint of the velocity range), pushes the surface's sounding notes into the pa
 each timer tick, panics the surface on a channel change (so notes can't strand),
 animates the pitch wheel home after release, and on construction fires
 `okstudio::updater::checkAsync`; if a newer signed
-release exists, a one-click "Update to vX.Y.Z" button appears. The wheels column
-always shows, next to the playing surface, as in Octavium.
+release exists, a one-click "Update to vX.Y.Z" button appears. The wheels column shows
+next to the playing surface, as in Octavium, unless the Keyboard bar's Wheels chip
+folds it away.

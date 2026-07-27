@@ -10,7 +10,8 @@ modifier keys. Right-click is only ever an accelerator, with one exception Owen 
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain, the Humanize settings, which sections you
-had folded away, this instance's colour, the
+had folded away and which you had pulled out into windows of their own (down to where each
+window sat), this instance's colour, the
 eight knob CC assignments, and
 your captured chord pads all save into the DAW project and come back when you reopen
 it. And it drops straight onto a track, with no loopMIDI to configure.
@@ -32,9 +33,11 @@ Built with **JUCE 8** and **CMake**, on the shared
 The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex).
 
 One view, no tabs: header controls, a centre view (the eight knobs, or the chord
-generator), then the arpeggiator, the chord pads, and the playing surface. Every section
-folds away so the window can be squeezed small, and the keyboard and the arpeggiator each
-detach into a resizable window of their own.
+generator), then the arpeggiator, the chord pads, the transcriber, and the playing surface.
+Every section folds away so the window can be squeezed small — click anywhere on its bar —
+and every one of them also detaches into a resizable window of its own. An open section's
+bar is a ruled band with a tick of accent; a folded one goes flat and dim, so the shape of
+the window reads before you have read a caption.
 
 ![Keys](assets/screenshots/keys.png)
 
@@ -51,6 +54,7 @@ detach into a resizable window of their own.
 | **Knob row** | Eight rotary CC knobs above the keyboard, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
 | **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next |
+| **Transcribe** | Record yourself singing or playing, and get the notes back as MIDI you can drag onto a track |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
@@ -72,12 +76,13 @@ the generator's cards and the arp slots; only **Send to arp slot** lives nowhere
 | **Sustain** | Hold notes after release (pedal) |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
-| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** spreads a chord's notes Up / Down / Random. Four numbered buttons on the Pads bar pick the page |
-| **To Arp** | On the Pads bar. Lit, clicking a chord card hands that chord to the arpeggiator and leaves it there until you click the card again |
-| **Arp** | Its own section too. The bar carries an **On** toggle and a **Detach**, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs |
+| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page |
+| **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
+| **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins |
+| **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there |
 | **Chords** | The chord generator — see below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
-| **Detach** | Put the keyboard in its own resizable window. The Arp bar has a Detach of its own |
+| **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it — click the bar to bring the section back first |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).
@@ -108,6 +113,38 @@ Press any chord in the grid to hear it. The page-wide actions are on-screen butt
 Page, Regen Unlocked, Clear Page. Lock, New and Next act on one card, so they live in that
 card's right-click menu.
 
+## Transcribing what you play
+
+**Transcribe** is the one place Keys listens instead of playing. Pick an audio input, hit
+**Record**, sing or play something, hit **Stop**, and the notes appear in a piano roll.
+Drag them from **DRAG MIDI** onto a track in your DAW and you have a MIDI file of what you
+just did.
+
+![Transcribe](assets/screenshots/transcribe.png)
+
+| Control | What it does |
+|---------|--------------|
+| **Driver** + **Input** | Which audio input to record from: a microphone, an interface, anything Windows lists. Remembered per machine, not per song |
+| **Record** / **Stop** | Record, then transcribe. The level meter beside the input shows signal arriving, so you can check the mic works before committing to a take |
+| **Sensitivity** | Higher finds more notes. It re-reads the same recording rather than running the model again, so it responds immediately |
+| **DRAG MIDI** | Drag onto a track to drop the notes there as a MIDI file |
+| **Clear** | Throw away the recording and the notes |
+
+Keys is an instrument, so your DAW sends it MIDI and never audio: there is no track input to
+record. The section opens an audio input itself, which is why it works the same in the plugin
+and in the standalone app, and why choosing an input here never disturbs your DAW's own audio
+settings. The input is only open while the section is showing or while you are recording, so
+Keys never sits on your microphone in the background.
+
+It is not live, and cannot be. The model needs the whole recording before it can work out
+where a note started, so takes under about a second produce nothing, and recording stops
+itself after two minutes. Transcription runs in the background, so the keyboard keeps playing
+while it thinks.
+
+The engine is Spotify's [basic-pitch](https://github.com/spotify/basic-pitch), ported from
+[NeuralNote](https://github.com/DamRsn/NeuralNote) by Damien Ronssin and Tibor Vass
+(Apache-2.0) and shared through the kit, so the other OK Studio plugins can use it too.
+
 ## Driving it with Claude
 
 Keys embeds an MCP server, so Claude Code (or any local MCP client) can set
@@ -135,6 +172,11 @@ DAWs look automatically (`C:\Program Files\Common Files\VST3`). Or build from so
 
 Requires CMake 3.22+, Visual Studio 2022, a JUCE 8 checkout at `../JUCE`, and the
 kit at `../okstudio-juce-kit`.
+
+The Transcribe section downloads a large prebuilt ONNX Runtime the first time you configure,
+and forces the static MSVC runtime on the whole binary; both come with the transcription
+engine rather than being choices. `-DKEYS_TRANSCRIBE=OFF` builds without the section and
+without either cost.
 
 ```powershell
 ./build.ps1                 # VST3 -> %USERPROFILE%\Ableton\vst3

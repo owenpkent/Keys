@@ -20,10 +20,10 @@ namespace
     // window the folds ask for and the layout they get can never drift apart.
     constexpr int rowH = 46;                          // one row of header controls
     constexpr int headerH = 14 + rowH * 2 + 6;        // both of them, plus label lead-in
-    constexpr int viewBarH = 34;                      // centre-view tabs + pad transport
     constexpr int knobRowH = 110;
     constexpr int padRowH = 96;
     constexpr int dockedKeybedH = 212;                // 185 px of key plus a little body
+    constexpr int detachWidth = 104;                  // the Detach / Re-dock button
 
     juce::StringArray channelItems()
     {
@@ -40,37 +40,160 @@ namespace
         l.setFont(skin::micro(10.0f));
         l.setColour(juce::Label::textColourId, skin::textDim);
     }
+
+    // The raised panel a performance module floats on. The generator, the arp and the
+    // Transcribe panel draw their own cards; the knob bank and the pad strip do not, so
+    // their holders draw it behind them.
+    void paintModule(juce::Graphics& g, juce::Rectangle<int> bounds)
+    {
+        const auto perf = bounds.toFloat();
+        g.setColour(juce::Colours::black.withAlpha(0.45f));
+        g.drawRoundedRectangle(perf.reduced(0.5f), skin::panelRadius + 0.5f, 1.0f);
+        g.setColour(skin::panel);
+        g.fillRoundedRectangle(perf.reduced(1.0f), skin::panelRadius);
+        g.setColour(juce::Colours::white.withAlpha(0.045f));
+        g.fillRoundedRectangle(perf.reduced(1.0f).withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
+    }
 } // namespace
 
 KeysEditor::KeysEditor(KeysProcessor& p)
     : juce::AudioProcessorEditor(p), processor(p),
+      controlsHolder(section(secControls).holder),
+      centreHolder(section(secCentre).holder),
+      arpHolder(section(secArp).holder),
+      padsHolder(section(secPads).holder),
+      transcribeHolder(section(secTranscribe).holder),
+      keybedHolder(section(secKeyboard).holder),
       keyboard(p), knobBank(p), chordPads(p)
 {
     setLookAndFeel(&lnf); // the Keys "Obsidian" skin; palette lives in KeysLookAndFeel.h
     okstudio::ui::makeMouseOnly(*this);
 
+    // --- The section table ---------------------------------------------------------
+    // Every section is the same three things: a fold flag, a window frame it remembers, and
+    // a floor below which its controls stop being clickable (which for a one-mouse player is
+    // the same as broken). Wired before anything is parented, so the holders exist first.
+    auto& lay = processor.layout;
+    const auto wire = [this](SectionId id, SectionBar& bar, bool& open, bool& detached,
+                             juce::Rectangle<int>& bounds, const juce::String& name,
+                             const juce::String& windowTitle,
+                             juce::Point<int> minSize, juce::Point<int> defaultSize)
+    {
+        auto& s = section(id);
+        s.bar = &bar;
+        s.open = &open;
+        s.detached = &detached;
+        s.bounds = &bounds;
+        s.name = name;
+        s.windowTitle = windowTitle;
+        s.minSize = minSize;
+        s.defaultSize = defaultSize;
+
+        bar.onClick = [this, id]
+        {
+            *section(id).open = section(id).bar->getToggleState();
+            refreshSectionPanels(); // folded away, the panel it was showing is destroyed
+            applyLayout();
+        };
+        addAndMakeVisible(bar);
+
+        s.detachButton.setClickingTogglesState(true);
+        s.detachButton.setTooltip("Put the " + name.toLowerCase() + " section in a window of its own, "
+                                  "so it can be sized without stretching the rest of the plugin.");
+        s.detachButton.onClick = [this, id] { setSectionDetached(id, section(id).detachButton.getToggleState()); };
+        addAndMakeVisible(s.detachButton);
+
+        s.holder.layout = [this, id]
+        {
+            switch (id)
+            {
+                case secControls:   layoutControlsHolder(); break;
+                case secCentre:     layoutCentreHolder(); break;
+                case secArp:        layoutArpHolder(); break;
+                case secPads:       layoutPadsHolder(); break;
+                case secTranscribe: layoutTranscribeHolder(); break;
+                case secKeyboard:   layoutKeybed(); break;
+                default: break;
+            }
+        };
+        addAndMakeVisible(s.holder);
+    };
+
+    wire(secControls, controlsBar, lay.controls, lay.controlsDetached, lay.controlsDetachedBounds,
+         "Controls", "Keys Controls", { 900, 190 }, { 980, 200 });
+    wire(secCentre, centreBar, lay.centre, lay.centreDetached, lay.centreDetachedBounds,
+         "Centre", "Keys Centre", { 720, 220 }, { 1010, 420 });
+    wire(secArp, arpBar, lay.arp, lay.arpDetached, lay.arpDetachedBounds,
+         "Arp", "Keys Arpeggiator", { 900, 300 }, { 1100, 520 });
+    wire(secPads, padsBar, lay.pads, lay.padsDetached, lay.padsDetachedBounds,
+         "Pads", "Keys Chord Pads", { 620, 180 }, { 940, 300 });
+    wire(secTranscribe, transcribeBar, lay.transcribe, lay.transcribeDetached, lay.transcribeDetachedBounds,
+         "Transcribe", "Keys Transcribe", { 620, 300 }, { 940, 420 });
+    wire(secKeyboard, keyboardBar, lay.keyboard, lay.detached, lay.detachedBounds,
+         "Keyboard", "Keys Keyboard", { 420, 190 }, { 1000, 300 });
+
+    // Wheels and the second Size selector belong to the keybed, not to the window it happens
+    // to be in, so they follow it out. Owen asked for this: with them left behind, the
+    // keyboard window had nothing on it but a close box.
+    section(secKeyboard).travellers = { { &wheelsButton, 84, false }, { &detachedSizeBox, 104, true } };
+
+    // The two holders whose content paints no card of its own get one behind it.
+    centreHolder.painter = [this](juce::Graphics& g)
+    {
+        if (knobBank.isVisible())
+            paintModule(g, knobBank.getBounds().expanded(4, 4));
+    };
+    padsHolder.painter = [this](juce::Graphics& g)
+    {
+        if (chordPads.isVisible())
+            paintModule(g, chordPads.getBounds().expanded(4, 4));
+    };
+    // The header band, and the wordmark under the title. Painted by the holder rather than
+    // by the editor so it travels with the section instead of being left behind as a
+    // gradient over nothing.
+    controlsHolder.painter = [this](juce::Graphics& g)
+    {
+        const auto band = controlsHolder.getLocalBounds().toFloat();
+        g.setGradientFill({ skin::headerTop, 0.0f, band.getY(), skin::headerBot, 0.0f, band.getBottom(), false });
+        g.fillRect(band);
+        g.setColour(juce::Colours::black.withAlpha(0.55f));
+        g.fillRect(0.0f, band.getBottom() - 2.0f, band.getWidth(), 1.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.04f));
+        g.fillRect(0.0f, band.getBottom() - 1.0f, band.getWidth(), 1.0f);
+
+        g.setColour(skin::accentOf(controlsHolder).base.withAlpha(0.85f));
+        g.setFont(skin::micro(9.0f).withExtraKerningFactor(0.32f));
+        g.drawText("OK STUDIO", titleCaption, juce::Justification::centredLeft);
+    };
+
+    // --- Controls section ------------------------------------------------------------
     title.setText("KEYS", juce::dontSendNotification);
     title.setFont(juce::Font(juce::FontOptions("Segoe UI", 24.0f, juce::Font::bold))
                       .withExtraKerningFactor(0.10f));
     title.setColour(juce::Label::textColourId, skin::text);
-    addAndMakeVisible(title);
+    controlsHolder.addAndMakeVisible(title);
 
-    addCombo(sizeBox, sizeLabel, "Size", sizeItems(), "size", sizeAtt);
-    addCombo(rootBox, rootLabel, "Root", okstudio::scales::noteNames(), "root", rootAtt);
-    addCombo(scaleBox, scaleLabel, "Scale", okstudio::scales::names(), "scale", scaleAtt);
-    addCombo(channelBox, channelLabel, "MIDI Ch", channelItems(), "channel", channelAtt);
-    addCombo(polyphonyBox, polyphonyLabel, "Voices",
+    addCombo(controlsHolder, sizeBox, sizeLabel, "Size", sizeItems(), "size", sizeAtt);
+    addCombo(controlsHolder, rootBox, rootLabel, "Root", okstudio::scales::noteNames(), "root", rootAtt);
+    addCombo(controlsHolder, scaleBox, scaleLabel, "Scale", okstudio::scales::names(), "scale", scaleAtt);
+    addCombo(controlsHolder, channelBox, channelLabel, "MIDI Ch", channelItems(), "channel", channelAtt);
+    addCombo(controlsHolder, polyphonyBox, polyphonyLabel, "Voices",
              { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, "polyphony", polyphonyAtt);
 
     styleLabel(octaveLabel, "Octave");
-    addAndMakeVisible(octaveLabel);
+    controlsHolder.addAndMakeVisible(octaveLabel);
     octaveSlider.setSliderStyle(juce::Slider::IncDecButtons);
     octaveSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 46, 26);
     octaveSlider.setRange(-5, 5, 1);
-    addAndMakeVisible(octaveSlider);
+    controlsHolder.addAndMakeVisible(octaveSlider);
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "octave", octaveSlider);
-    for (auto* b : { &scaleLockButton, &sustainButton, &humanizeButton, &chordExclusiveButton })
-        addAndMakeVisible(*b);
+
+    // Scale Lock and Humanize belong to the Controls section; Sustain and Exclusive ride on
+    // the Keyboard bar, outside every fold, because they are what you reach for while playing.
+    controlsHolder.addAndMakeVisible(scaleLockButton);
+    controlsHolder.addAndMakeVisible(humanizeButton);
+    addAndMakeVisible(sustainButton);
+    addAndMakeVisible(chordExclusiveButton);
     scaleLockAtt = std::make_unique<ButtonAtt>(processor.apvts, "scaleLock", scaleLockButton);
     sustainAtt = std::make_unique<ButtonAtt>(processor.apvts, "sustain", sustainButton);
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
@@ -80,7 +203,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // two-handle slider) and a micro-timing offset up to Timing ms. The range slider has
     // no APVTS attachment (two values), so it is synced to the params by hand.
     styleLabel(humanizeVelLabel, "Velocity");
-    addAndMakeVisible(humanizeVelLabel);
+    controlsHolder.addAndMakeVisible(humanizeVelLabel);
     humanizeVelSlider.setRange(1, 127, 1); // style/textbox are RangeSlider's own
     humanizeVelSlider.setTooltip("Each note takes a random velocity in this range. "
                                  "Drag an end to resize it, or the middle to move it.");
@@ -89,32 +212,50 @@ KeysEditor::KeysEditor(KeysProcessor& p)
                                          juce::dontSendNotification);
     humanizeVelSlider.onValueChange = [this]
     {
-        const auto write = [this](const char* id, double value)
-        {
-            if (auto* param = processor.apvts.getParameter(id))
-            {
-                const float norm = param->convertTo0to1((float) value);
-                if (std::abs(param->getValue() - norm) > 1.0e-6f)
-                    param->setValueNotifyingHost(norm);
-            }
-        };
-        write("humanizeVelMin", humanizeVelSlider.getMinValue());
-        write("humanizeVelMax", humanizeVelSlider.getMaxValue());
+        writeParam("humanizeVelMin", humanizeVelSlider.getMinValue());
+        writeParam("humanizeVelMax", humanizeVelSlider.getMaxValue());
     };
-    addAndMakeVisible(humanizeVelSlider);
+    controlsHolder.addAndMakeVisible(humanizeVelSlider);
 
     // Chord-pad strum (Octavium "Drift"): spread a pad's note-ons over N ms, in a direction.
+    // A range rather than one number, like Velocity above it - each chord rakes at a speed
+    // drawn from the band, so a part played on one pad stops sounding stamped out. Two
+    // values means no APVTS attachment; synced to the pair of params by hand.
     styleLabel(chordStrumLabel, "Strum");
-    addAndMakeVisible(chordStrumLabel);
-    chordStrumSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    chordStrumSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
+    controlsHolder.addAndMakeVisible(chordStrumLabel);
     chordStrumSlider.setRange(0, 200, 1);
-    chordStrumSlider.setTextValueSuffix(" ms");
-    addAndMakeVisible(chordStrumSlider);
-    chordStrumAtt = std::make_unique<SliderAtt>(processor.apvts, "chordStrum", chordStrumSlider);
+    chordStrumSlider.setTooltip("Each chord spreads its notes over a time drawn from this "
+                                "range. Drag an end to resize it, or the middle to move it; "
+                                "both ends together is a fixed strum.");
+    chordStrumSlider.setMinAndMaxValues(processor.apvts.getRawParameterValue("chordStrum")->load(),
+                                        processor.apvts.getRawParameterValue("chordStrumMax")->load(),
+                                        juce::dontSendNotification);
+    chordStrumSlider.onValueChange = [this]
+    {
+        writeParam("chordStrum", chordStrumSlider.getMinValue());
+        writeParam("chordStrumMax", chordStrumSlider.getMaxValue());
+    };
+    controlsHolder.addAndMakeVisible(chordStrumSlider);
 
-    addCombo(chordStrumDirBox, chordStrumDirLabel, "Dir", { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
+    addCombo(controlsHolder, chordStrumDirBox, chordStrumDirLabel, "Dir",
+             { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
 
+    // Tempo. The arpeggiator is the only thing in Keys timed in beats, and until now it had
+    // no tempo of its own: it followed the host and fell back to whatever the host last
+    // said, which in the standalone was 120 forever with no way to change it. A plain drag
+    // slider rather than +/- steppers, because getting from 120 to 90 should be one gesture.
+    styleLabel(bpmLabel, "BPM");
+    controlsHolder.addAndMakeVisible(bpmLabel);
+    bpmSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    bpmSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 26);
+    bpmSlider.setRange(40, 240, 1);
+    bpmSlider.setTooltip("Tempo the arpeggiator runs at when there is no transport to follow "
+                         "- always in the standalone, and whenever the host is stopped. While "
+                         "the host is playing, Keys follows the host.");
+    controlsHolder.addAndMakeVisible(bpmSlider);
+    bpmAtt = std::make_unique<SliderAtt>(processor.apvts, "bpm", bpmSlider);
+
+    // --- Keyboard section ------------------------------------------------------------
     // Performance wheels, left of the keyboard. Transient (no params/persistence): Mod
     // holds its value (CC1); Pitch bend glides back to centre when you let go.
     modWheel.setSliderStyle(juce::Slider::LinearVertical);
@@ -152,16 +293,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addAndMakeVisible(panicButton);
 
     keybedHolder.addAndMakeVisible(keyboard);
-    keybedHolder.layout = [this] { layoutKeybed(); };
-    addAndMakeVisible(keybedHolder);
-    addAndMakeVisible(knobBank);
-
-    // Chord-pad pages: four pages of sixteen (Octavium's 4x4 per page), so a session can
-    // hold several keys' worth of chords without the strip shrinking below a comfortable
-    // target.
+    centreHolder.addAndMakeVisible(knobBank);
 
     // Centre-view tabs. Each picks a view; the section's own chevron folds it away, the
-    // same as Controls and Keyboard. The tabs stay visible while it is folded, so picking
+    // same as every other section. The tabs stay visible while it is folded, so picking
     // one both unfolds and switches - otherwise a folded centre would be a dead end.
     const auto tab = [this](juce::TextButton& b, int view, const juce::String& tip)
     {
@@ -172,62 +307,34 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     tab(performButton, viewPerform, "The eight CC knobs.");
     tab(chordsButton, viewChords, "Generate chords for this page.");
-    // Four explicit page buttons, sat with the pads rather than a "1/4" transport parked
-    // up on the view bar. One click reaches any page, and what it pages is obvious from
-    // where it is.
-    for (int p = 0; p < KeysProcessor::numPadPages; ++p)
+
+    // Chord-pad pages: four pages of sixteen (Octavium's 4x4 per page), so a session can
+    // hold several keys' worth of chords without the strip shrinking below a comfortable
+    // target. Four explicit page buttons, sat with the pads rather than a "1/4" transport
+    // parked up on the view bar: one click reaches any page, and what it pages is obvious
+    // from where it is.
+    for (int pg = 0; pg < KeysProcessor::numPadPages; ++pg)
     {
-        auto& b = pageButtons[(size_t) p];
-        b.setButtonText(juce::String(p + 1));
-        b.setTooltip("Chord-pad page " + juce::String(p + 1) + " of " + juce::String(KeysProcessor::numPadPages) + ".");
+        auto& b = pageButtons[(size_t) pg];
+        b.setButtonText(juce::String(pg + 1));
+        b.setTooltip("Chord-pad page " + juce::String(pg + 1) + " of " + juce::String(KeysProcessor::numPadPages) + ".");
         b.setClickingTogglesState(false); // the timer owns the lit state
-        b.onClick = [this, p]
+        b.onClick = [this, pg]
         {
             if (auto* param = processor.apvts.getParameter("padPage"))
-                param->setValueNotifyingHost(param->convertTo0to1((float) p));
+                param->setValueNotifyingHost(param->convertTo0to1((float) pg));
         };
         addAndMakeVisible(b);
     }
 
-    // Section folds. The bars carry their own toggle state; the sub-section chips
-    // (Knobs / Wheels) are plain toggles on the bar they belong to.
-    auto& lay = processor.layout;
-    controlsBar.onClick = [this] { processor.layout.controls = controlsBar.getToggleState(); applyLayout(); };
-    keyboardBar.onClick = [this] { processor.layout.keyboard = keyboardBar.getToggleState(); applyLayout(); };
-    padsBar.onClick = [this] { processor.layout.pads = padsBar.getToggleState(); applyLayout(); };
-    centreBar.onClick = [this]
-    {
-        processor.layout.centre = centreBar.getToggleState();
-        refreshCentrePanels(); // folded away, the panel it was showing is destroyed
-        applyLayout();
-    };
-    arpBar.onClick = [this]
-    {
-        processor.layout.arp = arpBar.getToggleState();
-        refreshArpPanel(); // folded away, the panel is destroyed; the arp keeps running
-        applyLayout();
-    };
-    addAndMakeVisible(controlsBar);
-    addAndMakeVisible(centreBar);
-    addAndMakeVisible(padsBar);
-    addAndMakeVisible(arpBar);
-    addAndMakeVisible(keyboardBar);
-
-    // On and Detach ride on the Arp *bar*, not inside the section, so folding the editor
-    // away does not take the arp's power switch with it. Same reasoning as Sustain and All
-    // Off living on the Keyboard bar.
-    arpOnButton.setTooltip("Arpeggiate whatever is sounding.");
+    // On rides on the Arp *bar*, not inside the section, so folding the editor away does not
+    // take the arp's power switch with it. Same reasoning as Sustain and All Off living on
+    // the Keyboard bar.
+    arpOnButton.setTooltip("Arpeggiate whatever is sounding. Lit, clicking a chord card also "
+                           "hands that chord to the arp and leaves it there until you click "
+                           "the card again.");
     addAndMakeVisible(arpOnButton);
     arpOnAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpOn", arpOnButton);
-
-    arpDetachButton.setClickingTogglesState(true);
-    arpDetachButton.setTooltip("Put the arpeggiator in its own window, so it can be as wide as "
-                               "it likes without stretching the rest of the plugin.");
-    arpDetachButton.onClick = [this] { setArpDetached(arpDetachButton.getToggleState()); };
-    addAndMakeVisible(arpDetachButton);
-
-    arpHolder.layout = [this] { layoutArpHolder(); };
-    addAndMakeVisible(arpHolder);
 
     themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
@@ -250,27 +357,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     chip(knobsButton, lay.knobs, "Show or hide the eight CC knobs.");
     chip(wheelsButton, lay.wheels, "Show or hide the mod and pitch wheels.");
 
-    toArpButton.setClickingTogglesState(true);
-    toArpButton.setTooltip("Lit: clicking a chord card hands its chord to the arpeggiator and "
-                           "leaves it there. Click the lit card again to release it.");
-    toArpButton.onClick = [this] { chordPads.setToArp(toArpButton.getToggleState()); };
-    // The mode lives on the processor, so a window that was closed and reopened comes back
-    // in the state it left - which is what a chord still held into the arp requires.
-    toArpButton.setToggleState(lay.toArp, juce::dontSendNotification);
-    addAndMakeVisible(toArpButton);
-
-    detachButton.setClickingTogglesState(true);
-    detachButton.setTooltip("Put the keyboard in its own window, so you can resize it "
-                            "without stretching the rest of the plugin.");
-    detachButton.onClick = [this] { setKeyboardDetached(detachButton.getToggleState()); };
-    addAndMakeVisible(detachButton);
-
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
     addChildComponent(updateButton); // hidden until the updater finds a newer release
 
     const auto velocity = [this] { return processor.baseVelocity01(); };
     keyboard.getVelocity = velocity;
-    addAndMakeVisible(chordPads);
+    padsHolder.addAndMakeVisible(chordPads);
 
     // Dropping a pad on the live card latches its notes back onto the keyboard for
     // editing (Octavium's drag-to-edit).
@@ -297,15 +389,15 @@ KeysEditor::KeysEditor(KeysProcessor& p)
    #endif
 
     // The bars are full-width and translucent, and the controls that ride on them are
-    // siblings, not children (a SectionBar is a Button and must stay clickable end to
-    // end). Whichever was added last paints last, so without this the bars wash out the
-    // tabs and chips sitting on them.
-    controlsBar.toBack();
-    centreBar.toBack();
-    keyboardBar.toBack();
+    // siblings, not children: a SectionBar is a Button, and it stays full-width so it can
+    // paint the caption and the fold state across the whole strip, even though only the
+    // chevron end answers a click (SectionBar::hitTest). Whichever was added last paints
+    // last, so without this the bars wash out the buttons and captions sitting on them.
+    for (int i = 0; i < numSections; ++i)
+        sections[(size_t) i].bar->toBack();
 
     setResizable(true, true);
-    // The floor is everything folded away: three bars and the margins. What used to be
+    // The floor is everything folded away: six bars and the margins. What used to be
     // the minimum (560) is now roughly the *default*, and Owen can go far below it.
     setResizeLimits(820, 150, 2600, 1400);
     setSize(980, 724);
@@ -315,16 +407,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     sendLookAndFeelChange();
 
     // Restore the folds this session was saved with, building whichever centre view
-    // was up. setCentreView calls applyLayout(), which sizes the editor to match.
+    // was up, then pop back out whichever sections were left in windows of their own.
     applyAccent(lay.accent); // before the first layout, so nothing paints cyan then repaints
     syncSectionControls();
-    refreshCentrePanels();
-    refreshArpPanel();
+    refreshSectionPanels();
     applyLayout();
-    if (lay.detached)
-        setKeyboardDetached(true);
-    if (lay.arpDetached)
-        setArpDetached(true);
+    for (int i = 0; i < numSections; ++i)
+        if (*sections[(size_t) i].detached)
+            setSectionDetached((SectionId) i, true);
 
     startTimerHz(30);
 }
@@ -334,15 +424,14 @@ KeysEditor::~KeysEditor()
     stopTimer();
     // Before anything else: each detached window's content is a holder that is a member of
     // this editor. Tear the windows down while those are still live objects.
-    if (keyboardWindow != nullptr)
+    for (int i = 0; i < numSections; ++i)
     {
-        rememberDetachedBounds();
-        keyboardWindow.reset();
-    }
-    if (arpWindow != nullptr)
-    {
-        rememberArpDetachedBounds();
-        arpWindow.reset();
+        auto& s = sections[(size_t) i];
+        if (s.window != nullptr)
+        {
+            rememberSectionBounds((SectionId) i);
+            s.window.reset();
+        }
     }
     if (styledWindow != nullptr)
         styledWindow->setLookAndFeel(nullptr);
@@ -433,16 +522,26 @@ void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, in
     g.fillRoundedRectangle(led, 1.25f);
 }
 
-void KeysEditor::addCombo(juce::ComboBox& box, juce::Label& label, const juce::String& text,
-                          const juce::StringArray& items, const juce::String& paramID,
-                          std::unique_ptr<ComboAtt>& att)
+void KeysEditor::addCombo(juce::Component& parent, juce::ComboBox& box, juce::Label& label,
+                          const juce::String& text, const juce::StringArray& items,
+                          const juce::String& paramID, std::unique_ptr<ComboAtt>& att)
 {
     styleLabel(label, text);
-    addAndMakeVisible(label);
+    parent.addAndMakeVisible(label);
     box.addItemList(items, 1);
     box.setTitle(text); // accessible name (screen readers / UI Automation); combos otherwise expose none
-    addAndMakeVisible(box);
+    parent.addAndMakeVisible(box);
     att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
+}
+
+void KeysEditor::writeParam(const char* paramID, double value)
+{
+    if (auto* param = processor.apvts.getParameter(paramID))
+    {
+        const float norm = param->convertTo0to1((float) value);
+        if (std::abs(param->getValue() - norm) > 1.0e-6f)
+            param->setValueNotifyingHost(norm);
+    }
 }
 
 void KeysEditor::setCentreView(int view)
@@ -451,6 +550,15 @@ void KeysEditor::setCentreView(int view)
     processor.layout.centre = true; // picking a view unfolds the section it lives in
     refreshCentrePanels();
     applyLayout();
+}
+
+void KeysEditor::refreshSectionPanels()
+{
+    // Called on every fold and every detach: each of these builds or destroys nothing
+    // unless its own section changed state.
+    refreshCentrePanels();
+    refreshArpPanel();
+    refreshTranscribePanel();
 }
 
 void KeysEditor::refreshCentrePanels()
@@ -469,8 +577,9 @@ void KeysEditor::refreshCentrePanels()
         genPanel = std::make_unique<ChordGenPanel>(processor);
         genPanel->setInlineMode(true);
         genPanel->onClose = [this] { setCentreView(viewPerform); };
-        addAndMakeVisible(*genPanel);
+        centreHolder.addAndMakeVisible(*genPanel);
         genPanel->sendLookAndFeelChange(); // its controls were configured pre-parenting
+        layoutCentreHolder();
     }
 }
 
@@ -503,6 +612,25 @@ void KeysEditor::refreshArpPanel()
     layoutArpHolder();
 }
 
+void KeysEditor::refreshTranscribePanel()
+{
+#if KEYS_TRANSCRIBE
+    const bool wanted = processor.layout.transcribe;
+
+    if (wanted && transcribePanel == nullptr)
+    {
+        transcribePanel = std::make_unique<TranscribePanel>();
+        transcribeHolder.addAndMakeVisible(*transcribePanel);
+        layoutTranscribeHolder();
+    }
+    else if (! wanted && transcribePanel != nullptr)
+    {
+        // Destroyed rather than hidden: it owns an open audio device and the model's weights.
+        transcribePanel.reset();
+    }
+#endif
+}
+
 void KeysEditor::showThemeMenu()
 {
     juce::PopupMenu menu;
@@ -528,10 +656,11 @@ void KeysEditor::applyAccent(int index)
 
     // The ColourIds the LookAndFeel hands out are cached per component, so every one of
     // them has to be told to re-resolve. sendLookAndFeelChange walks the whole tree, and
-    // the detached keyboard window is a separate tree that shares this same lnf.
+    // each detached section is a separate tree that shares this same lnf.
     sendLookAndFeelChange();
-    if (keyboardWindow != nullptr)
-        keyboardWindow->sendLookAndFeelChange();
+    for (auto& s : sections)
+        if (s.window != nullptr)
+            s.window->sendLookAndFeelChange();
 
     syncSectionControls();
     repaint();
@@ -540,19 +669,40 @@ void KeysEditor::applyAccent(int index)
 void KeysEditor::syncSectionControls()
 {
     const auto& lay = processor.layout;
-    static const char* viewNames[] = { "Perform", "Chords", "Arp" };
-    controlsBar.setToggleState(lay.controls, juce::dontSendNotification);
-    centreBar.setToggleState(lay.centre, juce::dontSendNotification);
-    centreBar.setCaption(viewNames[juce::jlimit(0, 2, lay.view)]);
-    padsBar.setToggleState(lay.pads, juce::dontSendNotification);
-    arpBar.setToggleState(lay.arp, juce::dontSendNotification);
-    keyboardBar.setToggleState(lay.keyboard, juce::dontSendNotification);
+
+    // Every section, the same three questions: is it open, is it out in a window of its
+    // own, and does the button that put it there still say the right thing.
+    for (auto& s : sections)
+    {
+        s.bar->setToggleState(*s.open, juce::dontSendNotification);
+        s.detachButton.setToggleState(*s.detached, juce::dontSendNotification);
+        s.detachButton.setButtonText(*s.detached ? "Re-dock" : "Detach");
+        // Six buttons reading "Detach" are six identical accessible names, which is no use
+        // to a screen reader and made UI Automation pick whichever it found first. Say which
+        // section each one moves.
+        s.detachButton.setTitle(s.detachButton.getButtonText() + " " + s.name);
+        // Detach goes away with the section it detaches (2026-07-27, Owen's ask). Folded
+        // away, it was the loudest thing left on a bar whose whole job is to be quiet, and
+        // it offered a gesture with nothing behind it: detaching a folded section built a
+        // window that opened hidden. Every other control on a bar already hides with its
+        // section - the pad pages, the Knobs chip, Wheels - so this was the odd one out
+        // rather than a rule being broken. The deliberate exceptions stay: the arp's On
+        // (folding the panel must not stop the arpeggiator), the centre's two tabs (they
+        // are how a folded centre comes back) and the theme swatch (it belongs to the
+        // plugin, not the section).
+        s.detachButton.setVisible(*s.open);
+        // A holder is visible whenever its section is open, wherever it is parented: being
+        // detached is a change of parent, not of visibility. Folding a detached section
+        // hides its window instead of its slot, so one control means one thing.
+        s.holder.setVisible(*s.open);
+        if (s.window != nullptr)
+            s.window->setVisible(*s.open);
+    }
+
+    static const char* viewNames[] = { "Perform", "Chords" };
+    centreBar.setCaption(viewNames[juce::jlimit(0, 1, lay.view)]);
     knobsButton.setToggleState(lay.knobs, juce::dontSendNotification);
     wheelsButton.setToggleState(lay.wheels, juce::dontSendNotification);
-    detachButton.setToggleState(lay.detached, juce::dontSendNotification);
-    detachButton.setButtonText(lay.detached ? "Re-dock" : "Detach");
-    arpDetachButton.setToggleState(lay.arpDetached, juce::dontSendNotification);
-    arpDetachButton.setButtonText(lay.arpDetached ? "Re-dock" : "Detach");
 
     // The theme button is its own swatch: it wears the colour it sets, so the control and
     // the thing it controls are the same object.
@@ -571,98 +721,71 @@ void KeysEditor::syncSectionControls()
     knobsButton.setVisible(perform);
     knobBank.setVisible(perform && lay.knobs);
 
-    // The arp holder is visible whenever its section is open, wherever it is parented;
-    // detached is a change of parent, not of visibility. On and Detach stay on the bar in
-    // every state, so the arp can be switched off without unfolding it first.
-    arpHolder.setVisible(lay.arp);
-    if (arpWindow != nullptr)
-        arpWindow->setVisible(lay.arp);
-    arpOnButton.setVisible(true);
-    arpDetachButton.setVisible(true);
-
-    // The pads are their own section now, so they and their page buttons follow only their
-    // own fold - not the centre view, and not which view the centre is showing. That is the
-    // whole point of the move: a chord card stays one click away while you edit the arp.
-    chordPads.setVisible(lay.pads);
+    // The pads' page buttons stay on their bar in the main window even when the strip is
+    // off in one of its own: they page the cards, and paging from the window you are
+    // already looking at is one click either way.
     for (auto& b : pageButtons)
-        b.setVisible(lay.pads); // they page the pads; pointless without them
-    toArpButton.setVisible(lay.pads); // it changes what a card click does; no cards, no meaning
-
-    // The header rows and the keybed follow their bars; the wheels sit inside the keybed
-    // holder, so they can only show when it does.
-    for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &title, &sizeBox, &sizeLabel, &rootBox, &rootLabel, &scaleBox, &scaleLabel,
-             &octaveSlider, &octaveLabel, &scaleLockButton, &polyphonyBox, &polyphonyLabel,
-             &channelBox, &channelLabel, &humanizeButton,
-             &humanizeVelSlider, &humanizeVelLabel,
-             &chordStrumSlider, &chordStrumLabel, &chordStrumDirBox, &chordStrumDirLabel })
-        c->setVisible(lay.controls);
+        b.setVisible(lay.pads); // pointless without pads
 
     wheelsButton.setVisible(lay.keyboard);
-    detachButton.setVisible(lay.keyboard);
-
-    // Exclusive, Sustain and All Off sit on the Keyboard bar but do not belong to the
-    // keybed: they are what you reach for while playing, so folding the keyboard away
-    // must not take them with it. Deliberately outside every fold, in all three views.
-    chordExclusiveButton.setVisible(true);
-    sustainButton.setVisible(true);
-    panicButton.setVisible(true);
-    // The holder is visible whenever the section is open, wherever it is parented; being
-    // detached is a change of parent, not of visibility. Folding the section while it is
-    // detached hides the window instead of the slot, so one control means one thing.
-    keybedHolder.setVisible(lay.keyboard);
-    if (keyboardWindow != nullptr)
-        keyboardWindow->setVisible(lay.keyboard);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &modWheel, &modLabel, &pitchWheel, &pitchLabel })
         c->setVisible(lay.wheels);
 
     // Detached, the keybed owns its whole window, so the piano proportions cap comes off
     // and dragging the window taller genuinely makes the keys taller.
-    keyboard.setKeyHeightCap(processor.layout.detached ? 4000.0f : 185.0f);
+    keyboard.setKeyHeightCap(lay.detached ? 4000.0f : 185.0f);
 }
 
 int KeysEditor::centreHeight() const
 {
-    const auto& lay = processor.layout;
-    if (! lay.centre)
-        return 0;
-    if (lay.view == viewChords)
-        return ChordGenPanel::preferredHeight;
     // Perform is the knob bank alone since the pads moved out into their own section.
-    return lay.knobs ? knobRowH : 0;
+    if (processor.layout.view == viewChords)
+        return ChordGenPanel::preferredHeight;
+    return processor.layout.knobs ? knobRowH : 0;
 }
 
 int KeysEditor::arpHeight() const
 {
-    // Detached, the section occupies no height here at all - the same rule the keybed
-    // follows. Folded, likewise.
-    const auto& lay = processor.layout;
-    if (! lay.arp || lay.arpDetached)
-        return 0;
     return arpPanel != nullptr ? arpPanel->preferredHeight() : 0;
+}
+
+int KeysEditor::sectionHeight(SectionId id) const
+{
+    // Folded, or off in a window of its own: either way the section occupies no height here.
+    const auto& s = section(id);
+    if (! *s.open || *s.detached)
+        return 0;
+
+    switch (id)
+    {
+        case secControls:   return headerH;
+        case secCentre:     return centreHeight();
+        case secArp:        return arpHeight();
+        case secPads:       return padRowH;
+        case secTranscribe:
+           #if KEYS_TRANSCRIBE
+            return TranscribePanel::idealHeight;
+           #else
+            return 0;
+           #endif
+        case secKeyboard:   return dockedKeybedH;
+        default:            return 0;
+    }
 }
 
 int KeysEditor::idealHeight() const
 {
-    const auto& lay = processor.layout;
-    int h = 10 + SectionBar::height; // top margin + the Controls bar
-    if (lay.controls)
-        h += 4 + headerH;
-    h += 4 + viewBarH;
-    const int centre = centreHeight();
-    if (centre > 0)
-        h += 6 + centre;
-    h += 6 + SectionBar::height; // the Arp bar
-    const int arp = arpHeight();
-    if (arp > 0)
-        h += 4 + arp;
-    h += 6 + SectionBar::height; // the Pads bar
-    if (lay.pads)
-        h += 4 + padRowH;
-    h += 6 + SectionBar::height; // the Keyboard bar
-    if (lay.keyboard && ! lay.detached)
-        h += 4 + dockedKeybedH;
+    int h = 10; // top margin
+    for (int i = 0; i < numSections; ++i)
+    {
+        if (i > 0)
+            h += 6; // gap above the bar
+        h += SectionBar::height;
+        const int band = sectionHeight((SectionId) i);
+        if (band > 0)
+            h += 4 + band;
+    }
     return h + 10; // bottom margin
 }
 
@@ -673,11 +796,12 @@ int KeysEditor::minWidthForView() const
     // 960, not the old 820: the centre bar now also carries Sustain and All Off, and
     // below this the tabs and the pad transport start colliding.
     //
-    // The arp asks for the wider floor too, but only while it is docked: in its own window
-    // it is free to be any width it likes and has no business setting this one.
+    // Either section asks for the wider floor only while it is docked: in a window of its
+    // own it is free to be any width it likes and has no business setting this one.
     const auto& lay = processor.layout;
-    const bool wide = (lay.centre && lay.view == viewChords) || (lay.arp && ! lay.arpDetached);
-    return wide ? 1010 : 960;
+    const bool wideCentre = lay.centre && ! lay.centreDetached && lay.view == viewChords;
+    const bool wideArp = lay.arp && ! lay.arpDetached;
+    return (wideCentre || wideArp) ? 1010 : 960;
 }
 
 void KeysEditor::applyLayout()
@@ -716,126 +840,204 @@ void KeysEditor::applyLayout()
     if (! laidOut)
         resized();
 
-    // Always, and after the above: the wheels fold changes what is *inside* the keybed
-    // holder without changing the holder's own bounds, and JUCE only calls resized() on a
-    // component whose bounds actually moved. Detached, the holder is not even our child.
-    // Without this the wheels vanish and the keys keep their old width.
-    layoutKeybed();
+    // Always, and after the above: a fold inside a section (the wheels, the knobs) changes
+    // what is *inside* a holder without changing the holder's own bounds, and JUCE only
+    // calls resized() on a component whose bounds actually moved. Detached, the holder is
+    // not even our child. Without this the wheels vanish and the keys keep their old width.
+    for (auto& s : sections)
+        if (s.holder.layout)
+            s.holder.layout();
     repaint();
 }
 
-void KeysEditor::setKeyboardDetached(bool detach)
+// ---------------------------------------------------------------------------------------
+// Detaching. Every section can be popped into a window of its own: the editor keeps owning
+// the components either way and simply re-parents one holder, so nothing below this cares
+// where a section currently lives.
+// ---------------------------------------------------------------------------------------
+
+void KeysEditor::setSectionDetached(SectionId id, bool detach)
 {
-    auto& lay = processor.layout;
-    if (detach == (keyboardWindow != nullptr))
+    auto& s = section(id);
+    if (detach == (s.window != nullptr))
     {
-        lay.detached = detach; // already in the asked-for state; just keep the flag honest
+        *s.detached = detach; // already in the asked-for state; just keep the flag honest
         syncSectionControls();
         return;
     }
-    lay.detached = detach;
+    *s.detached = detach;
 
-    // Wheels and Detach belong to the keybed, not to the window it happens to be in, so
-    // they move with it. Owen asked for this: with the button left behind on the main
-    // editor, the keyboard window had nothing on it but a close box, and the control that
-    // undoes the detach was in the window you were not looking at.
     if (detach)
     {
-        keybedHolder.addAndMakeVisible(wheelsButton);
-        keybedHolder.addAndMakeVisible(detachButton);
-        keybedHolder.addAndMakeVisible(detachedSizeBox);
-        detachedSizeBox.sendLookAndFeelChange(); // configured before it was ever parented
-        removeChildComponent(&keybedHolder);
-        keyboardWindow = std::make_unique<DetachedWindow>(
-            "Keys Keyboard", lnf, keybedHolder, lay.detachedBounds,
-            juce::Point<int> { 420, 190 }, juce::Point<int> { 1000, 300 },
-            [this] { setKeyboardDetached(false); },   // its close button re-docks
-            [this] { rememberDetachedBounds(); });
+        // Detaching implies showing it: popping a window that then paints nothing would be a
+        // dead end, since the chevron that unfolds it is on a bar in the other window.
+        *s.open = true;
+        refreshSectionPanels();
+
+        // The Detach button travels with the section, so the window carries the control that
+        // undoes it - along with anything else that belongs to the content rather than to
+        // the editor around it (the keybed's wheels and Size).
+        s.holder.addAndMakeVisible(s.detachButton);
+        for (auto& t : s.travellers)
+        {
+            s.holder.addAndMakeVisible(*t.c);
+            t.c->sendLookAndFeelChange(); // some were configured before they were ever parented
+        }
+
+        removeChildComponent(&s.holder);
+        s.window = std::make_unique<DetachedWindow>(
+            s.windowTitle, lnf, s.holder, *s.bounds, s.minSize, s.defaultSize,
+            [this, id] { setSectionDetached(id, false); },   // its close button re-docks
+            [this, id] { rememberSectionBounds(id); });
     }
     else
     {
-        rememberDetachedBounds();
-        keyboardWindow.reset(); // clears its content, handing keybedHolder back
-        addAndMakeVisible(keybedHolder);
-        addAndMakeVisible(wheelsButton);   // back onto the Keyboard bar
-        addAndMakeVisible(detachButton);
-        keybedHolder.removeChildComponent(&detachedSizeBox); // Controls has the real one
+        rememberSectionBounds(id);
+        s.window.reset(); // clears its content, handing the holder back
+        addAndMakeVisible(s.holder);
+        addAndMakeVisible(s.detachButton); // back onto the section bar
+        for (auto& t : s.travellers)
+        {
+            if (t.detachedOnly)
+                s.holder.removeChildComponent(t.c); // the window's own; nothing docked shows it
+            else
+                addAndMakeVisible(*t.c);
+        }
     }
 
     syncSectionControls();
     applyLayout();
 }
 
-void KeysEditor::rememberDetachedBounds()
+void KeysEditor::rememberSectionBounds(SectionId id)
 {
-    if (keyboardWindow != nullptr)
-        processor.layout.detachedBounds = keyboardWindow->getBounds();
+    // Remember where Owen put it, so the next session opens it in the same place.
+    auto& s = section(id);
+    if (s.window != nullptr)
+        *s.bounds = s.window->getBounds();
 }
 
-void KeysEditor::setArpDetached(bool detach)
+juce::Rectangle<int> KeysEditor::layoutDetachRow(SectionId id, juce::Rectangle<int> row, bool onBar)
 {
-    auto& lay = processor.layout;
-    if (detach == (arpWindow != nullptr))
+    // The Detach button and its travellers are in exactly one of the two places at a time:
+    // on the section bar while docked, on the window's own strip while detached.
+    auto& s = section(id);
+    if (onBar == *s.detached)
+        return row;
+
+    const int vInset = onBar ? 0 : 2;
+    s.detachButton.setBounds(row.removeFromRight(detachWidth).reduced(2, vInset));
+    for (auto& t : s.travellers)
     {
-        lay.arpDetached = detach; // already in the asked-for state; keep the flag honest
-        syncSectionControls();
+        row.removeFromRight(6);
+        t.c->setBounds(row.removeFromRight(t.width).reduced(2, vInset));
+    }
+    return row;
+}
+
+juce::Rectangle<int> KeysEditor::holderContent(SectionId id)
+{
+    auto& s = section(id);
+    auto area = s.holder.getLocalBounds();
+    if (! *s.detached)
+        return area;
+
+    // Detached, the holder owns a whole window, so it carries a strip at the top for the
+    // controls that came out with it. Docked, those live on the section bar and this strip
+    // does not exist (there is no spare height for it under a 185 px keybed).
+    auto strip = area.removeFromTop(SectionBar::height);
+    area.removeFromTop(4);
+    layoutDetachRow(id, strip.reduced(6, 0), false);
+    return area;
+}
+
+// ---------------------------------------------------------------------------------------
+// Holder layouts. Each one is written once and used in both places the section can be: the
+// only thing that changes when it detaches is the size of the rectangle it gets.
+// ---------------------------------------------------------------------------------------
+
+void KeysEditor::layoutControlsHolder()
+{
+    // The holder is the painted band, so the rows sit inside it with the same margins the
+    // editor uses. Two rows, down from three: dropping the fixed Velocity slider and the
+    // Latch toggle emptied the middle one, so the remaining controls close up.
+    auto header = holderContent(secControls).reduced(10, 6);
+    if (header.isEmpty())
         return;
-    }
-    lay.arpDetached = detach;
 
-    // Detaching implies showing it: popping a window that then paints nothing would be a
-    // dead end, since the chevron that unfolds it is on a bar in the other window.
-    if (detach)
     {
-        lay.arp = true;
-        refreshArpPanel();
-        removeChildComponent(&arpHolder);
-        arpWindow = std::make_unique<DetachedWindow>(
-            "Keys Arpeggiator", lnf, arpHolder, lay.arpDetachedBounds,
-            juce::Point<int> { 900, 300 }, juce::Point<int> { 1100, 520 },
-            [this] { setArpDetached(false); },        // its close button re-docks
-            [this] { rememberArpDetachedBounds(); });
+        // Title + wordmark caption, centred as a pair in the header band.
+        auto titleCol = header.removeFromLeft(84);
+        const int pairTop = titleCol.getY() + (titleCol.getHeight() - 48) / 2;
+        title.setBounds(titleCol.withY(pairTop).withHeight(34));
+        titleCaption = { title.getX() + 2, title.getBottom() - 2, 80, 12 };
     }
-    else
-    {
-        rememberArpDetachedBounds();
-        arpWindow.reset(); // clears its content, handing arpHolder back
-        addAndMakeVisible(arpHolder);
-    }
+    header.removeFromLeft(6);
 
-    syncSectionControls();
-    applyLayout();
+    auto rowA = header.removeFromTop(rowH);
+    header.removeFromTop(3);
+    auto rowB = header.removeFromTop(rowH);
+
+    const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
+    {
+        auto c = row.removeFromLeft(w);
+        row.removeFromLeft(8);
+        lab.setBounds(c.removeFromTop(14));
+        ctl.setBounds(c);
+    };
+    const auto toggleCell = [](juce::Rectangle<int>& row, int w, juce::Component& ctl)
+    {
+        auto c = row.removeFromLeft(w);
+        row.removeFromLeft(8);
+        ctl.setBounds(c.withTrimmedTop(14));
+    };
+
+    cell(rowA, 88, sizeLabel, sizeBox);
+    cell(rowA, 70, rootLabel, rootBox);
+    cell(rowA, 150, scaleLabel, scaleBox);
+    cell(rowA, 120, octaveLabel, octaveSlider);
+    toggleCell(rowA, 110, scaleLockButton);
+    cell(rowA, 90, polyphonyLabel, polyphonyBox);
+    cell(rowA, 70, channelLabel, channelBox);
+
+    toggleCell(rowB, 96, humanizeButton);
+    cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
+    cell(rowB, 150, chordStrumLabel, chordStrumSlider);
+    cell(rowB, 100, chordStrumDirLabel, chordStrumDirBox);
+    cell(rowB, 170, bpmLabel, bpmSlider);
 }
 
-void KeysEditor::rememberArpDetachedBounds()
+void KeysEditor::layoutCentreHolder()
 {
-    if (arpWindow != nullptr)
-        processor.layout.arpDetachedBounds = arpWindow->getBounds();
+    // The holder is the module's raised panel; its content sits inside the bevel.
+    const auto area = holderContent(secCentre).reduced(4, 4);
+    if (genPanel != nullptr)
+        genPanel->setBounds(area);
+    knobBank.setBounds(area.withHeight(juce::jmin(area.getHeight(), knobRowH)));
+}
+
+void KeysEditor::layoutPadsHolder()
+{
+    chordPads.setBounds(holderContent(secPads).reduced(4, 4));
+}
+
+void KeysEditor::layoutTranscribeHolder()
+{
+#if KEYS_TRANSCRIBE
+    if (transcribePanel != nullptr)
+        transcribePanel->setBounds(holderContent(secTranscribe));
+#endif
 }
 
 void KeysEditor::layoutArpHolder()
 {
     if (arpPanel != nullptr)
-        arpPanel->setBounds(arpHolder.getLocalBounds());
+        arpPanel->setBounds(holderContent(secArp));
 }
 
 void KeysEditor::layoutKeybed()
 {
-    auto area = keybedHolder.getLocalBounds();
-
-    // Detached, the holder is the whole window, so it carries its own strip for the two
-    // controls that came with it. Docked, those live on the Keyboard section bar and this
-    // strip does not exist (there is no spare height for it under a 185 px keybed).
-    if (processor.layout.detached)
-    {
-        auto strip = area.removeFromTop(SectionBar::height);
-        area.removeFromTop(4);
-        detachButton.setBounds(strip.removeFromRight(104).reduced(2, 2));
-        strip.removeFromRight(6);
-        wheelsButton.setBounds(strip.removeFromRight(84).reduced(2, 2));
-        strip.removeFromRight(6);
-        detachedSizeBox.setBounds(strip.removeFromRight(104).reduced(2, 2));
-    }
+    auto area = holderContent(secKeyboard);
 
     // Wheels sit left of the keyboard; the keyboard fills the rest. Columns are as
     // slim as the mouse-only floor allows (40 px column -> 36 px slider, floor 34).
@@ -865,7 +1067,7 @@ void KeysEditor::toggleEditPad(int slot)
     lastEditNotes = processor.chordPad(slot).notes;
     keyboard.panic(); // clean slate, so the latched set mirrors exactly this pad
     keyboard.recallOutputNotes(lastEditNotes);
-    chordPads.setEditingSlot(slot);
+    chordPads.setEditingSlot(slot); // the pad grows a tick that ends the edit
 }
 
 void KeysEditor::endPadEdit()
@@ -923,6 +1125,15 @@ void KeysEditor::timerCallback()
         processor.stopAllChordPads();
     lastSustain = sus;
 
+    // Switching the arp off releases a chord a *card* was holding into it. Without this the
+    // chord drones on with nothing arpeggiating it, the pads are back in beat-pad mode, and
+    // the lit card has no gesture left that releases it. A chord an arp slot launched is
+    // left alone: that one was not put there from a card.
+    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
+    if (! arpOn && lastArpOn && processor.arpHeldPad() >= 0)
+        processor.releaseArpChord();
+    lastArpOn = arpOn;
+
     // Changing MIDI channel while notes sound would strand them on the old channel
     // (note-off goes to the new one), so panic on any channel change.
     const int ch = (int) apvts.getRawParameterValue("channel")->load();
@@ -952,8 +1163,22 @@ void KeysEditor::timerCallback()
                                  : "VELOCITY  " + juce::String((vmin + vmax) / 2),
                              juce::dontSendNotification);
 
+    // Strum is the same shape: two params, one band, the numbers in the label. Both ends
+    // equal is a fixed strum, and reads as one number rather than a range of nothing.
+    // Sorted before it reaches the slider: the pair can arrive the wrong way round from host
+    // automation, and a TwoValue slider handed max < min is not a defined thing to look at.
+    const int sa = (int) apvts.getRawParameterValue("chordStrum")->load();
+    const int sb = (int) apvts.getRawParameterValue("chordStrumMax")->load();
+    const int smin = juce::jmin(sa, sb), smax = juce::jmax(sa, sb);
+    chordStrumSlider.setMinAndMaxValues(smin, smax, juce::dontSendNotification);
+    chordStrumLabel.setText(smin == smax ? "STRUM  " + juce::String(smin) + " MS"
+                                         : "STRUM  " + juce::String(juce::jmin(smin, smax)) + "-"
+                                               + juce::String(juce::jmax(smin, smax)) + " MS",
+                            juce::dontSendNotification);
+
     // Pad page: label and the ends of the range.
-    const int page = processor.padPage();    for (int p = 0; p < KeysProcessor::numPadPages; ++p)
+    const int page = processor.padPage();
+    for (int p = 0; p < KeysProcessor::numPadPages; ++p)
         pageButtons[(size_t) p].setToggleState(p == page, juce::dontSendNotification);
 
     // Keyboard-edit link: the edited pad follows the keyboard's sounding set. An
@@ -962,7 +1187,10 @@ void KeysEditor::timerCallback()
     if (editingPad >= 0)
     {
         const int offset = processor.padPageOffset();
-        if (editingPad < offset || editingPad >= offset + KeysProcessor::padsPerPage)
+        // Folding the pads away takes the tick with them, and the edit would have no exit
+        // left. Same rule as flipping to another page: the pad keeps what it already got.
+        if (! processor.layout.pads
+            || editingPad < offset || editingPad >= offset + KeysProcessor::padsPerPage)
         {
             endPadEdit();
         }
@@ -1009,7 +1237,16 @@ void KeysEditor::timerCallback()
     knobBank.refreshAssignments();
 
     // Feed the pads the chord sounding on the keyboard (drives the live card and capture).
-    chordPads.setCurrentChord(keyboard.soundingOutputNotes());
+    // Notes arriving on the MIDI input count: play a chord on a physical keyboard and the
+    // live card names it and can be captured to a pad, which is the whole point of watching
+    // the input at all. Merged rather than replaced, so a hand on each keyboard still reads
+    // as one chord.
+    auto chord = keyboard.soundingOutputNotes();
+    for (int n : processor.inputNotes())
+        if (std::find(chord.begin(), chord.end(), n) == chord.end())
+            chord.push_back(n);
+    std::sort(chord.begin(), chord.end());
+    chordPads.setCurrentChord(chord);
     chordPads.repaint();
 }
 
@@ -1019,156 +1256,125 @@ void KeysEditor::paint(juce::Graphics& g)
     g.setGradientFill({ skin::bgTop, 0.0f, 0.0f, skin::bgBot, 0.0f, full.getBottom(), false });
     g.fillRect(full);
 
-    // Header band behind the three control rows, seated on a shadow + catch-light pair.
-    // Folded away, there is no band to draw and no wordmark under a hidden title.
-    if (processor.layout.controls && ! headerBand.isEmpty())
+    // Say where a section went, on its own bar. Below the bar would be the obvious place,
+    // but when a section is away the window shrinks until there is no "below" left - the
+    // caption was drawn straight off the bottom edge. The zone is whatever the bar's own
+    // controls did not use, so it can never land under a button.
+    g.setFont(skin::micro(10.0f).withExtraKerningFactor(0.2f));
+    for (int i = 0; i < numSections; ++i)
     {
-        const auto band = headerBand.toFloat();
-        g.setGradientFill({ skin::headerTop, 0.0f, band.getY(), skin::headerBot, 0.0f, band.getBottom(), false });
-        g.fillRect(band);
-        g.setColour(juce::Colours::black.withAlpha(0.55f));
-        g.fillRect(0.0f, band.getBottom(), full.getWidth(), 1.0f);
-        g.setColour(juce::Colours::white.withAlpha(0.04f));
-        g.fillRect(0.0f, band.getBottom() + 1.0f, full.getWidth(), 1.0f);
-
-        // Wordmark caption under the title.
-        g.setColour(skin::accentOf(*this).base.withAlpha(0.85f));
-        g.setFont(skin::micro(9.0f).withExtraKerningFactor(0.32f));
-        g.drawText("OK STUDIO", titleCaption, juce::Justification::centredLeft);
-    }
-
-    // The performance module floats as one raised panel behind whichever of the knob bank
-    // and the pad strip is showing. The other centre views draw their own card.
-    if (knobBank.isVisible() || chordPads.isVisible())
-    {
-        auto module = knobBank.isVisible() ? knobBank.getBounds() : chordPads.getBounds();
-        if (knobBank.isVisible() && chordPads.isVisible())
-            module = module.getUnion(chordPads.getBounds());
-        const auto perf = module.toFloat().expanded(4.0f, 5.0f);
-        g.setColour(juce::Colours::black.withAlpha(0.45f));
-        g.drawRoundedRectangle(perf.expanded(0.5f), skin::panelRadius + 0.5f, 1.0f);
-        g.setColour(skin::panel);
-        g.fillRoundedRectangle(perf, skin::panelRadius);
-        g.setColour(juce::Colours::white.withAlpha(0.045f));
-        g.fillRoundedRectangle(perf.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    }
-
-    // Say where the keybed went, on the bar itself. Below the bar would be the obvious
-    // place, but when the keyboard is away the window shrinks until there is no "below"
-    // left - the caption was drawn straight off the bottom edge. The bar's content area
-    // is empty in exactly these two states (Wheels and Detach travel with the keybed).
-    if (! processor.layout.keyboard || processor.layout.detached)
-    {
+        const auto& s = sections[(size_t) i];
+        // "HIDDEN" only for the keyboard: a missing keybed is dramatic enough to be worth
+        // saying out loud, whereas every other folded bar has its chevron and nothing else
+        // to explain.
+        const bool away = *s.detached;
+        const bool hidden = ! *s.open && (SectionId) i == secKeyboard;
+        if ((! away && ! hidden) || s.caption.getWidth() < 90)
+            continue;
         g.setColour(skin::textFaint);
-        g.setFont(skin::micro(10.0f).withExtraKerningFactor(0.2f));
-        g.drawText(processor.layout.detached ? "IN ITS OWN WINDOW" : "HIDDEN",
-                   keyboardBar.contentArea().withTrimmedRight(4),
+        g.drawText(away ? "IN ITS OWN WINDOW" : "HIDDEN", s.caption.withTrimmedRight(4),
                    juce::Justification::centredRight);
     }
 }
 
 void KeysEditor::resized()
 {
-    const auto& lay = processor.layout;
     auto area = getLocalBounds().reduced(10);
 
-    // Top to bottom, each band skipped when its section is folded: the Controls bar, the
-    // three control rows, the view bar (centre tabs + chord-pad transport), the centre
-    // view, the Keyboard bar, and the keybed. The keybed takes whatever is left, so extra
-    // window height reads as instrument body under a bottom-anchored keyboard.
+    // Top to bottom: every section is a bar, and - unless it is folded or off in a window of
+    // its own - a band of content under it. The keybed is last and takes whatever is left, so
+    // extra window height reads as instrument body under a bottom-anchored keyboard.
+
+    // --- Controls -------------------------------------------------------------------
     controlsBar.setBounds(area.removeFromTop(SectionBar::height));
     {
-        auto bar = controlsBar.contentArea();
+        auto bar = layoutDetachRow(secControls, controlsBar.contentArea(), true);
+        bar.removeFromRight(6);
         themeButton.setBounds(bar.removeFromRight(112).reduced(2, 0));
         bar.removeFromRight(6);
         if (updateButton.isVisible())
             updateButton.setBounds(bar.removeFromRight(170).reduced(0, 1));
+        section(secControls).caption = bar;
     }
-
-    auto header = juce::Rectangle<int> {};
-    if (lay.controls)
+    if (const int h = sectionHeight(secControls); h > 0)
     {
         area.removeFromTop(4);
-        header = area.removeFromTop(headerH);
-        headerBand = getLocalBounds().withY(header.getY() - 6).withHeight(header.getHeight() + 12);
-    }
-    else
-    {
-        headerBand = {};
+        const auto band = area.removeFromTop(h);
+        // Full width and a little past the rows: the holder paints the header band, and the
+        // band has always bled into the margins the rest of the editor keeps.
+        controlsHolder.setBounds(getLocalBounds().withY(band.getY() - 6).withHeight(h + 12));
     }
 
-    area.removeFromTop(4);
+    // --- Centre ---------------------------------------------------------------------
+    area.removeFromTop(6);
     centreBar.setBounds(area.removeFromTop(SectionBar::height));
-    auto toolRow = centreBar.contentArea();
-
-    const int centre = centreHeight();
-    juce::Rectangle<int> centreArea;
-    if (centre > 0)
+    section(secCentre).caption = layoutToolRow(layoutDetachRow(secCentre, centreBar.contentArea(), true));
+    if (const int h = sectionHeight(secCentre); h > 0)
     {
-        area.removeFromTop(6);
-        centreArea = area.removeFromTop(centre);
+        area.removeFromTop(4);
+        // Expanded, because the holder *is* the module's raised panel and that has always
+        // sat a few pixels proud of the content it carries.
+        centreHolder.setBounds(area.removeFromTop(h).expanded(4, 4));
     }
 
+    // --- Arp ------------------------------------------------------------------------
     area.removeFromTop(6);
     arpBar.setBounds(area.removeFromTop(SectionBar::height));
     {
-        // On and Detach sit on the bar, so both survive folding the section away.
-        auto bar = arpBar.contentArea();
-        arpDetachButton.setBounds(bar.removeFromRight(104).reduced(2, 0));
+        // On sits on the bar, so it survives folding the section away.
+        auto bar = layoutDetachRow(secArp, arpBar.contentArea(), true);
         bar.removeFromRight(6);
         arpOnButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
+        section(secArp).caption = bar;
     }
+    if (const int h = sectionHeight(secArp); h > 0)
     {
-        const int arp = arpHeight();
-        juce::Rectangle<int> arpArea;
-        if (arp > 0)
-        {
-            area.removeFromTop(4);
-            arpArea = area.removeFromTop(arp);
-        }
-        if (! lay.arpDetached)
-            arpHolder.setBounds(arpArea);
+        area.removeFromTop(4);
+        arpHolder.setBounds(area.removeFromTop(h));
     }
 
+    // --- Pads -----------------------------------------------------------------------
     area.removeFromTop(6);
     padsBar.setBounds(area.removeFromTop(SectionBar::height));
     {
         // The page buttons ride on the Pads bar, where they used to sit in a row of their
         // own under the strip. One click still reaches any page, and the section keeps its
         // height for pads instead of spending 34 px on a transport.
-        auto bar = padsBar.contentArea();
+        auto bar = layoutDetachRow(secPads, padsBar.contentArea(), true);
         for (auto& b : pageButtons)
         {
             b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
             bar.removeFromLeft(4);
         }
-        bar.removeFromLeft(14);
-        toArpButton.setBounds(bar.removeFromLeft(88).reduced(0, 2));
+        section(secPads).caption = bar;
     }
-    juce::Rectangle<int> padsArea;
-    if (lay.pads)
+    if (const int h = sectionHeight(secPads); h > 0)
     {
         area.removeFromTop(4);
-        padsArea = area.removeFromTop(padRowH);
+        padsHolder.setBounds(area.removeFromTop(h).expanded(4, 4));
     }
-    chordPads.setBounds(padsArea);
 
+    // --- Transcribe -----------------------------------------------------------------
+    area.removeFromTop(6);
+    transcribeBar.setBounds(area.removeFromTop(SectionBar::height));
+    section(secTranscribe).caption = layoutDetachRow(secTranscribe, transcribeBar.contentArea(), true);
+    if (const int h = sectionHeight(secTranscribe); h > 0)
+    {
+        area.removeFromTop(4);
+        transcribeHolder.setBounds(area.removeFromTop(h));
+    }
+
+    // --- Keyboard -------------------------------------------------------------------
     area.removeFromTop(6);
     keyboardBar.setBounds(area.removeFromTop(SectionBar::height));
     {
         // The Keyboard bar carries two kinds of control, and they behave differently when
         // the section folds. Wheels and Detach belong to the keybed, so they go with it
-        // (and detached, they are not our children at all - layoutKeybed places them in
-        // that window). Exclusive, Sustain and All Off are what you reach for *while
-        // playing*, so they stay put whatever the keybed is doing.
-        auto bar = keyboardBar.contentArea();
-        if (! lay.detached)
-        {
-            detachButton.setBounds(bar.removeFromRight(104).reduced(2, 0));
-            bar.removeFromRight(6);
-            wheelsButton.setBounds(bar.removeFromRight(84).reduced(2, 0));
-            bar.removeFromRight(14);
-        }
+        // (detached, they are not our children at all - the holder places them in that
+        // window). Exclusive, Sustain and All Off are what you reach for *while playing*,
+        // so they stay put whatever the keybed is doing.
+        auto bar = layoutDetachRow(secKeyboard, keyboardBar.contentArea(), true);
+        bar.removeFromRight(14);
         // 24 px tall like Sustain and Exclusive beside it, not the old reduced(0, 3) which
         // left it 20. The skin's button font scales with height, so those 4 px were also
         // shrinking the label: All Off was the odd one out on the bar for no reason.
@@ -1177,73 +1383,16 @@ void KeysEditor::resized()
         sustainButton.setBounds(bar.removeFromRight(96).withSizeKeepingCentre(94, 24));
         bar.removeFromRight(6);
         chordExclusiveButton.setBounds(bar.removeFromRight(104).withSizeKeepingCentre(102, 24));
+        section(secKeyboard).caption = bar;
     }
-
-    if (lay.keyboard && ! lay.detached)
+    if (sectionHeight(secKeyboard) > 0)
     {
         area.removeFromTop(4);
-        keybedHolder.setBounds(area);
+        keybedHolder.setBounds(area); // the slack is instrument body under the keys
     }
-
-    // The centre views fill the slot the Perform pair would have used.
-    if (genPanel != nullptr)
-        genPanel->setBounds(centreArea);
-    if (lay.view == viewPerform && lay.knobs)
-        knobBank.setBounds(centreArea.withHeight(knobRowH));
-
-    if (! lay.controls)
-    {
-        layoutToolRow(toolRow);
-        return; // nothing below needs a header that is not there
-    }
-
-    {
-        // Title + wordmark caption, centred as a pair in the header band.
-        auto titleCol = header.removeFromLeft(84);
-        const int pairTop = titleCol.getY() + (titleCol.getHeight() - 48) / 2;
-        title.setBounds(titleCol.withY(pairTop).withHeight(34));
-        titleCaption = { title.getX() + 2, title.getBottom() - 2, 80, 12 };
-    }
-    header.removeFromLeft(6);
-
-    auto rowA = header.removeFromTop(rowH);
-    header.removeFromTop(3);
-    auto rowB = header.removeFromTop(rowH);
-
-    const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
-    {
-        auto c = row.removeFromLeft(w);
-        row.removeFromLeft(8);
-        lab.setBounds(c.removeFromTop(14));
-        ctl.setBounds(c);
-    };
-    const auto toggleCell = [](juce::Rectangle<int>& row, int w, juce::Component& ctl)
-    {
-        auto c = row.removeFromLeft(w);
-        row.removeFromLeft(8);
-        ctl.setBounds(c.withTrimmedTop(14));
-    };
-
-    // Two rows, down from three: dropping the fixed Velocity slider and the Latch toggle
-    // emptied the middle one, so the remaining controls close up and the header (and with
-    // it the whole window) gets 49 px shorter.
-    cell(rowA, 88, sizeLabel, sizeBox);
-    cell(rowA, 70, rootLabel, rootBox);
-    cell(rowA, 150, scaleLabel, scaleBox);
-    cell(rowA, 120, octaveLabel, octaveSlider);
-    toggleCell(rowA, 110, scaleLockButton);
-    cell(rowA, 90, polyphonyLabel, polyphonyBox);
-    cell(rowA, 70, channelLabel, channelBox);
-
-    toggleCell(rowB, 96, humanizeButton);
-    cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
-    cell(rowB, 150, chordStrumLabel, chordStrumSlider);
-    cell(rowB, 100, chordStrumDirLabel, chordStrumDirBox);
-
-    layoutToolRow(toolRow);
 }
 
-void KeysEditor::layoutToolRow(juce::Rectangle<int> row)
+juce::Rectangle<int> KeysEditor::layoutToolRow(juce::Rectangle<int> row)
 {
     // The centre bar's content: which view is showing, then whatever that view folds. Both
     // tabs are always there (they are how a folded centre comes back); Knobs is all the
@@ -1254,6 +1403,7 @@ void KeysEditor::layoutToolRow(juce::Rectangle<int> row)
     row.removeFromLeft(14);
 
     knobsButton.setBounds(row.removeFromLeft(66).reduced(0, 2));
+    return row;
 }
 
 } // namespace keys

@@ -595,6 +595,100 @@ public:
                 }
             expect(saw);
         }
+
+        // Swing moves the odd steps off their own boundary, which is exactly the case where
+        // "the boundary is in this block" and "the note fires in this block" stop being the
+        // same question. Both directions are checked over several blocks: one block here is
+        // one whole step, so any shift at all puts the offbeat in a different buffer than
+        // its boundary - the shape that used to drop the note entirely.
+        const auto swungOnsetsOfSize = [&](float swing, int blockSize, int blocks)
+        {
+            auto sp = p;
+            sp.swing = swing;
+            ArpEngine e;
+            e.prepare(sr);
+            std::vector<int> onsets; // absolute sample of every note-on
+            for (int b = 0; b < blocks; ++b)
+            {
+                juce::MidiBuffer out;
+                clock.ppq = (double) (b * blockSize) / 24000.0; // 120 bpm at 48 kHz
+                e.process(sp, clock, blockSize, b == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                for (auto& x : collect(out))
+                    if (x.on)
+                        onsets.push_back(b * blockSize + x.sample);
+            }
+            return onsets;
+        };
+        const auto swungOnsets = [&](float swing, int blocks)
+        { return swungOnsetsOfSize(swing, block, blocks); };
+
+        beginTest("positive swing delays the offbeats without dropping them");
+        {
+            // Four blocks, so four steps' worth of timeline. Half a step is 3000 samples.
+            const auto onsets = swungOnsets(0.5f, 4);
+            expectEquals((int) onsets.size(), 4, "every step still fires - none lost to the "
+                                                 "block its swing pushed it into");
+            if (onsets.size() == 4)
+            {
+                expectWithinAbsoluteError(onsets[0], 0, 2);
+                expectWithinAbsoluteError(onsets[1], 9000, 2);  // 6000 + 3000 late
+                expectWithinAbsoluteError(onsets[2], 12000, 2);
+                expectWithinAbsoluteError(onsets[3], 21000, 2); // 18000 + 3000 late
+            }
+        }
+
+        beginTest("negative swing pulls the offbeats early");
+        {
+            const auto onsets = swungOnsets(-0.5f, 4);
+            expectEquals((int) onsets.size(), 4, "an early step belongs to the block before "
+                                                 "its own boundary, and must still fire");
+            if (onsets.size() == 4)
+            {
+                expectWithinAbsoluteError(onsets[0], 0, 2);
+                expectWithinAbsoluteError(onsets[1], 3000, 2);  // 6000 - 3000 early
+                expectWithinAbsoluteError(onsets[2], 12000, 2);
+                expectWithinAbsoluteError(onsets[3], 15000, 2); // 18000 - 3000 early
+            }
+        }
+
+        beginTest("swing survives a buffer far shorter than a step");
+        {
+            // The real host case, and the one that used to break: at 512 samples a boundary
+            // usually lands mid-buffer, so a swung note fires several buffers later than the
+            // one its boundary was in. The old scheduler looked only at boundaries inside
+            // the current buffer and gave up on any note whose swing carried it past the
+            // end, so every offbeat it could not fire immediately was lost for good.
+            // 48 x 512 = 24576 samples, four steps and a bit.
+            const auto late = swungOnsetsOfSize(0.5f, 512, 48);
+            expectEquals((int) late.size(), 5, "no offbeat may be dropped between buffers");
+            if (late.size() == 5)
+            {
+                expectWithinAbsoluteError(late[0], 0, 2);
+                expectWithinAbsoluteError(late[1], 9000, 2);
+                expectWithinAbsoluteError(late[2], 12000, 2);
+                expectWithinAbsoluteError(late[3], 21000, 2);
+                expectWithinAbsoluteError(late[4], 24000, 2);
+            }
+
+            const auto early = swungOnsetsOfSize(-0.5f, 512, 48);
+            expectEquals((int) early.size(), 5, "and none early, either");
+            if (early.size() == 5)
+            {
+                expectWithinAbsoluteError(early[0], 0, 2);
+                expectWithinAbsoluteError(early[1], 3000, 2);
+                expectWithinAbsoluteError(early[2], 12000, 2);
+                expectWithinAbsoluteError(early[3], 15000, 2);
+                expectWithinAbsoluteError(early[4], 24000, 2);
+            }
+        }
+
+        beginTest("zero swing is dead straight");
+        {
+            const auto onsets = swungOnsets(0.0f, 4);
+            expectEquals((int) onsets.size(), 4);
+            for (int i = 0; i < (int) onsets.size(); ++i)
+                expectWithinAbsoluteError(onsets[(size_t) i], i * 6000, 2);
+        }
     }
 };
 
