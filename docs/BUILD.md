@@ -44,6 +44,11 @@ its own project.
 the keyboard, the pads, the generator or the arp can be built that way and will configure and
 link much faster from cold.
 
+**Give it its own build tree rather than flipping it in place.** The flag decides the C
+runtime for the entire binary, so toggling it invalidates every object in the tree — and with
+it on, re-configuring is the expensive part. `cmake -B build-notranscribe -DKEYS_TRANSCRIBE=OFF`
+keeps both trees warm and lets you move between them for the cost of a link.
+
 The engine and its own tests live in the kit; see its `docs/TRANSCRIPTION.md`.
 
 ## Testing a change (run.py)

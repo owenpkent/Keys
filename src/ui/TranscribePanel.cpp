@@ -14,43 +14,72 @@ constexpr int bottomH = 30;
 constexpr double minUsefulSeconds = 1.2;
 } // namespace
 
-// Runs the model away from the message thread. The panel owns one and throws it away when it
-// finishes; the callback is posted back to the message thread, and is dropped if the panel
-// died in the meantime.
-class TranscribePanel::Job : public juce::Thread
+// Runs the model away from the message thread, and outlives the panel if it has to.
+//
+// Two things make that necessary, and they pull in the same direction. The panel is built and
+// destroyed with its fold (it holds an open device and a network's weights), so it can go away
+// at any moment - including after run() has posted its result and before the message manager
+// gets to it. A raw `this` in that message is a use-after-free with a window of exactly one
+// message pump. And waiting for the model instead - joining the thread in the panel's
+// destructor - freezes the whole editor for as long as the model still needs, on a click,
+// because nothing inside transcribe() checks for cancellation.
+//
+// So the job holds the panel weakly (a SafePointer, which nulls itself when the panel dies)
+// and the transcriber strongly (a shared_ptr, so the weights it is reading through cannot be
+// freed underneath it), and it keeps *itself* alive through a shared_ptr released by the
+// completion message. Abandoning it is therefore just dropping the panel's reference: the
+// thread runs to its natural end, finds a null panel, throws the result away and deletes
+// itself on the message thread.
+class TranscribePanel::Job : public juce::Thread,
+                             public std::enable_shared_from_this<TranscribePanel::Job>
 {
 public:
-    Job(okstudio::transcribe::Transcriber& t, juce::AudioBuffer<float> a, double rate,
-        okstudio::transcribe::Options o, std::function<void(std::vector<okstudio::transcribe::Note>)> done)
-        : juce::Thread("Keys transcription"), transcriber(t), audio(std::move(a)), sampleRate(rate),
-          options(o), onDone(std::move(done))
+    Job(std::shared_ptr<okstudio::transcribe::Transcriber> t, juce::AudioBuffer<float> a, double rate,
+        okstudio::transcribe::Options o, TranscribePanel& panel)
+        : juce::Thread("Keys transcription"), transcriber(std::move(t)), audio(std::move(a)),
+          sampleRate(rate), options(o), target(&panel)
     {
     }
 
     ~Job() override { stopThread(4000); }
 
+    // Must be called instead of startThread(): the self-reference is what lets the job be
+    // abandoned rather than waited for.
+    void start()
+    {
+        keepAlive = shared_from_this();
+        startThread();
+    }
+
     void run() override
     {
+        std::vector<okstudio::transcribe::Note> result;
         const auto mono = okstudio::transcribe::Transcriber::resampleForModel(audio, sampleRate);
 
-        if (threadShouldExit())
-            return;
+        if (! threadShouldExit())
+            result = transcriber->transcribe(mono.getReadPointer(0), mono.getNumSamples(), options);
 
-        auto result = transcriber.transcribe(mono.getReadPointer(0), mono.getNumSamples(), options);
+        const bool cancelled = threadShouldExit();
 
-        if (threadShouldExit())
-            return;
-
+        // `self` is the last reference once the panel has let go, so this message both
+        // delivers the result and destroys the job - on the message thread, after run() has
+        // returned, which is the only place ~Job's join can be free.
         juce::MessageManager::callAsync(
-            [done = onDone, r = std::move(result)]() mutable { done(std::move(r)); });
+            [self = std::move(keepAlive), panel = target, r = std::move(result), cancelled]() mutable
+            {
+                if (panel != nullptr && ! cancelled)
+                    panel->transcriptionFinished(std::move(r));
+                self.reset();
+            });
     }
 
 private:
-    okstudio::transcribe::Transcriber& transcriber;
+    std::shared_ptr<okstudio::transcribe::Transcriber> transcriber;
     juce::AudioBuffer<float> audio;
     double sampleRate;
     okstudio::transcribe::Options options;
-    std::function<void(std::vector<okstudio::transcribe::Note>)> onDone;
+    juce::Component::SafePointer<TranscribePanel> target;
+    std::shared_ptr<Job> keepAlive;
 };
 
 TranscribePanel::TranscribePanel()
@@ -126,7 +155,29 @@ TranscribePanel::TranscribePanel()
 TranscribePanel::~TranscribePanel()
 {
     stopTimer();
-    job.reset(); // joins the thread before the transcriber it borrows goes away
+
+    // Let go rather than wait. The job keeps itself and the transcriber alive, and its result
+    // is addressed to a SafePointer that is about to go null, so an abandoned job finishes
+    // quietly and deletes itself. Asking it to stop first only saves the work still ahead of
+    // the next cancellation check - the model itself does not have one - but it costs nothing.
+    if (job != nullptr)
+    {
+        job->signalThreadShouldExit();
+        job.reset();
+    }
+}
+
+void TranscribePanel::transcriptionFinished(std::vector<okstudio::transcribe::Note> result)
+{
+    notes = std::move(result);
+    transcribing = false;
+    job.reset();
+
+    if (notes.empty())
+        message = "No notes found. Try a higher sensitivity, or record with more level.";
+
+    updateEnablements();
+    repaint();
 }
 
 void TranscribePanel::resized()
@@ -361,7 +412,7 @@ void TranscribePanel::startTranscription()
     }
 
     if (transcriber == nullptr)
-        transcriber = std::make_unique<okstudio::transcribe::Transcriber>();
+        transcriber = std::make_shared<okstudio::transcribe::Transcriber>();
 
     okstudio::transcribe::Options options;
     options.noteSensitivity = (float) sensitivitySlider.getValue();
@@ -374,19 +425,9 @@ void TranscribePanel::startTranscription()
     transcribing = true;
     message.clear();
 
-    job = std::make_unique<Job>(*transcriber, std::move(audio), capture.recordedSampleRate(), options,
-                                [this](std::vector<okstudio::transcribe::Note> result) {
-                                    notes = std::move(result);
-                                    transcribing = false;
-
-                                    if (notes.empty())
-                                        message = "No notes found. Try a higher sensitivity, or "
-                                                  "record with more level.";
-
-                                    updateEnablements();
-                                    repaint();
-                                });
-    job->startThread();
+    job = std::make_shared<Job>(transcriber, std::move(audio), capture.recordedSampleRate(), options,
+                                *this);
+    job->start();
 
     updateEnablements();
     repaint();
@@ -507,11 +548,14 @@ void TranscribePanel::dragMidiOut()
     if (notes.empty())
         return;
 
+    // One reused name *per panel*: the file has to outlive the drag, and a fresh one per drag
+    // would litter the temp directory for the rest of the session. Per panel rather than
+    // per plugin, because two instances of Keys - or Keys and Keys Host - drag into the same
+    // temp directory, and a shared name means one drag overwrites the file the other is still
+    // handing to the OS.
     const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                          .getChildFile("Keys transcription.mid");
-
-    // One reused name: the file has to outlive the drag, and a fresh one per drag would
-    // litter the temp directory for the rest of the session.
+                          .getChildFile("Keys transcription " + juce::String::toHexString((juce::pointer_sized_int) this)
+                                        + ".mid");
     if (auto stream = std::unique_ptr<juce::FileOutputStream>(file.createOutputStream()))
     {
         stream->setPosition(0);

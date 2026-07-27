@@ -75,7 +75,7 @@ function(keys_configure_target tgt)
     endif()
 
     if (KEYS_TRANSCRIBE)
-        target_compile_definitions(${tgt} PUBLIC KEYS_TRANSCRIBE=1)
+        target_compile_definitions(${tgt} PRIVATE KEYS_TRANSCRIBE=1)
         target_link_libraries(${tgt} PRIVATE okstudio_basicpitch)
     endif()
 

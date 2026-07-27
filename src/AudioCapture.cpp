@@ -40,6 +40,10 @@ void AudioCapture::setDriver(const juce::String& name)
     if (name == driver)
         return;
 
+    // Close first, unconditionally. Routing this through setInput({}) alone was not enough:
+    // that returns early when there is no input selected, which left the outgoing driver's
+    // device open while `driver` moved on to name something else.
+    closeDevice();
     setInput({}); // the previous driver's inputs mean nothing to the new one
     driver = name;
     saveSelection();
@@ -145,7 +149,19 @@ bool AudioCapture::startRecording()
     if (! openDevice())
         return false;
 
-    capturedRate = juce::jmax(8000.0, deviceSampleRate());
+    // Refuse rather than guess. Every sample here is timed by this number - the model
+    // resamples from it, and the piano roll dates every note by it - so a placeholder for a
+    // device that will not say what rate it runs at produces a transcription that is wrong
+    // in pitch and in time, with nothing on screen to suggest it.
+    const double rate = deviceSampleRate();
+
+    if (rate < 8000.0)
+    {
+        lastError = "That input did not report a usable sample rate.";
+        return false;
+    }
+
+    capturedRate = rate;
 
     // Allocated here, on the message thread, while nothing is writing to it.
     captured.setSize(1, (int) (maxSeconds * capturedRate), false, true, true);

@@ -37,6 +37,9 @@ private:
 
     void toggleRecording();
     void startTranscription();
+    // Where a finished job lands, on the message thread. Reached through a SafePointer, so a
+    // panel that was folded away while the model ran is simply never called.
+    void transcriptionFinished(std::vector<okstudio::transcribe::Note> result);
     void applySensitivity();  // re-derive notes from the last recording; no model rerun
     void refreshDevices();
     void updateEnablements();
@@ -55,12 +58,14 @@ private:
 
     // Built on the first transcription rather than at construction: it loads the CNN weights
     // and starts an ONNX session, which is not worth doing for a section that may never be
-    // opened.
-    std::unique_ptr<okstudio::transcribe::Transcriber> transcriber;
+    // opened. Shared rather than owned outright, because a job abandoned by a fold is still
+    // reading through it and must be able to keep it alive to its natural end.
+    std::shared_ptr<okstudio::transcribe::Transcriber> transcriber;
 
-    // Runs the model off the message thread, then posts the notes back to it.
+    // Runs the model off the message thread, then posts the notes back to it. Shared for the
+    // same reason: dropping this reference abandons the job rather than waiting for it.
     class Job;
-    std::unique_ptr<Job> job;
+    std::shared_ptr<Job> job;
 
     std::vector<okstudio::transcribe::Note> notes;
 
@@ -72,7 +77,7 @@ private:
     // A drag source, not a button: an external file drag starts from a mouse drag, and there
     // is no click that can do it. Drawn to look like the buttons beside it so it reads as one
     // of them, and greyed the same way when there is nothing to drag.
-    struct MidiDragSource : juce::SettableTooltipClient, juce::Component
+    struct MidiDragSource : juce::Component, juce::SettableTooltipClient
     {
         std::function<void()> onDrag;
         void mouseDrag(const juce::MouseEvent&) override;

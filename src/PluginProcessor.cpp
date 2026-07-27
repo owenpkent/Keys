@@ -173,8 +173,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
     // A host that is *playing* always wins: this is what Keys runs at when there is no
     // transport to follow, which is every moment in the standalone and every stopped
-    // transport in a DAW. Added last on purpose: appending keeps every existing
-    // parameter's automation index where the session left it.
+    // transport in a DAW.
+    //
+    // Appended rather than slotted in beside the arp's other controls, to keep the shuffling
+    // of this layout to a minimum. It is only a tidiness argument: Keys ships VST3 and
+    // Standalone, and JUCE derives a VST3 parameter's id by hashing its string id, so saved
+    // state and existing automation follow the id and not the position. What position still
+    // decides is the order a host's generic parameter list shows - and chordStrumMax above
+    // does insert mid-list, so this branch moves that order regardless.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
 
     return layout;
@@ -1046,6 +1052,11 @@ void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
     //
     // Read the tree rather than the live parameters: this runs while the state is still being
     // applied, and the atomics may not have caught up.
+    //
+    // The repair goes through setValueNotifyingHost rather than poking the atomic, so the host
+    // and the UI both learn the new value. That wants the message thread, and every host in
+    // practice calls setStateInformation there; the spec does not actually promise it, so if
+    // one ever turns up that does not, this is the line to move behind a callAsync.
     const auto params = root.getChildWithName(apvts.state.getType());
     if (! params.isValid())
         return;

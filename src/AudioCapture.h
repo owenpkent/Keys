@@ -64,8 +64,13 @@ public:
 
     void clear();
 
-    // What has been recorded, mono, at recordedSampleRate(). Only read this when not
-    // recording: while recording it is being written from the device thread.
+    // What has been recorded, mono, at recordedSampleRate().
+    //
+    // Samples [0, recordedSamples()) are settled and safe to read at any time, recording or
+    // not: the buffer is allocated once at startRecording() and never resized or moved while
+    // recording, the device thread only ever appends, and `written` is published after the
+    // samples it covers. That is what lets the waveform draw live. Do not read past that
+    // bound, and do not hold the pointer across a startRecording() or a clear().
     const juce::AudioBuffer<float>& recorded() const { return captured; }
     int recordedSamples() const { return (int) written.load(); }
     double recordedSampleRate() const { return capturedRate; }

@@ -66,6 +66,25 @@ Found while auditing the hang above; each one turns a legible failure into a con
   their own first letter, because `GetWindowTextW` was marshalled as ANSI and the UTF-16 it
   writes stops at the first NUL.
 
+### Fixed: smaller traps in the Transcribe section
+
+All found reviewing this branch. None are reachable by accident, but each is the kind that
+only shows up on somebody else's desk.
+
+- **Switching driver left the old driver's device open.** The close was routed through
+  `setInput({})`, which returns early when no input is selected — so with nothing chosen,
+  the driver moved on while its device stayed open. It closes first now, unconditionally.
+- **A device that would not report its sample rate got a made-up one.** `startRecording`
+  fell back to 8 kHz. Every sample is timed by that number — the model resamples from it and
+  the piano roll dates every note by it — so the fallback produced a transcription wrong in
+  both pitch and time with nothing on screen to suggest it. It refuses to start and says so.
+- **Two instances dragged the same temp file.** The MIDI drag wrote one fixed name in the
+  temp directory, so Keys and Keys Host, or two Keys, could overwrite the file the other was
+  still handing to the OS. The name carries the panel's address now.
+- The buffer-read contract on `AudioCapture::recorded()` said "only when not recording", which
+  its only caller has to violate to draw the live waveform. The settled region is well defined
+  and the comment now describes it rather than forbidding it.
+
 ### Added: the keybed shows what is played *into* Keys
 
 Play a hardware keyboard through Keys and its notes now light up on the on-screen keys, and
@@ -212,6 +231,17 @@ minutes. The model runs on a background thread, so the keyboard keeps playing wh
 The section starts folded, like the arp, because open it is tall. Building it pulls in a
 multi-gigabyte ONNX Runtime download and forces the static MSVC runtime on the whole binary;
 `-DKEYS_TRANSCRIBE=OFF` drops both along with the section.
+
+**Folding the section away while the model is running is free, and safe.** The panel is
+destroyed with its fold — it holds an open device and a network's weights — so a transcription
+in flight has to survive its own panel going away. The job holds the panel weakly and the
+transcriber strongly, and keeps itself alive until it finishes: closing the section drops the
+reference, the model runs to its natural end, and the result is thrown away because there is
+nobody left to give it to. The two obvious alternatives are both wrong. Waiting for the model
+in the panel's destructor freezes the editor for as long as the model still needs, on a click,
+because nothing inside `transcribe()` checks for cancellation. Posting the result to a raw
+`this` is a use-after-free with a window of exactly one message pump: the result is already
+queued when the panel dies.
 
 ### Changed: the arpeggiator is a section of its own, and it detaches
 
