@@ -43,26 +43,25 @@ public:
     std::function<void(int)> onEditToggle;
     void setEditingSlot(int slot); // absolute slot being edited, or -1
 
-    // "To Arp", a toggle on the Pads section bar. On, a left-click on a chord card holds its
-    // chord into the arpeggiator rather than playing it for as long as the button is down:
-    // click it again to release, click another to swap. Off, the pads behave exactly as they
-    // always have. A visible toggle rather than an implicit "the arp is on" mode, so a pad
-    // never quietly does a different thing than it did a minute ago.
-    //
-    // The flag itself lives on the processor (KeysProcessor::LayoutState::toArp), because the
-    // chord it holds outlives this editor and the generator's pad grid has to honour the same
-    // mode. This just applies a change and repaints.
-    void setToArp(bool);
-
 private:
     juce::Rectangle<float> cardBounds() const;
     juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1: row = i/8, col = i%8
+
+    // The tick that ends a keyboard edit, on the pad being edited. Only that one pad has
+    // one, and only while the link lasts; a full-height strip at its right end rather than
+    // a corner chip, because the mouse-only floor is 34 px and a corner badge that size
+    // would sit exactly where the chord name is. Static: it is pure geometry.
+    static juce::Rectangle<float> saveBadgeBounds(juce::Rectangle<float> pad);
     int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;
     void showPadMenu(int slot);
 
     KeysProcessor& processor;
-    bool toArp() const; // processor.layout.toArp; see setToArp
+    // Whether a click on a chord card feeds the arpeggiator instead of playing the chord
+    // for as long as the button is down. It is the arp's own On state (see
+    // KeysProcessor::cardsFeedArp), asked rather than cached so the pads can never be in a
+    // different mode than the generator's grid, or than the arp itself.
+    bool toArp() const;
     int editingSlot = -1;
     std::vector<int> currentNotes;
     juce::String currentName;

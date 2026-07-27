@@ -78,6 +78,14 @@ public:
     // repaint only when something actually moved.
     bool isNoteSounding(int midiNote) const;
     juce::uint32 soundingGeneration() const { return soundingGen.load(); }
+
+    // What is arriving on the MIDI *input* - a physical keyboard through the standalone's
+    // MIDI settings, or a clip and any device above Keys in a DAW track. Keys has always
+    // passed that stream through untouched; this only watches it go by, so the on-screen
+    // keybed lights up for what someone else is playing and the live chord card can name
+    // the chord under their hands. Display only, and a flag per pitch rather than a count:
+    // a missed note-off would leak a refcount into a key lit forever.
+    std::vector<int> inputNotes() const; // sorted, message thread
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
@@ -175,6 +183,14 @@ public:
     void holdArpChordFromPad(int padSlot);
     int arpHeldPad() const { return arpPadSlot; }
 
+    // True when a left-click on a chord card should hand that chord to the arpeggiator and
+    // leave it there, rather than play it beat-pad style for as long as the button is down.
+    // That used to be its own "To Arp" toggle on the Pads bar; it is simply *the arp being
+    // on* since 2026-07-27, because a mode you had to arm separately from the arp read as
+    // doing nothing whenever the arp happened to be off. Every surface that shows a chord
+    // card asks here, so the pad strip and the generator's grid can never disagree.
+    bool cardsFeedArp() const { return apvts.getRawParameterValue("arpOn")->load() > 0.5f; }
+
     // A stored pattern slot (A-H), independent of whichever pattern is currently
     // active/live. Public so the MCP bridge can read or write an arbitrary slot
     // without disturbing the live lanes (unless it happens to be the active one) -
@@ -210,24 +226,41 @@ public:
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
         bool transcribe = false; // the Transcribe section (off by default: it is tall too)
-        // "To Arp": a click on a chord card hands its chord to the arpeggiator. It lives here
-        // rather than in the pad strip because it is a *mode*, and the chord it holds outlives
-        // the editor. A host that destroys the window on close was dropping the flag while the
-        // chord kept sounding, which left the pads back in momentary mode with a lit ring and
-        // no gesture that released it. Every surface showing a chord card reads this.
-        bool toArp = false;
         bool wheels = true;     // mod + pitch, left of the keybed
         bool keyboard = true;   // the keybed itself
+
+        // Every section can also be popped out into a window of its own (2026-07-27; the
+        // keybed and the arp could already, and Owen asked for the rest to follow). One
+        // flag and one remembered frame each, in the editor's top-to-bottom order.
+        // `detached` keeps its bare name: it is the keybed's, and renaming it would drop
+        // the setting out of every session saved before this.
+        bool controlsDetached = false;
+        bool centreDetached = false;
+        bool arpDetached = false;
+        bool padsDetached = false;
+        bool transcribeDetached = false;
         bool detached = false;  // keybed lives in its own resizable window
-        bool arpDetached = false; // ditto the arp panel
+
         int  view = 0;          // which centre view: 0 = perform, 1 = chords
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
-        juce::Rectangle<int> detachedBounds {};    // empty = never detached yet, so centre it
+
+        // Where each window was left. Empty = never detached yet, so centre it.
+        juce::Rectangle<int> controlsDetachedBounds {};
+        juce::Rectangle<int> centreDetachedBounds {};
         juce::Rectangle<int> arpDetachedBounds {};
+        juce::Rectangle<int> padsDetachedBounds {};
+        juce::Rectangle<int> transcribeDetachedBounds {};
+        juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
     };
     LayoutState layout;
 
 protected:
+    // Everything both products restore from a saved session. Keys Host adds its instrument
+    // on top of this rather than repeating the list; see the definition.
+    void restoreSharedState(const juce::ValueTree& root);
+    // Repairs a session saved before Strum became a range; see the definition for the tell.
+    void migrateStrumRange(const juce::ValueTree& root);
+
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);
 
@@ -298,11 +331,16 @@ private:
     std::array<std::atomic<int>, 128> noteRefs {};
     std::atomic<juce::uint32> soundingGen { 0 };
 
+    // Notes seen arriving on the MIDI input (see inputNotes). Written on the audio thread,
+    // read on the message thread; a plain flag per pitch, never a count.
+    std::array<std::atomic<bool>, 128> inputNoteOn {};
+    void watchInputNotes(const juce::MidiBuffer&); // audio thread, before anything consumes it
+    void clearInputNotes();
+
     std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
     bool lastArpOn = false;        // audio thread; to flush cleanly on bypass
-    double lastKnownBpm = 120.0;   // audio thread; feeds the internal-clock fallback
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

@@ -174,17 +174,36 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     const float capR = arcR - lw * 1.6f;
     const float angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
 
+    // A knob whose range straddles zero fills *from the centre*, not from the minimum: a
+    // bipolar control at 0 should look empty, and one turned left should read as clearly
+    // negative rather than as half full. Asked through the range rather than through a flag,
+    // so any future bipolar knob gets it without opting in (the arp's Swing is the first).
+    const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+    const float originPos = bipolar ? (float) slider.valueToProportionOfLength(0.0) : 0.0f;
+    const float originAngle = rotaryStartAngle + originPos * (rotaryEndAngle - rotaryStartAngle);
+
     // Groove.
     juce::Path track;
     track.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, rotaryEndAngle, true);
     g.setColour(skin::well);
     g.strokePath(track, { lw, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
 
+    // Centre detent mark, so a bipolar knob shows where "off" is even at a glance.
+    if (bipolar)
+    {
+        juce::Path tick;
+        tick.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f,
+                           originAngle - 0.012f, originAngle + 0.012f, true);
+        g.setColour(skin::textFaint);
+        g.strokePath(tick, { lw, juce::PathStrokeType::curved, juce::PathStrokeType::butt });
+    }
+
     // Value arc: halo, body, hot core.
-    if (sliderPos > 0.001f)
+    if (std::abs(sliderPos - originPos) > 0.001f)
     {
         juce::Path value;
-        value.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, angle, true);
+        value.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f,
+                            juce::jmin(originAngle, angle), juce::jmax(originAngle, angle), true);
         g.setColour(accent().base.withAlpha(0.16f));
         g.strokePath(value, { lw * 2.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
         g.setColour(accent().base.withAlpha(0.55f));

@@ -361,7 +361,7 @@ void ChordGenPanel::buildControls()
             auto& r = *padRows[(size_t) v];
             const int slot = processor.padPageOffset() + v;
             const bool down = r.play.isDown();
-            if (processor.layout.toArp)
+            if (processor.cardsFeedArp())
             {
                 if (down && ! r.playHeld)
                 {
