@@ -252,9 +252,13 @@ Concrete remaps:
 The arp is a foldable **section**, between the centre view and the chord pads, with its
 **On** toggle and a **Detach** button on its own bar. Folding the section destroys the
 editor, never the arpeggiator, which is why On lives on the bar rather than inside the
-panel. Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with
-every other section since 2026-07-27); a detached section takes no height in the main
-window, and the Re-dock button travels into the window with it.
+panel — and why On is one of the few things that stays put when the section folds, while
+Detach hides with it. Detach moves the whole panel into a resizable window
+(`DetachedWindow`, shared with every other section since 2026-07-27); a detached section
+takes no height in the main window, and the Re-dock button travels into the window with it.
+
+Clicking the bar anywhere but on **On** folds the panel away, which makes the arpeggiator
+easy to leave running behind a single dim strip.
 
 It got there in three steps, all at Owen's request. A full-editor overlay first, changed to
 a centre view on 2026-07-25 because the overlay dimmed and covered the keyboard you are

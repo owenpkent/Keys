@@ -681,6 +681,16 @@ void KeysEditor::syncSectionControls()
         // to a screen reader and made UI Automation pick whichever it found first. Say which
         // section each one moves.
         s.detachButton.setTitle(s.detachButton.getButtonText() + " " + s.name);
+        // Detach goes away with the section it detaches (2026-07-27, Owen's ask). Folded
+        // away, it was the loudest thing left on a bar whose whole job is to be quiet, and
+        // it offered a gesture with nothing behind it: detaching a folded section built a
+        // window that opened hidden. Every other control on a bar already hides with its
+        // section - the pad pages, the Knobs chip, Wheels - so this was the odd one out
+        // rather than a rule being broken. The deliberate exceptions stay: the arp's On
+        // (folding the panel must not stop the arpeggiator), the centre's two tabs (they
+        // are how a folded centre comes back) and the theme swatch (it belongs to the
+        // plugin, not the section).
+        s.detachButton.setVisible(*s.open);
         // A holder is visible whenever its section is open, wherever it is parented: being
         // detached is a change of parent, not of visibility. Folding a detached section
         // hides its window instead of its slot, so one control means one thing.

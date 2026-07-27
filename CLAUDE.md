@@ -106,6 +106,13 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   The Re-dock button travels into the window; controls that belong to the editor rather
   than the content (the centre tabs, arp On, the pad pages, the theme swatch) stay on the
   bar. The keybed keeps two extras of its own via `Section::travellers`.
+  The **whole bar** folds its section, not just the chevron: the bar's controls are siblings
+  sitting in front of it (every bar is `toBack()`ed), so z-order already stops it stealing
+  their clicks and `SectionBar::hitTest` had nothing left to protect. **Detach hides with
+  its section** — the exceptions that stay on a folded bar are arp On, the centre tabs and
+  the theme swatch, each for a stated reason. Open and folded bars are painted at different
+  weights on purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
+  or the caption ellipsises and the controls beside it shift as a section folds.
 - **Keys watches its MIDI input but never consumes it.** `watchInputNotes()` runs first
   thing in `processBlock`, before the collector drains, and records which pitches the
   incoming stream turns on (a flag per pitch, not a count). `isNoteSounding()` answers

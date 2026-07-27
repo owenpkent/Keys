@@ -34,8 +34,10 @@ The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex
 
 One view, no tabs: header controls, a centre view (the eight knobs, or the chord
 generator), then the arpeggiator, the chord pads, the transcriber, and the playing surface.
-Every section folds away so the window can be squeezed small, and every one of them also
-detaches into a resizable window of its own.
+Every section folds away so the window can be squeezed small — click anywhere on its bar —
+and every one of them also detaches into a resizable window of its own. An open section's
+bar is a ruled band with a tick of accent; a folded one goes flat and dim, so the shape of
+the window reads before you have read a caption.
 
 ![Keys](assets/screenshots/keys.png)
 
@@ -80,7 +82,7 @@ the generator's cards and the arp slots; only **Send to arp slot** lives nowhere
 | **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there |
 | **Chords** | The chord generator — see below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
-| **Detach** | On every section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it |
+| **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it — click the bar to bring the section back first |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).

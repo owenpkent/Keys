@@ -269,7 +269,11 @@ window of its own: **Controls** (the two header rows), the **centre view**, the 
 **Pads**, **Transcribe**, and the **Keyboard** (with the wheels as a sub-fold).
 `SectionBar` is the fold affordance — a `juce::Button` so the mouse-only contract and the
 accessible name come for free, with the section's own small controls laid out as its
-siblings in `contentArea()`.
+siblings in `contentArea()`. The whole bar is the target, and it paints open and folded at
+different weights (see below). One trap: `captionWidth()` feeds both the caption's own text
+box and `contentArea()`, so it and `paintButton()` have to measure with the same
+`captionFont()` — measure narrower than you draw and the longest caption ellipsises; vary
+the font with the fold state and every control on the bar shifts when the section folds.
 
 **Transcribe** is the odd one out: it is the only part of Keys that consumes audio rather
 than producing MIDI, and the only section whose panel owns a device. Like the arp's, its
@@ -295,12 +299,24 @@ reach a chord. Their page buttons ride on the Pads bar. What a card click *means
 arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp running, a click hands that
 chord over and leaves it there instead of playing it while the button is down.
 
-The bars are full-width translucent Buttons and the controls on them are *siblings*, not
-children: a bar stays full-width so it can paint its caption and fold state across the whole
-strip, while `SectionBar::hitTest` narrows what answers a click to the 40 px chevron end, so
-a click that misses a control by a few pixels cannot fold the section by accident. Z-order
-therefore matters: they are sent `toBack()` after construction, or each bar paints over its
-own tabs.
+The bars are full-width Buttons and the controls on them are *siblings*, not children. The
+whole strip answers a click, so folding a section is a 34 px-tall full-width target rather
+than a 40 px box at one end. What keeps that from swallowing the controls riding on it is
+z-order, not hit-testing: the bars are sent `toBack()` after construction, so every sibling
+sits in front and takes its own clicks first, and the bar only ever gets what none of them
+wanted. (That `toBack()` is load-bearing twice over — without it each bar also paints over
+its own tabs.)
+
+`SectionBar` used to narrow its own `hitTest` to the chevron end, on the reasoning that a
+click missing a control by a few pixels would fold the section by accident. It was solving a
+problem z-order already solved, and it cost the thing the mouse-only contract cares about
+most: a full-width strip that looks like a button but only answers along one end makes the
+target *harder* to hit, not safer.
+
+Open and folded bars are painted at deliberately different weights — the open one is a solid
+ruled band with an accent tick, the folded one flat and dim — so a stack of six reads as a
+shape before any caption is read. The Detach button hides with its section for the same
+reason, and because detaching a folded section only ever built a window that opened hidden.
 
 ## The accent is per instance
 

@@ -5,6 +5,32 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the section bars read as headers, and the whole bar folds it again
+
+Three of Owen's asks, all about the same strip.
+
+**The whole bar folds the section again.** It had been narrowed to the chevron end, to stop
+a click that missed a tab or a chip from folding the section by accident. That accident was
+never possible: the controls on a bar are its *siblings* and sit in front of it, so z-order
+already stopped the bar from stealing their clicks. What the narrowing did instead was make
+a full-width 34 px strip that looks like a button answer along one 40 px end of itself — so
+the target got harder to hit, in a plugin whose whole contract is that targets are big.
+
+**Open and folded bars look different now.** An open one is a solid ruled band: a gradient
+fill, a hairline above, an accent rule below where it meets its content, a brighter caption
+and a tick of accent at its left end. A folded one is flat, dim and outlined. Six of these
+stacked read as a shape before you have read a caption, which is the point — the window is
+mostly bars when it is squeezed small. All six stay the one accent colour; the skin has
+exactly one, and per-section tints would have been six.
+
+**Detach hides with its section.** Folded away, it was the loudest thing left on a bar whose
+whole job is to be quiet, and it offered a gesture with nothing behind it: detaching a folded
+section built a window that opened hidden. Every other control on a bar already hid with its
+section — the pad pages, the Knobs chip, Wheels — so this was the odd one out rather than a
+rule being broken. The deliberate exceptions stay put: the arp's **On** (folding the panel
+must never stop the arpeggiator), the centre's two tabs (they are how a folded centre comes
+back) and the theme swatch (it belongs to the plugin, not to a section).
+
 ### Fixed: run.py hung with a blank console instead of launching
 
 Smart App Control gates every freshly linked unsigned build, and it does so **two different
@@ -518,6 +544,11 @@ The whole section bar was the target, so a click that missed a tab or a chip by 
 pixels folded the section instead. Now just the chevron end does — still a full 40x34 hit
 box, and the hover highlight sits on it rather than lighting the whole bar, so where to
 click is visible rather than remembered.
+
+> **Reversed on 2026-07-27** — see "the whole section bar folds it again" above. The
+> accident this was guarding against could not actually happen: the controls on a bar are
+> siblings sitting in front of it, so z-order already stopped the bar from stealing their
+> clicks.
 
 ### Changed: one velocity control, not two
 

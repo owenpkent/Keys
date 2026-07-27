@@ -37,10 +37,16 @@ transient (they don't save with the session) and send on the current MIDI channe
 ## Folding the window down
 
 Keys is a stack of sections, and each one folds away so the plugin can be squeezed small
-when the screen is busy. **Click the chevron at the left end of a section bar** — only
-that end folds it, so a click that misses a control next to it can't collapse the section
-by accident. The window resizes itself to whatever the folds add up to, and can never be
-dragged smaller than the content it is showing.
+when the screen is busy. **Click anywhere on a section bar** to fold it, or on a folded one
+to bring it back — the whole 34 px strip is the button, not just the chevron at its left
+end. The controls that sit on a bar take their own clicks first, so hitting **Detach** or
+**On** does what it says; the bar only gets what they don't want. The window resizes itself
+to whatever the folds add up to, and can never be dragged smaller than the content it is
+showing.
+
+An open section's bar is a solid ruled band with a bright caption and a tick of accent at
+its left end. A folded one goes flat and dim and drops its Detach button. So the shape of
+the window reads at a glance, before you have read a single caption.
 
 | Section | Bar | Folds away |
 |---------|-----|-----------|
@@ -53,11 +59,15 @@ dragged smaller than the content it is showing.
 
 ### Detaching a section
 
-**Every section bar has a Detach button**, at its right-hand end. It puts that section in a
-resizable window of its own, which you can put anywhere on the desk and size to suit. Inside
-that window a **Re-dock** button sits at the top, and the window's close box does the same
-thing; either brings the section home. Each window's position and size are remembered with
-the session, and one that ends up off-screen is pulled back on before it opens.
+**Every open section bar has a Detach button**, at its right-hand end. It puts that section
+in a resizable window of its own, which you can put anywhere on the desk and size to suit.
+Inside that window a **Re-dock** button sits at the top, and the window's close box does the
+same thing; either brings the section home. Each window's position and size are remembered
+with the session, and one that ends up off-screen is pulled back on before it opens.
+
+A folded section has no Detach button: unfold it first. There was nothing behind the gesture
+anyway — detaching a folded section built a window that opened hidden — and on a bar whose
+whole job is to be quiet, it was the loudest thing left.
 
 A detached section takes no height in the main window, so this is also the way to keep a tall
 section open and the plugin window small at the same time. Folding a detached section hides
@@ -72,6 +82,12 @@ alongside Re-dock, because those belong to the keybed rather than to the editor.
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
 **Perform / Chords** tabs, the arp's **On** toggle, the pad page buttons, and the theme
 swatch. All of them keep working while the section they name is off in a window.
+
+Folding is the other case, and a stricter one: a folded bar keeps only what still means
+something with the section gone — the arp's **On** (so the arpeggiator runs on behind a
+closed panel), the **Perform / Chords** tabs (they are how a folded centre comes back) and
+the theme swatch (it colours the whole plugin). Everything else goes with the section,
+Detach included.
 
 ## Transcribe
 
