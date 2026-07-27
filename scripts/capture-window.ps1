@@ -8,6 +8,7 @@
 #       -OutPath assets/screenshots/keys.png
 #   ... -InvokeButtons Chords            # open an overlay first (UIA Invoke by name)
 #   ... -KeepOpen                        # leave the app running (repeat captures)
+#   ... -WindowTitle "Keys Host"         # REQUIRED for Keys Host: see the note by $hwnd
 param(
     # Not mandatory: with -ProcessId you are reusing a running instance and there is
     # nothing to launch. -SetValues runs *before* -InvokeButtons, so reaching a control
@@ -20,7 +21,8 @@ param(
     [string[]]$SetValues = @(),   # ComboBox "CurrentText=NewText" pairs (matched by current value)
     [int]$AfterInvokeMs = 900,
     [switch]$KeepOpen,
-    [int]$ProcessId = 0   # reuse an already-running instance instead of launching
+    [int]$ProcessId = 0,   # reuse an already-running instance instead of launching
+    [string]$WindowTitle   # shoot the window with this exact title, not "the main window"
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -28,12 +30,38 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class KeysCapture {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+    // CharSet.Unicode matters: the default is Ansi, which marshals the StringBuilder as
+    // bytes, so the W function's UTF-16 comes back truncated at the first NUL and every
+    // title reads as its own first letter ("Keys Host" -> "K").
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowTextW(IntPtr hwnd, StringBuilder text, int max);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr param);
+    public delegate bool EnumProc(IntPtr hwnd, IntPtr param);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+
+    public static List<IntPtr> TopLevelWindows(uint wanted) {
+        var found = new List<IntPtr>();
+        EnumWindows((h, p) => {
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            if (pid == wanted && IsWindowVisible(h)) found.Add(h);
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+    public static string WindowTitle(IntPtr h) {
+        var sb = new StringBuilder(512);
+        GetWindowTextW(h, sb, sb.Capacity);
+        return sb.ToString();
+    }
 }
 '@
 [KeysCapture]::SetProcessDPIAware() | Out-Null
@@ -117,7 +145,24 @@ try {
         Start-Sleep -Milliseconds $AfterInvokeMs
     }
 
+    # Which of the process's windows to shoot. MainWindowHandle is a heuristic, and for Keys
+    # Host it picks wrong: the hosted instrument's GUI is a top-level window of the same
+    # process, so a capture aimed at "the main window" comes back as a picture of somebody
+    # else's synth. Pass -WindowTitle to name the one you actually want. The detached
+    # sections have the same problem, and the same answer ("Keys Keyboard", "Keys Arp"...).
     $hwnd = $proc.MainWindowHandle
+    if ($WindowTitle) {
+        $match = [IntPtr]::Zero
+        foreach ($h in [KeysCapture]::TopLevelWindows([uint32]$proc.Id)) {
+            if ([KeysCapture]::WindowTitle($h) -eq $WindowTitle) { $match = $h; break }
+        }
+        if ($match -eq [IntPtr]::Zero) {
+            $titles = ([KeysCapture]::TopLevelWindows([uint32]$proc.Id) |
+                       ForEach-Object { "'" + [KeysCapture]::WindowTitle($_) + "'" }) -join ", "
+            throw "No visible window titled '$WindowTitle'. This process has: $titles"
+        }
+        $hwnd = $match
+    }
     $rect = New-Object KeysCapture+RECT
     [KeysCapture]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
     $w = $rect.Right - $rect.Left

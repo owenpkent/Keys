@@ -25,10 +25,16 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
 from ctypes import wintypes
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# How long to let Smart App Control hold a freshly linked build before giving up on it.
+# Twenty minutes because that is what was measured here (19m44s on 2026-07-27), not
+# because anyone should have to wait that long - docs/BUILD.md has the ways out.
+LAUNCH_TIMEOUT_S = 1200.0
 
 # Our own messages interleave with cmake's, which writes straight to the console handle.
 # Without this, Python's block buffering lands "Closing running Keys..." *after* the build
@@ -64,25 +70,58 @@ YELLOW = "\033[93m" if _ANSI else ""
 RESET = "\033[0m" if _ANSI else ""
 
 
+# Anything here means a human's shell is sharing this console, so it will still be on
+# screen after we return and there is nothing to hold open.
+_SHELLS = frozenset({"cmd.exe", "powershell.exe", "pwsh.exe", "bash.exe", "sh.exe",
+                     "zsh.exe", "wt.exe", "windowsterminal.exe", "conemu64.exe",
+                     "conemuc.exe", "code.exe"})
+
+
 def console_is_ours() -> bool:
     """True when this console exists only for us, i.e. the script was double-clicked.
 
     Matters because that console vanishes the instant the script returns, taking any
-    error message with it. Run from a terminal the count is at least two (the shell and
-    us) and we must not pause. GetConsoleProcessList is the only reliable way to tell.
+    error message with it. Run from a terminal we must not pause.
+
+    This used to ask GetConsoleProcessList for a count of exactly one, which is never
+    true: the .py association is py.exe, and py.exe spawns python.exe and then *stays in
+    the same console* to relay the exit code, so even a double-click counts two. Because
+    the count never matched, hold_window_open() never held, and every failure this script
+    can report - no cmake, a failed build, a blocked launch, a traceback - flashed past
+    unread. That is the precise thing the script exists to prevent, so identify the
+    processes rather than counting them.
+
+    (Uses the module-level kernel32 handle and constants defined further down; everything
+    here runs long after import.)
     """
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        buf = (wintypes.DWORD * 8)()
+        buf = (wintypes.DWORD * 64)()
         count = kernel32.GetConsoleProcessList(buf, len(buf))
-        return count == 1
+        if count == 0:
+            return False
+        for i in range(min(count, len(buf))):
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, buf[i])
+            if not handle:
+                continue  # a process we may not open is not a shell of ours
+            try:
+                name = ctypes.create_unicode_buffer(32768)
+                length = wintypes.DWORD(len(name))
+                if kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(length)):
+                    if os.path.basename(name.value).lower() in _SHELLS:
+                        return False
+            finally:
+                kernel32.CloseHandle(handle)
+        return True
     except OSError:
         return False
 
 
+_FORCE_HOLD = False  # --hold: for a console that is transient but has a shell in it
+
+
 def hold_window_open() -> None:
     """Keep a double-clicked console up so the failure above can actually be read."""
-    if not console_is_ours():
+    if not _FORCE_HOLD and not console_is_ours():
         return
     print()
     print(f"{YELLOW}Read the error above, then close this window (or press Enter).{RESET}")
@@ -152,14 +191,28 @@ def find_cmake():
         if key in seen or not os.path.exists(cand):
             continue
         seen.add(key)
+        probe_started = time.monotonic()
         try:
+            # A timeout, because a candidate can start and then wedge - a stale UNC path
+            # under ProgramFiles, a disconnected mapped drive, an AV scanning a first-run
+            # binary. Without it the probe hangs here, before a single line of output, and
+            # looks exactly like the launch hang further down. (It does not cover
+            # CreateProcess itself blocking, which no timeout can; the candidates are
+            # ordered signed-first precisely so that stays hypothetical.)
             subprocess.run([cand, "--version"], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, check=True)
+                           stderr=subprocess.DEVNULL, check=True, timeout=20)
         except OSError as exc:
             blocked.append((cand, exc))
             continue
+        except subprocess.TimeoutExpired:
+            blocked.append((cand, "started but did not answer --version within 20s"))
+            continue
         except subprocess.CalledProcessError:
             continue
+        # Silent when it is instant, which is every normal run; if a probe was slow enough
+        # to notice, say which one, so the pause has a name.
+        if time.monotonic() - probe_started > 2.0:
+            print(f"{GREY}cmake took {time.monotonic() - probe_started:.0f}s to answer ({cand}){RESET}")
         # Say so whenever we sidestep PATH. Comparing against `blocked` instead would never
         # fire: the signed payload is tried first, so the blocked launcher on PATH is not
         # even probed, and the notice that explains the switch would be dead code.
@@ -321,6 +374,79 @@ def wait_for_exit(exe_name: str, timeout_s: float) -> bool:
     return not running_pids(exe_name)
 
 
+def launch_detached(exe: str, timeout_s: float) -> tuple:
+    """Start `exe` detached, absorbing whatever Smart App Control does to a new build.
+
+    SAC gets in the way two different ways and this has to survive both. With a verdict
+    already cached it *fails* the call outright (OSError, error 4551). While the reputation
+    lookup is still in flight it *blocks* the call instead, for as long as the lookup takes.
+    Only the first form was ever handled, and the second is the one that reads as a hang:
+    the script sat inside CreateProcess with nothing on screen - the "waiting" message lived
+    in the OSError branch and so was never reached - until Owen pressed Ctrl+C.
+
+    So the launch runs on a worker thread and this one does the talking: a live counter, a
+    deadline that is actually enforced, and a Ctrl+C that is heard rather than swallowed by
+    a blocking syscall. Measured here on 2026-07-27, one unsigned build stayed blocked for
+    19m44s across 175 CodeIntegrity 3118 events, so the wait is long on purpose and says so
+    out loud rather than looking broken.
+    """
+    outcome = {}
+
+    def attempt() -> None:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            try:
+                # Detached, so the app outlives this console instead of dying with it.
+                subprocess.Popen([exe], cwd=ROOT, close_fds=True,
+                                 creationflags=subprocess.DETACHED_PROCESS
+                                 | subprocess.CREATE_NEW_PROCESS_GROUP)
+                outcome["ok"] = True
+                return
+            except OSError as exc:
+                outcome["error"] = exc
+                if time.monotonic() >= deadline:
+                    outcome["ok"] = False
+                    return
+                time.sleep(2.0)
+
+    worker = threading.Thread(target=attempt, name="launch", daemon=True)
+    worker.start()
+
+    started = time.monotonic()
+    announced = False
+    while True:
+        worker.join(0.25)  # interruptible, unlike the CreateProcess it is waiting on
+        if not worker.is_alive():
+            break
+        waited = time.monotonic() - started
+        if waited >= timeout_s:
+            break
+        if waited < 2.0:
+            continue  # a normal launch is instant and should print nothing at all
+        if not announced:
+            announced = True
+            print(f"{GREY}Smart App Control is vetting this build before it will run it. "
+                  f"That is normal for an unsigned dev build.{RESET}")
+            print(f"{GREY}  It has been measured at twenty minutes on this machine. "
+                  f"Ctrl+C to stop waiting - the build itself is already done.{RESET}")
+        # The counter overwrites itself, so it is a console-only trick: redirected to a file
+        # it would be one enormous line. The announcement above is enough there.
+        if sys.stdout.isatty():
+            print(f"\r{GREY}  waiting {waited:.0f}s of {timeout_s:.0f}s{RESET}", end="", flush=True)
+
+    if announced and sys.stdout.isatty():
+        print()  # close off the counter line
+
+    launched = bool(outcome.get("ok"))
+    if launched and announced:
+        print(f"{GREEN}Cleared.{RESET}")
+    # Hand back the last error too. Blaming Smart App Control for whatever went wrong was a
+    # guess the old code made without looking: an exe still held by the linker, a missing
+    # dependent DLL and a file deleted under us all raise here, and all used to be reported
+    # as a reputation check.
+    return launched, outcome.get("error")
+
+
 def close_running(exe_name: str, window_title: str) -> None:
     pids = running_pids(exe_name)
     if not pids:
@@ -349,7 +475,15 @@ def close_running(exe_name: str, window_title: str) -> None:
                     kernel32.TerminateProcess(handle, 1)
                 finally:
                     kernel32.CloseHandle(handle)
-        wait_for_exit(exe_name, 5.0)
+        # Say so when even that fails, rather than walking into the build and letting the
+        # linker report it as LNK1104 several thousand lines of output later. A process we
+        # cannot terminate is usually elevated, or mid-crash-dump, or held by a driver.
+        if not wait_for_exit(exe_name, 5.0):
+            stuck = ", ".join(str(pid) for pid in running_pids(exe_name))
+            print(f"{YELLOW}  ...and it is still running (pid {stuck}). The build is about "
+                  f"to fail with LNK1104 because the linker cannot overwrite a running "
+                  f"exe.{RESET}")
+            print(f"{YELLOW}  Close {window_title} by hand, then run this again.{RESET}")
 
 
 # --------------------------------------------------------------------------------------
@@ -361,7 +495,13 @@ def main() -> int:
     parser.add_argument("--no-build", action="store_true",
                         help="skip the build and just relaunch what is already there")
     parser.add_argument("--config", default="Release")
+    parser.add_argument("--hold", action="store_true",
+                        help="pause on failure even when a shell shares the console "
+                             "(for run.ps1 started from a console that will close)")
     args = parser.parse_args()
+
+    global _FORCE_HOLD
+    _FORCE_HOLD = args.hold
 
     os.chdir(ROOT)
 
@@ -392,46 +532,25 @@ def main() -> int:
         print(f"{YELLOW}{exe_name} not found at {exe} - run without --no-build first.{RESET}")
         return 1
 
-    # Smart App Control is enforced on this machine and dev builds are unsigned, so it
-    # blocks the first launch of a freshly linked exe while its reputation check runs,
-    # then lets the same file through once that finishes (CodeIntegrity event 3118).
-    # Signing every iteration would need the EV eToken and a PIN, which defeats a
-    # 5-second loop, so absorb the transient here rather than weakening the machine.
-    #
-    # The wait used to be 5 tries over 3.5s, which was tuned when the check cleared almost
-    # at once. It does not always: measured at up to ~3 minutes on this machine. Giving up
-    # after three and a half seconds turned a slow launch into "it's broken", and the
-    # advice it printed was to run the same command again. Wait properly instead, and say
-    # what is happening so the pause is legible rather than a hang.
-    launch_timeout = 240.0
-    deadline = time.monotonic() + launch_timeout
-    launched = False
-    announced = False
-    while True:
-        try:
-            # Detached, so the app outlives this console instead of dying with it.
-            subprocess.Popen([exe], cwd=ROOT, close_fds=True,
-                             creationflags=subprocess.DETACHED_PROCESS
-                             | subprocess.CREATE_NEW_PROCESS_GROUP)
-            launched = True
-            break
-        except OSError:
-            if time.monotonic() >= deadline:
-                break
-            if not announced:
-                announced = True
-                print(f"{GREY}Smart App Control is checking the new build; waiting for it "
-                      f"(up to {launch_timeout:.0f}s)...{RESET}")
-            time.sleep(2.0)
-    if launched and announced:
-        print(f"{GREEN}Cleared.{RESET}")
-
+    # Smart App Control is enforced on this machine (VerifiedAndReputablePolicyState = 1)
+    # and dev builds are unsigned, so it gates the first launch of every freshly linked exe
+    # while its reputation check runs, then lets the same file through once that finishes
+    # (CodeIntegrity event 3118). Signing every iteration would need the EV eToken and a
+    # PIN, which defeats a 5-second loop, so absorb the wait here rather than weakening the
+    # machine behind Owen's back. See docs/BUILD.md for the ways out of the wait itself.
+    launched, why = launch_detached(exe, LAUNCH_TIMEOUT_S)
     if not launched:
-        print(f"{YELLOW}Could not launch {exe_name} - Smart App Control blocked it for "
-              f"{launch_timeout:.0f}s.{RESET}")
-        print(f"{YELLOW}  Retry with: py run.py --no-build{RESET}")
-        print(f"{YELLOW}  Or build a signed one: .\\build.ps1 -Standalone -Sign "
-              f"(needs the eToken plugged in).{RESET}")
+        print(f"{YELLOW}Could not launch {exe_name} after "
+              f"{LAUNCH_TIMEOUT_S / 60:.0f} minutes.{RESET}")
+        if why is not None:
+            # Say what Windows actually said. Not every failure here is Smart App Control:
+            # an exe still held by the linker, or a missing dependent DLL, lands in exactly
+            # the same place and used to be reported as a reputation check regardless.
+            print(f"{YELLOW}  Windows said: {why}{RESET}")
+        print(f"{YELLOW}  If that was Smart App Control it may still clear and open on its "
+              f"own. To try again without rebuilding: py run.py --no-build{RESET}")
+        print(f"{YELLOW}  To stop it happening at all, see \"Smart App Control\" in "
+              f"docs/BUILD.md.{RESET}")
         return 1
 
     print(f"{GREEN}Launched {exe_name} ({args.config}){RESET}")
@@ -447,6 +566,21 @@ if __name__ == "__main__":
         sys.exit(1)
     try:
         code = main()
+    except KeyboardInterrupt:
+        # Not an error, and not a traceback: Ctrl+C is the documented way out of the Smart
+        # App Control wait. `except Exception` below does not catch it (BaseException), so
+        # this used to dump a stack trace and, when double-clicked, close on it.
+        print(f"\n{YELLOW}Cancelled.{RESET}")
+        sys.exit(130)
+    except SystemExit as exc:
+        # argparse's exit path, which is also where a file *dropped onto run.py in
+        # Explorer* ends up: it becomes an unrecognised argument, argparse prints usage to
+        # stderr and raises SystemExit(2). SystemExit is a BaseException too, so this used
+        # to skip the hold and close on the usage message.
+        code = exc.code if isinstance(exc.code, int) else 0
+        if code:
+            hold_window_open()
+        sys.exit(code)
     except Exception:  # noqa: BLE001 - a double-clicked window must show the traceback
         import traceback
         traceback.print_exc()
