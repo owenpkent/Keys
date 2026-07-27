@@ -15,7 +15,8 @@ on:
       - 'assets/**'
       - 'docs/**'
 
-# Least privilege: this workflow only reads source and uploads an artifact.
+# Least privilege: this workflow only reads source, caches the ONNX Runtime
+# download and uploads an artifact.
 permissions:
   contents: read
 

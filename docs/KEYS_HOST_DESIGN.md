@@ -27,7 +27,7 @@ instrument. So this is a one-slot host, not a chainer.
 
 Subclassing works because the playing surface takes a concrete `KeysProcessor&`
 (`src/ui/NoteSurface.h`), and `KeysProcessor` already declares a real stereo output
-bus that it clears every block (`PluginProcessor.cpp` ~171, ~589). The subclass fills
+bus that it clears every block (`PluginProcessor.cpp` ~188, ~670). The subclass fills
 that bus with the hosted instrument's audio.
 
 - Members: `juce::AudioPluginFormatManager` (VST3 format only),
@@ -64,7 +64,7 @@ that bus with the hosted instrument's audio.
 ## State
 
 Small refactor in `KeysProcessor`: extract pad serialization
-(`PluginProcessor.cpp:649-708`) into protected `chordPadsToTree()` /
+(`PluginProcessor.cpp:734-793`) into protected `chordPadsToTree()` /
 `chordPadsFromTree(root)`, used by the base get/setState unchanged (same "KEYS" root
 tag — sessions stay interchangeable between Keys and Keys Host). The host override
 saves `okstudio::state::save(apvts, "KEYS", dest, { chordPadsToTree(), arpToTree(),
@@ -100,9 +100,9 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   `keysEditor.onIdealHeightChanged`, and the host follows it in both directions, resizing
   to `barHeight + wanted` (`KeysHostEditor.cpp:403-408`) inside
   `setResizeLimits(1010, barHeight + absMinKeysHeight, 2600, 1700)`. It opens at
-  `1010 x (barHeight + minKeysHeight)`: a comfortable default, not a minimum. Detaching the
-  keybed or the arpeggiator drops their height out of that number, since a detached section
-  lives in its own window.
+  `1010 x (barHeight + minKeysHeight)`: a comfortable default, not a minimum. Detaching any
+  section drops its height out of that number, since a detached section lives in its own
+  window.
 - `InstrumentPicker` files instruments into one **collapsible folder per publisher**:
   bundle `moduleinfo.json` "Factory Info"/"Vendor", else the DLL version-resource
   CompanyName (Windows, `version.lib` via `#pragma comment`), else the vendor
@@ -118,19 +118,19 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   at rest and lights the row with a `skin::accent` edge on hover. Dimming the
   instrument chip instead of removing it was tried first and was not enough.
 - **Updater gating**: the embedded `KeysEditor` runs the Keys updater check in its
-  ctor (`PluginEditor.cpp:283-297`). The KeysHost target compiles its own copy of the
+  ctor (`PluginEditor.cpp:374-388`). The KeysHost target compiles its own copy of the
   sources, so gate it with a `KEYS_HOST=1` compile definition (same pattern as
   `KEYS_MIDI_EFFECT`).
 
 ## CMake
 
-Follow the KeysFX pattern exactly (`CMakeLists.txt:83-94`): `option(KEYS_BUILD_HOST)`,
+Follow the KeysFX pattern exactly (`CMakeLists.txt:107-118`): `option(KEYS_BUILD_HOST)`,
 `okstudio_add_plugin(KeysHost PRODUCT_NAME "Keys Host" PLUGIN_CODE KyHo
 BUNDLE_SUFFIX keyshost ${_keysCopy})`, `keys_configure_target(KeysHost)`, then
 additionally: the two `src/host/*.cpp` sources, `KEYS_HOST=1`, and
 `JUCE_PLUGINHOST_VST3=1` (set nowhere in Keys or the kit today; JUCE bundles the
 VST3 hosting headers, no external SDK needed). `createPluginFilter` lives at
-`PluginProcessor.cpp:1067` — it must return `KeysHostProcessor` for this target
+`PluginProcessor.cpp:1172` — it must return `KeysHostProcessor` for this target
 (gate on `KEYS_HOST`). `okstudio_add_plugin` is already called twice in this repo;
 nothing in the kit assumes one plugin per repo.
 
@@ -173,7 +173,7 @@ nothing in the kit assumes one plugin per repo.
   surfaces and the `uiLayout`-selected Classic/Performer arrangement. The surface is
   picked at compile time now, and the rest of the editor is a stack of foldable sections:
   Controls, a centre view (Perform or Chords, chosen by tabs on the centre bar), Arp,
-  Pads, Transcribe, Keyboard. The keybed and the arp each detach into a window of their own, and every
+  Pads, Transcribe, Keyboard. Every one of them also detaches into a window of its own, and every
   fold changes the height Keys Host is asked for. Keys and Keys Host build the piano only;
   the Harmonic Table and Hex Host moved out to their own repo (`../Hex`).
   `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session compatibility

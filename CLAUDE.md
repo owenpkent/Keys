@@ -21,7 +21,11 @@ the running standalone, builds exactly one Standalone target, and relaunches it:
 5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real instrument VST3
 in-process, so a click makes sound with no DAW involved and no rescan. It remembers the
 loaded synth between launches, which is why the script asks the app to close politely (a
-forced kill skips JUCE's settings write and loses it).
+forced kill skips JUCE's settings write and loses it). Those seconds are the build:
+Smart App Control is enforced here and dev builds are unsigned, so the *launch* of a
+freshly linked exe can be held while Windows vets it. `run.py` waits that out with a
+counter on screen (twenty minutes before it gives up, Ctrl+C to stop waiting);
+`docs/BUILD.md` has the ways out of the wait itself.
 
 **Owen runs it by double-clicking `run.py` in Explorer** — no arguments, no terminal, and
 the console holds open on failure so he can read the error. Never tell him to type a
@@ -89,9 +93,24 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 - **The chord pads and the arpeggiator are each a section of their own**, stacked between
   the centre view and the keyboard, so a chord card is on screen whatever else is open. The
   centre views are Perform and Chords only: the arp stopped being a third one on
-  2026-07-25. The arp bar carries its On toggle and a Detach, both of which survive folding
-  the section shut. `DetachedWindow` (was `KeyboardWindow`) serves the keybed and the arp.
+  2026-07-25. The arp bar carries its On toggle, which survives folding the section shut.
   See `docs/ARP_DESIGN.md`.
+- **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
+  table of six `Section`s (Controls, Centre, Arp, Pads, Transcribe, Keyboard); each owns a
+  `Holder` its content is parented into, a Detach button, and the `DetachedWindow` it is
+  currently in. Detaching is one re-parent of that holder, and `idealHeight()`,
+  `syncSectionControls()` and `paint()` walk the table rather than naming sections.
+  (`sectionHeight()` is still a switch and `resized()` still lays each bar out in its own
+  block, because what those two spend per section genuinely differs.) Add a section by
+  adding an entry, not by copying a code path.
+  The Re-dock button travels into the window; controls that belong to the editor rather
+  than the content (the centre tabs, arp On, the pad pages, the theme swatch) stay on the
+  bar. The keybed keeps two extras of its own via `Section::travellers`.
+- **Keys watches its MIDI input but never consumes it.** `watchInputNotes()` runs first
+  thing in `processBlock`, before the collector drains, and records which pitches the
+  incoming stream turns on (a flag per pitch, not a count). `isNoteSounding()` answers
+  true for those too, which is all it takes to light the keybed for a physical keyboard
+  and feed the live chord card. The stream itself passes through untouched, as always.
 - **Transcribe is the only part of Keys that consumes audio.** Everything else produces MIDI.
   Keys is an instrument, so a host sends it MIDI and never audio: there is no track input, and
   `AudioCapture` opens an audio device of its own. That is what makes the section behave the
@@ -137,15 +156,20 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   page-wide left-click Fill/Regen/Clear stay as the bulk path) and on the main-page
   strip (Edit on keyboard / Clear, plus **Send to arp slot** since 2026-07-25 — the
   only item in the plugin with no left-click twin, since binding a chord to one
-  particular slot needs a target picker; the Pads bar's To Arp toggle is the
-  left-click way to get a card into the arp). Do not add further right-click-only
+  particular slot needs a target picker; a left click on a card with the arp **On**
+  is the left-click way to get a chord into the arp, which is what keeps that
+  exception to one item). Do not add further right-click-only
   paths without Owen's explicit say-so.
   The arp slot cards also carry a right-click menu, but it is an ordinary accelerator:
   Launch is a click on the card, and Clear chord, Copy and Randomize all have buttons
   under the slot row (Copy and Clear arm, then take a slot click). Randomize is greyed
   in the menu outside Pattern shape, because that is where its button lives.
-  The feature-request template requires an accessibility answer — hold PRs to it.
-- **Audio thread**: no allocation, no locks. It only drains the collector.
+  Every feature request has to answer "how is this reached with one left-click?" before
+  it is worth designing; hold PRs to that. It is a rule, not a form: this line used to
+  claim a feature-request template enforced it, and no issue template has ever existed
+  in this repo (checked across every ref, 2026-07-27).
+- **Audio thread**: no allocation, no locks. It drains the collector, notes what came
+  in on the MIDI input (display only), and runs the arp stage.
 - Parameter-layout changes break saved sessions — changelog loudly.
 - **Updater contract** lives in the kit (`docs/AUTO_UPDATE.md`): releases repo is
   `okstudio1/keys-releases`; assets named exactly `KeysSetup-<version>.exe`, tag

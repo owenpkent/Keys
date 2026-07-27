@@ -10,7 +10,8 @@ modifier keys. Right-click is only ever an accelerator, with one exception Owen 
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain, the Humanize settings, which sections you
-had folded away, this instance's colour, the
+had folded away and which you had pulled out into windows of their own (down to where each
+window sat), this instance's colour, the
 eight knob CC assignments, and
 your captured chord pads all save into the DAW project and come back when you reopen
 it. And it drops straight onto a track, with no loopMIDI to configure.
@@ -33,8 +34,8 @@ The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex
 
 One view, no tabs: header controls, a centre view (the eight knobs, or the chord
 generator), then the arpeggiator, the chord pads, the transcriber, and the playing surface.
-Every section folds away so the window can be squeezed small, and the keyboard and the
-arpeggiator each detach into a resizable window of their own.
+Every section folds away so the window can be squeezed small, and every one of them also
+detaches into a resizable window of its own.
 
 ![Keys](assets/screenshots/keys.png)
 
@@ -73,12 +74,13 @@ the generator's cards and the arp slots; only **Send to arp slot** lives nowhere
 | **Sustain** | Hold notes after release (pedal) |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
-| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** spreads a chord's notes Up / Down / Random. Four numbered buttons on the Pads bar pick the page |
-| **To Arp** | On the Pads bar. Lit, clicking a chord card hands that chord to the arpeggiator and leaves it there until you click the card again |
-| **Arp** | Its own section too. The bar carries an **On** toggle and a **Detach**, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs |
+| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page |
+| **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
+| **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins |
+| **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there |
 | **Chords** | The chord generator — see below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
-| **Detach** | Put the keyboard in its own resizable window. The Arp bar has a Detach of its own |
+| **Detach** | On every section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).
