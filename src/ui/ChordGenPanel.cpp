@@ -42,7 +42,11 @@ namespace
 
     // A card's mini keyboard: two octaves (three when the chord spills over) from the
     // low note's C, held keys lit in accent. Purely informative, not a target.
-    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes)
+    //
+    // The accent is passed in rather than looked up: this is a free function with no
+    // component to resolve it from, and the accent is per instance now.
+    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes,
+                          skin::Accent ac)
     {
         if (notes.empty())
             return;
@@ -61,7 +65,7 @@ namespace
             const int note = base + (i / 7) * 12 + whitePc[i % 7];
             const auto key = juce::Rectangle<float>(r.getX() + ww * (float) i, r.getY(),
                                                     ww, r.getHeight()).reduced(0.5f, 0.0f);
-            g.setColour(held(note) ? skin::accent : juce::Colours::white.withAlpha(0.30f));
+            g.setColour(held(note) ? ac.base : juce::Colours::white.withAlpha(0.30f));
             g.fillRoundedRectangle(key, 1.0f);
         }
 
@@ -73,7 +77,7 @@ namespace
             {
                 const int note = base + o * 12 + blackPc[b];
                 const float x = r.getX() + ww * (float) (o * 7 + blackAfterWhite[b] + 1) - bw * 0.5f;
-                g.setColour(held(note) ? skin::accentHot : juce::Colour(0xff101216));
+                g.setColour(held(note) ? ac.hot : juce::Colour(0xff101216));
                 g.fillRoundedRectangle(x, r.getY(), bw, bh, 1.0f);
             }
     }
@@ -109,9 +113,9 @@ namespace
             if (isItemHighlighted())
             {
                 const auto r = getLocalBounds().toFloat().reduced(2.0f, 1.0f);
-                g.setColour(skin::accent.withAlpha(0.15f));
+                g.setColour(skin::accentOf(*this).base.withAlpha(0.15f));
                 g.fillRoundedRectangle(r, 4.0f);
-                g.setColour(skin::accent.withAlpha(0.4f));
+                g.setColour(skin::accentOf(*this).base.withAlpha(0.4f));
                 g.drawRoundedRectangle(r, 4.0f, 1.0f);
             }
             g.setColour(isItemHighlighted() ? juce::Colour(0xffeafcff) : skin::text);
@@ -156,7 +160,7 @@ void ChordGenPanel::PadButton::paintButton(juce::Graphics& g, bool over, bool do
     g.setFont(skin::micro(10.0f));
     g.drawText(noteListText(notes), noteLine.toNearestInt(), juce::Justification::centred, true);
 
-    drawMiniKeyboard(g, kb, notes);
+    drawMiniKeyboard(g, kb, notes, skin::accentOf(*this));
 
     if (locked)
     {
@@ -348,12 +352,26 @@ void ChordGenPanel::buildControls()
         auto row = std::make_unique<PadRow>();
 
         // Press-and-hold auditions the chord: same gesture as the pad strip, same code path.
+        // Including "To Arp" - it is a mode about what clicking a chord card means, so a card
+        // here has to obey it too. It used to be a flag private to the pad strip, which left
+        // this grid playing momentarily while the strip held, and its note-offs then silenced
+        // whatever the arp was chewing on.
         row->play.onStateChange = [this, v]
         {
             auto& r = *padRows[(size_t) v];
             const int slot = processor.padPageOffset() + v;
             const bool down = r.play.isDown();
-            if (down && ! r.playHeld)
+            if (processor.cardsFeedArp())
+            {
+                if (down && ! r.playHeld)
+                {
+                    if (processor.arpHeldPad() == slot)
+                        processor.releaseArpChord();
+                    else
+                        processor.holdArpChordFromPad(slot);
+                }
+            }
+            else if (down && ! r.playHeld)
                 processor.pressChordPad(slot);
             else if (! down && r.playHeld)
                 processor.releaseChordPad(slot);
@@ -741,18 +759,28 @@ void ChordGenPanel::timerCallback()
 
 void ChordGenPanel::mouseDown(const juce::MouseEvent&)
 {
-    // The overlay is opaque to clicks: nothing behind it should react while it is up.
+    // Opaque to clicks: as an overlay nothing behind it should react, and inline the
+    // card's own background should not fall through to the editor either.
+}
+
+void ChordGenPanel::setInlineMode(bool b)
+{
+    if (inlineMode == b)
+        return;
+    inlineMode = b;
+    repaint();
 }
 
 void ChordGenPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(scrim); // dim whatever is behind, so the panel reads as the active surface
+    if (! inlineMode)
+        g.fillAll(scrim); // dim whatever is behind, so the panel reads as the active surface
     const auto b = getLocalBounds().reduced(8).toFloat();
     g.setColour(panelBg);
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, b, skin::panelRadius, skin::accent, 0.55f);
+    skin::glowRect(g, b, skin::panelRadius, skin::accentOf(*this).base, inlineMode ? 0.30f : 0.55f);
 }
 
 void ChordGenPanel::resized()

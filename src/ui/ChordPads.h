@@ -46,17 +46,29 @@ public:
 private:
     juce::Rectangle<float> cardBounds() const;
     juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1: row = i/8, col = i%8
+
+    // The tick that ends a keyboard edit, on the pad being edited. Only that one pad has
+    // one, and only while the link lasts; a full-height strip at its right end rather than
+    // a corner chip, because the mouse-only floor is 34 px and a corner badge that size
+    // would sit exactly where the chord name is. Static: it is pure geometry.
+    static juce::Rectangle<float> saveBadgeBounds(juce::Rectangle<float> pad);
     int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;
     void showPadMenu(int slot);
 
     KeysProcessor& processor;
+    // Whether a click on a chord card feeds the arpeggiator instead of playing the chord
+    // for as long as the button is down. It is the arp's own On state (see
+    // KeysProcessor::cardsFeedArp), asked rather than cached so the pads can never be in a
+    // different mode than the generator's grid, or than the arp itself.
+    bool toArp() const;
     int editingSlot = -1;
     std::vector<int> currentNotes;
     juce::String currentName;
 
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
     int playing = -1;      // pad held down and sounding (beat-pad momentary play)
+    bool playingLive = false; // the live card is held down and sounding its chord
     bool dragging = false;
     juce::Point<float> downPos, dragPos;
 

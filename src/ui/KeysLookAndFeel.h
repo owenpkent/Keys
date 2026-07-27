@@ -27,11 +27,66 @@ namespace skin
     const juce::Colour control    { 0xff262a31 };  // raised control top
     const juce::Colour controlBot { 0xff1f2227 };
 
-    // The one accent: the OK Studio cyan, with a hot core and a deep shade for
-    // gradient ends. Every lit state on every surface uses this family.
-    const juce::Colour accent     = okstudio::theme::accent;      // 0xff35c4d7
-    const juce::Colour accentHot  = okstudio::theme::accentSoft;  // 0xff8fe8f2
-    const juce::Colour accentDeep { 0xff1b8496 };
+    // The accent: a base, a hot core and a deep shade for gradient ends. Every lit state
+    // on every surface uses this family.
+    //
+    // Keys used to have exactly one, the OK Studio cyan. It is now per instance, because
+    // a session has a Keys on the pad track and a Keys on the bass track and they were
+    // indistinguishable at a glance. Cyan is still the default and still the line's
+    // colour; the rest are there to tell one instance from another.
+    //
+    // Crucially this is *not* a global. A DAW loads every instance into one process, so a
+    // global would repaint every track's Keys at once. The live values hang off each
+    // editor's KeysLookAndFeel, and components read them through accentOf() below.
+    struct Accent
+    {
+        juce::Colour base, hot, deep;
+    };
+
+    // The default: the OK Studio cyan, with its shipped hot/deep pair kept exact rather
+    // than derived, since the whole skin was tuned against these three.
+    const Accent cyanAccent { okstudio::theme::accent,      // 0xff35c4d7
+                              okstudio::theme::accentSoft,  // 0xff8fe8f2
+                              juce::Colour(0xff1b8496) };
+
+    // Everything else is derived from one base, so adding a colour is one line.
+    inline Accent derive(juce::Colour base)
+    {
+        return { base, base.brighter(0.75f), base.darker(0.45f) };
+    }
+
+    struct AccentChoice
+    {
+        const char* name;
+        juce::uint32 argb; // 0 = use cyanAccent, which is not derived
+    };
+    inline const AccentChoice* accentChoices()
+    {
+        static const AccentChoice table[] = {
+            { "Cyan",    0 },
+            { "Amber",   0xffd7a635 },
+            { "Lime",    0xff8fd735 },
+            { "Violet",  0xff9a6cf5 },
+            { "Magenta", 0xffd7459f },
+            { "Orange",  0xffe0703a },
+            { "Rose",    0xffe04a6b },
+            { "Ice",     0xff8fb4de },
+        };
+        return table;
+    }
+    constexpr int numAccents = 8;
+
+    inline Accent accentAt(int index)
+    {
+        index = juce::jlimit(0, numAccents - 1, index);
+        const auto& choice = accentChoices()[index];
+        return choice.argb == 0 ? cyanAccent : derive(juce::Colour(choice.argb));
+    }
+
+    // The accent of whichever editor this component belongs to. Resolved through the
+    // LookAndFeel chain, which JUCE already walks up to the editor, so a component does
+    // not need to know who owns it. Falls back to cyan outside a Keys editor.
+    Accent accentOf(const juce::Component&);
 
     const juce::Colour text      { 0xffe9ecf0 };
     const juce::Colour textDim   { 0xff8a919c };
@@ -73,6 +128,13 @@ class KeysLookAndFeel : public okstudio::theme::LookAndFeel
 public:
     KeysLookAndFeel();
 
+    // One per editor, so each instance of the plugin wears its own colour. Re-applies the
+    // JUCE ColourIds the kit derives from the accent (tick marks, slider tracks, the
+    // popup highlight), which are baked at construction and would otherwise stay cyan.
+    void setAccent(int index);
+    skin::Accent accent() const { return accentColours; }
+    int accentIndex() const { return index; }
+
     void drawRotarySlider(juce::Graphics&, int x, int y, int width, int height, float sliderPos,
                           float rotaryStartAngle, float rotaryEndAngle, juce::Slider&) override;
     void drawLinearSlider(juce::Graphics&, int x, int y, int width, int height, float sliderPos,
@@ -98,11 +160,26 @@ public:
                                     bool drawTitleTextOnLeft) override;
     juce::Button* createDocumentWindowButton(int buttonType) override;
 
+    // Tooltips: JUCE's default is a 13 px font in a box up to 400 px wide, which next to
+    // this skin's 10 px micro-caps reads like a different application shouting. Smaller
+    // type, tighter padding, narrower wrap.
+    juce::Rectangle<int> getTooltipBounds(const juce::String& tip, juce::Point<int> screenPos,
+                                          juce::Rectangle<int> parentArea) override;
+    void drawTooltip(juce::Graphics&, const juce::String& text, int width, int height) override;
+
     void drawPopupMenuBackground(juce::Graphics&, int width, int height) override;
+    // Must agree with drawPopupMenuItem's gutters, or JUCE sizes the menu to the text
+    // alone and our own inset then clips it. This is what was truncating "Magenta".
+    void getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator, int standardHeight,
+                                   int& idealWidth, int& idealHeight) override;
     void drawPopupMenuItem(juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator,
                            bool isActive, bool isHighlighted, bool isTicked, bool hasSubMenu,
                            const juce::String& text, const juce::String& shortcutKeyText,
                            const juce::Drawable* icon, const juce::Colour* textColour) override;
     juce::Font getPopupMenuFont() override;
+
+private:
+    skin::Accent accentColours = skin::cyanAccent;
+    int index = 0;
 };
 } // namespace keys

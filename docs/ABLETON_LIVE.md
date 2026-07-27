@@ -121,7 +121,9 @@ Ch** on Keys and filter by channel on the receiving tracks. Otherwise leave it a
 
 Arm the instrument track and record; the notes you click land as a normal MIDI clip.
 Scale Lock, octave, and velocity all apply to what's recorded, because Keys sends the
-already-resolved notes.
+already-resolved notes. With the Arp section's **On** lit, what lands is the arpeggiated
+stream rather than the chord you clicked: the arp rewrites the note stream on its way out
+of the plugin, so the clip holds what you heard.
 
 ## Troubleshooting
 
@@ -131,5 +133,6 @@ already-resolved notes.
 - **No sound.** Check the instrument track's **Monitor** is **In** and its **MIDI
   From** points at the Keys track → Keys. Keys itself never makes sound; it only
   sends notes.
-- **Wrong octave.** The Octave control transposes everything; also check the
-  receiving instrument's own range.
+- **Wrong octave.** The Octave control transposes the keys you click, not the chord
+  cards: those carry absolute notes, fixed by the generator's own Octave at the moment
+  they were made. Also check the receiving instrument's own range.

@@ -23,6 +23,11 @@ public:
 
     void setRange(int lowNote, int numKeys);
 
+    // How tall a white key may grow. Docked, the keybed keeps piano proportions and
+    // extra height reads as instrument body; detached into its own window the whole
+    // point is that dragging the window resizes the keys, so the cap comes off.
+    void setKeyHeightCap(float px);
+
 protected:
     int drawnAt(juce::Point<float>) const override;  // drawn note under the point, or -1
     int outputNote(int drawnNote) const override;    // scale-lock + octave applied, clamped
@@ -39,6 +44,7 @@ private:
     void layoutKeys();
 
     int lowNote = 36, numKeys = 61;
+    float keyHeightCap = 185.0f;
     std::vector<Key> keys;
     float keysTop = 0.0f; // y of the top of the keybed (keys anchored to the bottom)
 

@@ -203,7 +203,7 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("octave", text("octave"));
         obj->setProperty("sustain", text("sustain"));
         obj->setProperty("latch", text("latch"));
-        obj->setProperty("velocity", text("velocity"));
+        obj->setProperty("velocity", juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         obj->setProperty("arpOn", text("arpOn"));
         obj->setProperty("arpRate", text("arpRate"));
         obj->setProperty("arpDirection", text("arpDirection"));
@@ -328,7 +328,7 @@ okstudio::mcp::Tool KeysMcp::toolPlayNotes()
                      "the arp (if it's on).";
     t.params = {
         { "notes", "array", "MIDI note numbers to play, 0..127.", true },
-        { "velocity", "integer", "Note-on velocity, 1..127. Default: the Velocity control's current value.", false },
+        { "velocity", "integer", "Note-on velocity, 1..127. Default: the Velocity range's current value.", false },
         { "durationMs", "integer", "How long to hold each note before its note-off, in ms (clamped 10..60000). Default 500.", false },
         { "channel", "integer", "MIDI channel 1..16 to send on. Default: the MIDI Channel control.", false },
     };
@@ -349,7 +349,7 @@ okstudio::mcp::Tool KeysMcp::toolPlayNotes()
             }
         }
 
-        const int defaultVel = (int) processor.apvts.getRawParameterValue("velocity")->load();
+        const int defaultVel = juce::jlimit(1, 127, juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         const int velocity = juce::jlimit(1, 127, (int) args.getProperty("velocity", defaultVel));
         const int durationMs = juce::jlimit(10, 60000, (int) args.getProperty("durationMs", 500));
         const int channel = (int) args.getProperty("channel", 0);
@@ -401,7 +401,7 @@ okstudio::mcp::Tool KeysMcp::toolPlaySequence()
         struct Step { int note; double startMs; double durationMs; float vel01; };
         std::vector<Step> steps;
         steps.reserve((size_t) arr->size());
-        const int defaultVel = (int) processor.apvts.getRawParameterValue("velocity")->load();
+        const int defaultVel = juce::jlimit(1, 127, juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         double horizonMs = 0.0;
 
         for (const auto& item : *arr)
@@ -644,9 +644,9 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                      "gate, ratchet, probability), each trimmed to its own length, plus "
                      "its per-lane clock dividers and which pattern is active. Without "
                      "slot, reads the live lanes (what's currently playing/showing in the "
-                     "editor); with slot, reads that stored pattern (0..7, A-H) without "
+                     "editor); with slot, reads that stored pattern (0..11) without "
                      "disturbing what's live.";
-    t.params = { { "slot", "integer", "Pattern slot 0..7 (A-H). Omit to read the live lanes.", false } };
+    t.params = { { "slot", "integer", "Pattern slot 0..11. Omit to read the live lanes.", false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         auto* obj = new juce::DynamicObject();
@@ -655,7 +655,7 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
             const int slot = (int) args.getProperty("slot", -1);
             if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
             {
-                error = "slot out of range 0..7";
+                error = "slot out of range 0..11";
                 return {};
             }
             const auto& pat = processor.arpPatternSlot(slot);
@@ -695,10 +695,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "arrays make a shorter pattern for that lane, for polymeter against the others. "
         "clockDivs is an optional map of lane name -> 0 (every step) / 1 (every 2nd) / 2 "
         "(every 4th). Without slot, writes the live lanes directly (the same path the "
-        "editor edits through); with slot, writes that stored pattern (0..7, A-H), and "
+        "editor edits through); with slot, writes that stored pattern (0..11), and "
         "refreshes the live lanes too if that slot happens to be the active one.";
     t.params = {
-        { "slot", "integer", "Pattern slot 0..7 to write. Omit to write the live lanes.", false },
+        { "slot", "integer", "Pattern slot 0..11 to write. Omit to write the live lanes.", false },
         { "note", "array", "Per-step note lane (-1..8).", false },
         { "octave", "array", "Per-step octave lane (-3..3).", false },
         { "velocity", "array", "Per-step velocity lane (10..200).", false },
@@ -745,7 +745,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         const int slot = hasSlot ? (int) args.getProperty("slot", -1) : processor.arpActivePattern();
         if (hasSlot && (slot < 0 || slot >= KeysProcessor::numArpPatterns))
         {
-            error = "slot out of range 0..7";
+            error = "slot out of range 0..11";
             return {};
         }
 
@@ -787,16 +787,16 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
 {
     okstudio::mcp::Tool t;
     t.name = "recall_arp_pattern";
-    t.description = "Make a stored pattern (0..7, A-H) the active/live one, same as "
+    t.description = "Make a stored pattern (0..11) the active/live one, same as "
                      "clicking its pattern button. Snapshots the current live lanes into "
                      "their slot first, so nothing being edited is lost.";
-    t.params = { { "slot", "integer", "Pattern slot 0..7 (A-H) to make active.", true } };
+    t.params = { { "slot", "integer", "Pattern slot 0..11 to make active.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
         if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
         {
-            error = "slot out of range 0..7";
+            error = "slot out of range 0..11";
             return {};
         }
         processor.recallArpPattern(slot);

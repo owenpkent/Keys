@@ -288,15 +288,17 @@ void KeysHostProcessor::getStateInformation(juce::MemoryBlock& destData)
         instrument->getStateInformation(blob);
         hosted.setProperty("state", blob.toBase64Encoding(), nullptr);
     }
-    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree(), hosted });
+    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree(), layoutToTree(), hosted });
 }
 
 void KeysHostProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
     {
-        chordPadsFromTree(root);
-        arpFromTree(root);
+        // Everything Keys restores, restored the same way; then the one thing only Keys Host
+        // has. This used to be the base class's three calls copied out by hand, which is how
+        // a session fix landed in Keys and quietly skipped Keys Host.
+        restoreSharedState(root);
 
         const auto hosted = root.getChildWithName("hostedInstrument");
         if (! hosted.isValid() || hosted.getProperty("file").toString().isEmpty())

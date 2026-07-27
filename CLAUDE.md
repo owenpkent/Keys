@@ -16,21 +16,36 @@ drums, Keys = the played keyboard). Where those two generate, Keys is performed.
 
 ## Build & Run
 
-**Default dev loop: `.\run.ps1`.** Do not send Owen to Ableton to try a change. `run.ps1`
-closes the running standalone, builds exactly one Standalone target, and relaunches it:
-about 5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real
-instrument VST3 in-process, so a click makes sound with no DAW involved and no rescan.
-It remembers the loaded synth between launches, which is why the script asks the app to
-close politely (a forced kill skips JUCE's settings write and loses it).
+**Default dev loop: `run.py`.** Do not send Owen to Ableton to try a change. It closes
+the running standalone, builds exactly one Standalone target, and relaunches it: about
+5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real instrument VST3
+in-process, so a click makes sound with no DAW involved and no rescan. It remembers the
+loaded synth between launches, which is why the script asks the app to close politely (a
+forced kill skips JUCE's settings write and loses it). Those seconds are the build:
+Smart App Control is enforced here and dev builds are unsigned, so the *launch* of a
+freshly linked exe can be held while Windows vets it. `run.py` waits that out with a
+counter on screen (twenty minutes before it gives up, Ctrl+C to stop waiting);
+`docs/BUILD.md` has the ways out of the wait itself.
+
+**Owen runs it by double-clicking `run.py` in Explorer** — no arguments, no terminal, and
+the console holds open on failure so he can read the error. Never tell him to type a
+command when he could click the file instead. `run.ps1` is a thin shim over `run.py`, so
+there is one copy of the logic; either is fine from a terminal.
 
 ```powershell
-.\run.ps1              # build + launch Keys Host standalone (makes sound)
-.\run.ps1 -Keys        # plain Keys instead (MIDI only, silent)
-.\run.ps1 -NoBuild     # just relaunch what is already built
+py run.py              # build + launch Keys Host standalone (makes sound)
+py run.py --keys       # plain Keys instead (MIDI only, silent)
+py run.py --no-build   # just relaunch what is already built
 ```
 
 Go to a real Live load test only for what the standalone genuinely cannot show: bus
 layout, plugin classification, installer, updater, host automation.
+
+**The first configure is slow now.** The Transcribe section pulls a multi-gigabyte prebuilt
+ONNX Runtime into the build tree, and forces the static MSVC runtime on the whole binary (both
+are properties of that library, not choices). `-DKEYS_TRANSCRIBE=OFF` drops the section and
+both costs, and is the right flag for work that never touches transcription. Deleting `build/`
+is no longer cheap.
 
 Full build (VST3 + install to the DAW):
 
@@ -53,7 +68,8 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
-- **Kit-based.** Theme, scales, state persistence, the mouse-only contract, and the
+- **Kit-based.** Theme, scales, state persistence, the mouse-only contract, the audio-to-MIDI
+  transcription engine, and the
   updater all come from `../okstudio-juce-kit`. Fix shared behaviour there, not here.
 - **UI → audio note path is a `juce::MidiMessageCollector`.** The editor/keyboard
   call `processor.noteOn/noteOff` on the message thread; `processBlock` drains the
@@ -69,6 +85,56 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   locked chords. `ScaleModes.h` is deliberately *not* the kit's scale table: that one
   answers "is this note in the scale", generation also needs a quality per degree.
   All of it (plus `ChordSuggest.h`) is UI-free so it unit-tests.
+- **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
+  chord, a shape and a rate; launching one installs all of it and holds the chord into the
+  arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
+  scheduling). Held means held: no note-off follows until something replaces it, so
+  `allNotesOff()` has to forget it explicitly.
+- **The chord pads and the arpeggiator are each a section of their own**, stacked between
+  the centre view and the keyboard, so a chord card is on screen whatever else is open. The
+  centre views are Perform and Chords only: the arp stopped being a third one on
+  2026-07-25. The arp bar carries its On toggle, which survives folding the section shut.
+  See `docs/ARP_DESIGN.md`.
+- **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
+  table of six `Section`s (Controls, Centre, Arp, Pads, Transcribe, Keyboard); each owns a
+  `Holder` its content is parented into, a Detach button, and the `DetachedWindow` it is
+  currently in. Detaching is one re-parent of that holder, and `idealHeight()`,
+  `syncSectionControls()` and `paint()` walk the table rather than naming sections.
+  (`sectionHeight()` is still a switch and `resized()` still lays each bar out in its own
+  block, because what those two spend per section genuinely differs.) Add a section by
+  adding an entry, not by copying a code path.
+  The Re-dock button travels into the window; controls that belong to the editor rather
+  than the content (the centre tabs, arp On, the pad pages, the theme swatch) stay on the
+  bar. The keybed keeps two extras of its own via `Section::travellers`.
+  The **whole bar** folds its section, not just the chevron: the bar's controls are siblings
+  sitting in front of it (every bar is `toBack()`ed), so z-order already stops it stealing
+  their clicks and `SectionBar::hitTest` had nothing left to protect. **Detach hides with
+  its section** — the exceptions that stay on a folded bar are arp On, the centre tabs and
+  the theme swatch, each for a stated reason. Open and folded bars are painted at different
+  weights on purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
+  or the caption ellipsises and the controls beside it shift as a section folds.
+- **Keys watches its MIDI input but never consumes it.** `watchInputNotes()` runs first
+  thing in `processBlock`, before the collector drains, and records which pitches the
+  incoming stream turns on (a flag per pitch, not a count). `isNoteSounding()` answers
+  true for those too, which is all it takes to light the keybed for a physical keyboard
+  and feed the live chord card. The stream itself passes through untouched, as always.
+- **Transcribe is the only part of Keys that consumes audio.** Everything else produces MIDI.
+  Keys is an instrument, so a host sends it MIDI and never audio: there is no track input, and
+  `AudioCapture` opens an audio device of its own. That is what makes the section behave the
+  same in the plugin and the standalone, and it is why choosing an input never touches the
+  host's audio setup. The device is open only while the section is on screen or recording.
+  The engine is the kit's (`okstudio/Transcribe.h`, basic-pitch ported from NeuralNote); the
+  model runs on a background thread, never on the audio or message thread, and the panel is
+  built and destroyed with its fold because it holds a device and a network's weights. All of
+  it is behind `KEYS_TRANSCRIBE`, on by default. See `docs/ARCHITECTURE.md`.
+- **One note-on per sounding pitch, released by the last owner.** Four sources can ask for
+  the same pitch at once (a chord pad, the live card, a chord held into the arp, the
+  keybed). `KeysProcessor::noteOn` emits MIDI only on the 0→1 transition of `noteRefs` and
+  `noteOff` only on 1→0; `ArpEngine::Held::ons` counts owners the same way downstream.
+  Break this and one source's release silences another's notes while the keys stay lit,
+  and the arp's held set leaks so a released chord arpeggiates forever. Any new chord
+  source has to go through `noteOn`/`noteOff`, and `Exclusive` has to reach it
+  (`stopAllChordPads`).
 - **MCP bridge.** Keys embeds an MCP server (`okstudio::mcp::Server`, transport in
   the kit at `okstudio/Mcp.h`) so Claude Code or any local MCP client can drive it.
   Tools are registered in `src/mcp/KeysMcp.cpp`; every handler runs on the message
@@ -87,16 +153,30 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   failure is silent-looking ("This VST3 plug-in could not be opened") and pluginval
   passes without the bus, so only a real Live load test catches it.
 - **Mouse-only UI**: single left-click or drag; targets ≥ ~34 px; no
-  keyboard/double-click/modifiers. Latch and Sustain are on-screen toggles by design,
-  never modifier keys. Right-click is normally only an optional accelerator with a
-  left-click equivalent (per-note latch on the note surfaces, at Owen's request).
+  keyboard/double-click/modifiers. Sustain is an on-screen toggle by design, never a
+  modifier key (the separate Latch toggle is gone: a left click on a held note releases
+  it, which left nothing for the mode to do). Right-click is normally only an optional
+  accelerator with a left-click equivalent (per-note latch on the note surfaces, at
+  Owen's request).
   One owner-directed exception (2026-07-22): chord-pad card menus are right-click —
   in the generator (Lock / New chord / Next, restoring Octavium's card menu; the
   page-wide left-click Fill/Regen/Clear stay as the bulk path) and on the main-page
-  strip (Edit on keyboard / Clear). Do not add further right-click-only paths
-  without Owen's explicit say-so.
-  The feature-request template requires an accessibility answer — hold PRs to it.
-- **Audio thread**: no allocation, no locks. It only drains the collector.
+  strip (Edit on keyboard / Clear, plus **Send to arp slot** since 2026-07-25 — the
+  only item in the plugin with no left-click twin, since binding a chord to one
+  particular slot needs a target picker; a left click on a card with the arp **On**
+  is the left-click way to get a chord into the arp, which is what keeps that
+  exception to one item). Do not add further right-click-only
+  paths without Owen's explicit say-so.
+  The arp slot cards also carry a right-click menu, but it is an ordinary accelerator:
+  Launch is a click on the card, and Clear chord, Copy and Randomize all have buttons
+  under the slot row (Copy and Clear arm, then take a slot click). Randomize is greyed
+  in the menu outside Pattern shape, because that is where its button lives.
+  Every feature request has to answer "how is this reached with one left-click?" before
+  it is worth designing; hold PRs to that. It is a rule, not a form: this line used to
+  claim a feature-request template enforced it, and no issue template has ever existed
+  in this repo (checked across every ref, 2026-07-27).
+- **Audio thread**: no allocation, no locks. It drains the collector, notes what came
+  in on the MIDI input (display only), and runs the arp stage.
 - Parameter-layout changes break saved sessions — changelog loudly.
 - **Updater contract** lives in the kit (`docs/AUTO_UPDATE.md`): releases repo is
   `okstudio1/keys-releases`; assets named exactly `KeysSetup-<version>.exe`, tag
@@ -104,13 +184,26 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
 ## Screenshots for docs
 
-Use the PrintWindow approach (never SetForegroundWindow/SetCursorPos — Owen is often
-using the machine, and a mis-capture can grab his private windows). Launch the
-standalone, capture via `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`, kill the
-process. Screenshots live in `assets/screenshots/`, referenced from README and docs.
-To capture an overlay (Chords/Arp), don't synthesize clicks — posted WM_LBUTTONDOWN
-never reaches JUCE. Invoke the button through UI Automation instead (find the
-AutomationElement by name, InvokePattern.Invoke()); no cursor movement involved.
+Use `scripts/capture-window.ps1`, which is the PrintWindow approach (never
+SetForegroundWindow/SetCursorPos — Owen is often using the machine, and a mis-capture can
+grab his private windows). Screenshots live in `assets/screenshots/`, referenced from
+README and docs. To reach a view, don't synthesize clicks — posted WM_LBUTTONDOWN never
+reaches JUCE. Invoke the button through UI Automation instead (`-InvokeButtons`); no cursor
+movement involved.
+
+Three things will bite otherwise:
+
+- **Pass `-WindowTitle` for anything but plain Keys.** The default target is
+  `MainWindowHandle`, a heuristic that lands on the *hosted instrument's* GUI in Keys Host
+  (that GUI is a top-level window of the same process) and on an arbitrary section once any
+  are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Centre` /
+  `Keys Arpeggiator` / `Keys Chord Pads` / `Keys Transcribe` / `Keys Keyboard` for the
+  detached sections (the `wire(...)` calls in `PluginEditor.cpp`).
+- **The Detach buttons are named per section**, because six buttons reading "Detach" are
+  six identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
+  name flips with the button's state.
+- **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
+  write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 
 ## Conventions
 

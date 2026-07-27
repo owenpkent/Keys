@@ -5,6 +5,690 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the section bars read as headers, and the whole bar folds it again
+
+Three of Owen's asks, all about the same strip.
+
+**The whole bar folds the section again.** It had been narrowed to the chevron end, to stop
+a click that missed a tab or a chip from folding the section by accident. That accident was
+never possible: the controls on a bar are its *siblings* and sit in front of it, so z-order
+already stopped the bar from stealing their clicks. What the narrowing did instead was make
+a full-width 34 px strip that looks like a button answer along one 40 px end of itself — so
+the target got harder to hit, in a plugin whose whole contract is that targets are big.
+
+**Open and folded bars look different now.** An open one is a solid ruled band: a gradient
+fill, a hairline above, an accent rule below where it meets its content, a brighter caption
+and a tick of accent at its left end. A folded one is flat, dim and outlined. Six of these
+stacked read as a shape before you have read a caption, which is the point — the window is
+mostly bars when it is squeezed small. All six stay the one accent colour; the skin has
+exactly one, and per-section tints would have been six.
+
+**Detach hides with its section.** Folded away, it was the loudest thing left on a bar whose
+whole job is to be quiet, and it offered a gesture with nothing behind it: detaching a folded
+section built a window that opened hidden. Every other control on a bar already hid with its
+section — the pad pages, the Knobs chip, Wheels — so this was the odd one out rather than a
+rule being broken. The deliberate exceptions stay put: the arp's **On** (folding the panel
+must never stop the arpeggiator), the centre's two tabs (they are how a folded centre comes
+back) and the theme swatch (it belongs to the plugin, not to a section).
+
+### Fixed: run.py hung with a blank console instead of launching
+
+Smart App Control gates every freshly linked unsigned build, and it does so **two different
+ways**: with a verdict already cached it fails `CreateProcess` outright, and while the
+reputation lookup is still in flight it *blocks the call*. `run.py` only ever handled the
+first — its "waiting for Smart App Control" message lived in the `except OSError` branch, so
+the blocking form printed nothing at all. The build would finish, the script would sit
+inside `CreateProcess` with an empty console, and the only way out was Ctrl+C, which then
+dumped a traceback because `except Exception` does not catch `KeyboardInterrupt`.
+
+The launch now runs on a worker thread with the main one reporting: a live counter, a
+deadline that is actually enforced, and a Ctrl+C that is heard and exits cleanly. The wait
+is twenty minutes, because that is what was measured here (19m44s across 175 CodeIntegrity
+block events) rather than the three minutes previously assumed. `docs/BUILD.md` now carries
+the measurements and the ways out.
+
+### Fixed: the console never held open on failure
+
+`console_is_ours()` asked `GetConsoleProcessList` for a count of exactly one, which never
+happens: the `.py` association is `py.exe`, and `py.exe` spawns `python.exe` and stays in
+the same console to relay the exit code, so a double-click is always at least two. The count
+never matched, `hold_window_open()` never held, and **every** failure run.py can report — no
+cmake, a failed build, a missing exe, a blocked launch, a traceback — flashed past and
+vanished. That is precisely what the script exists to prevent, and what both CLAUDE.md and
+docs/BUILD.md promised it did. It now identifies the processes instead of counting them, and
+holds unless an actual shell shares the console. Verified both ways: two processes and no
+shell when launched the way a double-click launches it, four with `powershell.exe` among
+them from a terminal.
+
+`SystemExit` skipped the hold for the same reason `KeyboardInterrupt` did, and that is the
+path a file *dropped onto run.py in Explorer* takes — argparse calls it an unrecognised
+argument, prints usage, and exits 2. Both are handled now, and `--hold` forces the pause for
+a console that has a shell in it but is still going to close (`run.ps1 -Hold`).
+
+### Fixed: smaller traps around the dev loop
+
+Found while auditing the hang above; each one turns a legible failure into a confusing one.
+
+- **run.py blamed Smart App Control for everything.** The `OSError` was discarded, so an exe
+  still held by the linker, a missing dependent DLL and a file deleted underneath us all got
+  the same "blocked by Smart App Control" story and the same useless advice. It now prints
+  what Windows actually said.
+- **A failed force-kill was silent.** If the running standalone could not be closed *or*
+  terminated, `run.py` walked into the build anyway and let the linker report it as LNK1104
+  a few thousand lines later. It now says the app is still running, names the pid, and says
+  what is about to happen.
+- **The cmake probe could hang with nothing on screen.** `subprocess.run([cand, "--version"])`
+  had no timeout, so a candidate that starts and wedges — a stale UNC path, a disconnected
+  mapped drive — hung before a single line of output, looking exactly like the launch hang.
+  Twenty second timeout, and a slow-but-successful probe now names itself.
+- **run.ps1 could report success for a run that never happened.** `exit $LASTEXITCODE` exits
+  **0** when `$LASTEXITCODE` is `$null`, which is what it is if py.exe never started. And
+  `$ErrorActionPreference = "Stop"` made `Write-Error` terminating, so the `exit 1` beneath
+  the "needs Python on PATH" message was unreachable.
+- **The screenshot script photographed the wrong window.** `capture-window.ps1` shot
+  `MainWindowHandle`, and for Keys Host that heuristic lands on the hosted instrument's GUI,
+  which is a top-level window of the same process: the docs nearly gained a picture of
+  somebody else's synth. It takes a `-WindowTitle` now. Its window titles also all read as
+  their own first letter, because `GetWindowTextW` was marshalled as ANSI and the UTF-16 it
+  writes stops at the first NUL.
+
+### Fixed: smaller traps in the Transcribe section
+
+All found reviewing this branch. None are reachable by accident, but each is the kind that
+only shows up on somebody else's desk.
+
+- **Switching driver left the old driver's device open.** The close was routed through
+  `setInput({})`, which returns early when no input is selected — so with nothing chosen,
+  the driver moved on while its device stayed open. It closes first now, unconditionally.
+- **A device that would not report its sample rate got a made-up one.** `startRecording`
+  fell back to 8 kHz. Every sample is timed by that number — the model resamples from it and
+  the piano roll dates every note by it — so the fallback produced a transcription wrong in
+  both pitch and time with nothing on screen to suggest it. It refuses to start and says so.
+- **Two instances dragged the same temp file.** The MIDI drag wrote one fixed name in the
+  temp directory, so Keys and Keys Host, or two Keys, could overwrite the file the other was
+  still handing to the OS. The name carries the panel's address now.
+- The buffer-read contract on `AudioCapture::recorded()` said "only when not recording", which
+  its only caller has to violate to draw the live waveform. The settled region is well defined
+  and the comment now describes it rather than forbidding it.
+
+### Added: the keybed shows what is played *into* Keys
+
+Play a hardware keyboard through Keys and its notes now light up on the on-screen keys, and
+the live chord card names the chord under your hands — so a chord you found on the piano can
+go straight onto a pad. In the standalone, tick your device under **Options → Audio/MIDI
+Settings**; in a DAW, anything feeding the track (a clip, another device) lights up the same
+way.
+
+Nothing about the MIDI path changed: Keys has always passed the incoming stream through
+untouched, and it still does. It only watches it go by, on the same display-only path
+that already lights a key for a chord pad or an MCP tool. **All Off** clears the lights, in
+case a note-off ever goes missing.
+
+### Added: a check mark on the pad to finish editing it
+
+**Edit on keyboard** links a pad to the keys and writes every change straight back to it.
+Finishing meant going back into the same right-click menu, which made the last step of the
+job the hardest one to reach. The pad being edited now carries a **✓** at its right-hand
+end for as long as the link lasts: click it and the edit is done. It is on the card itself
+rather than on the section bar, because the edit is a thing happening to *that card* and
+finishing it should not mean looking somewhere else.
+
+Folding the Pads section away while a pad is linked ends the edit too, since the tick goes
+with it. Nothing is lost either way — the pad is written as you play, so the tick ends the
+link rather than performing the save.
+
+### Changed: Strum is a range
+
+**Strum** was one number, so every chord raked at exactly the same speed. It is now a
+two-handle band like the Velocity range beside it, and each chord takes a spread drawn from
+it: drag an end to resize the band, or the middle to move it. Both ends together is a fixed
+strum, which is what a session saved with the old single value loads as.
+
+That last sentence was not true when it was written, and the screenshot for the docs is what
+caught it: Keys Host came back reading **STRUM 0-68 MS** for a session that had asked for a
+fixed 68 ms rake. The new high end arrived at its default of 0 under an existing low end of
+68, which is not "unchanged", it is a random 0 to 68 ms spread on every chord. Old sessions
+are now repaired on load. The tell is unambiguous: the pair comes out of a slider that
+cannot put the high end below the low one, so out of order means the session predates the
+range, and copying the single value across restores exactly the strum it asked for.
+
+The repair worked in Keys and did nothing at all in Keys Host, because
+`KeysHostProcessor::setStateInformation` had its own copy of the base class's restore list.
+Both now call one `restoreSharedState()`, so the next session-shaped fix cannot land in one
+product and miss the other.
+
+### Fixed: swing dropped most of the notes it swung
+
+The arpeggiator's **Swing** looked for every step boundary inside the current audio buffer
+and fired it there. A swung offbeat does not sound on its boundary, though — it sounds a
+fraction of a step later, which at any normal buffer size is several buffers later. The
+scheduler gave up on those, and the next buffer had already moved past them, so the note
+never played at all. With a 512-sample buffer that silenced very nearly every offbeat: swing
+did not shuffle the pattern so much as thin it out.
+
+It now schedules by each step's *fire time* rather than by its boundary. Covered by tests at
+a realistic buffer size — the old code passes a test whose buffer is exactly one step long,
+which is why this was not caught when the arp landed.
+
+### Changed: swing goes both ways from the centre
+
+**Swing** was 0 to 0.75, all of it delay. It is now −0.75 to +0.75 and starts centred:
+right of centre delays the offbeats for the usual shuffle, left pulls them *early*, which
+rushes them on top of the beat and is a feel you cannot get by delaying anything. Centre is
+dead straight. The knob fills from the centre out and carries a detent mark, so "no swing"
+looks like no swing instead of half full; any knob whose range straddles zero gets that
+automatically from now on. Sessions keep the swing they were saved with.
+
+### Added: a BPM control, in Controls
+
+The arpeggiator is the only thing in Keys timed in beats, and it had no tempo of its own: it
+followed the host, and fell back to whatever the host last reported. In the standalone that
+meant 120 forever, with nothing to change it. **BPM** (40–240) is what it runs at whenever
+there is no transport to follow — always in the standalone, and any time the host is
+stopped. A host that is *playing* still wins, so tempo sync is untouched.
+
+### Removed: the To Arp toggle
+
+Getting a chord card into the arpeggiator needed arming **To Arp** on the Pads bar first.
+With the arp switched off, doing so looked identical to sustaining a chord — so the button
+read as doing nothing, which is exactly how Owen found it. It is gone, and the arp's own
+**On** is the mode: with the arp running, clicking a chord card hands that chord over and
+leaves it there; with it off, cards play beat-pad style as they always have. Switching the
+arp off releases a chord a card was holding into it, rather than leaving it droning with no
+click left to stop it.
+
+The generator's chord grid follows the same rule, and a left click on a card with the arp
+**On** is now the left-click way to get a chord into the arp, so right-click **Send to arp
+slot** stays the plugin's one item with no left-click twin rather than becoming two.
+
+### Added: every section detaches into a window of its own
+
+The keyboard and the arpeggiator could already be pulled out into their own resizable
+windows. Now all six can: **Controls**, the **centre view** (Perform / Chords), **Arp**,
+**Pads**, **Transcribe** and **Keyboard** each have a **Detach** button at the right-hand end
+of their bar. One screen's worth of plugin can be spread across as many windows as the desk
+has room for — the generator wide on one monitor, the pads under your hand, the keybed as
+large as it will go.
+
+Inside each detached window, a **Re-dock** button sits at the top, and the close box does the
+same thing. Both windows and both routes were deliberate: leaving the control that undoes a
+detach behind in the main editor puts it in the window you are not looking at, which is the
+complaint that first moved the keyboard's Detach into its window.
+
+Each window's position and size are remembered with the session, and one saved on a monitor
+you no longer have is pulled back on screen before it opens. A detached section takes no
+height in the main window, so this is the way to keep a tall section open and the plugin
+window small at the same time; folding a detached section hides its window rather than its
+empty slot, so the chevron still means one thing. A bar whose section is away says
+**IN ITS OWN WINDOW** in the space its own controls were using.
+
+What stays behind on a bar is whatever belongs to the editor rather than to the section: the
+Perform / Chords tabs, the arp's **On** toggle, the pad page buttons and the
+theme swatch — all of them keep working while the section they name is off in a window. The
+keyboard window keeps its own **Size** and **Wheels**, because those are the keybed's.
+
+Under the hood this stopped being two special cases and became one table: each section owns a
+holder its content lives in, and detaching is a single re-parent of that holder. Layout,
+folding and height are written once and looped over, so the next section will detach without
+anyone writing detach code for it.
+
+### Added: Transcribe, a section that turns what you sing or play into notes
+
+A new folding section between the pads and the keyboard. Pick an audio input, hit **Record**,
+play or sing, hit **Stop**, and the notes appear in a piano roll. Drag them from **DRAG MIDI**
+onto a track and you have a MIDI file. **Sensitivity** re-reads the same recording, so trying
+a different setting is instant rather than another pass of the model.
+
+The engine is Spotify's basic-pitch, ported from
+[NeuralNote](https://github.com/DamRsn/NeuralNote) (Apache-2.0) and shared through the kit as
+`okstudio/Transcribe.h`, so Undertow, Beatform and Contour can have it too.
+
+Keys is an instrument: a DAW sends it MIDI and never audio, so there is no track input to
+record. The section opens an audio device itself, which means it behaves the same in the
+plugin and in the standalone, and picking an input here never disturbs the host's audio setup.
+The device is only open while the section is showing or while recording, so Keys never sits on
+a microphone in the background, and the chosen input is remembered per machine rather than in
+the song.
+
+It is not live, and cannot be: the model needs the whole recording before it can resolve a
+note, so a take under about a second produces nothing, and recording stops itself at two
+minutes. The model runs on a background thread, so the keyboard keeps playing while it works.
+
+The section starts folded, like the arp, because open it is tall. Building it pulls in a
+multi-gigabyte ONNX Runtime download and forces the static MSVC runtime on the whole binary;
+`-DKEYS_TRANSCRIBE=OFF` drops both along with the section.
+
+**Folding the section away while the model is running is free, and safe.** The panel is
+destroyed with its fold — it holds an open device and a network's weights — so a transcription
+in flight has to survive its own panel going away. The job holds the panel weakly and the
+transcriber strongly, and keeps itself alive until it finishes: closing the section drops the
+reference, the model runs to its natural end, and the result is thrown away because there is
+nobody left to give it to. The two obvious alternatives are both wrong. Waiting for the model
+in the panel's destructor freezes the editor for as long as the model still needs, on a click,
+because nothing inside `transcribe()` checks for cancellation. Posting the result to a raw
+`this` is a use-after-free with a window of exactly one message pump: the result is already
+queued when the panel dies.
+
+### Changed: the arpeggiator is a section of its own, and it detaches
+
+It was one of three centre views, so picking it put the knobs and the generator away — the
+opposite of what you want from a thing that runs while you play. It now has its own bar and
+chevron between the centre view and the pads, so the arp, the knobs (or the generator), the
+chord cards and the keyboard are all on screen together. **Detach** puts it in its own
+resizable window, the way the keyboard already does; its **On** toggle and Detach ride on the
+bar, so both survive folding the panel away. Perform and Chords are the two remaining tabs.
+
+The panel's own title, On and Close are gone with it — the bar says all three, and two On
+toggles bound to one parameter is just a thing to get wrong.
+
+The section starts folded, because open it is the tallest thing in the editor. A session
+saved on the old Arp *view* opens with the section unfolded instead, so it looks the same.
+`KeyboardWindow` became `DetachedWindow`; nothing in it was keyboard-specific but the title
+and the minimum size, which are parameters now.
+
+### Fixed: Exclusive and Sustain went wrong once a card was held in the arp
+
+Handing a chord to the arpeggiator added a fourth chord source (pads, the live card, the arp
+hold, the keybed) and they had no shared rule. Eight defects, three of them stuck notes:
+
+- **Two sources owning one pitch left notes stuck.** The processor emitted a second note-on
+  for a pitch already sounding, so downstream the first note-off ended it for everyone: the
+  arp lost notes out of its chord, keys stayed lit with nothing sounding, and the arpeggiator's
+  own held-set counter leaked permanently — with Latch on, a released chord arpeggiated forever
+  and every card after it stacked on top. **A pitch is now emitted once and released when the
+  last owner lets go.** Re-pressing still retriggers, because every path that re-fires releases
+  first. `ArpEngine` counts owners per held pitch to match.
+- **Exclusive only worked in one direction.** It never choked a chord held in the arp, and
+  handing a card to the arp never choked a sounding pad. It is a rule about *sources* now: one
+  chord at a time whichever surface started it.
+- **Clearing the card that was feeding the arp orphaned the chord.** The ring vanished, the
+  empty pad stopped accepting clicks, and the only way out was All Off. Clearing releases it,
+  and the ring is drawn (and clickable) even on a cleared card.
+- **To Arp was lost when the plugin window closed**, while the chord stayed held — leaving the
+  pads back in momentary mode with a lit ring and no gesture that released it. The mode lives
+  on the processor now and persists with the session.
+- **Only the pad strip honoured To Arp.** The live chord card and the generator's pad grid
+  played momentarily instead, and their note-offs silenced whatever the arp was chewing on.
+- **Moving a card left the ring behind**, pointing at the wrong slot.
+- **Releasing the live card or an arp-held chord wiped every other source's pending strum
+  notes**, because `cancelScheduledNotes` treated any negative tag as "cancel everything" —
+  true only while -1 was the sole negative tag. A pad mid-strum lost the rest of its chord.
+  This one predates the arp work.
+- **Releasing a chord mid-strum silenced somebody else's note.** A source remembers the whole
+  chord it asked for, which during a strum is ahead of what it has actually played — the rest
+  is still queued. Stopping it dropped the queue and then sent a note-off for every note in
+  the chord *including* the ones that never sounded, and since a pitch now ends when its last
+  owner lets go, that took a reference belonging to another source: release a pad mid-strum
+  while holding one of the same pitches on the keybed and the keybed's note stopped with the
+  key still down and still lit. Every chord source releases through one `releaseNotes()` now,
+  which cancels and releases together and can therefore tell the two apart.
+
+Sustain is deliberately unchanged: it defers the release a mouse-up would have caused, and a
+chord held into the arp is not released by a mouse-up at all.
+
+### Fixed: All Off did not match the buttons beside it
+
+It was laid out 20 px tall where Sustain, Exclusive, Wheels and Detach are 24–26, and the
+skin's button font scales with height, so its label came out smaller too.
+
+### Fixed: every arp note-off was one audio block late
+
+`ArpEngine::process()` retires owed note-offs at the *top* of the block, before any step
+fires — so a note-off parked by `fireStep()` was first judged a block later, with its
+countdown still measured from the block it was born in. Every note the arpeggiator played
+therefore ran one buffer long, and a note whose gate ended inside its own block never ended
+inside it at all: it was held until the next one.
+
+`active[].samplesLeft` now has one stated meaning — an offset from the start of the block being
+processed — and the drain moved. Each hit closes what it lands on top of immediately before its
+own note-on, and whatever is still owed is drained at the end of the block and rebased once.
+A note that ends inside the block it started in is emitted there and then, never parked.
+
+Doing the drain up front instead is what **broke ties**: at gate 101–200% a note overlaps into
+the next step, and on a repeating pitch the owed note-off has to be pulled back to just before
+the retrigger. Drained early, it landed *after* the note-on that superseded it — two note-ons
+for one pitch with nothing between them, which hangs a voice on any synth that allocates per
+note-on. That is why the close happens per hit rather than per block.
+
+Mostly inaudible at 512 samples (~11 ms) until now, which is why it survived: it took making
+**Gate** a knob you can turn to 5% on any shape to make it easy to hear. Nine regression tests
+cover it, including one across uneven block sizes (512 / 480 / 1024), where the old code put
+the note-off at sample 2012 instead of 1500 — late by exactly the first block — and five that
+pin the tie and event-ordering behaviour so this cannot be "fixed" the wrong way again. One of
+those deliberately puts *both* hits of a tie inside a single buffer, which is the shape the rest
+of the suite structurally could not reach and where an earlier attempt at this fix stacked two
+note-ons on one pitch.
+
+Out of note-tracking slots (64 sounding arp notes), the fallback now ends the note at the edge
+of the block rather than stamping an event past the end of the buffer.
+
+### Fixed: ratchets did nothing at any buffer size a host actually uses
+
+A ratchet subdivides one step, and a step is normally longer than a buffer: at 1/16 and
+120 bpm a step is 6000 samples against a 512-sample block. Sub-hits were stamped at their
+offset from the step regardless, so a ratchet of 4 put note-ons at samples 1500, 3000 and
+4500 of a 512-sample buffer — out of range, and dropped or clamped by whatever came next.
+Only the first hit of any ratchet was ever heard.
+
+The mistake is deciding an event belongs to this block because the thing that *caused* it
+did. A sub-hit that lands past the end of its block is carried into the one
+it belongs to now, in the same frame `active[]` already uses and rebased by the same
+`advanceBlock()`. The step is still resolved exactly once — the RNG draw, the sequence walk
+and the step counter must not repeat — so what is carried is the finished hit, not the step.
+Un-fired sub-hits are dropped on bypass, on a transport jump and when the keys come up: a
+ratchet is one gesture and does not outlive the step that decided it.
+
+Three tests, each confirmed to fail before: sub-hits land at the right absolute samples
+across 512-sample blocks, the same run comes out identical at 512 / 480 / 8192, and no event
+is ever stamped past the end of its buffer (the old code emitted six that were). The existing
+ratchet test passed throughout because its block is exactly one step long, which is a blind
+spot worth remembering: a test whose buffer is a whole step cannot see a timing bug that only
+appears when an event crosses a buffer edge.
+
+### Fixed: run.py crashed with a raw traceback instead of building
+
+Smart App Control is enforced on the dev machine, and the `cmake` on PATH is pip's *launcher*
+(`Scripts\cmake.exe`), which is unsigned. SAC blocks it, `CreateProcess` fails, and Python
+turned that into an `OSError` traceback out of `subprocess` — the exact thing run.py exists to
+avoid, since it is meant to be double-clicked and read.
+
+run.py now looks for a cmake that will actually start, preferring signed ones: `$CMAKE`, then
+Visual Studio's bundled copy, then pip's real signed payload in `site-packages/cmake/data/bin`
+(which the blocked launcher was merely wrapping), then a normal install, then PATH. If none
+starts it says which were blocked and why, instead of a traceback.
+
+The launch retry after a build was also too impatient — 5 tries over 3.5 s, tuned when SAC's
+reputation check cleared almost immediately. It has been measured at ~3 minutes on this
+machine, so a slow launch read as "it's broken" and the advice printed was to run the same
+command again. It now waits up to 4 minutes and says what it is waiting for.
+
+### Changed: the chord pads are their own section
+
+The pads used to live inside the Perform view, which meant picking Chords or Arp put them
+away — so the arpeggiator, whose whole job is to chew on a chord, was the one place you
+could not reach a chord. They now sit in a **Pads** section of their own between the centre
+view and the keyboard, visible under all three views and folding on their own chevron. Their
+page buttons moved onto the Pads bar, where the row of four used to cost 34 px under the
+strip. Perform is the knob bank alone now, so the Pads chip on the view bar is gone.
+
+### Added: cards go into the arpeggiator, two ways
+
+- **To Arp**, a toggle on the Pads bar. Lit, a click on a chord card hands its chord to the
+  arp and *leaves it there* — the notes are held with no note-off until you click the lit
+  card again or click another. The card wears a bright ring while it is the one feeding the
+  arp. Unlit, pads behave exactly as before; this is a visible toggle rather than an implicit
+  "the arp is on" mode, so a pad never quietly does something different than it did a minute
+  ago. (With the arp bypassed the chord simply sustains, which is honest.)
+- **Send to arp slot**, in a pad's right-click card menu. Parks a copy of the chord in one of
+  the twelve slots, to be launched later. A copy, not a reference: regenerating the pad page
+  must not silently rewrite what a slot plays.
+
+### Changed: the arpeggiator is laid out like an arpeggiator
+
+Owen asked for the hardware-arp arrangement: controls gathered into ruled, captioned groups
+instead of strung across two loose rows.
+
+- **PATTERN** (Shape, Rate, Trip, Dot), **PLAYBACK** (Swing, Gate, Chance, Octaves, Anchor,
+  Latch, Retrigger) and **STEPS** (Steps, Speed, Link), the last appearing only in Pattern
+  shape, where it belongs with the editor it drives.
+- **`<` and `>` step buttons beside Shape and Rate.** Walking to the next shape is the
+  commonest thing you do to an arp and it cost a click, a travel down a menu and a second
+  click. They clamp at the ends rather than wrapping, so one click too many on "Up" cannot
+  drop you in "Pattern" and throw the whole step editor open.
+- Swing, Gate and Chance are knobs with their value beneath them.
+
+### Added: Gate and Chance work on any shape
+
+Both existed only as per-step lanes, and the lanes are gated behind Shape being "Pattern" —
+so on a plain "Up" there was no way to shorten the notes or thin the run out at all. Two new
+parameters, `arpGate` (5–200%) and `arpChance` (0–100%), **multiply** the lane value, so the
+defaults leave an edited pattern exactly as drawn and the controls mean the same thing in
+both shapes. **Parameter layout change: sessions saved before this will load, but the two
+new parameters come up at their defaults, which is a no-op.**
+
+The parameters that stopped being read — `velocity`, `curve`, `latch`, `humanizeTime` — also
+moved to the end of the layout, beside the other retained-but-unread ones, so what the plugin
+actually uses reads top to bottom. Saved state and existing automation are unaffected: Keys
+ships VST3 and Standalone only, and JUCE derives a VST3 parameter's id by hashing its string
+id, not from its position. What does change is **order** — where these appear in a host's
+generic parameter list, and the numbering in any host UI that counts them. Nothing is renamed
+and nothing is removed.
+
+### Changed: arp patterns became twelve launchable slots
+
+A–H were eight lettered memories that only appeared in Pattern shape. They are now twelve
+cards that show what they will play — the chord they hold, the shape and the rate they will
+install — with a launch triangle, and they are on screen in **both** shapes, because
+launching a chord through "Up" is as much a thing you do as launching one through an edited
+pattern. One click launches: it installs the pattern, applies the slot's shape and rate, and
+holds the slot's chord. Clicking the launched slot again releases it, and a new **Stop**
+button releases it without reaching for All Off. A slot with no chord launches the pattern
+alone and arpeggiates whatever you are already holding.
+
+Right-clicking a slot opens Launch / Clear chord / Copy / Randomize — an accelerator only;
+every one of those has a left-click path on the buttons beside the row.
+
+Slots 9–12 come up empty in a session saved with eight.
+
+### Added: each instance wears its own colour
+
+A session with Keys on the pad track and Keys on the bass track gave you two identical
+windows. Every instance now picks from eight accents (Cyan, Amber, Lime, Violet, Magenta,
+Orange, Rose, Ice) from a swatch on the Controls bar, and it colours the whole plugin:
+knobs, keys, the fallboard rail, tick marks, slider tracks, the wheel LEDs.
+
+- **The accent is per instance, not global.** A DAW loads every instance into one
+  process, so a global would have repainted every track's Keys at once. It hangs off each
+  editor's `KeysLookAndFeel` and components resolve it through the LookAndFeel chain JUCE
+  already walks up to the editor (`skin::accentOf`).
+- **The swatch sits on the Controls *bar*, not inside the section**, so it stays reachable
+  with Controls folded away. Telling instances apart is the point; hiding the control
+  behind a fold would defeat it.
+- Saved with the session. Cyan stays the default and the line's colour.
+
+### Added: clicking a held key releases it
+
+Both ways of holding a note were one-way doors. A key the pedal caught stayed on until
+Sustain came off entirely; a key toggled on with a right-click needed a second right-click,
+which is an accelerator not everyone reaches for. A plain left click now releases either,
+so a chord with a wrong note in it can be taken apart a note at a time instead of started
+over.
+
+### Changed: the performance controls live on the Keyboard bar
+
+Exclusive, Sustain and All Off now sit next to Wheels and Detach, and — unlike those two —
+they stay visible whatever the Keyboard section is doing. They are what you reach for
+*while playing*, so a fold must not take them away. They no longer follow the centre
+view either, so they are there in Chords and Arp too.
+
+### Added: the live chord card plays
+
+Holding a chord sounds the keys you are holding. Clicking the "hold a chord" card now
+fires those same notes as one chord, so you hear it the way a pad would play it: strummed,
+humanized, and capped by Voices. Press and hold to sound it, release to stop (Sustain
+holds it). Dragging still captures the chord onto a pad — the drag wins the moment the
+mouse actually moves.
+
+### Changed: chord-pad pages are four buttons, under the pads
+
+`< 1/4 >` sat up on the view bar, far from the pads it paged, and read as a fraction. It
+is now four numbered buttons directly beneath the pad strip: one click reaches any page,
+and what they page is obvious from where they are.
+
+### Fixed: Strum was doing nothing
+
+Chord-pad Strum spreads a chord's note-ons over up to 200 ms. It never did. It passed the
+delay to `noteOn`, which timestamps the message and hands it to `juce::MidiMessageCollector`
+— and that empties its **entire** queue into the current block on every callback, clamping
+each event into it. Anything beyond one buffer (~10 ms at 512 samples) was flattened onto
+the end of that buffer, so every chord landed as a block however far the slider was pushed.
+
+Strum now schedules its notes on the message thread and emits each when it comes due, the
+same approach the MCP bridge already used for deferred notes. The timer only runs while
+something is pending. Every path that stops sound (stopping a pad, panic) also drops what
+is still queued, because a note-on that fires after its note-off is a stuck note nothing
+clears.
+
+A comment in `PluginProcessor.h` had named strum as the "one real use" for that delay
+argument, which is what kept the bug hidden; it now says the opposite.
+
+### Removed: the Humanize Timing spread
+
+It rode the same broken path, and fixing it would not have been worth it: a random 0-30 ms
+nudge is inaudible on a single clicked note, and on a chord it is Strum's job, done better
+and with a direction. The parameter is retained but no longer read.
+
+### Changed: only the chevron folds a section
+
+The whole section bar was the target, so a click that missed a tab or a chip by a few
+pixels folded the section instead. Now just the chevron end does — still a full 40x34 hit
+box, and the hover highlight sits on it rather than lighting the whole bar, so where to
+click is visible rather than remembered.
+
+> **Reversed on 2026-07-27** — see "the whole section bar folds it again" above. The
+> accident this was guarding against could not actually happen: the controls on a bar are
+> siblings sitting in front of it, so z-order already stopped the bar from stealing their
+> clicks.
+
+### Changed: one velocity control, not two
+
+There were two: a fixed Velocity slider that only applied while Humanize was **off**, and
+the Humanize range that only applied while it was **on**. The same control in two costumes,
+which is what made them feel redundant. The range absorbed it: Humanize on picks a random
+value inside the band per note, off plays its midpoint. Collapse the band onto one value
+and you have a plain fixed velocity — which is all the slider ever did.
+
+The header is two rows instead of three as a result, so the whole window is 49 px shorter.
+
+**This changes how an existing session sounds.** `velocity` is retained but no longer read,
+so a session that set it loads with the velocity the Humanize band describes instead: with
+the default band that is 76, whatever the slider used to say. Sessions saved at a loud fixed
+velocity come back quieter. Drag the band to where you want it once and it stays.
+
+### Changed: the Latch toggle is gone
+
+Once a left click releases a note it is holding, a whole *mode* for holding notes earned
+nothing: right-click holds, left-click releases. Latch survives internally for chord-pad
+editing, which still forces it on.
+
+Both parameters are **retained but no longer read**, alongside `curve`, `surface`,
+`padChannel` and the XY pad's, so existing sessions and host automation still load.
+
+### Fixed: long names were clipped in every menu, not just the colour picker
+
+`drawPopupMenuItem` insets its text by 26 px on each side for the tick gutter, but the
+base class sizes menu items from the text alone — so every menu in the plugin came out
+52 px too narrow and ellipsised its longest entry. "Magenta" was the visible symptom; the
+CC picker and the chord-card menus had it too.
+
+### Changed: Velocity Curve is gone from the UI
+
+It shaped the Velocity slider's own constant, so it only ever remapped one fixed number to
+another — which is what moving the slider does. Between it, the slider and the Humanize
+range there were three overlapping ways to set velocity, and this was the one that earned
+nothing. The parameter is **retained but no longer read**, alongside `surface`,
+`padChannel` and the XY pad's, so existing sessions and any host automation still load.
+
+### Changed: the Humanize velocity range drags as a band
+
+Only the two ends were grabbable, so shifting a range meant dragging one end, then the
+other, then fixing the width by eye: three careful gestures for what is conceptually one.
+Grabbing between the ends now moves the whole band and keeps its width. The ends still
+resize it, and nothing needs a modifier key.
+
+### Changed: Sustain and All Off moved next to Exclusive
+
+They are the two controls you reach for *while playing*, and they were in the Controls
+section — the one most likely to be folded away, which was taking them with it.
+
+### Fixed: the window could be dragged smaller than its own contents
+
+The minimum size was fixed while the layout is not, so with every section open the window
+could be pulled well under what it needed and rows were simply carved off the bottom. The
+floor now moves with the folds: the content's own height *is* the minimum.
+
+### Fixed: tooltips were oversized, and long colour names were clipped
+
+Tooltips used JUCE's 13 px default in a box up to 400 px wide, which next to this skin's
+10 px micro-caps read like a different application. Smaller type, tighter padding, a
+narrower wrap, and the longest tooltip strings cut down. The theme swatch also grew enough
+to fit "Magenta".
+
+### Changed: the centre section folds like the others
+
+Perform / Chords / Arp used to fold by clicking whichever tab was already lit, which was
+its own gesture to learn. The centre now has a `SectionBar` with a chevron, the same as
+Controls and Keyboard, and the three tabs ride on that bar. They stay visible while it is
+folded, so picking one both unfolds and switches.
+
+### Added: the detached keyboard carries its own Size selector
+
+Key count lives in the Controls section, which is exactly the section you fold away once
+the keyboard is in its own window. The detached window now has its own, on the same
+parameter.
+
+### Changed: the dev loop is `run.py`, so it can be launched with a double-click
+
+`run.ps1` had to be typed at a prompt. Typing is real effort here, and the dev loop is the
+one command that gets run dozens of times a day. `run.py` does exactly the same work and
+Explorer will run it on a double-click (or right-click → Open), with no arguments needed.
+
+- Same behaviour throughout: the polite WM_CLOSE aimed at the window titled after the
+  product (a force-kill loses the synth Keys Host has loaded), configure only on a cold
+  build tree, and the Smart App Control launch retry.
+- **The console holds open if anything fails**, so the error can be read instead of
+  flashing past as the window closes. It only does this when the console was created for
+  the script, so running it from a terminal never pauses.
+- `run.ps1` is now a shim that forwards to `run.py`. One copy of the logic, and
+  `./run.ps1 -Keys -NoBuild` still works exactly as before.
+
+### Changed: every section folds, and the keyboard can leave the window
+
+The editor was one fixed stack: three rows of controls, knobs, pads, keys, all of it
+always on screen, with a floor of 820x560 whether or not you were using any of it. On a
+busy screen that is a lot of plugin for a keyboard you mostly want to click.
+
+- **Controls, Knobs, Pads, Wheels and Keyboard each fold away**, from a `SectionBar`
+  (a full-width 34 px header with a disclosure chevron) or a chip on the bar the section
+  belongs to. The window resizes itself to whatever the folds add up to, so the minimum
+  height drops from 560 to 150: bars only, if that is all you want on screen.
+- **The keyboard detaches into its own resizable window.** Docked, the keybed is one row
+  of a fixed layout and key size is a compromise with everything above it. Detached, its
+  size is entirely yours, and the 185 px key-height cap comes off so dragging the window
+  taller genuinely makes the keys taller. Its close button re-docks it.
+- **Folds, the current view and the detached window's position are saved with the
+  session**, so a session comes back looking the way it was left. They are session state,
+  not parameters: none of it changes a note.
+- **Wheels and Detach travel with the keybed.** Detached, they sit on a strip inside the
+  keyboard window: leaving the control that undoes a detach on the main editor put it in
+  the window you were not looking at, and left the keyboard window with nothing on it but
+  a close box.
+- **Keys Host follows the folds too**, in both directions. Its window used to only ever
+  grow, so minimizing a section there did nothing except hand the freed space to the
+  keybed. Its minimum height drops with it (664 -> 194).
+- **Hiding the wheels widens the keyboard.** The toggle hid them but left the keys where
+  they were: the keybed holder's own bounds do not move when only its contents change, so
+  JUCE never called its `resized()` and the keys kept their old width.
+
+### Changed: Chords and Arp are views, not sheets over the whole plugin
+
+Both opened as an overlay that dimmed and covered the entire editor, including the
+keyboard. Editing an arpeggiator while unable to play a note is backwards for an
+instrument you perform, and it made the plugin feel like it had opened a second window.
+
+- **The tool row is now a view bar**: `Perform | Chords | Arp`. Each swaps what the middle
+  of the editor shows; the header rows and the keyboard stay put and stay playable.
+- **Clicking the lit tab folds the centre away**, which is how the middle section
+  minimizes. It needs no chevron of its own.
+- The panels' `Close` buttons now return to Perform rather than dismissing an overlay.
+
+### Fixed: a grey band smeared across the bottom of every key
+
+The white keys' front lip was a 10 px band two steps darker than the key body with a 30%
+black line above it. Meant as the 3D step under the playing surface, it read as a shadow
+someone had left on the keybed. It is now a thin, barely-darker bevel with a hairline
+separator: the keys still have a front face, without the dirt.
+
 ### Added: the keyboard lights up for notes you did not play
 
 The on-screen piano only ever showed your own mouse gestures. Its three states come

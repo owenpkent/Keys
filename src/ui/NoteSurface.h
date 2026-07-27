@@ -23,7 +23,9 @@ namespace keys
 // while it rings.
 //
 // Mouse: left click plays, left drag glides (monophonic; with the pedal down the trail
-// keeps ringing). Right-click toggles a per-note latch — an optional accelerator on top
+// keeps ringing). With Sustain on, clicking a key the pedal is already holding releases
+// it, so a chord built by mistake can be taken apart a note at a time instead of needing
+// Sustain switched off. Right-click toggles a per-note latch — an optional accelerator on top
 // of the on-screen Latch toggle, never the only path (accessibility contract). It feeds
 // the same `latched` set, so Latch-off and panic clear it; Octavium's right-latched
 // notes survived panic forever, which was a bug, not a behaviour to keep.
@@ -86,6 +88,7 @@ protected:
     std::vector<int> voiceOrder; // drawn ids in the order they started (FIFO, for stealing)
     int dragDrawn = -1;
     bool rightGesture = false;   // a right-click toggle is in flight; ignore its drag/up
+    bool releaseGesture = false; // this click released a sustained note; ignore its drag/up
 
 private:
     void timerCallback() override; // polls the processor's sounding generation, repaints on change

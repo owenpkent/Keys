@@ -13,9 +13,11 @@ namespace keys
 // The chord generator, ported from Octavium's Autofill + Options dialogs and its
 // right-click card menu (app/chord_autofill.py, app/chord_suggestions.py).
 //
-// It is an overlay rather than a dialog: a plugin editor has no business opening OS
-// windows, and an overlay keeps every target inside the one surface the mouse is already
-// in. It fills the *current pad page*, so the four pages can hold four different keys.
+// It is inline rather than a dialog: a plugin editor has no business opening OS windows,
+// and the centre view keeps every target inside the one surface the mouse is already in.
+// Picking Chords swaps it in where the knob bank and chord pads sit, so the keyboard
+// stays playable while you generate. It fills the *current pad page*, so the four pages
+// can hold four different keys.
 //
 // The pad grid is repeated at full size (not the strip) so each pad is a generous
 // play target. Per-pad actions (Lock / New chord / Next suggestions) live in the
@@ -34,9 +36,17 @@ public:
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override; // swallow clicks so the editor below is inert
 
-    std::function<void()> onClose; // dismiss the overlay
+    std::function<void()> onClose; // dismiss the panel
+
+    // Inline: draw as a plain card filling our bounds, with no scrim behind it.
+    void setInlineMode(bool);
+
+    // Header rows plus a 4x4 pad grid whose cards stay comfortable play targets.
+    static constexpr int preferredHeight = 16 + 24 + (28 + 8) + (44 + 4) + (44 + 6) + (36 + 8) + 4 * 74 + 3 * 8;
 
 private:
+    bool inlineMode = false;
+
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;

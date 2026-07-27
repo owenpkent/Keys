@@ -1,10 +1,12 @@
 # Dependabot configuration. Addresses scorecard/Dependency-Update-Tool.
 #
 # Weekly cadence for GitHub Actions. This is the only ecosystem Dependabot
-# supports for this repo: the C++ deps (JUCE, okstudio-juce-kit) are pinned by
-# git ref in CMake, which Dependabot does not track. A configured ecosystem
-# with no manifest makes Dependabot log a failed run every cycle, so only the
-# github-actions block is enabled.
+# supports for this repo: there is no package manifest of any other kind here.
+# JUCE and okstudio-juce-kit are sibling checkouts CMake adds by path (only CI
+# pins a JUCE ref, in its checkout step), and the Transcribe section's ONNX
+# Runtime is downloaded from a GitHub release at configure time. Dependabot
+# tracks none of that. A configured ecosystem with no manifest makes Dependabot
+# log a failed run every cycle, so only the github-actions block is enabled.
 version: 2
 updates:
   - package-ecosystem: "github-actions"

@@ -17,7 +17,8 @@ class KeysMcp; // src/mcp/KeysMcp.h; only PluginProcessor.cpp needs the full typ
 // the track output, to drive whatever instrument sits downstream. All settings
 // (size, scale-lock, octave, channel, velocity, sustain, latch) persist with the
 // DAW session via the APVTS.
-class KeysProcessor : public juce::AudioProcessor
+class KeysProcessor : public juce::AudioProcessor,
+                      private juce::Timer // strum scheduling; see scheduleNoteOn
 {
 public:
     KeysProcessor();
@@ -52,11 +53,15 @@ public:
 
     // Note I/O: called from the UI thread; queued and drained on the audio thread.
     // delaySeconds nudges the note-on (or, on noteOff, the note-off) later, and is only
-    // good for sub-block waits: chord-pad strum spread is the one real use. It is NOT a
-    // scheduler. juce::MidiMessageCollector empties its queue into the current block on
-    // every callback and clamps each event into it, so a delay long enough to matter is
-    // simply thrown away. Anything that has to happen meaningfully later has to be held
-    // and emitted at real time (see src/mcp/KeysMcp.cpp).
+    // good for sub-block waits. It is NOT a scheduler. juce::MidiMessageCollector empties
+    // its queue into the current block on every callback and clamps each event into it, so
+    // a delay longer than one buffer (~10 ms at 512 samples) is simply thrown away.
+    //
+    // This comment used to name chord-pad strum as its "one real use". That was wrong, and
+    // it hid the bug: Strum asks for up to 200 ms, so the spread was flattened and every
+    // chord landed as a block. Strum now goes through scheduleNoteOn instead. Anything
+    // that has to happen meaningfully later has to be held and emitted at real time (see
+    // scheduleNoteOn here, and src/mcp/KeysMcp.cpp).
     // channelOverride 1..16 sends on that channel instead of the global param (0 = global);
     // the Pad Grid surface uses it so drums land on their own channel.
     void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0);
@@ -73,6 +78,14 @@ public:
     // repaint only when something actually moved.
     bool isNoteSounding(int midiNote) const;
     juce::uint32 soundingGeneration() const { return soundingGen.load(); }
+
+    // What is arriving on the MIDI *input* - a physical keyboard through the standalone's
+    // MIDI settings, or a clip and any device above Keys in a DAW track. Keys has always
+    // passed that stream through untouched; this only watches it go by, so the on-screen
+    // keybed lights up for what someone else is playing and the live chord card can name
+    // the chord under their hands. Display only, and a flag per pitch rather than a count:
+    // a missed note-off would leak a refcount into a key lit forever.
+    std::vector<int> inputNotes() const; // sorted, message thread
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
@@ -86,7 +99,7 @@ public:
     // Live settings read by the editor / keyboard widget.
     int midiChannel() const;   // 1..16
     int octaveShift() const;   // -5..+5, in octaves
-    float baseVelocity01() const; // velocity slider through the curve, 0..1 (Humanize aside)
+    float baseVelocity01() const; // midpoint of the velocity range, 0..1 (Humanize re-rolls it per note)
     int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes
 
     // Chord pads: capture a chord's notes into a slot, click to play/stop it. The pad
@@ -121,6 +134,12 @@ public:
     void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive
     void releaseChordPad(int i);         // stop it, unless Sustain is holding
     void stopAllChordPads();
+
+    // The live card's chord: whatever the keyboard is holding, fired as one gesture so it
+    // is heard strummed and humanized the way a pad plays it, rather than as the sum of
+    // the keys under your mouse. Same press/release contract as a pad.
+    void pressLiveChord(const std::vector<int>& notes);
+    void releaseLiveChord(bool force = false);
     int padPage() const;                 // 0-based; the page the editor is showing
     int padPageOffset() const { return padPage() * padsPerPage; }
 
@@ -131,12 +150,46 @@ public:
     // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
     // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
     ArpEngine arp;
-    static constexpr int numArpPatterns = 8;
+    // Twelve, not the original eight: the slots stopped being lettered pattern memories and
+    // became launchable cards carrying a chord as well as a pattern, and twelve of them fit
+    // a bar of the strip. Slots 9-12 come up empty in a session saved with eight.
+    static constexpr int numArpPatterns = 12;
     int arpActivePattern() const { return activeArpPattern; }
     void storeActiveArpPattern();          // lanes -> snapshot slot (call before switching)
     void recallArpPattern(int index);      // snapshot slot -> lanes, becomes active
     void copyArpPattern(int from, int to); // whole-pattern copy (the no-modifier answer)
     void randomizeActiveArpPattern();
+
+    // Launch a slot: recall its pattern, apply the shape and rate it remembers, and hold
+    // its chord into the arp. That is the whole "pass a card into the arpeggiator" gesture
+    // in one click. A slot with no chord launches the pattern alone and arpeggiates
+    // whatever is already sounding.
+    void launchArpSlot(int index);
+    void stopArpSlot();                  // release the launched chord; the pattern stays
+    int arpLaunchedSlot() const { return launchedSlot; }
+    void setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name);
+    void clearArpSlotChord(int index);
+
+    // Hold a chord into the arp without going through a slot: the Pads section's "To Arp"
+    // toggle sends a card here. Held means exactly that - the note-ons are emitted and no
+    // note-off follows until the next call, so the arp keeps chewing on it whether or not
+    // its own Latch is on. With the arp bypassed the chord simply sustains, which is honest.
+    void holdArpChord(const std::vector<int>& notes, const juce::String& name);
+    void releaseArpChord();
+    const std::vector<int>& arpHeldNotes() const { return arpChordOn; }
+
+    // Hold a chord pad's chord into the arp, remembering which pad it came from so the
+    // strip can light it. Same one-at-a-time rule as a slot: a second call swaps.
+    void holdArpChordFromPad(int padSlot);
+    int arpHeldPad() const { return arpPadSlot; }
+
+    // True when a left-click on a chord card should hand that chord to the arpeggiator and
+    // leave it there, rather than play it beat-pad style for as long as the button is down.
+    // That used to be its own "To Arp" toggle on the Pads bar; it is simply *the arp being
+    // on* since 2026-07-27, because a mode you had to arm separately from the arp read as
+    // doing nothing whenever the arp happened to be off. Every surface that shows a chord
+    // card asks here, so the pad strip and the generator's grid can never disagree.
+    bool cardsFeedArp() const { return apvts.getRawParameterValue("arpOn")->load() > 0.5f; }
 
     // A stored pattern slot (A-H), independent of whichever pattern is currently
     // active/live. Public so the MCP bridge can read or write an arbitrary slot
@@ -147,11 +200,70 @@ public:
         std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
         std::array<int, ArpEngine::numLanes> length {};
         std::array<int, ArpEngine::numLanes> clockDiv {};
+
+        // What launching the slot plays, and how. The chord is a copy of a card, not a
+        // reference to one: re-generating the pad page must not silently rewrite what a
+        // slot launches. -1 on shape or rate means "leave that control alone", which is
+        // what a slot that has never been told a shape does.
+        std::vector<int> chordNotes;
+        juce::String chordName;
+        int shape = -1;  // 0..numDirections-1 a direction, numDirections = Pattern
+        int rate = -1;   // index into the arpRate choice list
     };
     const ArpPattern& arpPatternSlot(int index) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
 
+    // How the editor is folded up. Deliberately not parameters: none of it changes a
+    // note, and exposing five booleans to host automation would only add ways to break
+    // a session. It lives here rather than in the editor because the editor is created
+    // and destroyed every time the window opens, and Owen should get the same layout
+    // back. Message thread only; the audio thread never reads it.
+    struct LayoutState
+    {
+        bool controls = true;   // the three header rows
+        bool centre = true;     // the centre view (Perform / Chords)
+        bool knobs = true;      // the CC knob bank
+        bool pads = true;       // the chord-pad strip
+        bool arp = false;       // the arpeggiator section (off by default: it is tall)
+        bool transcribe = false; // the Transcribe section (off by default: it is tall too)
+        bool wheels = true;     // mod + pitch, left of the keybed
+        bool keyboard = true;   // the keybed itself
+
+        // Every section can also be popped out into a window of its own (2026-07-27; the
+        // keybed and the arp could already, and Owen asked for the rest to follow). One
+        // flag and one remembered frame each, in the editor's top-to-bottom order.
+        // `detached` keeps its bare name: it is the keybed's, and renaming it would drop
+        // the setting out of every session saved before this.
+        bool controlsDetached = false;
+        bool centreDetached = false;
+        bool arpDetached = false;
+        bool padsDetached = false;
+        bool transcribeDetached = false;
+        bool detached = false;  // keybed lives in its own resizable window
+
+        int  view = 0;          // which centre view: 0 = perform, 1 = chords
+        int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
+
+        // Where each window was left. Empty = never detached yet, so centre it.
+        juce::Rectangle<int> controlsDetachedBounds {};
+        juce::Rectangle<int> centreDetachedBounds {};
+        juce::Rectangle<int> arpDetachedBounds {};
+        juce::Rectangle<int> padsDetachedBounds {};
+        juce::Rectangle<int> transcribeDetachedBounds {};
+        juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
+    };
+    LayoutState layout;
+
 protected:
+    // Everything both products restore from a saved session. Keys Host adds its instrument
+    // on top of this rather than repeating the list; see the definition.
+    void restoreSharedState(const juce::ValueTree& root);
+    // Repairs a session saved before Strum became a range; see the definition for the tell.
+    void migrateStrumRange(const juce::ValueTree& root);
+
+    juce::ValueTree layoutToTree() const;
+    void layoutFromTree(const juce::ValueTree& root);
+
     juce::ValueTree arpToTree() const;              // all patterns + the live lanes
     void arpFromTree(const juce::ValueTree& root);
     // Chord-pad state as a "chordPads" ValueTree, shared with subclasses (Keys Host
@@ -164,7 +276,51 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     void stopChordPad(int i);
-    float curved(float pos01) const; // shape a 0..1 velocity position by the Curve param
+
+    // Shared by the pads and the live card: cap, order, strum-schedule a chord. Returns
+    // the notes actually fired (post polyphony cap), for the caller to remember.
+    std::vector<int> fireChord(const std::vector<int>& notes, int tag);
+    // Scheduling tags. Pads use their own slot (>= 0); everything else is negative, and
+    // cancelScheduledNotes must compare against the exact tag, never `< 0` - see the comment
+    // there for the stuck-note this caused.
+    static constexpr int panicTag = -1;     // cancelScheduledNotes only: cancel *everything*
+    static constexpr int liveChordTag = -2; // the live "current chord" card
+    static constexpr int arpChordTag = -3;  // the chord held into the arp
+    std::vector<int> liveChordOn;
+    std::vector<int> arpChordOn;   // notes currently held into the arp (empty = none)
+    juce::String arpChordName;
+    int launchedSlot = -1;         // arp slot whose chord is held, or -1
+    int arpPadSlot = -1;           // chord pad whose chord is held, or -1
+
+    // Hold a note-on and emit it `delayMs` from now, on the message thread.
+    //
+    // noteOn's own delaySeconds cannot do this. It timestamps the message and hands it to
+    // juce::MidiMessageCollector, which empties its *entire* queue into the current block
+    // on every callback and clamps each event into it - so anything beyond one buffer
+    // (~10 ms at 512 samples) collapses onto the end of that buffer. Strum asks for up to
+    // 200 ms, so the spread was simply thrown away and every chord landed as a block.
+    //
+    // Message thread only, same approach as the MCP bridge's deferred notes. The timer
+    // runs only while something is pending, so an idle plugin costs nothing.
+    void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot);
+    // Drops this tag's un-fired notes (panicTag drops everything) and returns the pitches it
+    // dropped, so a caller releasing the chord can tell which of its notes never sounded.
+    std::vector<int> cancelScheduledNotes(int padSlot);
+    // Cancel `tag`'s queued note-ons, release the notes that did sound, and empty `sounding`.
+    // Every chord source releases through here; see the definition for why the two halves
+    // cannot be done independently.
+    void releaseNotes(std::vector<int>& sounding, int tag);
+    void timerCallback() override;
+
+    struct DeferredNote
+    {
+        int note;
+        float vel01;
+        int channel;
+        double atMs;
+        int padSlot; // so stopping one pad drops only its own un-fired notes
+    };
+    std::vector<DeferredNote> deferred; // sorted by atMs; message thread only
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread
@@ -175,11 +331,16 @@ private:
     std::array<std::atomic<int>, 128> noteRefs {};
     std::atomic<juce::uint32> soundingGen { 0 };
 
+    // Notes seen arriving on the MIDI input (see inputNotes). Written on the audio thread,
+    // read on the message thread; a plain flag per pitch, never a count.
+    std::array<std::atomic<bool>, 128> inputNoteOn {};
+    void watchInputNotes(const juce::MidiBuffer&); // audio thread, before anything consumes it
+    void clearInputNotes();
+
     std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
     bool lastArpOn = false;        // audio thread; to flush cleanly on bypass
-    double lastKnownBpm = 120.0;   // audio thread; feeds the internal-clock fallback
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

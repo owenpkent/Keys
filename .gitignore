@@ -12,3 +12,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python bytecode. run.py is a module as well as a script (tooling imports it to reuse
+# close_running and find_cmake), so importing it leaves a cache directory behind.
+__pycache__/
+*.pyc
