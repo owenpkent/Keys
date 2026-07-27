@@ -71,8 +71,14 @@ saves `okstudio::state::save(apvts, "KEYS", dest, { chordPadsToTree(), arpToTree
 layoutToTree(), hosted })` where `hosted` is a locally built `hostedInstrument` tree
 holding the `.vst3` path, name, and the instrument's full state blob base64'd. All four
 trees matter: drop one and a Keys Host session comes back without its arp slots or its
-folds. Restore: load pads, arp and layout, then re-load the instrument from the path and
-apply its blob.
+folds. Restore: call `KeysProcessor::restoreSharedState(root)`, then re-load the instrument
+from the path and apply its blob.
+
+**Call the shared one; never re-list what it does.** This used to read "load pads, arp and
+layout", and the override was three calls copied out of the base class. On 2026-07-27 a
+session repair was added to that base list, worked in Keys, and did nothing at all in Keys
+Host, which nobody would have noticed except that it showed up in a screenshot. Anything
+session shaped belongs in `restoreSharedState`, so both products get it or neither does.
 
 Because the instrument's *complete* state is saved in the Live set, its own MIDI
 Learn mappings (e.g. Keys fader CC → filter cutoff) persist with the project. This

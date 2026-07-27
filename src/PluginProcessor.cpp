@@ -1037,38 +1037,36 @@ void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
     // that session asked for silently becomes a random spread between zero and it. Caught on
     // Owen's own session, which came back reading "STRUM 0-68 MS" for a 68 ms strum.
     //
-    // Out-of-order is the tell, and it is unambiguous: the RangeSlider that owns the pair
-    // cannot produce a high end below the low one, so nothing a user has ever dragged looks
-    // like this. Idempotent, so a session already opened once is corrected too, which
-    // matters because the first open re-saves the broken pair.
-    // Read what the *session* saved, out of the tree, rather than the live parameters: this
-    // runs while the state is still being applied, and the atomics may not have caught up.
+    // The tell is the *absence* of chordStrumMax, and only that. An out-of-order pair looks
+    // like the same thing and was briefly treated as one, but it is not: both ends are
+    // ordinary automatable parameters, and a host or an MCP client can write max below min
+    // deliberately. Collapsing that to a fixed strum on the next load would silently narrow
+    // a range the user meant. Absence cannot be produced by anything except a session older
+    // than the parameter.
+    //
+    // Read the tree rather than the live parameters: this runs while the state is still being
+    // applied, and the atomics may not have caught up.
     const auto params = root.getChildWithName(apvts.state.getType());
     if (! params.isValid())
         return;
 
-    float low = 0.0f, high = 0.0f;
-    bool sawLow = false, sawHigh = false;
+    float low = 0.0f;
+    bool sawLow = false;
     for (int i = 0; i < params.getNumChildren(); ++i)
     {
         const auto child = params.getChild(i);
         const auto id = child.getProperty("id").toString();
+        if (id == "chordStrumMax")
+            return;                      // saved since the change; whatever it says is meant
         if (id == "chordStrum")
         {
             low = (float) child.getProperty("value");
             sawLow = true;
         }
-        else if (id == "chordStrumMax")
-        {
-            high = (float) child.getProperty("value");
-            sawHigh = true;
-        }
     }
 
     if (! sawLow)
         return;                          // nothing saved either way; the defaults are right
-    if (sawHigh && high >= low)
-        return;                          // saved since the change, and the right way round
 
     if (auto* param = apvts.getParameter("chordStrumMax"))
         param->setValueNotifyingHost(param->convertTo0to1(low));

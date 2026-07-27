@@ -177,13 +177,26 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
 ## Screenshots for docs
 
-Use the PrintWindow approach (never SetForegroundWindow/SetCursorPos — Owen is often
-using the machine, and a mis-capture can grab his private windows). Launch the
-standalone, capture via `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`, kill the
-process. Screenshots live in `assets/screenshots/`, referenced from README and docs.
-To capture an overlay (Chords/Arp), don't synthesize clicks — posted WM_LBUTTONDOWN
-never reaches JUCE. Invoke the button through UI Automation instead (find the
-AutomationElement by name, InvokePattern.Invoke()); no cursor movement involved.
+Use `scripts/capture-window.ps1`, which is the PrintWindow approach (never
+SetForegroundWindow/SetCursorPos — Owen is often using the machine, and a mis-capture can
+grab his private windows). Screenshots live in `assets/screenshots/`, referenced from
+README and docs. To reach a view, don't synthesize clicks — posted WM_LBUTTONDOWN never
+reaches JUCE. Invoke the button through UI Automation instead (`-InvokeButtons`); no cursor
+movement involved.
+
+Three things will bite otherwise:
+
+- **Pass `-WindowTitle` for anything but plain Keys.** The default target is
+  `MainWindowHandle`, a heuristic that lands on the *hosted instrument's* GUI in Keys Host
+  (that GUI is a top-level window of the same process) and on an arbitrary section once any
+  are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Centre` /
+  `Keys Arpeggiator` / `Keys Chord Pads` / `Keys Transcribe` / `Keys Keyboard` for the
+  detached sections (the `wire(...)` calls in `PluginEditor.cpp`).
+- **The Detach buttons are named per section**, because six buttons reading "Detach" are
+  six identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
+  name flips with the button's state.
+- **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
+  write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 
 ## Conventions
 

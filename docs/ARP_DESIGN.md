@@ -206,6 +206,16 @@ closed the first half):
   and the generator's grid can never disagree). Switching the arp off releases a chord a
   card was holding, or it would drone with nothing arpeggiating it and no click left to
   release it.
+
+  **That release lives in the editor's timer, and there are two edges it does not cover**
+  (found in the 2026-07-27 sweep, not yet closed). It is gated on `arpHeldPad() >= 0`, so a
+  chord handed over from the *live* card, which leaves `arpPadSlot` at -1, is not released.
+  And with no editor open there is nothing polling at all, so host automation or an MCP
+  client writing `arpOn` false leaves the chord sounding. This is the hazard the old To Arp
+  flag was put on the processor to avoid, in a new place: a chord held into the arp outlives
+  the window, so what releases it should too. Moving the check onto the processor closes
+  both, and wants a heartbeat there that does not exist yet (its `juce::Timer` is the 1 ms
+  strum scheduler and stops itself the moment nothing is queued).
 - **Send to arp slot**, in the pad's card menu, which copies the chord into a slot for
   later. A copy and not a reference, so regenerating the pad page cannot silently rewrite
   what a slot plays.
