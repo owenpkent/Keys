@@ -50,6 +50,14 @@ hold, the keybed) and they had no shared rule. Eight defects, three of them stuc
   notes**, because `cancelScheduledNotes` treated any negative tag as "cancel everything" —
   true only while -1 was the sole negative tag. A pad mid-strum lost the rest of its chord.
   This one predates the arp work.
+- **Releasing a chord mid-strum silenced somebody else's note.** A source remembers the whole
+  chord it asked for, which during a strum is ahead of what it has actually played — the rest
+  is still queued. Stopping it dropped the queue and then sent a note-off for every note in
+  the chord *including* the ones that never sounded, and since a pitch now ends when its last
+  owner lets go, that took a reference belonging to another source: release a pad mid-strum
+  while holding one of the same pitches on the keybed and the keybed's note stopped with the
+  key still down and still lit. Every chord source releases through one `releaseNotes()` now,
+  which cancels and releases together and can therefore tell the two apart.
 
 Sustain is deliberately unchanged: it defers the release a mouse-up would have caused, and a
 chord held into the arp is not released by a mouse-up at all.
@@ -89,6 +97,29 @@ note-ons on one pitch.
 
 Out of note-tracking slots (64 sounding arp notes), the fallback now ends the note at the edge
 of the block rather than stamping an event past the end of the buffer.
+
+### Fixed: ratchets did nothing at any buffer size a host actually uses
+
+A ratchet subdivides one step, and a step is normally longer than a buffer: at 1/16 and
+120 bpm a step is 6000 samples against a 512-sample block. Sub-hits were stamped at their
+offset from the step regardless, so a ratchet of 4 put note-ons at samples 1500, 3000 and
+4500 of a 512-sample buffer — out of range, and dropped or clamped by whatever came next.
+Only the first hit of any ratchet was ever heard.
+
+The mistake is deciding an event belongs to this block because the thing that *caused* it
+did. A sub-hit that lands past the end of its block is carried into the one
+it belongs to now, in the same frame `active[]` already uses and rebased by the same
+`advanceBlock()`. The step is still resolved exactly once — the RNG draw, the sequence walk
+and the step counter must not repeat — so what is carried is the finished hit, not the step.
+Un-fired sub-hits are dropped on bypass, on a transport jump and when the keys come up: a
+ratchet is one gesture and does not outlive the step that decided it.
+
+Three tests, each confirmed to fail before: sub-hits land at the right absolute samples
+across 512-sample blocks, the same run comes out identical at 512 / 480 / 8192, and no event
+is ever stamped past the end of its buffer (the old code emitted six that were). The existing
+ratchet test passed throughout because its block is exactly one step long, which is a blind
+spot worth remembering: a test whose buffer is a whole step cannot see a timing bug that only
+appears when an event crosses a buffer edge.
 
 ### Fixed: run.py crashed with a raw traceback instead of building
 
@@ -150,6 +181,14 @@ parameters, `arpGate` (5–200%) and `arpChance` (0–100%), **multiply** the la
 defaults leave an edited pattern exactly as drawn and the controls mean the same thing in
 both shapes. **Parameter layout change: sessions saved before this will load, but the two
 new parameters come up at their defaults, which is a no-op.**
+
+The parameters that stopped being read — `velocity`, `curve`, `latch`, `humanizeTime` — also
+moved to the end of the layout, beside the other retained-but-unread ones, so what the plugin
+actually uses reads top to bottom. Saved state and existing automation are unaffected: Keys
+ships VST3 and Standalone only, and JUCE derives a VST3 parameter's id by hashing its string
+id, not from its position. What does change is **order** — where these appear in a host's
+generic parameter list, and the numbering in any host UI that counts them. Nothing is renamed
+and nothing is removed.
 
 ### Changed: arp patterns became twelve launchable slots
 
@@ -251,6 +290,11 @@ value inside the band per note, off plays its midpoint. Collapse the band onto o
 and you have a plain fixed velocity — which is all the slider ever did.
 
 The header is two rows instead of three as a result, so the whole window is 49 px shorter.
+
+**This changes how an existing session sounds.** `velocity` is retained but no longer read,
+so a session that set it loads with the velocity the Humanize band describes instead: with
+the default band that is 76, whatever the slider used to say. Sessions saved at a loud fixed
+velocity come back quieter. Drag the band to where you want it once and it stays.
 
 ### Changed: the Latch toggle is gone
 

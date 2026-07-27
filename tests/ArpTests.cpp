@@ -176,6 +176,67 @@ public:
             expectEquals(ons, 2);
         }
 
+        // A ratchet subdivides one step, and a step is normally longer than a buffer: at 1/16
+        // and 120 bpm a step is 6000 samples against a 512-sample block, so three of a
+        // ratchet-4's four sub-hits belong to a later block than the one that decided the
+        // step. They used to be stamped at their raw offset regardless - a note-on at sample
+        // 4500 of a 512-sample buffer - so ratchets did nothing at any buffer a host actually
+        // uses. The test above only passed because its block is exactly one step long.
+        const auto ratchetRun = [&](int ratchets, int blockSize, int blocks)
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneRatchet][0].store(ratchets);
+            std::vector<int> onsets;
+            int outOfRange = 0;
+            for (int b = 0; b < blocks; ++b)
+            {
+                juce::MidiBuffer out;
+                clock.ppq = (double) (b * blockSize) / 24000.0; // 120 bpm at 48 kHz
+                e.process(lp, clock, blockSize, b == 0 ? chordOn({ 60 }) : juce::MidiBuffer {}, out);
+                for (auto& x : collect(out))
+                {
+                    if (x.sample < 0 || x.sample >= blockSize)
+                        ++outOfRange;
+                    if (x.on)
+                        onsets.push_back(b * blockSize + x.sample);
+                }
+            }
+            return std::make_pair(onsets, outOfRange);
+        };
+
+        beginTest("ratchet sub-hits survive a buffer shorter than a step");
+        {
+            // 16 x 512 = 8192 samples: step 0 ratchets into four, step 1 is a plain hit.
+            const auto [onsets, outOfRange] = ratchetRun(4, 512, 16);
+            expectEquals(outOfRange, 0, "no event may be stamped past the end of its buffer");
+            expectEquals((int) onsets.size(), 5, "four sub-hits then the next step - none lost "
+                                                 "to the buffer its own offset fell past");
+            if (onsets.size() == 5)
+            {
+                expectWithinAbsoluteError(onsets[0], 0, 2);
+                expectWithinAbsoluteError(onsets[1], 1500, 2);
+                expectWithinAbsoluteError(onsets[2], 3000, 2);
+                expectWithinAbsoluteError(onsets[3], 4500, 2);
+                expectWithinAbsoluteError(onsets[4], 6000, 2); // step 1, ratchet 1
+            }
+        }
+
+        beginTest("a ratchet lands identically however the buffer is cut");
+        {
+            // Same timeline three ways. A carried sub-hit has to fire where it would have
+            // fired had the block been big enough to hold it.
+            const auto small = ratchetRun(4, 512, 16).first;
+            const auto odd = ratchetRun(4, 480, 18).first;
+            const auto whole = ratchetRun(4, 8192, 1).first;
+            expectEquals((int) odd.size(), (int) small.size(), "block size must not change the count");
+            expectEquals((int) whole.size(), (int) small.size());
+            for (size_t i = 0; i < small.size() && i < odd.size(); ++i)
+                expectWithinAbsoluteError(odd[i], small[i], 2);
+            for (size_t i = 0; i < small.size() && i < whole.size(); ++i)
+                expectWithinAbsoluteError(whole[i], small[i], 2);
+        }
+
         beginTest("probability 0 silences a step; muted note step silences too");
         {
             ArpEngine e;

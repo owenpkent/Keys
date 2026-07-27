@@ -269,7 +269,13 @@ private:
     // Message thread only, same approach as the MCP bridge's deferred notes. The timer
     // runs only while something is pending, so an idle plugin costs nothing.
     void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot);
-    void cancelScheduledNotes(int padSlot); // -1 cancels everything
+    // Drops this tag's un-fired notes (panicTag drops everything) and returns the pitches it
+    // dropped, so a caller releasing the chord can tell which of its notes never sounded.
+    std::vector<int> cancelScheduledNotes(int padSlot);
+    // Cancel `tag`'s queued note-ons, release the notes that did sound, and empty `sounding`.
+    // Every chord source releases through here; see the definition for why the two halves
+    // cannot be done independently.
+    void releaseNotes(std::vector<int>& sounding, int tag);
     void timerCallback() override;
 
     struct DeferredNote

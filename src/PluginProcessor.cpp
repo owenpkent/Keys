@@ -283,10 +283,34 @@ void KeysProcessor::stopChordPad(int i)
 {
     if (i < 0 || i >= numChordPads)
         return;
-    cancelScheduledNotes(i); // a strummed note still queued must never outlive its note-off
-    for (int n : chordPadOn[(size_t) i])
-        noteOff(n);
-    chordPadOn[(size_t) i].clear();
+    releaseNotes(chordPadOn[(size_t) i], i);
+}
+
+void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag)
+{
+    // Drop what this source still has queued, and release the rest — but *only* the rest.
+    //
+    // `sounding` is what fireChord was asked to play, which during a strum is ahead of what
+    // it has actually played: the notes still sitting in `deferred` never reached noteOn and
+    // so own no reference to release. Calling noteOff for one of those takes a reference that
+    // belongs to somebody else, and since a pitch now ends when its last owner lets go (see
+    // noteOn), that emits a real note-off and silences another source's note while its key
+    // stays lit. Releasing a pad mid-strum while the keybed held one of the same pitches did
+    // exactly that - the failure this refcount rewrite exists to remove, arriving by a
+    // different door.
+    //
+    // Matched one-for-one rather than by set membership, so a chord carrying the same pitch
+    // twice still ends up with one note-off per reference actually taken.
+    auto cancelled = cancelScheduledNotes(tag);
+    for (int n : sounding)
+    {
+        const auto it = std::find(cancelled.begin(), cancelled.end(), n);
+        if (it != cancelled.end())
+            cancelled.erase(it); // never fired; there is no reference here to give back
+        else
+            noteOff(n);
+    }
+    sounding.clear();
 }
 
 void KeysProcessor::stopAllChordPads()
@@ -374,10 +398,7 @@ void KeysProcessor::releaseLiveChord(bool force)
 {
     if (! force && apvts.getRawParameterValue("sustain")->load() > 0.5f)
         return; // pedal down: leave it ringing, same as a pad
-    cancelScheduledNotes(liveChordTag);
-    for (int n : liveChordOn)
-        noteOff(n);
-    liveChordOn.clear();
+    releaseNotes(liveChordOn, liveChordTag);
 }
 
 void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot)
@@ -398,7 +419,7 @@ void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double de
         startTimer(1); // 1 ms: a strum step can be as short as 200/8 = 25 ms
 }
 
-void KeysProcessor::cancelScheduledNotes(int padSlot)
+std::vector<int> KeysProcessor::cancelScheduledNotes(int padSlot)
 {
     // A note-on that fires *after* its note-off is a stuck note that nothing clears, so
     // every path that stops sound has to drop what is still queued.
@@ -407,14 +428,22 @@ void KeysProcessor::cancelScheduledNotes(int padSlot)
     // negative tag. The live card (-2) and the chord held into the arp (-3) are sources like
     // any other, so releasing either wiped every other source's un-fired strum notes too: a
     // pad mid-strum lost the rest of its chord. Only the panic tag means all.
-    if (padSlot == panicTag)
-        deferred.clear();
-    else
-        deferred.erase(std::remove_if(deferred.begin(), deferred.end(),
-                                      [padSlot](const DeferredNote& n) { return n.padSlot == padSlot; }),
-                       deferred.end());
+    //
+    // Returns the pitches actually dropped, because a caller about to release the chord needs
+    // to know which of its notes never sounded; see releaseNotes.
+    std::vector<int> cancelled;
+    const auto mine = [padSlot](const DeferredNote& n)
+    { return padSlot == panicTag || n.padSlot == padSlot; };
+
+    for (const auto& n : deferred)
+        if (mine(n))
+            cancelled.push_back(n.note);
+
+    deferred.erase(std::remove_if(deferred.begin(), deferred.end(), mine), deferred.end());
+
     if (deferred.empty())
         stopTimer();
+    return cancelled;
 }
 
 void KeysProcessor::timerCallback()
@@ -477,6 +506,14 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     // Re-pressing a source that already owns the pitch still retriggers, because every such
     // path releases before it fires (pressChordPad -> stopChordPad, holdArpChord ->
     // releaseArpChord), taking the count to zero on the way.
+    //
+    // The count is per pitch, NOT per (pitch, channel): two sources holding one pitch on two
+    // different channels collapse to a single note on whichever channel got there first, and
+    // the eventual note-off goes out on whichever channel released last. Nothing on screen can
+    // reach that today - no NoteSurface overrides noteChannel(), so everything here is on the
+    // global channel - and the MCP bridge is the only caller that passes one (see
+    // KeysMcp.cpp). Anything that gives a surface a channel of its own has to make noteRefs
+    // per channel first, or it will silently eat the second source's notes.
     const bool alreadySounding = noteRefs[(size_t) midiNote].fetch_add(1) > 0;
     if (! alreadySounding)
     {
@@ -752,10 +789,7 @@ void KeysProcessor::releaseArpChord()
 {
     // No Sustain check, unlike a pad: this chord is held on purpose until something
     // replaces it, so the pedal has nothing to say about when it stops.
-    cancelScheduledNotes(arpChordTag);
-    for (int n : arpChordOn)
-        noteOff(n);
-    arpChordOn.clear();
+    releaseNotes(arpChordOn, arpChordTag);
     arpChordName = {};
     launchedSlot = -1;
     arpPadSlot = -1;
@@ -934,17 +968,19 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.keyboard = flag("keyboard", true);
     layout.detached = flag("detached", false);
     layout.arpDetached = flag("arpDetached", false);
-    // "view" briefly carried a fourth value meaning "folded away" before the centre got
-    // its own chevron like the other sections. Map it onto the flag it became.
+    // "view" is 0 = Perform, 1 = Chords, and used to carry two more values that have each
+    // since become a flag of their own. Both legacy values leave no centre view to restore -
+    // they replaced it rather than sitting beside it - so both fall back to Perform, which
+    // is also what an unreadable value gets.
+    //   2, "Arp", before the arp became a section: open the arp section instead, which is
+    //      the same thing the user was looking at.
+    //   3, "folded away", before the centre got its own chevron like every other section.
     const int storedView = (int) tree.getProperty("view", 0);
-    if (storedView == 3)
-        layout.centre = false;
-    // ...and a third value meaning "Arp", before the arp became a section of its own. A
-    // session saved on that view has no centre view to restore, so fall back to Perform and
-    // open the arp section instead, which is the same thing the user was looking at.
     if (storedView == 2)
         layout.arp = true;
-    layout.view = juce::jlimit(0, 1, storedView == 2 ? 0 : storedView);
+    else if (storedView == 3)
+        layout.centre = false;
+    layout.view = (storedView == 0 || storedView == 1) ? storedView : 0;
     layout.accent = juce::jlimit(0, 7, (int) tree.getProperty("accent", 0));
 
     const auto bounds = juce::Rectangle<int>::fromString(tree.getProperty("detachedBounds").toString());
