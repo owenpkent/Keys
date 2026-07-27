@@ -29,6 +29,11 @@ its own project.
 - **A large download at configure time.** The archive is fetched into the build tree and
   unpacks to a few gigabytes. It is never committed, and never re-downloaded once it is there,
   but a fresh build tree pays for it again. Deleting `build/` is not free any more.
+
+  Unless you keep it somewhere else: `-DOKSTUDIO_ONNXRUNTIME_CACHE=<dir>` puts the unpacked
+  runtime at a path of your choosing, shared by every build tree that points at it. Worth
+  setting once if you ever delete `build/`. CI uses the same flag with an `actions/cache`
+  step, keyed on the ONNX Runtime release.
 - **The static MSVC runtime.** That library is `/MT`, and MSVC will not link objects that
   disagree, so `CMAKE_MSVC_RUNTIME_LIBRARY` is set before `add_subdirectory(JUCE)` in the
   top-level `CMakeLists.txt`. Everything in the binary — JUCE included — is built that way.
