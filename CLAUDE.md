@@ -217,6 +217,13 @@ Three things will bite otherwise:
 - **The Detach buttons are named per section**, because six buttons reading "Detach" are
   six identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
   name flips with the button's state.
+- **A section bar is not reachable** (checked 2026-07-30): it is a plain Component with a
+  mouse handler and no accessibility handler, so `-InvokeButtons Arp` finds nothing and
+  there is no way to fold or unfold a section from a script. Any shot that needs a section
+  open needs Owen to click that bar once first — do not synthesize a click instead. Combo
+  boxes are reachable by their *current* text (`-SetValues "Up=Pattern"`), but two combos
+  can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
+  match; set the other one out of the way first.
 - **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
   write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 

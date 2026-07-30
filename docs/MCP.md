@@ -24,7 +24,7 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 
 | Tool | Purpose |
 |------|---------|
-| `get_state` | Snapshot the load-bearing controls, whether the arp is reading its step lanes (`arpPattern`), the active arp pattern, pad page, and how many chord pads are loaded. Call this first. |
+| `get_state` | Snapshot the load-bearing controls, whether the arp is reading its step lanes (`arpPattern`), the active arp pattern, which slot the chain is playing (`arpChainSlot`, -1 when it is not running), pad page, and how many chord pads are loaded. Call this first. |
 | `list_params` | Every parameter Keys exposes, with its current value and legal range/choices. |
 | `set_params` | Set one or more parameters at once, by id. |
 | `play_notes` | Play one or more notes now, release them after a duration. |
@@ -35,8 +35,8 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `clear_chord_pad` | Empty a pad slot. |
 | `press_chord_pad` | Fire a pad now, optionally auto-releasing after a duration. |
 | `release_chord_pad` | Stop a pad (unless Sustain is holding it). |
-| `get_arp_pattern` | Read a pattern's six per-step lanes: the live lanes, or a stored slot (0..11). |
-| `set_arp_pattern` | Write one or more lanes of a pattern: the live lanes, or a stored slot. |
+| `get_arp_pattern` | Read a pattern's ten per-step lanes: the live lanes, or a stored slot (0..11). |
+| `set_arp_pattern` | Write one or more lanes of a pattern: the live lanes, or a stored slot. Lane names are `note`, `octave`, `velocity`, `gate`, `ratchet`, `probability`, and — since 2026-07-30 — `transpose` (scale degrees), `late` (percent of a step), `harmony` (chord tones above) and `chord` (0 = off, 1..12 = play that arp slot's stored chord on this step). |
 | `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
 

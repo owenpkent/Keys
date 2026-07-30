@@ -423,6 +423,19 @@ toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`fade
 CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
 `markovLength`.
 
+The arp's own set is `arpOn`, `arpRate` / `arpDot` / `arpTrip` / `arpAnchor`,
+`arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves` (Repeats) + `arpDistance`,
+`arpOffset`, `arpSwing`, `arpLatch`, `arpRetrigger` + `arpRetrigBars`, `arpGate`,
+`arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`, and `arpLinkLanes`. The six
+after `arpChance` arrived on 2026-07-30 and are appended, like everything else that round:
+a choice parameter's list and an int's range are both load-bearing for sessions, so nothing
+before them moved.
+
+Two pieces of arp state are deliberately **not** parameters. Lane data and the twelve slots
+live in the `arp` ValueTree beside the chord pads (they are arrays, not knobs). And the
+chain's running state is transient: it starts stopped, because a session that reopens
+already playing a progression is a session that surprises you.
+
 `bpm` (40..240, default 120) is the newest, and is registered last on purpose: appending
 leaves every existing parameter's automation index where the session left it. It is the
 tempo anything timed in beats runs at when there is no transport to follow, which is every

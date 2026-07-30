@@ -9,7 +9,8 @@ modifier keys. Right-click is only ever an accelerator, with one exception Owen 
 **Send to arp slot**, in a chord card's menu, has no left-click twin.
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
-scale-lock, octave, channel, velocity, sustain, the Humanize settings, which sections you
+scale-lock, octave, channel, velocity, sustain and latch, the Humanize settings, the
+arpeggiator down to its step lanes and its twelve slots, which sections you
 had folded away and which you had pulled out into windows of their own (down to where each
 window sat), this instance's colour, the
 eight knob CC assignments, and
@@ -54,13 +55,13 @@ the window reads before you have read a caption.
 | **Right-click** a key (optional) | Hold that one note — the Octavium accelerator. **Left-click it again** to release it |
 | **Knob row** | Eight rotary CC knobs above the keyboard, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
-| **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next |
+| **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next. It has no cards of its own — the chords it makes *are* the pads below it |
 | **Transcribe** | Record yourself singing or playing, and get the notes back as MIDI you can drag onto a track |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
-toggle, not a modifier key, on purpose. Right-click opens the card menus on the chord pads,
-the generator's cards and the arp slots; only **Send to arp slot** lives nowhere else.
+toggle, not a modifier key, on purpose. Right-click opens the card menus on the chord pads
+and the arp slots; only **Send to arp slot** lives nowhere else.
 
 ## Controls
 
@@ -78,10 +79,10 @@ the generator's cards and the arp slots; only **Send to arp slot** lives nowhere
 | **Latch** | Click to hold a key, click again to release it. Sustain's twin, and the difference between them is exactly that second click |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
-| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page |
+| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page, and **Big** swaps the two rows of eight for four rows of four, each card showing the chord's notes and a mini keyboard |
 | **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
 | **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins |
-| **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there |
+| **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
 | **Chords** | The chord generator — see below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
 | **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it — click the bar to bring the section back first |
@@ -92,7 +93,9 @@ Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).
 ## The chord generator
 
 **Chords** opens a panel that fills the current page of pads for a key and mode, so you
-can have a progression to play with before you know any theory.
+can have a progression to play with before you know any theory. The chords it makes are the
+pads in the section below it — it draws no cards of its own, so what you audition is what
+you play.
 
 ![The chord generator](assets/screenshots/chord-generator.png)
 
@@ -111,9 +114,9 @@ match so Scale Lock agrees. Then **Fill Page**.
 | **Notes** / **Inversions** | Generate triads, 7ths and/or 9ths; allow root position and inversions |
 | **Source** | **Algorithmic** (the weighted pool above) or **Markov**: real-progression chains per Major / Minor / Modal, with **Temperature** (conservative to adventurous), **Length**, a **Mood** filter, and a **Start chord** |
 
-Press any chord in the grid to hear it. The page-wide actions are on-screen buttons: Fill
-Page, Regen Unlocked, Clear Page. Lock, New and Next act on one card, so they live in that
-card's right-click menu.
+Press any pad to hear it — turn **Big** on (Pads bar) if you want to read each chord's notes
+while you work. The page-wide actions are on-screen buttons: Fill Page, Regen Unlocked,
+Clear Page. Lock, New and Next act on one card, so they live in that pad's right-click menu.
 
 ## Transcribing what you play
 

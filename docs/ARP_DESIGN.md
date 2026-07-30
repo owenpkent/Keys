@@ -110,7 +110,8 @@ bar), so the Probability lane and the whole pattern row sat below the window edg
 you enlarged it. Lanes are tabs now, with one labelled Steps control, one Speed control,
 and the Link lanes switch this spec asked for from the start.
 
-**Shape gates the whole editor** (Serum 2's model). Shape holds the eight directions plus
+**Shape gates the whole editor** (Serum 2's model). Shape holds the directions (eight in v1,
+twelve since the 2026-07-30 round below) plus
 "Pattern"; the step editor exists only in "Pattern", and `ArpEngine::Params::usePattern`
 carries it into the engine. `laneValue()` is the single place lane data is read, so it is
 the single place the gate lives: with it off, every lane reads as `laneDefaults` and the
@@ -276,8 +277,7 @@ silently turned every stored Pattern slot into Random. Sessions now record `shap
 Pattern was numbered when they were written) and `arpFromTree` remaps it. Anything else that
 stores an enum whose end is a sentinel needs the same treatment.
 
-Still unbuilt from the v2 list below: per-step CC lanes, chord mode (inversion stacking),
-arp-on-note-count.
+What is left of the v2 list, and what became of the rest, is the table below.
 
 **Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
 behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or
@@ -286,12 +286,19 @@ unreachable on the default shape. `Params::gate` and `Params::chance` **multiply
 value in `fireStep`, so 100 leaves an edited pattern exactly as drawn, and each control
 means the same thing in both shapes.
 
-v2 and later (nice-to-have per the research ranking): timing-offset (Late) lane,
-probability / random-select lane, harmony lane (second note within +/-1 octave),
-semitone pitch lane gated by scale-degree enables with automatic root detection
-(Cthulhu's inversion-insensitive chord analysis), per-pitch-class block/redirect
-keyboard (its 4-state click-cycle model is already mouse-only), chord mode
-(inversion stacking), per-step CC lanes, pattern chaining, arp-on-note-count.
+v2 and later (nice-to-have per the research ranking), with what became of each:
+
+| Wanted | Status |
+|--------|--------|
+| probability / random-select lane | shipped in v1 (Owen promoted it) |
+| timing-offset (Late) lane | shipped 2026-07-30 |
+| harmony lane (second note within ±1 octave) | shipped 2026-07-30, counted in chord tones rather than octaves |
+| semitone pitch lane gated by scale-degree enables, with root detection | shipped 2026-07-30 as the Transpose lane, which counts scale degrees outright - the gating was a way to keep a chromatic lane in key, and counting degrees is that idea without the gate |
+| pattern chaining | shipped 2026-07-30 as **Chain**, over the slots rather than over patterns |
+| per-pitch-class block/redirect keyboard | not built |
+| chord mode (inversion stacking) | not built. The Chord *shape* plays the held chord every step, which is the rhythmic half of this; stacking inversions is still open |
+| per-step CC lanes | not built |
+| arp-on-note-count | not built |
 
 ## Scale awareness
 
@@ -345,20 +352,20 @@ closed the first half):
   ago. In practice the separate arming read as a button that did nothing: with the arp off,
   handing it a chord looks exactly like sustaining one, and that is the state the toggle was
   most often found in. Owen had it removed, and the arp's own **On** is the mode now
-  (`KeysProcessor::cardsFeedArp`, which every surface showing a chord card asks, so the pads
-  and the generator's grid can never disagree). Switching the arp off releases a chord a
-  card was holding, or it would drone with nothing arpeggiating it and no click left to
-  release it.
+  (`KeysProcessor::cardsFeedArp`, which every surface showing a chord card asks - a rule with
+  only one surface left to obey it since the generator's duplicate grid went on 2026-07-30).
+  Switching the arp off releases a chord a card was holding, or it would drone with nothing
+  arpeggiating it and no click left to release it.
 
-  **That release lives in the editor's timer, and there are two edges it does not cover**
-  (found in the 2026-07-27 sweep, not yet closed). It is gated on `arpHeldPad() >= 0`, so a
-  chord handed over from the *live* card, which leaves `arpPadSlot` at -1, is not released.
-  And with no editor open there is nothing polling at all, so host automation or an MCP
-  client writing `arpOn` false leaves the chord sounding. This is the hazard the old To Arp
-  flag was put on the processor to avoid, in a new place: a chord held into the arp outlives
-  the window, so what releases it should too. Moving the check onto the processor closes
-  both, and wants a heartbeat there that does not exist yet (its `juce::Timer` is the 1 ms
-  strum scheduler and stops itself the moment nothing is queued).
+  **That release used to live in the editor's timer, and missed two edges** (found in the
+  2026-07-27 sweep, closed 2026-07-30). It was gated on `arpHeldPad() >= 0`, so a chord
+  handed over from the *live* card, which leaves `arpPadSlot` at -1, was never released. And
+  with no editor open there was nothing polling at all, so host automation or an MCP client
+  writing `arpOn` false left the chord sounding. That was the hazard the old To Arp flag was
+  put on the processor to avoid, in a new place: a chord held into the arp outlives the
+  window, so what releases it has to as well. It is on the processor's heartbeat now (see
+  **The heartbeat**, below), which is also what the chain needed. A chord an arp *slot*
+  launched is still left alone deliberately: its lit card is on screen and still releases it.
 - **Send to arp slot**, in the pad's card menu, which copies the chord into a slot for
   later. A copy and not a reference, so regenerating the pad page cannot silently rewrite
   what a slot plays.
