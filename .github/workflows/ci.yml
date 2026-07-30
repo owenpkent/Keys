@@ -51,10 +51,17 @@ jobs:
       # The kit is a private repo. Access is a read-only deploy key on the kit
       # ("Keys CI (read-only)"), stored here as the KIT_DEPLOY_KEY secret. No PAT
       # and no user identity involved; revoke by deleting the deploy key.
+      # TEMPORARY PIN, remove before this branch merges. The Chance section includes
+      # okstudio/Polyrhythm.h, which lives on the kit's strata-engine branch and is not yet on
+      # its main; Strata's CI pins the same branch for the same reason. Merging that branch
+      # into the kit's main also lands the Obsidian skin promotion and an ASIO cmake change for
+      # the whole product line, so it is its own reviewed step rather than a side effect of
+      # this one. Drop this ref once it has happened.
       - name: Checkout okstudio-juce-kit
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: owenpkent/okstudio-juce-kit
+          ref: strata-engine
           ssh-key: ${{ secrets.KIT_DEPLOY_KEY }}
           path: okstudio-juce-kit
           persist-credentials: false

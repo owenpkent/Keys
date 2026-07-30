@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ChanceEngine.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
 #include <atomic>
@@ -90,6 +91,14 @@ public:
         bool latch = false;
         bool retrigger = true;    // restart at step 1 when a note arrives on an empty set
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
+
+        // Chance, the third note source (docs/CHANCE_DESIGN.md). With it enabled the step
+        // lanes and the direction walk are both bypassed, because only one source can own a
+        // step; everything downstream of the decision is shared. `harmony` is the pitch-class
+        // weight table it selects against, rebuilt on the message thread from Root, Mode and
+        // the live chord, and copied in here per block.
+        ChanceEngine::Params chanceParams;
+        ChanceEngine::Harmony harmony;
     };
 
     struct HostClock
@@ -101,6 +110,9 @@ public:
     };
 
     Lanes lanes;
+    // Public so the processor can hand it a new seed (Generate) without going through Params:
+    // a seed is state, not an automatable value.
+    ChanceEngine chance;
 
     void prepare(double sampleRate)
     {
@@ -161,7 +173,13 @@ public:
             pos = clock.ppq;
             // A jump (loop, relocate) means owed note-offs' timelines are invalid.
             if (havePrevPpq && std::abs(clock.ppq - expectedNextPpq) > blockBeats + 1.0e-3)
+            {
                 flushInto(out);
+                // A looped bar has to sound the same on its second pass, so Chance restarts
+                // from its seed rather than carrying a stale loop position over the jump.
+                // Marbles never needs this because hardware has no transport; a plugin does.
+                chance.resync();
+            }
             havePrevPpq = true;
             expectedNextPpq = clock.ppq + blockBeats;
             freePhaseBeats = clock.ppq; // keep free phase seeded for a later stop
@@ -380,6 +398,12 @@ private:
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
                   int numSamples, juce::MidiBuffer& out)
     {
+        if (p.chanceParams.enabled)
+        {
+            fireChanceStep(p, globalStep, offset, stepSamplesF, numSamples, out);
+            return;
+        }
+
         const int noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal < 0)
             return; // muted step
@@ -435,6 +459,72 @@ private:
             // so sixteen is five steps' worth in flight at once - which no rate reaches.
         }
         ++stepCounter;
+    }
+
+    // Chance owns the whole step: whether it fires, which members of the pool sound, and
+    // their velocity, gate, ratchet count and timing nudge. So neither the step lanes nor the
+    // direction walk is read here - they are the other two note sources, and a step has one
+    // owner. What is deliberately *not* rewritten is everything downstream: emitHit, the
+    // pending[] carry and active[] are shared with the plain path, because that is where the
+    // close-what-you-land-on rule and three separate stuck-note fixes live.
+    void fireChanceStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
+                        int numSamples, juce::MidiBuffer& out)
+    {
+        buildSequence(p);
+        if (seqCount == 0)
+            return;
+
+        // Resolve the pool once, as absolute pitches: Chance weights candidates by pitch
+        // class, so it needs the notes rather than indices into the held set.
+        for (int i = 0; i < seqCount; ++i)
+        {
+            const auto& e = seq[(size_t) i];
+            poolPitches[(size_t) i] = juce::jlimit(0, 127,
+                                                   held[(size_t) e.heldIndex].note + e.octaveOffset);
+        }
+
+        // The global Chance knob keeps working with this source on, by thinning Density. The
+        // alternatives were both worse: leaving it dead is a control that lies, and taking a
+        // second draw for it would have to come from somewhere outside the step bundle, which
+        // is exactly what makes a locked loop stop repeating.
+        ChanceEngine::Params cp = p.chanceParams;
+        cp.density = cp.density * juce::jlimit(0, 100, p.chance) / 100;
+
+        // Once per step, whatever it decides, so the loop stays in phase with the grid.
+        const auto d = chance.advance(cp, p.harmony, poolPitches.data(), seqCount,
+                                      (juce::int64) globalStep);
+        ++stepCounter;
+        if (! d.fires || d.voices <= 0)
+            return;
+
+        const int jitterSamples = (int) std::llround(d.jitterFrac * stepSamplesF);
+        const int ratchets = juce::jlimit(1, 4, d.ratchets);
+        const double gate = juce::jlimit(0.05f, 2.0f, d.gateScale)
+                          * juce::jlimit(5, 200, p.gate) / 100.0;
+        const double subLen = stepSamplesF / ratchets;
+
+        for (int v = 0; v < d.voices; ++v)
+        {
+            const int idx = juce::jlimit(0, seqCount - 1, d.poolIndex[(size_t) v]);
+            const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, seq[(size_t) idx].heldIndex)];
+            const int note = poolPitches[(size_t) idx];
+            const float vel = juce::jlimit(0.05f, 1.0f, src.velocity * d.velocityScale);
+
+            for (int r = 0; r < ratchets; ++r)
+            {
+                // Jitter rides on the same offset the ratchet does, so a nudged hit that falls
+                // past the block edge parks in pending[] exactly like a ratchet sub-hit and
+                // fires from the next block. Early nudges clamp at 0 rather than reaching back
+                // into a block already gone.
+                const int on = juce::jmax(0, offset + jitterSamples + (int) std::floor(subLen * r));
+                const int durSamples = juce::jmax(1, (int) std::floor(subLen * gate));
+
+                if (on < numSamples)
+                    emitHit(note, src.channel, vel, on, durSamples, numSamples, out);
+                else if (pendingCount < maxPending)
+                    pending[(size_t) pendingCount++] = { note, src.channel, vel, on, durSamples };
+            }
+        }
     }
 
     // One ratchet hit: close what it lands on top of, emit its note-on, and park its note-off
@@ -566,6 +656,9 @@ private:
     std::array<PendingHit, maxPending> pending {};
     int pendingCount = 0;
     std::array<SeqEntry, maxHeld * 4> seq {};
+    // seq[] resolved to absolute pitches, for Chance to weight by pitch class. A member rather
+    // than a local so the audio thread never builds it on the stack per step.
+    std::array<int, maxHeld * 4> poolPitches {};
     int seqCount = 0;
     long long stepCounter = 0;
     int dirCursor = 0;

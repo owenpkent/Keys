@@ -693,4 +693,224 @@ public:
 };
 
 static ArpEngineTests arpEngineTests;
+
+// Chance driving the arp's scheduler (docs/CHANCE_DESIGN.md). The engine's own behaviour is
+// covered in ChanceTests.cpp; what matters here is the seam: a generative note source has to
+// obey the same note-off contract the plain path took three fixes to get right, and it has to
+// be indifferent to buffer size like everything else derived from ppq.
+class ArpChanceTests : public juce::UnitTest
+{
+public:
+    ArpChanceTests() : juce::UnitTest("ArpEngine + Chance") {}
+
+    void runTest() override
+    {
+        constexpr double sr = 48000.0;
+        constexpr double bpm = 120.0;
+
+        // C major triad, so the default C-major weighting has something to prefer.
+        const auto harmony = ChanceEngine::buildHarmony(0, { 0, 2, 4, 5, 7, 9, 11 }, 0, 0);
+
+        const auto chanceParams = [] {
+            ArpEngine::Params p;
+            p.enabled = true;
+            p.rateIndex = 8; // 1/16
+            p.chanceParams.enabled = true;
+            p.chanceParams.density = 100;   // fire every step, so the tests see traffic
+            p.chanceParams.dejaVu = 30;
+            p.chanceParams.wander = 60;
+            p.chanceParams.temperature = 70;
+            p.chanceParams.key = 40;
+            p.chanceParams.jitter = 40;
+            return p;
+        };
+
+        // Note-on pitches in order, running `steps` sixteenths at the given buffer size.
+        const auto pitchesAtBlockSize = [&](const ArpEngine::Params& p, int blockSize, int steps)
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.chance.prepare(0xC0FFEEull, p.chanceParams.loopLen);
+
+            ArpEngine::HostClock clock;
+            clock.playing = true;
+            clock.hasPpq = true;
+            clock.bpm = bpm;
+
+            const double blockBeats = (double) blockSize / sr * (bpm / 60.0);
+            const int blocks = (int) std::llround(steps * 0.25 / blockBeats);
+
+            std::vector<int> notes;
+            juce::MidiBuffer in = chordOn({ 60, 64, 67 });
+            for (int b = 0; b < blocks; ++b)
+            {
+                clock.ppq = (double) b * blockBeats; // recomputed, never accumulated
+                juce::MidiBuffer out;
+                e.process(p, clock, blockSize, in, out);
+                in.clear();
+                for (auto& x : collect(out))
+                    if (x.on)
+                        notes.push_back(x.note);
+            }
+            return notes;
+        };
+
+        beginTest("the same phrase whatever the buffer size");
+        {
+            // Eight beats is a whole number of blocks at all three sizes, so the comparison is
+            // over identical musical spans. A ppq-derived scheduler must not care how the
+            // audio callback happens to be chopped up; a generative one that drew from a
+            // real-time RNG would fail exactly here, which is why Chance does not.
+            const auto p = chanceParams();
+            const auto a = pitchesAtBlockSize(p, 6000, 32); // one step per block
+            const auto b = pitchesAtBlockSize(p, 1500, 32); // four blocks per step
+            const auto c = pitchesAtBlockSize(p, 500, 32);  // twelve blocks per step
+
+            expect(! a.empty(), "Chance produced nothing at all");
+            expect(a == b, "buffer size changed the phrase (6000 vs 1500)");
+            expect(a == c, "buffer size changed the phrase (6000 vs 500)");
+        }
+
+        beginTest("one note-on per sounding pitch, and nothing is left hanging");
+        {
+            // The invariant from CLAUDE.md, through the new source: a pitch never stacks two
+            // note-ons, and every note-on is eventually matched. Jitter and bursts are on, so
+            // hits are parking in pending[] and crossing block boundaries throughout.
+            auto p = chanceParams();
+            p.chanceParams.tMode = ChanceEngine::TMode::bursts;
+            p.chanceParams.xMode = ChanceEngine::XMode::cluster;
+            p.chanceParams.jitter = 90;
+
+            ArpEngine e;
+            e.prepare(sr);
+            e.chance.prepare(0xBADC0DEull, 8);
+
+            ArpEngine::HostClock clock;
+            clock.playing = true;
+            clock.hasPpq = true;
+            clock.bpm = bpm;
+
+            constexpr int blockSize = 512;
+            const double blockBeats = (double) blockSize / sr * (bpm / 60.0);
+
+            std::array<int, 128> net {};
+            juce::MidiBuffer in = chordOn({ 60, 64, 67 });
+            for (int b = 0; b < 400; ++b)
+            {
+                clock.ppq = (double) b * blockBeats;
+                juce::MidiBuffer out;
+                e.process(p, clock, blockSize, in, out);
+                in.clear();
+                for (auto& x : collect(out))
+                {
+                    net[(size_t) x.note] += x.on ? 1 : -1;
+                    expect(net[(size_t) x.note] >= 0,
+                           "a note-off arrived for a pitch that was not sounding");
+                    expect(net[(size_t) x.note] <= 1,
+                           "two note-ons stacked on pitch " + juce::String(x.note));
+                }
+            }
+
+            // Keys up, then a flush, which is what bypass and transport stop both do.
+            juce::MidiBuffer off;
+            for (int n : { 60, 64, 67 })
+                off.addEvent(juce::MidiMessage::noteOff(1, n), 0);
+            juce::MidiBuffer out;
+            clock.ppq = 400.0 * blockBeats;
+            e.process(p, clock, blockSize, off, out);
+            e.flushInto(out);
+            for (auto& x : collect(out))
+                net[(size_t) x.note] += x.on ? 1 : -1;
+
+            for (int n = 0; n < 128; ++n)
+                expectEquals(net[(size_t) n], 0, "pitch " + juce::String(n) + " was left sounding");
+        }
+
+        beginTest("Chance ignores the step lanes and the direction walk");
+        {
+            // A step has one owner. With Chance on, a note lane muted at every step must not
+            // silence it, because those lanes belong to the other source.
+            auto p = chanceParams();
+            p.usePattern = true;
+
+            ArpEngine e;
+            e.prepare(sr);
+            e.chance.prepare(0x1234u, 8);
+            for (int s = 0; s < ArpEngine::maxSteps; ++s)
+                e.lanes.value[ArpEngine::laneNote][(size_t) s].store(-1); // every step muted
+
+            juce::MidiBuffer out;
+            ArpEngine::HostClock clock;
+            clock.playing = true;
+            clock.hasPpq = true;
+            clock.bpm = bpm;
+            clock.ppq = 0.0;
+            e.process(p, clock, 6000, chordOn({ 60, 64, 67 }), out);
+
+            int ons = 0;
+            for (auto& x : collect(out))
+                if (x.on)
+                    ++ons;
+            expect(ons > 0, "a muted note lane silenced Chance");
+        }
+
+        beginTest("the global Chance knob still thins Chance");
+        {
+            // It multiplies Density rather than taking a draw of its own, so at zero it is
+            // silence and the control has not become a lie.
+            auto p = chanceParams();
+            p.chance = 0;
+            expect(pitchesAtBlockSize(p, 6000, 32).empty(), "global Chance 0 still fired");
+
+            p.chance = 100;
+            expect(! pitchesAtBlockSize(p, 6000, 32).empty(), "global Chance 100 fired nothing");
+        }
+
+        beginTest("a transport jump replays rather than drifting");
+        {
+            // A looped bar has to sound the same on its second pass. The jump both flushes the
+            // owed note-offs and resyncs Chance; without the resync the phrase would walk on.
+            auto p = chanceParams();
+            p.chanceParams.jitter = 0; // compare pitches, not timing
+
+            ArpEngine e;
+            e.prepare(sr);
+
+            ArpEngine::HostClock clock;
+            clock.playing = true;
+            clock.hasPpq = true;
+            clock.bpm = bpm;
+
+            // Seeded once, deliberately. Re-seeding per pass would make this pass whatever the
+            // jump handling did, which is the same as not testing it: the second pass has to
+            // replay because process() noticed the ppq discontinuity and resynced, and for no
+            // other reason.
+            e.chance.prepare(0x5EEDu, p.chanceParams.loopLen);
+
+            const auto pass = [&]
+            {
+                std::vector<int> notes;
+                juce::MidiBuffer in = chordOn({ 60, 64, 67 });
+                for (int b = 0; b < 16; ++b)
+                {
+                    clock.ppq = (double) b * 0.25;
+                    juce::MidiBuffer out;
+                    e.process(p, clock, 6000, in, out);
+                    in.clear();
+                    for (auto& x : collect(out))
+                        if (x.on)
+                            notes.push_back(x.note);
+                }
+                return notes;
+            };
+
+            const auto first = pass();
+            // Jump back to the top, the way a DAW loop does.
+            const auto second = pass();
+            expect(first == second, "the second pass of a loop did not replay");
+        }
+    }
+};
+
+static ArpChanceTests arpChanceTests;
 } // namespace keys::tests
