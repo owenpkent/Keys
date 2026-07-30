@@ -18,6 +18,11 @@ shipped in v1. That lane decides whether a step you authored fires. Chance decid
 which note exists in the first place. Adding another fire/skip control would be a
 duplicate feature; this is not one.
 
+![The Chance section at its shipping defaults](../assets/screenshots/chance-section.png)
+
+Above: the section as a new user first sees it, Deja Vu centre-detented on the frozen
+loop and Freeze greyed because nothing has been generated yet.
+
 ## Placement and contract
 
 A seventh section, appended to `SectionId` in `src/PluginEditor.h` and positioned
@@ -458,6 +463,33 @@ with whatever got built is worth nothing.
 - **Freeze targets the active slot** rather than arming a slot click. See its section.
 - **Learn became a plain toggle**: on follows what you play, off follows the key, one
   click either way and no invisible state.
+
+## Two bugs the tests could not have caught
+
+Both found by driving the running standalone over the MCP tools, which is the reason
+those were built before the panel. Recorded because the shape of them generalises: a
+pure engine can be tested exhaustively and still be wired into a process wrongly.
+
+**Freezing to the active slot was silently clobbered.** The active slot is a *mirror*
+of the live lanes: `storeActiveArpPattern()` copies those over it, and that runs on
+every session save (`arpToTree`) as well as every slot switch. Chance writes no live
+lanes of its own, so a save landing between the freeze and the next read replaced the
+phrase with lane defaults. One probe read back `note=[0 x8] velocity=[100 x8]`, exactly
+`laneDefaults`; an identical second probe happened not to race and looked perfect. The
+fix is to install the phrase into the live lanes as well when the target is the active
+slot, which makes the re-snapshot idempotent. Reproducing it needed a real session save
+racing a real audio thread, which no unit test in this repo can stage.
+
+**Half of all seeds could not round-trip.** `regenerateChance` casts a signed
+`nextInt64()` to unsigned, so about half of all seeds land above `int64`'s maximum. The
+seed was saved as a decimal string and read back with `getLargeIntValue()`, which
+saturates, so every one of those reloaded as `9223372036854775807`: half the seed space
+collapsed onto a single phrase. Hex and `getHexValue64()` round-trip all 64 bits.
+Reproducing it needed an actual process restart.
+
+The lesson worth keeping: the engine had 33 passing tests, including exact pitch
+sequences at three buffer sizes, and both of these still got through. Neither was a
+generation bug. Both were about the phrase's life *outside* the engine.
 
 ## Research caveats carried forward
 
