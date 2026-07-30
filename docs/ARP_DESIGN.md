@@ -195,8 +195,40 @@ arriving out of order is the one thing `emitHit`'s close-what-you-land-on rule c
 survive. At 0 the engine draws no random numbers at all, which is also what keeps the older
 tests deterministic.
 
-Still unbuilt from the v2 list below: the Late and Harmony lanes, per-step transpose, chord
-mode (inversion stacking), per-step CC lanes, pattern chaining, arp-on-note-count.
+### Four more lanes (the same round)
+
+Six lanes became ten. They are appended for the same reason the shapes are: a slot's lane
+data is serialized by lane index, so inserting would reinterpret every pattern in every
+saved session.
+
+| Lane | Range | Notes |
+|------|-------|-------|
+| Transpose | -7..+7 | **Scale degrees.** Everyone else's transpose lane is chromatic, which makes it a machine for leaving the key; the degree version reuses the same `shiftByDegrees` + scale mask the Distance control brought in, and a chromatic mask makes it chromatic again for free. |
+| Late | 0..90% | Per-step delay, Cthulhu's lane and Kirnu's Shift. **Late only.** An early half would mean two steps could swap order, and out-of-order hits of one pitch are the one thing `emitHit`'s close-what-you-land-on rule cannot survive. Swing already offers early. |
+| Harmony | 0..7 | A second voice that many *sequence entries* above the note played, so it stays inside the chord; running off the top adds an octave rather than folding onto a note already sounding. Cthulhu's harmony. |
+| Chord | 0..12 | The step plays the chord in that arp **slot** instead of a note of the held set. Kirnu Cream's Chordmem, except the memories are the twelve slots Keys already has, so a progression can be drawn into a lane without a second copy of it. |
+
+The Late lane is why the step loop now looks **three** steps back rather than one. One
+sufficed while swing was the only thing that moved a step (|swing| < 1, so a step could
+only ever be pulled into the block before its own); a step can now fire up to 1.65 steps
+after its boundary (0.9 late plus 0.75 swing), and the loop has to still be walking it.
+The cost is two extra iterations a block that skip on a negative offset.
+
+The Chord lane is the only part of the engine that reads anything outside itself. Slot
+chords live on the message thread in `std::vector`s, so `KeysProcessor` keeps an
+`ArpEngine::ChordTable` mirror of atomics beside them and `syncArpChordTable()` rebuilds it
+whole from every path that can change a slot's chord. There is no single choke point for
+those writes, so **the call sites are the contract** (set, clear, copy, whole-slot write,
+session load). The count is stored last and with release ordering, so a half-written chord
+is never reachable: the notes are in place before the count that admits them.
+
+Found while adding them: `ArpPattern` zero-initialized its lane arrays, so a slot nobody had
+ever stored recalled as *every lane at zero* - velocity 0 clamps to a near-silent 0.05 and
+gate 0 to 5%, so launching an untouched slot made the arp whisper rather than doing nothing.
+It fills from `laneDefaults` now.
+
+Still unbuilt from the v2 list below: per-step CC lanes, chord mode (inversion stacking),
+pattern chaining, arp-on-note-count.
 
 **Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
 behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or

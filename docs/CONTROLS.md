@@ -329,7 +329,7 @@ than wrapping round.
 
 ### The step editor (Shape → Pattern)
 
-Six lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. Click a
+Ten lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. Click a
 step to set it, or drag across the grid to paint several in one gesture; a readout
 follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
 
@@ -340,7 +340,11 @@ follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
 | **Velocity** | 10–200% | Scales the velocity you played at. |
 | **Gate** | 5–200% | Note length as a share of the step. Over 100% ties into the next step. |
 | **Ratchet** | 1–4 | Sub-hits packed into this step. |
-| **Probability** | 0–100% | Chance this step fires at all. |
+| **Prob** | 0–100% | Chance this step fires at all. |
+| **Transpose** | −7 – +7 | Scale **degrees**, not semitones: +2 lifts each note a third *of your key*, so it can never land outside it. |
+| **Late** | 0–90% | Pushes this step later by that share of a step. Draw a little on the offbeats for a lazy feel, or a lot on one step to make it stumble. Late only — Swing is the control that can also rush. |
+| **Harmony** | 0–7 | Adds a second voice this many chord tones above the note the step plays. Off at 0. |
+| **Chord** | 1–12, or off | This step plays the chord stored in that **arp slot** instead of a note of what you are holding. Draw four of them across a lane and the arp plays a progression on its own. Off (the dot) is a normal step, and a slot with no chord in it is left alone rather than silenced. |
 
 The **Mute** row under the grid silences individual steps without disturbing their
 values, so you can take a step out and put it back unchanged.

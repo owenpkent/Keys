@@ -87,6 +87,11 @@ juce::String ArpPanel::LaneGrid::cellText(int value) const
         if (value == 0)
             return {}; // drawn as a dot instead, see paint()
     }
+    // Harmony and Chord are off at zero rather than centred on it, so a row of noughts would
+    // read as data where it means "nothing here". The dot the note lane already uses says it
+    // better. Late and Transpose keep their zeroes: those two are positions on a range.
+    if (value == 0 && (lane == ArpEngine::laneHarmony || lane == ArpEngine::laneChord))
+        return {};
     return juce::String(value);
 }
 
@@ -797,7 +802,13 @@ void ArpPanel::buildControls()
     buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate", 5, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet", 1, 4);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Probability", 0, 100);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Prob", 0, 100);
+    // The 2026-07-30 four. "Prob" above shortened with them: ten tabs share the width six
+    // used to, and "Probability" is the only old label that will not fit at that size.
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose", -7, 7);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late", 0, 90);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony", 0, 7);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord", 0, 12);
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);
@@ -1185,7 +1196,7 @@ void ArpPanel::resized()
     // the whole pattern row used to be cut off the bottom of the window entirely.
     auto tabsRow = area.removeFromTop(34);
     area.removeFromTop(6);
-    const int tabW = juce::jmax(70, (tabsRow.getWidth() - 5 * 4) / ArpEngine::numLanes);
+    const int tabW = juce::jmax(70, (tabsRow.getWidth() - (ArpEngine::numLanes - 1) * 4) / ArpEngine::numLanes);
     for (auto& lr : laneRows)
     {
         lr.tab.setBounds(tabsRow.removeFromLeft(tabW));

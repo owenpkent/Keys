@@ -5,6 +5,31 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: four more arp lanes — Transpose, Late, Harmony and Chord
+
+Six step lanes became ten, on the same tab bar and edited exactly the same way.
+
+- **Transpose** (−7 – +7) counts **scale degrees**, not semitones. Everyone else's transpose
+  lane is chromatic, which makes it a machine for leaving the key; this one follows Root and
+  Scale, so +2 lifts every note a third *of your key* and can never land outside it.
+- **Late** (0–90%) pushes a step later by that share of a step — a little on the offbeats for
+  a lazy feel, a lot on one step to make a bar stumble. Late only: Swing is the control that
+  can also rush, and an early half would let two steps swap order, which the note-off
+  bookkeeping cannot survive.
+- **Harmony** (0–7) adds a second voice that many chord tones above the note the step plays,
+  so it stays inside the chord you are holding.
+- **Chord** (1–12) plays the chord stored in that **arp slot** instead of a note of what you
+  are holding. Draw four across a lane and the arp runs a progression by itself. A slot with
+  no chord in it leaves the step alone rather than silencing it.
+
+**Fixed on the way past:** a slot nobody had ever stored recalled as every lane at zero,
+which is not "empty" — velocity 0 clamps to a near-silent 0.05 and gate 0 to 5%, so
+launching an untouched slot made the arp whisper instead of doing nothing. Slots start at
+the lane defaults now.
+
+Lane data is serialized by lane index, so the four are appended and every saved pattern
+still means what it did. Six new engine tests.
+
 ### Added: the arpeggiator grew four shapes, a spread, a ramp and a feel
 
 A second research pass (Ableton Live 12's Arpeggiator, the Kirnu Cream manual, Cthulhu,

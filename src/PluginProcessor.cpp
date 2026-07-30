@@ -787,6 +787,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ap.velRamp = (int) apvts.getRawParameterValue("arpVelRamp")->load();
         ap.rampBeats = (double) (int) apvts.getRawParameterValue("arpRampBeats")->load();
         ap.humanize = (int) apvts.getRawParameterValue("arpHumanize")->load();
+        ap.chords = &arpChordTable; // what the Chord lane calls up, slot for slot
 
         // Distance: what each repeat past the first adds. The list names intervals rather
         // than numbers because "5th" is the thing you want and "+7 semitones" is the way you
@@ -1013,12 +1014,33 @@ void KeysProcessor::stopArpSlot()
     releaseArpChord(); // clears launchedSlot too
 }
 
+// Message thread. The Chord lane reads slot chords on the audio thread, so they live in a
+// mirror of atomics; this rebuilds the whole mirror, which is twelve chords of eight notes
+// and not worth being clever about. Every path that can change a slot's chord ends here.
+void KeysProcessor::syncArpChordTable()
+{
+    static_assert(ArpEngine::ChordTable::numSlots == numArpPatterns,
+                  "the Chord lane addresses slots one for one");
+    for (int s = 0; s < ArpEngine::ChordTable::numSlots; ++s)
+    {
+        const auto& notes = arpPatterns[(size_t) s].chordNotes;
+        const int n = juce::jlimit(0, ArpEngine::ChordTable::maxNotes, (int) notes.size());
+        for (int i = 0; i < ArpEngine::ChordTable::maxNotes; ++i)
+            arpChordTable.note[(size_t) s][(size_t) i].store(i < n ? notes[(size_t) i] : 0,
+                                                             std::memory_order_relaxed);
+        // Count last, and it is what the engine gates on, so a half-written chord is never
+        // reachable: the notes are in place before the count that admits them.
+        arpChordTable.count[(size_t) s].store(n, std::memory_order_release);
+    }
+}
+
 void KeysProcessor::setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
     arpPatterns[(size_t) index].chordNotes = notes;
     arpPatterns[(size_t) index].chordName = name;
+    syncArpChordTable();
     // Capture the shape and rate that are up right now, so launching the slot brings the
     // whole sound back and the card can say what it will play. Nothing else ever wrote
     // these, so every slot painted "--" and a launch left Shape and Rate alone.
@@ -1035,6 +1057,7 @@ void KeysProcessor::clearArpSlotChord(int index)
         return;
     arpPatterns[(size_t) index].chordNotes.clear();
     arpPatterns[(size_t) index].chordName = {};
+    syncArpChordTable();
     if (launchedSlot == index)
         releaseArpChord();
 }
@@ -1045,6 +1068,7 @@ void KeysProcessor::copyArpPattern(int from, int to)
         return;
     storeActiveArpPattern();
     arpPatterns[(size_t) to] = arpPatterns[(size_t) from];
+    syncArpChordTable();
     if (to == activeArpPattern)
         recallArpPattern(to);
 }
@@ -1062,6 +1086,7 @@ void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern)
     if (index < 0 || index >= numArpPatterns)
         return;
     arpPatterns[(size_t) index] = pattern;
+    syncArpChordTable();
     if (index != activeArpPattern)
         return;
     // Refresh the live lanes from the slot just written. Not recallArpPattern(index):
@@ -1304,6 +1329,7 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
             pat.clockDiv[(size_t) l] = (int) lt.getProperty("clockDiv", 0);
         }
     }
+    syncArpChordTable(); // the Chord lane's view of the slots, after a whole session lands
     // Recall the active pattern by hand (recallArpPattern would first snapshot the
     // live lanes over the data we just loaded).
     activeArpPattern = juce::jlimit(0, numArpPatterns - 1, (int) tree.getProperty("active", 0));

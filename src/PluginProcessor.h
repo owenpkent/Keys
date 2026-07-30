@@ -197,6 +197,20 @@ public:
     // the editor never needs this, it only ever touches the live lanes directly.
     struct ArpPattern
     {
+        // Lane defaults, not zeroes. A never-written slot used to recall as every lane at 0,
+        // which is not "empty": velocity 0 clamps to a near-silent 0.05 and gate 0 to 5%, so
+        // launching a slot nobody had stored made the arp whisper. Found 2026-07-30 while
+        // adding lanes 7-10, which would have quietly widened the same hole.
+        ArpPattern()
+        {
+            for (int l = 0; l < ArpEngine::numLanes; ++l)
+            {
+                value[(size_t) l].fill(ArpEngine::laneDefaults[l]);
+                length[(size_t) l] = 8;
+                clockDiv[(size_t) l] = 0;
+            }
+        }
+
         std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
         std::array<int, ArpEngine::numLanes> length {};
         std::array<int, ArpEngine::numLanes> clockDiv {};
@@ -338,6 +352,11 @@ private:
     void clearInputNotes();
 
     std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
+    // The slot chords, mirrored into atomics for the Chord lane to read on the audio thread.
+    // Rebuilt whole by syncArpChordTable() from every message-thread path that can change a
+    // slot's chord - there is no single choke point, so the call sites are the contract.
+    ArpEngine::ChordTable arpChordTable;
+    void syncArpChordTable();
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
     bool lastArpOn = false;        // audio thread; to flush cleanly on bypass

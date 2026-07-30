@@ -857,6 +857,99 @@ public:
             expect(last >= 0.0f && last < 0.15f, "and a beat later it has faded out");
         }
 
+        beginTest("the Transpose lane counts scale degrees, not semitones");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneTranspose][0].store(2); // a third of the scale
+            e.lanes.value[ArpEngine::laneTranspose][1].store(2);
+            auto sp = lp;
+            sp.rootPc = 0;
+            sp.scaleMask = 0b101010110101u; // C major
+            const auto steps = stepNotes(e, sp, 2, chordOn({ 60, 62 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 64, "C lifts a major third to E");
+            expectEquals(steps[1].empty() ? -1 : steps[1][0], 65, "D lifts a minor third to F");
+        }
+
+        beginTest("the Late lane delays a step and nothing else");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneLate][1].store(50); // half a step late
+            auto sp = lp;
+            std::vector<int> onsets;
+            for (int i = 0; i < 3; ++i)
+            {
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * i;
+                e.process(sp, clock, block, i == 0 ? chordOn({ 60 }) : juce::MidiBuffer {}, out);
+                for (const auto meta : out)
+                    if (meta.getMessage().isNoteOn())
+                        onsets.push_back(i * block + meta.samplePosition);
+            }
+            expectEquals((int) onsets.size(), 3, "every step still fires exactly once");
+            if (onsets.size() == 3)
+            {
+                expectWithinAbsoluteError(onsets[0], 0, 2);
+                expectWithinAbsoluteError(onsets[1], 9000, 2); // 6000 + half a 6000-sample step
+                expectWithinAbsoluteError(onsets[2], 12000, 2);
+            }
+        }
+
+        beginTest("the Harmony lane adds a second note from inside the chord");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            for (int s = 0; s < 4; ++s)
+                e.lanes.value[ArpEngine::laneHarmony][(size_t) s].store(2); // two chord tones up
+            const auto steps = stepNotes(e, lp, 2, chordOn({ 60, 64, 67 }));
+            expectEquals((int) steps[0].size(), 2, "one note becomes two");
+            if (steps[0].size() == 2)
+            {
+                auto s = steps[0];
+                std::sort(s.begin(), s.end());
+                expect(s[0] == 60 && s[1] == 67, "the root and the note two tones above it");
+            }
+        }
+
+        beginTest("the Chord lane calls up a slot's chord for that step");
+        {
+            ArpEngine::ChordTable table;
+            table.note[3][0].store(53); // slot 4 holds F major
+            table.note[3][1].store(57);
+            table.note[3][2].store(60);
+            table.count[3].store(3);
+
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneChord][1].store(4); // step 2 only
+            auto sp = lp;
+            sp.chords = &table;
+            const auto steps = stepNotes(e, sp, 3, chordOn({ 72 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 72, "step 1 is what is held");
+            expectEquals((int) steps[1].size(), 3, "step 2 is the stored chord");
+            if (steps[1].size() == 3)
+            {
+                auto s = steps[1];
+                std::sort(s.begin(), s.end());
+                expect(s[0] == 53 && s[1] == 57 && s[2] == 60, "and it is that chord");
+            }
+            expectEquals(steps[2].empty() ? -1 : steps[2][0], 72, "step 3 is held again");
+        }
+
+        beginTest("an empty Chord-lane slot leaves the step alone");
+        {
+            ArpEngine::ChordTable table; // nothing stored anywhere
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneChord][0].store(7);
+            auto sp = lp;
+            sp.chords = &table;
+            const auto steps = stepNotes(e, sp, 1, chordOn({ 72 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 72,
+                         "a slot with no chord in it is not a silent step");
+        }
+
         beginTest("Humanize is late-only, bounded, and does nothing at zero");
         {
             const auto onsetsWith = [&](int human)

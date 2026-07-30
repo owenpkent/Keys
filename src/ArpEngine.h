@@ -29,15 +29,32 @@ class ArpEngine
 public:
     static constexpr int maxSteps = 32;
     static constexpr int maxHeld = 16;
-    static constexpr int maxActive = 64; // sounding arp notes awaiting their note-off
-    static constexpr int numLanes = 6;
+    // Sounding arp notes awaiting their note-off. Raised from 64 with the Chord shape and
+    // the Harmony lane, which between them can put a spread chord's every note on one step.
+    static constexpr int maxActive = 128;
+    static constexpr int numLanes = 10;
 
-    enum Lane { laneNote = 0, laneOctave, laneVelocity, laneGate, laneRatchet, laneProbability };
+    // The four after laneProbability arrived 2026-07-30. Appended, like everything else in
+    // that round: a slot's lane data is serialized by index, so inserting would silently
+    // reinterpret every pattern in every saved session.
+    enum Lane { laneNote = 0, laneOctave, laneVelocity, laneGate, laneRatchet, laneProbability,
+                laneTranspose, laneLate, laneHarmony, laneChord };
 
     // The value each lane holds when it is doing nothing. Also what every lane reads as
     // while Params::usePattern is false, which is how "Shape: Up" behaves like a plain
     // arpeggiator even after the step lanes have been edited.
-    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100 };
+    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0 };
+
+    // The chords the twelve slots hold, mirrored into atomics so a step can call one up on
+    // the audio thread. The processor owns it and refreshes it on the message thread
+    // whenever a slot's chord changes; the engine only ever reads.
+    struct ChordTable
+    {
+        static constexpr int numSlots = 12;
+        static constexpr int maxNotes = 8;
+        std::array<std::array<std::atomic<int>, maxNotes>, numSlots> note {};
+        std::array<std::atomic<int>, numSlots> count {};
+    };
 
     // Per-step values, editor-writable. Meanings per lane:
     //   note:        0 = follow the direction mode, 1..8 = fixed chord-note index,
@@ -125,6 +142,9 @@ public:
         // does not go through), so 0 leaves the engine bit-identical to before.
         int humanize = 0;         // 0..100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
+        // The slot chords, for the Chord lane. Null means the lane does nothing, which is
+        // what every caller that has no slots (the tests) wants.
+        const ChordTable* chords = nullptr;
     };
 
     struct HostClock
@@ -242,7 +262,13 @@ public:
             // any step it pulled behind the block start, which silenced every other note.
             // Costs at most one extra iteration per block, since |swing| < 1 keeps fire
             // times monotonic and each step therefore still fires in exactly one block.
-            double nextIndexF = std::floor(pos / stepBeats + 1.0e-9) - 1.0;
+            // Three steps back, not one. One was enough while swing was the only thing that
+            // moved a step (|swing| < 1, so a step could only ever be pulled into the block
+            // before its own). The Late lane can push a step up to 0.9 of a step *past* its
+            // boundary, and on an odd step that stacks with a positive swing, so a step can
+            // now fire as much as 1.65 steps after the one it is named for. Costs two extra
+            // iterations that skip on a negative offset and fire nothing.
+            double nextIndexF = std::floor(pos / stepBeats + 1.0e-9) - 3.0;
             for (;;)
             {
                 const double boundaryBeats = nextIndexF * stepBeats;
@@ -250,6 +276,12 @@ public:
                 double fireBeats = boundaryBeats;
                 if ((globalStep & 1) != 0)
                     fireBeats += stepBeats * p.swing; // swing shifts the offbeats
+                // Late: this step's own shift, always forwards. Cthulhu calls the lane Late
+                // and so does this - it can only delay, which is what keeps fire times in
+                // step order however the lane is drawn (step n at n+0.9 still precedes step
+                // n+1 at n+1.0). An early half would need the whole close-what-you-land-on
+                // rule in emitHit rewritten, for a shift Swing already offers.
+                fireBeats += stepBeats * juce::jlimit(0, 90, laneValue(p, laneLate, globalStep)) / 100.0;
                 const double offsetBeats = fireBeats - pos;
                 const int offset = (int) std::floor(offsetBeats / beatsPerSample);
                 if (offset >= numSamples)
@@ -572,6 +604,9 @@ private:
         }
 
         const int octaveShift = 12 * juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep));
+        const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
+        const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
+        const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
         const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale;
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
@@ -587,19 +622,78 @@ private:
                                              subLen * 0.4)
                           : 0;
 
+        // Resolve the step into pitches once, before the ratchet loop repeats them. Three
+        // lanes fold in here, and all three want the note *after* the sequence walk has
+        // chosen one, not instead of it.
+        struct Hit { int note; float vel; int chan; };
+        Hit hits[maxHeld * 8 + ChordTable::maxNotes];
+        int hitCount = 0;
+        const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
+        const auto addHit = [&](int note, float vel, int chan)
+        {
+            if (hitCount < (int) (sizeof(hits) / sizeof(hits[0])))
+                hits[hitCount++] = { juce::jlimit(0, 127, note), vel, chan };
+        };
+        const auto place = [&](int note)
+        {
+            // Octave lane, then Transpose - which counts *scale degrees*, not semitones.
+            // Everyone else's transpose lane is chromatic and is therefore a machine for
+            // leaving the key; Keys already owns Root and Scale, so the musical version is
+            // the one that costs nothing (and a chromatic scale mask makes it chromatic).
+            const int shifted = note + octaveShift;
+            return transpose != 0 ? shiftByDegrees(shifted, transpose, p.scaleMask, p.rootPc) : shifted;
+        };
+
+        const int chordCount = (chordSel > 0 && p.chords != nullptr)
+                             ? juce::jlimit(0, ChordTable::maxNotes,
+                                            p.chords->count[(size_t) (chordSel - 1)].load(std::memory_order_relaxed))
+                             : 0;
+        if (chordCount > 0)
+        {
+            // The Chord lane calls up one of the twelve slots' chords for this step alone -
+            // Kirnu Cream's Chordmem, except the memories are the slots Keys already has, so
+            // a progression can be drawn into a lane without storing a second copy of it.
+            // What is held decides only the velocity and the channel.
+            for (int i = 0; i < chordCount; ++i)
+                addHit(place(p.chords->note[(size_t) (chordSel - 1)][(size_t) i].load(std::memory_order_relaxed)),
+                       lead.velocity * velScale, lead.channel);
+        }
+        else
+        {
+            for (int k = 0; k < playCount; ++k)
+            {
+                const int idx = juce::jlimit(0, seqCount - 1, playIdx[k]);
+                const auto& entry = seq[(size_t) idx];
+                const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
+                addHit(place(src.note + entry.semitoneOffset), src.velocity * velScale, src.channel);
+
+                // Harmony: a second voice this many chord tones above the one just played,
+                // Cthulhu's lane. Counting in sequence entries rather than semitones is what
+                // keeps it inside the chord; running off the top adds an octave instead of
+                // folding back onto a note already sounding.
+                if (harmony > 0)
+                {
+                    const int h = idx + harmony;
+                    const auto& hEntry = seq[(size_t) (h % seqCount)];
+                    const auto& hSrc = held[(size_t) juce::jlimit(0, heldCount - 1, hEntry.heldIndex)];
+                    addHit(place(hSrc.note + hEntry.semitoneOffset + 12 * (h / seqCount)),
+                           hSrc.velocity * velScale, hSrc.channel);
+                }
+            }
+        }
+
         for (int r = 0; r < ratchets; ++r)
         {
             const int at = offset + (int) std::floor(subLen * r);
             const int durSamples = juce::jmax(1, (int) std::floor(subLen * gate));
 
-            for (int k = 0; k < playCount; ++k)
+            for (int k = 0; k < hitCount; ++k)
             {
-                const auto& entry = seq[(size_t) juce::jlimit(0, seqCount - 1, playIdx[k])];
-                const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
-                const int note = juce::jlimit(0, 127, src.note + entry.semitoneOffset + octaveShift);
+                const auto& hit = hits[k];
+                const int note = hit.note;
 
                 int on = at;
-                float vel = src.velocity * velScale;
+                float vel = hit.vel;
                 if (p.humanize > 0)
                 {
                     // Late and quieter, never early and never louder: a nudge that can also
@@ -626,9 +720,9 @@ private:
                 // stepCounter must not be repeated, which is why this parks the resolved hit
                 // rather than re-deriving the step later.
                 if (on < numSamples)
-                    emitHit(note, src.channel, vel, on, durSamples, numSamples, out);
+                    emitHit(note, hit.chan, vel, on, durSamples, numSamples, out);
                 else if (pendingCount < maxPending)
-                    pending[(size_t) pendingCount++] = { note, src.channel, vel, on, durSamples };
+                    pending[(size_t) pendingCount++] = { note, hit.chan, vel, on, durSamples };
                 // else: out of carry slots, and the hit is dropped rather than mistimed. The
                 // capacity is a chord's worth of ratchets over several steps; a step's carry is
                 // drained before the next step fires, so nothing that fits reaches it.

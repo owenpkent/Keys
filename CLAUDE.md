@@ -90,6 +90,12 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
   scheduling). Held means held: no note-off follows until something replaces it, so
   `allNotesOff()` has to forget it explicitly.
+  The **Chord lane** reads those same slot chords per step, which is the one thing the arp
+  engine reads from outside itself. Slot chords are message-thread `std::vector`s, so the
+  processor keeps an `ArpEngine::ChordTable` mirror of atomics and `syncArpChordTable()`
+  rebuilds it whole; there is no choke point for slot writes, so **its call sites are the
+  contract** (set, clear, copy, whole-slot write, session load). Miss one and a lane plays a
+  stale chord.
 - **The chord pads and the arpeggiator are each a section of their own**, stacked between
   the centre view and the keyboard, so a chord card is on screen whatever else is open. The
   centre views are Perform and Chords only: the arp stopped being a third one on
