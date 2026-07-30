@@ -154,10 +154,14 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   passes without the bus, so only a real Live load test catches it.
 - **Mouse-only UI**: single left-click or drag; targets ≥ ~34 px; no
   keyboard/double-click/modifiers. Sustain is an on-screen toggle by design, never a
-  modifier key (the separate Latch toggle is gone: a left click on a held note releases
-  it, which left nothing for the mode to do). Right-click is normally only an optional
-  accelerator with a left-click equivalent (per-note latch on the note surfaces, at
-  Owen's request).
+  modifier key, and **Latch is a second one beside it** (restored 2026-07-30 at Owen's
+  request, after a spell where a left click on any held note released it and the mode
+  looked redundant — it wasn't: that made the pedal a per-note switch, so a repeated note
+  over a ringing chord was unreachable). Under Sustain a second click on a ringing key
+  **strikes it again**; under Latch it **releases** it. Right-click is normally only an
+  optional accelerator with a left-click equivalent (per-note latch on the note surfaces,
+  at Owen's request; its left-click release keys on the `latched` set, not on Latch mode,
+  so it works with both buttons off).
   One owner-directed exception (2026-07-22): chord-pad card menus are right-click —
   in the generator (Lock / New chord / Next, restoring Octavium's card menu; the
   page-wide left-click Fill/Regen/Clear stay as the bulk path) and on the main-page

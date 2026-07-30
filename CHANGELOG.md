@@ -5,6 +5,37 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: Sustain is a pedal again, and Latch is back as its own toggle
+
+Owen's call. Sustain had quietly become a per-note switch: with it on, clicking a key that
+was already ringing *released* that key. That was deliberate once — it gave right-click's
+per-note latch a left-click way out — but it cost the thing a pedal is for. You could not
+play a note twice. A repeated melody note over a chord you were holding came out as one
+note and then a silence, because the second click turned it off.
+
+So the two behaviours are two controls again, and the whole difference between them is
+what a second click does:
+
+- **Sustain** (unchanged in every other way) is the pedal. Notes ring on after you let go,
+  a glide still leaves a trail, and **clicking a ringing key strikes it again**. Playing
+  the same key four times over a held chord now gives four attacks.
+- **Latch** is a new toggle on the Keyboard bar, next to Sustain. Click a key to hold it,
+  click it again to release it. This is the one for building a chord a note at a time, or
+  taking one apart, and it is what Sustain had been doing by accident.
+
+Both can be on at once; Latch wins on the keys it holds. Right-click's per-note latch is
+untouched and still has its left-click twin: clicking a note held that way releases it,
+with both buttons off, so the accessibility contract never depended on Sustain's old
+behaviour. **All Off** and turning either toggle off still clear everything.
+
+Under the hood, a restrike is a note-off followed by a note-on, not a second note-on, so it
+goes through the same refcount the chord pads, the live card and the arp share: a key
+struck again while another source is holding that pitch leaves the other source's note
+alone rather than cutting it short.
+The `latch` parameter this reads has been in the state since the first release (it stayed
+registered while the toggle was gone, and pad editing kept forcing it on), so no saved
+session or automation lane moves.
+
 ### Changed: the section bars read as headers, and the whole bar folds it again
 
 Three of Owen's asks, all about the same strip.

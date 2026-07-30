@@ -91,11 +91,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // were three overlapping ways to set velocity; this is the one that earned nothing.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "curve", 1 }, "Velocity Curve",
                                                       juce::StringArray { "Soft", "Linear", "Hard" }, 1));
-    // Velocity and Latch, same story. The fixed Velocity slider only ever applied while
-    // Humanize was off, so it and the Humanize range were one control in two costumes;
-    // the range absorbed it (baseVelocity01). Latch-as-a-mode went once a left click
-    // released a held note, which left right-click-to-hold as the only path worth having.
+    // Velocity, same story. The fixed slider only ever applied while Humanize was off, so
+    // it and the Humanize range were one control in two costumes; the range absorbed it
+    // (baseVelocity01).
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
+    // Latch is read again (2026-07-30). It was briefly a retained-but-dead parameter, on the
+    // reasoning that a left click on a held note releases it and so a whole mode earned
+    // nothing; that made Sustain a per-note toggle, which is not what a pedal does. Sustain
+    // restrikes now, Latch is the toggle, and each has a button on the Keyboard bar.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
     // Timing Spread, retained but no longer read. It rode the same broken path Strum did
     // (see scheduleNoteOn), and even fixed it earned nothing: a random 0-30 ms nudge is

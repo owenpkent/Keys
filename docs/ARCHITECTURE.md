@@ -125,12 +125,22 @@ Chords and holds make "which notes should sound" non-trivial. `NoteSurface` keep
 three sets of **drawn** ids (a MIDI note for the piano, a cell index for the grids):
 
 - `pressed` — under the active mouse gesture (a click, or the current key in a glide),
-- `latched` — toggled on by right-click (or by the forced latch during pad editing),
+- `latched` — toggled on by the Latch button or right-click (or by the forced latch
+  during pad editing),
 - `sustained` — captured by the Sustain pedal when the mouse released.
 
-A left click on a key already in `latched` or `sustained` **releases** it. That is what
-retired the Latch toggle: once a plain click both holds and releases, a whole mode for it
-earned nothing. The `latch` member survives for pad editing, which still forces it on.
+**Sustain and Latch differ only in what a second click does**, and that difference is the
+whole reason both exist. Latch is a switch: a click on a key already in `latched`
+**releases** it. Sustain is a pedal: a click on a key already in `sustained` **strikes it
+again**, which `mouseDown` gets by dropping it from `sustained`, calling `refresh()` to
+emit the note-off, and only then pressing it (`refresh()` emits deltas, so without the
+first call nothing would go out at all). Gliding back over a sustained key does the same.
+
+The Latch button was briefly retired, on the reasoning that a plain click already both
+held and released — which is true, but it made the pedal behave like a switch, so a
+repeated note under a held chord was impossible. Restored 2026-07-30 as its own toggle on
+the Keyboard bar, reading the `latch` parameter that had survived for pad editing (which
+still forces it on regardless of the button).
 
 `refresh()` computes `want = pressed ∪ latched ∪ sustained`, diffs it against
 `sounding` (drawn id → the output MIDI note currently on), and emits exactly the
@@ -141,8 +151,9 @@ first steals the oldest voices (FIFO `voiceOrder`) until `want` fits the cap. Ch
 MIDI channel panics, so a note can't stick on the channel it was played on.
 
 **Right-click latch** is an optional accelerator on every note surface, and the
-accessibility contract is still satisfied because a left click releases what it holds:
-right-click is never the only way out. It toggles the drawn id in the same `latched` set,
+accessibility contract is still satisfied because a left click releases what it holds
+(that release path is keyed on `latched`, not on Latch mode, so it works with every
+button off): right-click is never the only way out. It toggles the drawn id in the same `latched` set,
 so panic clears it. Octavium kept right-click latches in a private set no panic ever
 cleared; that was its worst stuck-note bug, not a behaviour to keep.
 
@@ -391,7 +402,7 @@ shrinking them. Auditioning a chord in the grid reuses
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
-`scaleLock`, `octave`, `channel`, `polyphony`, `sustain`,
+`scaleLock`, `octave`, `channel`, `polyphony`, `sustain`, `latch`,
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStrumDir` /
 `padPage`, the generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the
@@ -409,10 +420,11 @@ standalone could ever reach and nobody anywhere could change.
 
 A growing set is **registered but no longer read**, kept only so a session (and any host
 automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,
-`xyCCX` / `xyCCY` from the old five-tab arrangement, and `velocity`, `curve`, `latch`,
+`xyCCX` / `xyCCY` from the old five-tab arrangement, and `velocity`, `curve`,
 `humanizeTime` from the controls this branch retired. Adding to that list is the standing
 convention here — removing a parameter outright would shift automation in projects that
-already exist.
+already exist. `latch` came back off it in 2026-07-30, which is the other reason to keep
+dead parameters registered: a retired control is sometimes only resting.
 
 The folding layout (which sections are open, which centre view, where each detached
 window was left) and the instance's accent colour are **not** parameters: they change no

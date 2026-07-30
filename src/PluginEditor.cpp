@@ -193,9 +193,15 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     controlsHolder.addAndMakeVisible(scaleLockButton);
     controlsHolder.addAndMakeVisible(humanizeButton);
     addAndMakeVisible(sustainButton);
+    addAndMakeVisible(latchButton);
     addAndMakeVisible(chordExclusiveButton);
+    sustainButton.setTooltip("Pedal. Notes keep sounding after you let go, and clicking a key "
+                             "that is already ringing strikes it again. All Off stops them.");
+    latchButton.setTooltip("Click a key to hold it, click it again to release it. Use this to "
+                           "build a chord a note at a time, or to take one apart.");
     scaleLockAtt = std::make_unique<ButtonAtt>(processor.apvts, "scaleLock", scaleLockButton);
     sustainAtt = std::make_unique<ButtonAtt>(processor.apvts, "sustain", sustainButton);
+    latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "latch", latchButton);
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
     chordExclusiveAtt = std::make_unique<ButtonAtt>(processor.apvts, "chordExclusive", chordExclusiveButton);
 
@@ -1116,8 +1122,8 @@ void KeysEditor::timerCallback()
                           (int) apvts.getRawParameterValue("scale")->load());
     keyboard.setSustain(sus);
     // While a pad is linked for editing, clicks must toggle notes, so Latch behaviour
-    // is forced on regardless of the parameter.
-    keyboard.setLatch(editingPad >= 0);
+    // is forced on regardless of the button.
+    keyboard.setLatch(editingPad >= 0 || apvts.getRawParameterValue("latch")->load() > 0.5f);
     keyboard.setPolyphony((int) apvts.getRawParameterValue("polyphony")->load()); // 0 = unlimited
 
     // Lifting the sustain pedal releases any pad chords left ringing by it.
@@ -1379,6 +1385,8 @@ void KeysEditor::resized()
         // left it 20. The skin's button font scales with height, so those 4 px were also
         // shrinking the label: All Off was the odd one out on the bar for no reason.
         panicButton.setBounds(bar.removeFromRight(84).withSizeKeepingCentre(84, 24));
+        bar.removeFromRight(6);
+        latchButton.setBounds(bar.removeFromRight(78).withSizeKeepingCentre(76, 24));
         bar.removeFromRight(6);
         sustainButton.setBounds(bar.removeFromRight(96).withSizeKeepingCentre(94, 24));
         bar.removeFromRight(6);

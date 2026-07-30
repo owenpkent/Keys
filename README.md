@@ -49,7 +49,8 @@ the window reads before you have read a caption.
 |---------|--------|
 | **Click** a key | Play that note |
 | **Click and drag** | Glide across keys (monophonic) |
-| **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail. Click a held key to release just that one, or **All Off** for everything |
+| **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail, and clicking a ringing key **plays it again**. **All Off** stops everything |
+| **Latch on**, click several keys | Each click holds that key, and clicking it again releases it — the way to build a chord note by note, or take one apart |
 | **Right-click** a key (optional) | Hold that one note — the Octavium accelerator. **Left-click it again** to release it |
 | **Knob row** | Eight rotary CC knobs above the keyboard, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
@@ -73,7 +74,8 @@ the generator's cards and the arp slots; only **Send to arp slot** lives nowhere
 | **MIDI Ch** | Output channel, 1–16 |
 | **Voices** | Polyphony limit: Off (unlimited) or 1–8 notes, stealing the oldest |
 | **Mod / Pitch wheels** | Left of the keyboard: Mod sends CC1 and holds; Pitch bends and glides back to centre. Both move by relative drag, never jumping to a click |
-| **Sustain** | Hold notes after release (pedal) |
+| **Sustain** | Hold notes after release (pedal). A repeated key is a repeated strike, so you can play over a chord that is still ringing |
+| **Latch** | Click to hold a key, click again to release it. Sustain's twin, and the difference between them is exactly that second click |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
 | **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page (two rows) and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page |

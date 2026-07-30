@@ -15,9 +15,12 @@ twin, because binding a chord to one particular slot needs a target picker.
 | Right-click a key *(optional)* | Hold that one note — Octavium's per-note latch. **Left-click it again** to release it, or **All Off**. |
 | Click a **C** | Every C is labelled (C1, C2, …) to help you orient |
 
-Chords come from **Sustain** or **right-click** — a single mouse can't hold several
-keys at once, so those are how you stack notes. Either way, **clicking a held key
-releases it**, so a chord with a wrong note in it can be taken apart a note at a time.
+Chords come from **Latch**, **Sustain** or **right-click** — a single mouse can't hold
+several keys at once, so those are how you stack notes. The difference is what a second
+click on a ringing key does: under **Sustain** it strikes the note again (it is a pedal,
+so the same key can be played over and over while the chord under it holds), under
+**Latch** it releases that note, so a chord with a wrong note in it can be taken apart
+a note at a time.
 
 ### Watching a physical keyboard
 
@@ -55,7 +58,7 @@ the window reads at a glance, before you have read a single caption.
 | **Arp** | below the centre | The arpeggiator. Its **On** toggle and **Detach** ride on the bar, so the arp can be switched on, off and detached with the panel folded shut — folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
 | **Pads** | below the arp | The chord-pad strip, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons ride on the bar. |
 | **Transcribe** | below the pads | Audio to MIDI: the input picker, the waveform, the piano roll and the MIDI drag handle. It starts folded, like the arp, because open it is tall. Folding it also closes the audio input, so Keys is not holding your microphone while it is shut. |
-| **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain and All Off stay put. |
+| **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
 ### Detaching a section
 
@@ -155,19 +158,24 @@ takes them with it — they are what you reach for while playing:
 | Control | Type | What it does |
 |---------|------|--------------|
 | **Exclusive** | toggle | Playing a chord pad chokes the previously-playing pad, so only one pad chord sounds at a time. |
-| **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail. Click a held key to release just that note; turn Sustain off (or click All Off) to release everything. |
+| **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail, and clicking a key that is already ringing **strikes it again** — the pedal never turns a key into a switch. Turn Sustain off (or click All Off) to release everything. |
+| **Latch** | toggle | On: clicking a key holds it, clicking it again releases it. This is the one to use to build a chord note by note, or to take one apart. Turning Latch off releases everything it was holding. |
 | **All Off** | button | Panic. Stops every note on every channel, and drops anything a strum still had queued. |
 
 ## Holding notes
 
-A single mouse can't hold several keys, so there are two ways to stack them:
+A single mouse can't hold several keys, so there are three ways to stack them:
 
-- **Sustain** catches every note you play while it is on.
-- **Right-click** a key to hold that one note (an optional accelerator).
+- **Latch** holds every key you click until you click it again.
+- **Sustain** catches every note you play while it is on, and re-plays any key you click
+  a second time.
+- **Right-click** a key to hold that one note (an optional accelerator). **Left-clicking
+  it releases it**, so the right button is never the only way out.
 
-Either way, **left-clicking a held key releases it**. That is why there is no Latch
-toggle any more: once one click both holds and releases, a whole mode for holding notes
-earned nothing.
+Sustain and Latch are two answers to the same question — how does a note stop? Sustain is
+a pedal: it defers the release, and a repeated key is a repeated strike, so you can play a
+riff over a chord that is still ringing. Latch is a switch: the second click is the
+release. They can both be on, and Latch wins on the keys it holds.
 
 Everything here persists with the DAW session.
 
@@ -176,7 +184,7 @@ Everything here persists with the DAW session.
 Two rows of eight pads (sixteen a page) and a live chord card sit between the controls
 and the playing area. They let you keep a palette of chords a single click away.
 
-1. **Build a chord.** Turn **Sustain** on (or right-click) and click the notes you want.
+1. **Build a chord.** Turn **Latch** on (or **Sustain**, or right-click) and click the notes you want.
    The card names the chord it hears (for example `Cm7`).
 2. **Hear it as a chord.** Press and hold the card. Holding a chord sounds the keys you
    are holding; the card fires them as one chord, so you hear it strummed, humanized and

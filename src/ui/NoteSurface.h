@@ -23,12 +23,17 @@ namespace keys
 // while it rings.
 //
 // Mouse: left click plays, left drag glides (monophonic; with the pedal down the trail
-// keeps ringing). With Sustain on, clicking a key the pedal is already holding releases
-// it, so a chord built by mistake can be taken apart a note at a time instead of needing
-// Sustain switched off. Right-click toggles a per-note latch — an optional accelerator on top
-// of the on-screen Latch toggle, never the only path (accessibility contract). It feeds
-// the same `latched` set, so Latch-off and panic clear it; Octavium's right-latched
-// notes survived panic forever, which was a bug, not a behaviour to keep.
+// keeps ringing).
+//
+// Sustain and Latch are two different holds, and the difference is what a *second* click
+// on a ringing key does. Sustain is a pedal: the click strikes the note again, so playing
+// the same key four times over a held chord gives four attacks. Latch is a toggle: the
+// click releases that note, which is how a chord gets taken apart a note at a time.
+//
+// Right-click toggles a per-note latch — an optional accelerator on top of the on-screen
+// Latch toggle, never the only path (accessibility contract). It feeds the same `latched`
+// set, so a plain left click releases it, and Latch-off and panic clear it; Octavium's
+// right-latched notes survived panic forever, which was a bug, not a behaviour to keep.
 class NoteSurface : public juce::Component,
                     private juce::Timer
 {

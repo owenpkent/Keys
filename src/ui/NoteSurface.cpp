@@ -227,33 +227,42 @@ void NoteSurface::mouseDown(const juce::MouseEvent& e)
     if (latch)
     {
         if (latched.count(d))
+        {
             latched.erase(d);
+            sustained.erase(d); // a note the pedal also caught has to stop, not linger
+        }
         else
+        {
             latched.insert(d);
+        }
         dragDrawn = d;
         refresh();
         return;
     }
 
-    // A note already being held releases when you click it again, whether the pedal
-    // caught it (Sustain) or a right-click toggled it on. Both were one-way doors: the
-    // sustained note stayed until Sustain came off entirely, and the right-latched note
-    // needed a second right-click, which is an accelerator not everyone reaches for. So
-    // the plain left click is now the way out of both, and a chord with a wrong note in
-    // it can be taken apart a note at a time.
-    //
-    // Checked before `pressed` so the click reads as "stop that note" rather than a
-    // re-trigger, and the gesture is marked so the drag and mouse-up below cannot put it
-    // straight back (mouseUp's pedal-catch would otherwise re-sustain what we released).
-    if (sustained.count(d) || latched.count(d))
+    // A note held by a right-click releases when you left-click it again. Right-click is
+    // only ever an accelerator, so the way out of it has to be an ordinary click; a chord
+    // built that way can be taken apart a note at a time. Checked before `pressed` so the
+    // click reads as "stop that note", and the gesture is marked so the drag and mouse-up
+    // below cannot put it straight back (mouseUp's pedal-catch would otherwise re-sustain
+    // what we released).
+    if (latched.count(d))
     {
-        sustained.erase(d);
         latched.erase(d);
+        sustained.erase(d);
         releaseGesture = true;
         dragDrawn = -1;
         refresh();
         return;
     }
+
+    // Sustain is a pedal, not a per-note toggle: a key the pedal is already holding sounds
+    // *again* when you click it, the way a real keyboard does with the pedal down. It used
+    // to release instead, which is Latch's job and now Latch's alone (restored as its own
+    // toggle 2026-07-30, Owen's call). refresh() emits only the delta, so the note has to
+    // come off before the press goes back in or nothing would be sent at all.
+    if (sustained.erase(d) > 0)
+        refresh();
 
     pressed.insert(d);
     dragDrawn = d;
@@ -285,6 +294,10 @@ void NoteSurface::mouseDrag(const juce::MouseEvent& e)
         if (sustain)
             sustained.insert(dragDrawn);
         pressed.erase(dragDrawn);
+        // Gliding back onto a key the pedal is holding strikes it again, exactly as
+        // clicking it does. Same delta problem as mouseDown: off first, then on.
+        if (sustained.erase(d) > 0)
+            refresh();
         pressed.insert(d);
         dragDrawn = d;
         refresh();

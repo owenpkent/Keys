@@ -219,6 +219,10 @@ private:
 
     juce::ToggleButton scaleLockButton { "Scale Lock" };
     juce::ToggleButton sustainButton { "Sustain" };
+    // Latch is back as a toggle of its own (2026-07-30, Owen's call). It rides the Keyboard
+    // bar beside Sustain because the two are the same question — how does a note stop? —
+    // answered two ways: the pedal restrikes, Latch releases.
+    juce::ToggleButton latchButton { "Latch" };
     juce::ToggleButton humanizeButton { "Humanize" };
     juce::ToggleButton chordExclusiveButton { "Exclusive" };
     juce::TextButton panicButton { "All Off" };
@@ -287,7 +291,7 @@ private:
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
     std::unique_ptr<SliderAtt> octaveAtt, bpmAtt; // strum has two values; synced by hand
-    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, humanizeAtt, chordExclusiveAtt;
+    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;
