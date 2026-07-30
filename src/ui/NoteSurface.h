@@ -30,10 +30,27 @@ namespace keys
 // the same key four times over a held chord gives four attacks. Latch is a toggle: the
 // click releases that note, which is how a chord gets taken apart a note at a time.
 //
-// Right-click toggles a per-note latch — an optional accelerator on top of the on-screen
-// Latch toggle, never the only path (accessibility contract). It feeds the same `latched`
-// set, so a plain left click releases it, and Latch-off and panic clear it; Octavium's
-// right-latched notes survived panic forever, which was a bug, not a behaviour to keep.
+// Right-click is a per-note hold/release: an optional accelerator on top of the on-screen
+// Latch toggle. On a key *this surface* is holding it releases that key, out of whichever
+// set has it (`latched` or `sustained`, or both at once), and it leaves Sustain mode itself
+// on, so a pedal-held chord can be taken apart a note at a time without lifting the pedal
+// (Owen's ask, 2026-07-30). Otherwise it latches, feeding the same `latched` set, so a plain
+// left click releases it and Latch-off and panic clear it; Octavium's right-latched notes
+// survived panic forever, which was a bug, not a behaviour to keep.
+//
+// Read "this surface is holding" strictly: it only ever moves our own sets. A key can be lit
+// while we hold nothing, because a chord pad, the arp, MCP or the watched MIDI input is
+// sounding that pitch (see externallySounding). Right-clicking one of those takes the
+// *latch* path, not the release path, because the keybed does not own that note and refcounts
+// are per owner. That adds us as a second owner and changes nothing you can see or hear until
+// the other owner lets go, at which point the note stays because we are still holding it. A
+// left click releases it, since it is in `latched` like any other latched note.
+//
+// This release has no left-click twin for the `sustained` case, and that is deliberate: under
+// Sustain a left click on a ringing key restrikes it, which is the whole point of Sustain
+// being a pedal rather than a toggle. Owen took that trade explicitly (2026-07-30) to get
+// per-note release without giving up the restrike. It is a sanctioned exception to the
+// right-click-needs-a-left-click-twin rule, not an oversight; see CLAUDE.md.
 class NoteSurface : public juce::Component,
                     private juce::Timer
 {
@@ -92,7 +109,7 @@ protected:
     std::map<int, int> sounding; // drawn id -> output note currently on
     std::vector<int> voiceOrder; // drawn ids in the order they started (FIFO, for stealing)
     int dragDrawn = -1;
-    bool rightGesture = false;   // a right-click toggle is in flight; ignore its drag/up
+    bool rightGesture = false;   // a right-click hold/release is in flight; ignore its drag/up
     bool releaseGesture = false; // this click released a sustained note; ignore its drag/up
 
 private:

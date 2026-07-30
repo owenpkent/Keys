@@ -262,8 +262,8 @@ void ChordPads::paint(juce::Graphics& g)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot, 0.8f);
         }
 
-        // Locked pads carry a corner dot. It is an indicator, not a target: the toggle
-        // lives in the Chords panel, where it can be a full-size button.
+        // Locked pads carry a corner dot. It is an indicator, not a target: the toggle is
+        // Lock on this pad's own card menu, where it can be a full-size item.
         if (filled && pad.locked)
         {
             const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
@@ -342,7 +342,12 @@ void ChordPads::showPadMenu(int slot)
     const auto& pad = processor.chordPad(slot);
     const bool editing = slot == editingSlot;
 
+    // Three groups down this menu, each behind a section header: what acts on this pad, what
+    // acts on the whole page, and the generator's settings. The generator adds the last two
+    // and the tail of the first, so the order the items are built in is the order they read
+    // in - Send to arp slot moved up here (2026-07-30) to close the pad group before it.
     juce::PopupMenu menu;
+    menu.addSectionHeader("This pad");
     menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");
     menu.addItem(2, "Clear pad", ! pad.notes.empty() && ! pad.locked);
     // Lock lives here now. The strip has always painted the lock dot and never been able to
@@ -350,15 +355,9 @@ void ChordPads::showPadMenu(int slot)
     // state you could see from the keyboard could only be changed from another view.
     menu.addItem(3, pad.locked ? "Unlock" : "Lock", ! pad.notes.empty());
 
-    // Whatever else can act on this pad right now. The generator adds New chord and its
-    // suggestion families while the Chords view is open; with it closed there is nothing to
-    // add, and nothing that pretends to be there.
-    if (onExtraMenuItems)
-        onExtraMenuItems(slot, menu);
-
     // Bind this card to an arp slot, so launching that slot plays this chord through that
-    // slot's pattern. The other half of the "cards into the arp" pair: To Arp holds a card
-    // right now, this parks one in a slot for later.
+    // slot's pattern. The other half of the "cards into the arp" pair: a click with the arp
+    // On holds a card right now, this parks one in a slot for later.
     juce::PopupMenu slots;
     for (int s = 0; s < KeysProcessor::numArpPatterns; ++s)
     {
@@ -368,8 +367,13 @@ void ChordPads::showPadMenu(int slot)
             label += "  (" + target.chordName + ")";
         slots.addItem(100 + s, label, ! pad.notes.empty());
     }
-    menu.addSeparator();
     menu.addSubMenu("Send to arp slot", slots, ! pad.notes.empty());
+
+    // Whatever else can act on this pad right now: the generator adds New chord, its
+    // suggestion families and every setting it has. It has no panel and no view of its own
+    // since 2026-07-30, so this is where all of it is, on every pad and every page.
+    if (onExtraMenuItems)
+        onExtraMenuItems(slot, menu);
 
     const auto area = localAreaToGlobal(padBounds(slot - processor.padPageOffset()).toNearestInt());
     juce::Component::SafePointer<ChordPads> safe(this);
@@ -443,20 +447,36 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     playing = -1;
     dragSource = cellAt(e.position);
 
-    // To Arp: a filled pad hands its chord to the arpeggiator and it stays there. Not a
+    // Arp On: a filled pad hands its chord to the arpeggiator and it stays there. Not a
     // beat-pad press, so `playing` stays -1 and mouseUp has nothing to release; a second
-    // click on the same pad takes it back. Checked before the beat-pad branch because in
-    // this mode the click means something else entirely.
+    // click on the pad already feeding the arp re-plays it, the way a second press on a
+    // beat pad re-fires it. Checked before the beat-pad branch because in this mode the
+    // click means something else entirely.
+    //
+    // The `arpHeldPad()` half of the test is not redundant with the notes test: a card can
+    // be cleared while it is still the one feeding the arp, and then it wears the ring with
+    // no notes behind it. Without that clause the click falls past every branch below and
+    // does nothing at all, which is a dead click on a lit target.
     if (toArp() && dragSource >= 0
         && (! processor.chordPad(dragSource).notes.empty() || processor.arpHeldPad() == dragSource))
     {
-        // The second half of that condition matters: a pad whose card was cleared while it
-        // was feeding the arp has no notes left but is still the holder, and it has to stay
-        // clickable or the chord is unreachable.
-        if (processor.arpHeldPad() == dragSource)
+        if (processor.chordPad(dragSource).notes.empty())
+        {
+            // Ringed but empty: there is nothing to re-play, so the click means the only
+            // other thing it can mean. This is the ring's own way out, and the reason it is
+            // drawn on a cleared card at all.
             processor.releaseArpChord();
+        }
         else
+        {
+            // Re-playing the holder is a retrigger, never a second owner on the same
+            // pitches: holdArpChordFromPad goes through holdArpChord, which releases the
+            // previous hold (releaseNotes on arpChordTag, so the refs and the arp's held set
+            // both unwind) before it fires, and applies Exclusive to the new one. Stopping a
+            // filled card's hold outright is the Hold off button on the arp bar.
             processor.holdArpChordFromPad(dragSource);
+        }
+
         dragSource = -1; // and it is not a drag handle in this mode either
         repaint();
         return;

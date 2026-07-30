@@ -714,6 +714,13 @@ void KeysProcessor::allNotesOff()
     arpChordName = {};
     launchedSlot = -1;
     arpPadSlot = -1;
+
+    // And the Chain, for the same reason releaseArpHold() stops it: forgetting the chord is
+    // only true until the next bar line, when heartbeatTick() launches the following slot and
+    // the progression comes back out of a button whose whole job is silence. Last, not first,
+    // so the clears above have already emptied arpChordOn: stopChain() ends in releaseArpChord(),
+    // which would otherwise emit note-offs for references the panic loop has just zeroed.
+    stopChain();
 }
 
 void KeysProcessor::sendCC(int controller, int value)
@@ -1010,6 +1017,17 @@ void KeysProcessor::releaseArpChord()
     arpPadSlot = -1;
 }
 
+void KeysProcessor::releaseArpHold()
+{
+    // The chain first, and for the same reason the heartbeat stops it when the arp goes off:
+    // releasing the chord without it only wins until the next bar boundary, when
+    // heartbeatTick() launches the following slot and hands the arp another one. stopChain()
+    // is a no-op when nothing is chaining, and releases the chord it was holding when it is.
+    stopChain();
+    // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
+    releaseArpChord();
+}
+
 void KeysProcessor::holdArpChordFromPad(int padSlot)
 {
     if (padSlot < 0 || padSlot >= numChordPads)
@@ -1092,6 +1110,12 @@ void KeysProcessor::startChain()
     launchArpSlot(first);
     chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) first].bars));
     chainEpoch.fetch_add(1); // tells the audio thread to count this slot from zero
+    // Clear the advance flag *before* arming the clock. stopChain() clears it too, but the
+    // audio thread can raise it once more in the block that straddles the stop, and nothing
+    // consumes it while chainOn is false - so a stale true survived into the next chain and
+    // stepped it to its second slot on the first heartbeat. Ordered last but one so there is
+    // no window where chainActive is set and the flag is still whatever it was.
+    chainAdvance.store(false);
     chainActive.store(true);
 }
 
@@ -1328,28 +1352,21 @@ juce::ValueTree KeysProcessor::layoutToTree() const
 {
     juce::ValueTree tree { "layout" };
     tree.setProperty("controls", layout.controls, nullptr);
-    tree.setProperty("centre", layout.centre, nullptr);
     tree.setProperty("knobs", layout.knobs, nullptr);
     tree.setProperty("pads", layout.pads, nullptr);
     tree.setProperty("arp", layout.arp, nullptr);
-    tree.setProperty("transcribe", layout.transcribe, nullptr);
     tree.setProperty("wheels", layout.wheels, nullptr);
     tree.setProperty("keyboard", layout.keyboard, nullptr);
     tree.setProperty("detached", layout.detached, nullptr);
     tree.setProperty("arpDetached", layout.arpDetached, nullptr);
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
-    tree.setProperty("centreDetached", layout.centreDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
-    tree.setProperty("transcribeDetached", layout.transcribeDetached, nullptr);
     tree.setProperty("padsBig", layout.padsBig, nullptr);
-    tree.setProperty("view", layout.view, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
     tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
-    tree.setProperty("centreDetachedBounds", layout.centreDetachedBounds.toString(), nullptr);
     tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
-    tree.setProperty("transcribeDetachedBounds", layout.transcribeDetachedBounds.toString(), nullptr);
     return tree;
 }
 
@@ -1361,33 +1378,26 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     const auto flag = [&tree](const char* id, bool fallback)
     { return (bool) tree.getProperty(id, fallback); };
     layout.controls = flag("controls", true);
-    layout.centre = flag("centre", true);
     layout.knobs = flag("knobs", true);
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
-    layout.transcribe = flag("transcribe", false);
     layout.wheels = flag("wheels", true);
     layout.keyboard = flag("keyboard", true);
     layout.detached = flag("detached", false);
     layout.arpDetached = flag("arpDetached", false);
     layout.controlsDetached = flag("controlsDetached", false);
-    layout.centreDetached = flag("centreDetached", false);
     layout.padsDetached = flag("padsDetached", false);
-    layout.transcribeDetached = flag("transcribeDetached", false);
     layout.padsBig = flag("padsBig", false); // absent before the pads could be tall
-    // "view" is 0 = Perform, 1 = Chords, and used to carry two more values that have each
-    // since become a flag of their own. Both legacy values leave no centre view to restore -
-    // they replaced it rather than sitting beside it - so both fall back to Perform, which
-    // is also what an unreadable value gets.
-    //   2, "Arp", before the arp became a section: open the arp section instead, which is
-    //      the same thing the user was looking at.
-    //   3, "folded away", before the centre got its own chevron like every other section.
-    const int storedView = (int) tree.getProperty("view", 0);
-    if (storedView == 2)
-        layout.arp = true;
-    else if (storedView == 3)
-        layout.centre = false;
-    layout.view = (storedView == 0 || storedView == 1) ? storedView : 0;
+    // Older sessions carry keys nothing reads any more, and every one of them is simply
+    // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
+    // rest of the layout still arrives.
+    //   "transcribe" / "transcribeDetached" / "transcribeDetachedBounds", from before the
+    //   Transcribe section was removed.
+    //   "centre" / "centreDetached" / "centreDetachedBounds" and "view", from before the
+    //   centre section was removed (2026-07-30). The knob bank it held is a row of the
+    //   Controls band now, folded by "knobs", which those sessions already carry. "view"
+    //   was the centre's chosen view and had migrations of its own - 2 meaning "the arp",
+    //   from before the arp was a section - retired with the section they restored into.
     layout.accent = juce::jlimit(0, 7, (int) tree.getProperty("accent", 0));
 
     // A frame is only restored if the session actually carried one; an empty rectangle
@@ -1401,9 +1411,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     frame("detachedBounds", layout.detachedBounds);
     frame("arpDetachedBounds", layout.arpDetachedBounds);
     frame("controlsDetachedBounds", layout.controlsDetachedBounds);
-    frame("centreDetachedBounds", layout.centreDetachedBounds);
     frame("padsDetachedBounds", layout.padsDetachedBounds);
-    frame("transcribeDetachedBounds", layout.transcribeDetachedBounds);
 }
 
 juce::ValueTree KeysProcessor::arpToTree() const

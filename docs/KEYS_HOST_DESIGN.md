@@ -27,7 +27,7 @@ instrument. So this is a one-slot host, not a chainer.
 
 Subclassing works because the playing surface takes a concrete `KeysProcessor&`
 (`src/ui/NoteSurface.h`), and `KeysProcessor` already declares a real stereo output
-bus that it clears every block (`PluginProcessor.cpp` ~188, ~670). The subclass fills
+bus that it clears every block (`PluginProcessor.cpp` ~228, ~761). The subclass fills
 that bus with the hosted instrument's audio.
 
 - Members: `juce::AudioPluginFormatManager` (VST3 format only),
@@ -64,7 +64,7 @@ that bus with the hosted instrument's audio.
 ## State
 
 Small refactor in `KeysProcessor`: extract pad serialization
-(`PluginProcessor.cpp:734-793`) into protected `chordPadsToTree()` /
+(`PluginProcessor.cpp:908-967`) into protected `chordPadsToTree()` /
 `chordPadsFromTree(root)`, used by the base get/setState unchanged (same "KEYS" root
 tag — sessions stay interchangeable between Keys and Keys Host). The host override
 saves `okstudio::state::save(apvts, "KEYS", dest, { chordPadsToTree(), arpToTree(),
@@ -124,19 +124,19 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   at rest and lights the row with a `skin::accent` edge on hover. Dimming the
   instrument chip instead of removing it was tried first and was not enough.
 - **Updater gating**: the embedded `KeysEditor` runs the Keys updater check in its
-  ctor (`PluginEditor.cpp:374-388`). The KeysHost target compiles its own copy of the
+  ctor (`PluginEditor.cpp:493-507`). The KeysHost target compiles its own copy of the
   sources, so gate it with a `KEYS_HOST=1` compile definition (same pattern as
   `KEYS_MIDI_EFFECT`).
 
 ## CMake
 
-Follow the KeysFX pattern exactly (`CMakeLists.txt:107-118`): `option(KEYS_BUILD_HOST)`,
+Follow the KeysFX pattern exactly (`CMakeLists.txt:99-115`): `option(KEYS_BUILD_HOST)`,
 `okstudio_add_plugin(KeysHost PRODUCT_NAME "Keys Host" PLUGIN_CODE KyHo
 BUNDLE_SUFFIX keyshost ${_keysCopy})`, `keys_configure_target(KeysHost)`, then
 additionally: the two `src/host/*.cpp` sources, `KEYS_HOST=1`, and
 `JUCE_PLUGINHOST_VST3=1` (set nowhere in Keys or the kit today; JUCE bundles the
 VST3 hosting headers, no external SDK needed). `createPluginFilter` lives at
-`PluginProcessor.cpp:1172` — it must return `KeysHostProcessor` for this target
+`PluginProcessor.cpp:1540`, and it must return `KeysHostProcessor` for this target
 (gate on `KEYS_HOST`). `okstudio_add_plugin` is already called twice in this repo;
 nothing in the kit assumes one plugin per repo.
 
@@ -177,10 +177,13 @@ nothing in the kit assumes one plugin per repo.
   2026-07-19).
 - **One surface, folding sections** (see CHANGELOG): Keys dropped the five tabbed
   surfaces and the `uiLayout`-selected Classic/Performer arrangement. The surface is
-  picked at compile time now, and the rest of the editor is a stack of foldable sections:
-  Controls, a centre view (Perform or Chords, chosen by tabs on the centre bar), Arp,
-  Pads, Transcribe, Keyboard. Every one of them also detaches into a window of its own, and every
-  fold changes the height Keys Host is asked for. Keys and Keys Host build the piano only;
-  the Harmonic Table and Hex Host moved out to their own repo (`../Hex`).
-  `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session compatibility
-  but are no longer read by the UI.
+  picked at compile time now, and the rest of the editor is a stack of **four** foldable
+  sections: Controls (the two header rows plus the knob bank), Arp, Pads, Keyboard. There
+  are no tabs anywhere: the centre view went on 2026-07-30 with the chord generator's panel,
+  and the Transcribe section was removed the same day, which also took Keys off the static
+  MSVC runtime that its ONNX Runtime forced on the whole binary. Every section detaches into
+  a window of its own (titled `Keys Controls`, `Keys Arpeggiator`, `Keys Chord Pads`,
+  `Keys Keyboard`), and every fold changes the height Keys Host is asked for. Keys and Keys
+  Host build the piano only; the Harmonic Table and Hex Host moved out to their own repo
+  (`../Hex`). `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session
+  compatibility but are no longer read by the UI.

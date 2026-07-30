@@ -1,19 +1,23 @@
 # Captures a screenshot of the Keys (or Keys Host) standalone for the docs, per the
 # CLAUDE.md screenshot contract: launch, PrintWindow(PW_RENDERFULLCONTENT), kill.
 # Never SetForegroundWindow/SetCursorPos (Owen may be using the machine), and never
-# synthesized clicks - overlay buttons are driven through UI Automation Invoke.
+# synthesized clicks - on-screen controls are driven through UI Automation Invoke.
 #
 # Usage:
 #   powershell -File scripts/capture-window.ps1 -ExePath build/Keys_artefacts/Release/Standalone/Keys.exe `
 #       -OutPath assets/screenshots/keys.png
-#   ... -InvokeButtons Chords            # open an overlay first (UIA Invoke by name)
+#   ... -InvokeButtons "Arp section"     # unfold a section first (UIA Invoke by name)
 #   ... -KeepOpen                        # leave the app running (repeat captures)
 #   ... -WindowTitle "Keys Host"         # REQUIRED for Keys Host: see the note by $hwnd
+#
+# A section bar is a juce::Button named "<caption> section", so "Controls section",
+# "Arp section", "Pads section" and "Keyboard section" each fold or unfold that section.
+# The arp starts folded, so most arp shots begin by invoking "Arp section".
 param(
     # Not mandatory: with -ProcessId you are reusing a running instance and there is
     # nothing to launch. -SetValues runs *before* -InvokeButtons, so reaching a control
-    # that only exists inside a view means two passes: one to open it with -KeepOpen,
-    # then one with -ProcessId to drive it.
+    # that only exists inside a folded section means two passes: one to unfold it with
+    # -InvokeButtons and -KeepOpen, then one with -ProcessId to drive it.
     [string]$ExePath,
     [Parameter(Mandatory = $true)] [string]$OutPath,
     [int]$SettleMs = 2500,
@@ -149,7 +153,8 @@ try {
     # Host it picks wrong: the hosted instrument's GUI is a top-level window of the same
     # process, so a capture aimed at "the main window" comes back as a picture of somebody
     # else's synth. Pass -WindowTitle to name the one you actually want. The detached
-    # sections have the same problem, and the same answer ("Keys Keyboard", "Keys Arp"...).
+    # sections have the same problem, and the same answer: "Keys Controls", "Keys Arpeggiator",
+    # "Keys Chord Pads", "Keys Keyboard". Those four are the whole list.
     $hwnd = $proc.MainWindowHandle
     if ($WindowTitle) {
         $match = [IntPtr]::Zero

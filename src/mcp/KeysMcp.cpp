@@ -63,7 +63,7 @@ namespace
         return true;
     }
 
-    // Fills a result object with the six per-step lanes (trimmed to each lane's
+    // Fills a result object with every per-step lane (trimmed to each lane's
     // length), plus "lengths" and "clockDivs" sub-objects. Shared by get_arp_pattern's
     // live-lane and stored-slot branches.
     void writeArpPatternInto(juce::DynamicObject& obj,
@@ -656,8 +656,9 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
 {
     okstudio::mcp::Tool t;
     t.name = "get_arp_pattern";
-    t.description = "Read an arp pattern's six per-step lanes (note, octave, velocity, "
-                     "gate, ratchet, probability), each trimmed to its own length, plus "
+    t.description = "Read an arp pattern's ten per-step lanes (note, octave, velocity, "
+                     "gate, ratchet, probability, transpose, late, harmony, chord), each "
+                     "trimmed to its own length, plus "
                      "its per-lane clock dividers and which pattern is active. Without "
                      "slot, reads the live lanes (what's currently playing/showing in the "
                      "editor); with slot, reads that stored pattern (0..11) without "

@@ -2,9 +2,15 @@
 
 Every control is operated with a single left-click, a drag, or the scroll wheel.
 Nothing needs the keyboard, a double-click, or a modifier key. The right-click gestures
-below are accelerators, and the work each of them does has a left-click path too. The
-single exception is **Send to arp slot** in a chord pad's menu, which has no left-click
-twin, because binding a chord to one particular slot needs a target picker.
+below are accelerators, and the work each of them does has a left-click path too, bar two
+exceptions Owen signed off:
+
+- **Send to arp slot**, in a chord pad's menu, because binding a chord to one particular
+  slot needs a target picker.
+- **Releasing one note out of a chord the Sustain pedal is holding.** Under Sustain a left
+  click on a ringing key strikes it again, by design, so the second click cannot also be the
+  release. Right-click is the only way to take that one note out. Under **Latch** the left
+  click does release, so this exception is Sustain's alone.
 
 ## The keyboard
 
@@ -12,15 +18,20 @@ twin, because binding a chord to one particular slot needs a target picker.
 |---------|--------|
 | Click a key | Play that note (velocity from the Velocity range) |
 | Click and drag | Glide across keys; the previous note releases as the next sounds (monophonic) |
-| Right-click a key *(optional)* | Hold that one note — Octavium's per-note latch. **Left-click it again** to release it, or **All Off**. |
+| Right-click a key *(optional)* | Toggle a hold on that one note. A key this keyboard is already holding **lets go**, whether Latch put it there or the pedal caught it; any other key latches on. So a right-click walk along a ringing chord takes it apart a note at a time without lifting Sustain. |
 | Click a **C** | Every C is labelled (C1, C2, …) to help you orient |
 
-Chords come from **Latch**, **Sustain** or **right-click** — a single mouse can't hold
+Chords come from **Latch**, **Sustain** or **right-click**: a single mouse can't hold
 several keys at once, so those are how you stack notes. The difference is what a second
-click on a ringing key does: under **Sustain** it strikes the note again (it is a pedal,
-so the same key can be played over and over while the chord under it holds), under
+click on a ringing key does. Under **Sustain** it strikes the note again (it is a pedal,
+so the same key can be played over and over while the chord under it holds). Under
 **Latch** it releases that note, so a chord with a wrong note in it can be taken apart
-a note at a time.
+a note at a time. A note the right button latched on releases to a plain left click too,
+so the right button is never the only way out of it.
+
+Right-click can only reach notes **this keyboard** is holding. Keys lit by a chord pad, the
+arpeggiator or MCP are owned elsewhere and are left alone: use the pad, **Hold off** on the
+arp bar, or **All Off**.
 
 ### Watching a physical keyboard
 
@@ -39,13 +50,23 @@ transient (they don't save with the session) and send on the current MIDI channe
 
 ## Folding the window down
 
-Keys is a stack of sections, and each one folds away so the plugin can be squeezed small
-when the screen is busy. **Click anywhere on a section bar** to fold it, or on a folded one
-to bring it back — the whole 34 px strip is the button, not just the chevron at its left
-end. The controls that sit on a bar take their own clicks first, so hitting **Detach** or
-**On** does what it says; the bar only gets what they don't want. The window resizes itself
-to whatever the folds add up to, and can never be dragged smaller than the content it is
-showing.
+Keys is a stack of four sections, and each one folds away so the plugin can be squeezed
+small when the screen is busy. **Click the chevron at a bar's left end, or the caption
+beside it**, to fold that section, or to bring a folded one back. That left end is the whole
+target: 92 px wide at the shortest caption, the only part of the bar that lights under the
+mouse, and a **hairline** is drawn where it ends so you can see how far it reaches. The rest
+of the strip belongs to the controls riding on it, and a click that lands in the gaps
+between them does nothing at all.
+
+Doing nothing is the point. For three days the whole 34 px strip folded the section, on the
+reasoning that a bigger target is a kinder one. Z-order always protected each control's own
+rectangle, so a click that landed on **Detach** always reached Detach; what nothing could
+protect was the space around them. A click aimed at Detach that missed by a few pixels hit
+bar, and the bar folded away the thing you were reaching into. A bigger target is only
+kinder when the extra area does what the target does.
+
+The window resizes itself to whatever the folds add up to, and can never be dragged smaller
+than the content it is showing.
 
 An open section's bar is a solid ruled band with a bright caption and a tick of accent at
 its left end. A folded one goes flat and dim and drops its Detach button. So the shape of
@@ -53,12 +74,15 @@ the window reads at a glance, before you have read a single caption.
 
 | Section | Bar | Folds away |
 |---------|-----|-----------|
-| **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Velocity, Humanize, Strum, Dir, BPM |
-| **Perform / Chords** | middle | Whichever centre view is showing. Both tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** folds the knob bank inside Perform. |
-| **Arp** | below the centre | The arpeggiator. Its **On** toggle and **Detach** ride on the bar, so the arp can be switched on, off and detached with the panel folded shut — folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
-| **Pads** | below the arp | The chord pads, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons and the **Big** card-size switch ride on the bar. |
-| **Transcribe** | below the pads | Audio to MIDI: the input picker, the waveform, the piano roll and the MIDI drag handle. It starts folded, like the arp, because open it is tall. Folding it also closes the audio input, so Keys is not holding your microphone while it is shut. |
+| **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Humanize, Velocity, Strum, Dir, BPM, and the eight knobs in the row beneath them. **Knobs**, at the left end of this bar, folds just that knob row; the theme swatch at the right end stays put whatever you fold. |
+| **Arp** | below the controls | The arpeggiator. Its **On** toggle, the **Hold off** chip and **Detach** ride on the bar, so the arp can be switched on, made to let go of a chord, and detached with the panel folded shut. Folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
+| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons and the **Big** card-size switch ride at the left of the bar and fold with the strip; the generator's **Fill** and **Regen** chips ride at the right and never do. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
+
+A bar is a real button, not a painted strip, so it carries an accessible name for screen
+readers and UI Automation: *"&lt;caption&gt; section"* (`Controls section`, `Arp section`,
+and so on). The name says "section" so that a bar can never collide with a control sitting
+on it.
 
 ### Detaching a section
 
@@ -83,39 +107,16 @@ large as the screen allows. That window carries its own **Size** and **Wheels** 
 alongside Re-dock, because those belong to the keybed rather than to the editor.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
-**Perform / Chords** tabs, the arp's **On** toggle, the pad page buttons, and the theme
-swatch. All of them keep working while the section they name is off in a window.
+arp's **On** toggle and **Hold off** chip, the pad page buttons and **Big**, the generator's
+**Fill** and **Regen** chips, the **Knobs** chip, and the theme swatch. All of them keep
+working while the section they name is off in a window.
 
 Folding is the other case, and a stricter one: a folded bar keeps only what still means
-something with the section gone — the arp's **On** (so the arpeggiator runs on behind a
-closed panel), the **Perform / Chords** tabs (they are how a folded centre comes back) and
-the theme swatch (it colours the whole plugin). Everything else goes with the section,
-Detach included.
-
-## Transcribe
-
-The one section that listens rather than plays. Record something, and Keys works out what
-notes you sang or played.
-
-| Control | Gesture | What it does |
-|---------|---------|--------------|
-| **Driver** | click | Which audio driver to list inputs from — Windows Audio, ASIO, DirectSound |
-| **Input** | click | The input to record from. Remembered per machine, not saved in the song, because it describes your desk rather than your track |
-| *(level meter)* | — | Between the input and the buttons. Shows signal arriving, so you can see the mic is working before you record |
-| **Record** / **Stop** | click | Start recording; click again to stop and transcribe. Recording stops itself after two minutes |
-| **Clear** | click | Throw away the recording and the notes |
-| **DRAG MIDI** | **drag** | Drag onto a DAW track to drop the notes there as a MIDI file. The one control here that is a drag rather than a click, because an external file drag has no click equivalent |
-| **Sensitivity** | drag | Higher finds more notes. It re-reads the same recording rather than running the model again, so it answers immediately |
-
-The waveform strip shows what was recorded; the piano roll below it shows the notes that
-came out, laid out over the length of the take with the pitches it actually found.
-
-Transcription is not live and cannot be: the model needs the whole recording before it can
-decide where a note began. A take shorter than about a second produces nothing at all. While
-it works, the rest of Keys keeps playing normally.
-
-If the section is greyed out or missing entirely, Keys was built with
-`-DKEYS_TRANSCRIBE=OFF`.
+something with the section gone. That is the arp's **On** and **Hold off** (so the
+arpeggiator runs on behind a closed panel, and can still be made to let go of a chord),
+**Fill** and **Regen** (the only left-click path into the chord generator, and generating
+into a folded strip is a fine thing to mean), and the theme swatch (it colours the whole
+plugin). Everything else goes with the section, Detach included.
 
 ## Playing surface
 
@@ -128,10 +129,16 @@ to Beatform; the XY pad's two CCs are covered by the knob row below).
 
 ## Knob row
 
-Eight rotary CC knobs sit above the playing area (Octavium's fader window and XY pad,
-collapsed into one strip): centred at 64, the button under each knob shows its CC and
-reassigns it in one click. Positions send only while you drag (relative drag, no
-click-jump), and nothing is sent until you move one.
+Eight rotary CC knobs (Octavium's fader window and XY pad, collapsed into one strip):
+centred at 64, the button under each knob shows its CC and reassigns it in one click.
+Positions send only while you drag (relative drag, no click-jump), and nothing is sent until
+you move one.
+
+They are the **bottom row of the Controls section**, not a section of their own, which is
+what makes them 60 px across. **Knobs**, the chip at the left end of the Controls bar, folds
+just that row and leaves the dropdowns above it alone. A chip riding a bar costs the window
+no height, so the knobs gave up a section without giving up the fold. Fold the whole
+Controls section and the chip goes with it, since there is then no row for it to hide.
 
 ## Top bar
 
@@ -169,10 +176,17 @@ A single mouse can't hold several keys, so there are three ways to stack them:
 - **Latch** holds every key you click until you click it again.
 - **Sustain** catches every note you play while it is on, and re-plays any key you click
   a second time.
-- **Right-click** a key to hold that one note (an optional accelerator). **Left-clicking
-  it releases it**, so the right button is never the only way out.
+- **Right-click** a key to toggle a hold on that one note (an optional accelerator). A key
+  it latched on releases to a plain **left click** as well, so the right button is never the
+  only way out of its own gesture.
 
-Sustain and Latch are two answers to the same question — how does a note stop? Sustain is
+Right-click is also the one way to release a single note out of a chord the **pedal** is
+holding, because under Sustain the left click is a restrike by design. That is the one
+gesture in Keys with no left-click twin besides Send to arp slot, and Owen asked for it:
+without it, taking one wrong note out of a sustained chord meant lifting Sustain and losing
+the lot. **All Off** is still the blunt way out.
+
+Sustain and Latch are two answers to the same question, which is how a note stops. Sustain is
 a pedal: it defers the release, and a repeated key is a repeated strike, so you can play a
 riff over a chord that is still ringing. Latch is a switch: the second click is the
 release. They can both be on, and Latch wins on the keys it holds.
@@ -181,8 +195,10 @@ Everything here persists with the DAW session.
 
 ## Chord pads
 
-Two rows of eight pads (sixteen a page) and a live chord card sit between the controls
-and the playing area. They let you keep a palette of chords a single click away.
+Two rows of eight pads (sixteen a page) and a live chord card sit between the arpeggiator
+and the playing area. They let you keep a palette of chords a single click away, and they
+are the **only** chord cards in Keys: the generator draws none of its own, so what you
+audition here is what you play.
 
 1. **Build a chord.** Turn **Latch** on (or **Sustain**, or right-click) and click the notes you want.
    The card names the chord it hears (for example `Cm7`).
@@ -200,7 +216,8 @@ and the playing area. They let you keep a palette of chords a single click away.
 6. **Make the cards bigger.** **Big**, on the Pads bar, swaps the two rows of eight for four
    rows of four, each card showing the chord's notes with octave numbers and a mini keyboard
    of the shape under your hand. It is the arrangement the chord generator used to draw over
-   the top of these same pads, and it works under every centre view, not just Chords.
+   the top of these same pads, back when it had a panel; now these pads are the only place
+   those large cards exist.
 7. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
    chord latches onto the keys, and every key you add or remove is written straight back
    to the pad, with the name re-detected as you go. That pad wears a **✓** at its
@@ -218,63 +235,126 @@ There are **four pages** of sixteen pads, picked by the four numbered buttons on
 **Pads bar** above the strip. A chord left ringing on one page keeps sounding while you
 work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
+### A pad's card menu
+
+Right-click any pad. Everything that can act on that card is here, in three groups, each
+under a heading and separated by a rule. Nothing on it is more than one submenu deep.
+
+**This pad**
+
+| Item | What it does |
+|------|--------------|
+| **Edit on keyboard** / **Done editing** | Step 7 above |
+| **Clear pad** | Empty this one card. Greyed on an empty or locked pad |
+| **Lock** / **Unlock** | Keep this chord through a Fill or a Regen. The card has always painted the lock dot; this is what sets it |
+| **Send to arp slot** | Park a copy of this chord in one of the twelve arp slots, to launch later. The one *menu item* in Keys with no left-click twin |
+| **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
+| **Next: could follow** | Four submenus of chords that could follow this one, described below. On a filled pad only, since there has to be a chord to follow |
+
+**This page**
+
+| Item | What it does |
+|------|--------------|
+| **Clear page** | Empty every unlocked pad on this page. Greyed when there is nothing to take |
+
+**Generator settings** — every setting the chord generator has, one submenu each, described
+below.
+
+**Clear page** is on this menu and not a chip on the Pads bar, where it used to be. It
+empties sixteen pads, Keys has no undo of any kind, and on the bar it sat a few pixels from
+**Regen** and the page buttons, which are the two things there you click constantly. A
+right-click and a read is the right price for sixteen pads. **Fill** and **Regen** stayed on
+the bar because they are constructive.
+
 ## Chord generator
 
-**Chords** is the centre view that holds the generator. It works on the page of pads you
-are looking at, so each page can be a different key. **Close** goes back to Perform.
+The generator has no panel and no view of its own. It is **two chips, three combo boxes and a
+card menu**:
 
-It has no cards of its own: the chords it makes are the pads in the **Pads** section below,
-which is on screen under every centre view. (It used to draw its own copy of that same page
-at full size, from back when the generator covered the whole plugin and the pads had nowhere
-else to live. **Big** on the Pads bar gives you those large cards where the pads actually
-are.)
+- **Fill** and **Regen**, at the right-hand end of the **Pads bar**. Fill writes a chord to
+  every unlocked pad on the page; Regen gives a new chord to the unlocked pads that already
+  have one. Both stay clickable when the Pads section is folded away, because they are the
+  only left-click path into generation and folding the strip must not take the feature with
+  it. Unfold and the page is written.
+- **Key**, **Mode** and **Scale Compliance**, combo boxes on the same bar just left of the
+  chips. These are the three you change while you are auditioning a page, so they are on the
+  bar rather than behind a right-click: one click opens the list, one picks. They stay put
+  through a fold too, and they are the same settings as the menu items of the same names, so
+  either place shows what the other did.
+- **The pad right-click menu** for everything that acts on one card, and for every setting.
+
+It works on the page of pads you are looking at, so each page can be a different key. The
+chords it makes *are* the pads: there is exactly one set of chord cards in Keys and this is
+it, so what you audition is what you play. (It used to draw its own full-size copy of the
+same sixteen pads, from back when it covered the whole plugin. **Big** on the Pads bar gives
+you those large cards where the pads actually are.)
 
 ### Filling a page
 
-1. **Pick a key.** Set **Key** and **Mode**: each mode shows the character it carries
-   (Lydian reads "Dreamy, Ethereal, Magical"), so you can choose by feel rather than by
-   name. These two are the generator's own, separate from the **Root** and **Scale** that
-   drive Scale Lock, so move those to match if you want Scale Lock to agree with the
-   chords you're about to get.
-2. **Fill Page.** Every unlocked pad gets a chord. The seven chords that belong to the
-   key come first, in order, then the remaining pads get something richer from the key.
+1. **Pick a key.** Set **Key** and **Mode** from the combo boxes on the Pads bar, or from the
+   same two items on a pad's right-click menu, where each mode also shows the character it
+   carries (Lydian reads "Dreamy, Ethereal, Magical") so you can choose by feel rather than by
+   name. The bar spells the modes without their aliases, so "Natural Minor (Aeolian)" reads
+   **Natural Minor** there. These two are the generator's
+   own, separate from the **Root** and **Scale** that drive Scale Lock, so move those to
+   match if you want Scale Lock to agree with the chords you're about to get.
+2. **Fill.** One click on the chip. Every unlocked pad gets a chord: the seven that belong
+   to the key come first, in order, then the remaining pads get something richer from it.
 3. **Play them.** Press a pad to hear it. Turn **Big** on if you want to read the notes of
    each chord while you work.
 
-### Shaping what you get
+### Generator settings
 
-| Control | What it does |
+All of these live at the bottom of a pad's right-click menu, under the **Generator settings**
+heading. Each one opens a short list of values with the current one ticked, so a setting is a
+hover and a click and never a drag. There is no wrapper submenu around them: that cost a
+third leg of hover for every setting, and hover travel is the expensive part with one mouse.
+
+**Key**, **Mode** and **Scale Compliance** are also combo boxes on the Pads bar, which is the
+fast way to reach the three you change most. The five Markov rows are together under a single
+**Markov chains** submenu, because none of them does anything until the source is Markov.
+
+| Setting | What it does |
 |---------|--------------|
-| **Scale Compliance** | How adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows chords from related modes, then reaches for secondary dominants, then for anything at all. |
-| **Notes** | Which chord sizes to build: **3** triads, **4** 7ths and 6ths, **5** 9ths and extensions. |
-| **Inversions** | **R** is root position; **1st** / **2nd** / **3rd** let a chord sit with its lower notes moved up an octave, so a progression moves less. |
-| **Octave** | Which register the generated chords land in. |
+| **Source** | **Algorithmic** (the weighted pool) or **Markov** (chains learned from real progressions) |
+| **Key** | The tonic the chords are built from. Feeds both sources |
+| **Octave** | Which register the generated chords land in. Feeds both sources |
+| **Mode** | 12 modes, each labelled with the character it carries |
+| **Notes** | Which chord sizes to build: **3** triads, **4** 7ths and 6ths, **5** 9ths and extensions |
+| **Inversions** | **Root** position, and whether **1st** / **2nd** / **3rd** are allowed. An inversion lets a chord sit with its lower notes moved up an octave, so a progression moves less |
+| **Scale Compliance** | How adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows from related modes, then reaches for secondary dominants, then for anything at all |
+| **Lock Influence** | How much the chords you locked steer the new ones |
+| **Chain** | Markov only: Major, Minor or Modal chain tables |
+| **Mood** | Markov only: learn only from progressions tagged with this mood |
+| **Start** | Markov only: force the first chord (I, i, IV, V, vi, …) or let it pick |
+| **Temperature** | Markov only, 0.40 to 2.00. Low sticks to the most common moves; high flattens toward anything the corpus has ever done |
+| **Length** | Markov only: how many unique chords are generated (4 to 16) before the sequence loops to fill the page |
+
+Everything from **Mode** down to **Lock Influence** belongs to the weighted pool, so it
+greys out while Markov is the source rather than staying clickable and being silently
+ignored (which is what Octavium did). The Markov rows grey out the same way under
+Algorithmic, and the **Mood** list follows whichever chain is up.
 
 ### Keeping what you like
 
-**Lock** a chord you want to keep, from the pad's right-click menu — which offers it whether
-the generator is open or not, since the lock dot on the card was always visible from
-everywhere. **Regen Unlocked**
-gives every other pad a new chord; locked ones stay. **Clear Page** empties the unlocked
-pads.
+**Lock** a chord you want to keep, from that pad's menu. **Regen** then gives every other
+pad a new chord and leaves the locked ones alone; **Fill** keeps them too.
 
-**Lock Influence** decides how much the locked chords steer the new ones. At a high
-setting, locking three 7th chords biases what you get toward 7ths — it copies the
-*character* of what you kept, not the chords themselves.
+**Lock Influence** decides how much the locked chords steer the new ones. At a high setting,
+locking three 7th chords biases what you get toward 7ths: it copies the *character* of what
+you kept, not the chords themselves.
 
 ### Finding the next chord
 
-**New chord**, in that same card menu, gives you a different chord for that pad's place
-in the scale — same role in the key, different colour.
+**Next: could follow** asks what could follow that pad's chord, and offers four kinds of
+answer, one submenu each:
 
-**Next** asks what could follow that chord, and offers four kinds of answer:
-
-- **Neo-Riemannian** — the moves that change as little as possible: swap major for minor
+- **Neo-Riemannian**: the moves that change as little as possible. Swap major for minor
   (P), or slide to a chord that shares two of its notes (L, R, N, S, H).
-- **Circle of Fifths** — the dominant and subdominant, the pulls that make a progression
+- **Circle of Fifths**: the dominant and subdominant, the pulls that make a progression
   feel like it's going somewhere.
-- **Diatonic** — the other chords of the key (ii, iii, vi, vii).
-- **Chromatic** — the borrowed and jazz moves (tritone substitution, minor plagal,
+- **Diatonic**: the other chords of the key (ii, iii, vi, vii).
+- **Chromatic**: the borrowed and jazz moves (tritone substitution, minor plagal,
   Neapolitan, augmented sixth).
 
 Every suggestion row has a **play** button that auditions it for a moment without
@@ -282,33 +362,27 @@ closing the menu, so you can shop by ear. Clicking the row itself takes it: your
 goes into the next empty pad on the page, so you can build a progression left
 to right by asking for one chord at a time.
 
-### The Markov source
-
-Switch **Source** from **Algorithmic** to **Markov** and Fill walks chains learned
-from real progressions instead of weighting a candidate pool:
-
-| Control | What it does |
-|---------|--------------|
-| **Chain** | Major, Minor, or Modal chain tables |
-| **Temperature** | 0.30–2.00. Low sticks to the most common moves (conservative); high flattens toward anything the corpus has ever done (adventurous). |
-| **Length** | How many unique chords are generated (4–16) before the sequence loops to fill the page. |
-| **Mood** | Only learn from progressions tagged with this mood (or **Any**). |
-| **Start** | Force the first chord (I, i, IV, V, vi, …) or let it pick. |
-
-**New** on a Markov pad steps the chain again from the pad to its left, avoiding the
-chord it replaces. The note-count, inversion, compliance, and lock-influence controls
-don't apply to Markov chords and grey out (Octavium left them clickable and silently
-ignored them). Locked pads are never overwritten, same as the algorithmic source.
+**New chord** on a Markov pad steps the chain again from the pad to its left, avoiding the
+chord it replaces. Locked pads are never overwritten, same as the algorithmic source.
 
 ## Arpeggiator
 
-A section of its own, between the centre view and the pads. It takes whatever is currently
+A section of its own, between the controls and the pads. It takes whatever is currently
 sounding (keyboard, a held note, a chord pad) and plays it one note at a time. The chord
-pads sit directly below it, so a chord is always one click away, and the knobs or the
-generator stay on screen above.
+pads sit directly below it, so a chord is always one click away, and the knobs stay on
+screen above.
 
-**On** and **Detach** live on the Arp bar rather than inside the panel, so folding the
-panel away leaves the arpeggiator running and still switchable. The section starts folded.
+**On**, **Hold off** and **Detach** live on the Arp bar rather than inside the panel, so
+folding the panel away leaves the arpeggiator running, still switchable, and still able to
+let go of a chord. The section starts folded, so those three are usually all of it you can
+see.
+
+**Hold off** releases the chord being held into the arp and stops the **Chain** if it is
+running. The arp itself keeps running and goes back to arpeggiating whatever you play. It is
+greyed out when there is nothing held and nothing chaining, and it is the way to stop a hold
+outright: clicking the lit pad restrikes the chord rather than letting it go. A running
+chain counts as something to let go of even in the gap where no chord happens to be
+sounding, because it will fire the next one at the coming bar line.
 
 **Shape decides how much of the panel exists.** The twelve shapes are plain arpeggios and
 show nothing but the controls below. The last entry, **Pattern**, opens the step editor and
@@ -400,7 +474,7 @@ things and often belong to different slots.
 | **Copy** | Arms a copy from the live pattern: click it, then click the slot to copy into. |
 | **Clear** | Arms a clear: click it, then click a slot to take its chord away. The pattern stays. |
 | **Cancel** | Disarms Copy or Clear. Only appears while one of them is armed. |
-| **Stop** | Releases the chord a slot is holding, without the blunt instrument of All Off. |
+| **Stop** | Releases the chord being held into the arp and stops the Chain, without the blunt instrument of All Off. The same button as **Hold off** on the section bar, which is the one that is still on screen when the panel is folded. |
 | **Randomize** | Rerolls the live pattern's lanes. Pattern shape only, since a plain shape has no lanes. |
 
 Right-clicking a slot offers Launch, Clear chord, Copy and Randomize, if you prefer a menu.
@@ -410,13 +484,19 @@ Right-clicking a slot offers Launch, Clear chord, Copy and Randomize, if you pre
 Two ways, both from the Pads section under the panel:
 
 - **Click a chord card while the arp is on.** It hands that chord to the arp and leaves it
-  there: the pad wears a bright ring while it is the one feeding the arp, so click the lit
-  pad to release it, or another to swap. The generator's chord grid does the same, so a
-  chord can reach the arp while you are still filling the page. The live chord card hands
-  its chord over the same way, but takes no ring and no second click — use **Stop**, or
-  another card, to move off it. With the arp **off**, the pads play beat-pad style exactly
-  as they always have, and switching the arp off while a card is feeding it releases that
-  chord. (This used to need arming a separate **To Arp** toggle, which looked like it did
-  nothing whenever the arp was off; it went on 2026-07-27.)
+  there, and the pad wears a bright ring while it is the one feeding it. Click **another**
+  card to swap. Clicking the **lit** one again **strikes the chord afresh**, the way a second
+  press on a beat pad re-fires it: it is a retrigger, not a release, and it never doubles up
+  on the notes it is already holding. To stop the hold outright, use **Hold off** on the arp
+  bar (or **Stop** in the panel, which is the same button). The live chord card hands its
+  chord over the same way, and takes no ring. With the arp **off**, the pads play beat-pad
+  style exactly as they always have, and switching the arp off while a card is feeding it
+  releases that chord. (This used to need arming a separate **To Arp** toggle, which looked
+  like it did nothing whenever the arp was off; it went on 2026-07-27.)
+
+  One card does release rather than retrigger: a card you **cleared** while it was still the
+  one feeding the arp. It keeps the ring with no notes behind it, so there is nothing to
+  re-play, and the click means the only other thing it can mean. That is the ring's own way
+  out, and the reason a cleared card is still drawn with one.
 - **Send to arp slot**, in a pad's right-click menu, parks a copy of that chord in one of
   the twelve slots to launch later.

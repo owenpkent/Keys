@@ -10,7 +10,7 @@
 namespace keys
 {
 // The arpeggiator editor (docs/ARP_DESIGN.md). A band of captioned control groups, the
-// six per-parameter step lanes (Cthulhu architecture) when Shape is "Pattern", and a row
+// ten per-parameter step lanes (Cthulhu architecture) when Shape is "Pattern", and a row
 // of twelve launchable slots along the bottom.
 //
 // The band and the slot row follow a hardware-arp layout Owen asked for (2026-07-25):
@@ -20,11 +20,15 @@ namespace keys
 // slot is the one-click "pass a card into the arpeggiator" gesture: it installs the
 // pattern, applies the slot's shape and rate, and holds the slot's chord into the arp.
 //
-// It lives inline, as the editor's centre view: picking Arp swaps it in where the knob
-// bank sat, instead of throwing a dimmed sheet over the whole plugin. The old behaviour
-// hid the keyboard behind the panel, which is backwards for a plugin you play while you
-// edit the arp. setInlineMode(false) restores the overlay look (no caller does today;
-// kept because the class is shared with Keys Host).
+// It lives inline, as the content of the editor's Arp section: unfolding that section
+// makes room for it between the pads and the keybed, instead of throwing a dimmed sheet
+// over the whole plugin. The old behaviour hid the keyboard behind the panel, which is
+// backwards for a plugin you play while you edit the arp. setInlineMode(false) restores
+// the overlay look (no caller does today; kept because the class is shared with Keys Host).
+//
+// Folding the section destroys this object, so nothing on it can be the only way to reach
+// a running arpeggiator: On and Hold off ride the section bar for exactly that reason, and
+// the Stop button below is the panel's own copy of the second of them.
 //
 // Lane data lives in processor.arp.lanes as arrays of std::atomic<int>, written here
 // on the message thread and read on the audio thread; no locking, so every edit is a
@@ -163,7 +167,7 @@ private:
 
     // The captioned, ruled group boxes the band is drawn as. Filled in by resized() and
     // painted by paint(), because a caption and a rule are two lines of Graphics each and
-    // do not justify six more child components.
+    // do not justify five more child components.
     struct Group
     {
         juce::String caption;

@@ -316,8 +316,11 @@ cards you fire rather than letters you recall.
 A slot carries its lane data *and* a chord, a shape and a rate. Launching it (one left
 click, anywhere on the card) installs the pattern, moves the Shape and Rate parameters
 through the host the way the combo boxes do, and holds the chord into the arp. Clicking the
-launched slot again releases it; **Stop** does the same without reaching for All Off. A slot
-with no chord launches the pattern alone and arpeggiates whatever is already sounding.
+launched slot again releases it (`ArpPanel::launchSlot` still toggles per slot, which is what
+makes a slot card a launcher rather than a pad). **Stop** does the same without reaching for
+All Off, and it goes through `releaseArpHold()`, so it also stops the Chain: it is the same
+button as **Hold off** on the section bar and has to behave like it. A slot with no chord
+launches the pattern alone and arpeggiates whatever is already sounding.
 
 The card paints what it will play - chord name, shape, rate - so a row of twelve reads as a
 progression. Two lit states, deliberately distinct: *active* (a soft ring) means these are
@@ -347,7 +350,22 @@ closed the first half):
 
 - **A click on a chord card, while the arp is on.** It calls
   `KeysProcessor::holdArpChordFromPad`, which emits the note-ons and never the note-offs
-  until the next call. This was its own **To Arp** toggle on the Pads bar until 2026-07-27,
+  until the next call.
+
+  **A second click on the card already feeding the arp retriggers it** (2026-07-30); it used
+  to toggle the hold off. `holdArpChordFromPad` goes through `holdArpChord`, which releases
+  the previous hold first (`releaseNotes` on `arpChordTag`, so the refcounts and the arp's
+  held set both unwind) and then fires, applying Exclusive to the new one, so re-playing the
+  holder is a restrike and never a second owner of the same pitches. That makes a chord card
+  behave like a beat pad in both modes: a second press re-fires it. The one exception is a
+  card that was **cleared** while still holding the arp. It wears the ring with no notes
+  behind it, there is nothing to re-play, so the click calls `releaseArpChord()` instead:
+  that is the ring's own way out, and the reason it is drawn on an empty card at all.
+
+  Stopping a *filled* card's hold outright is **Hold off** on the arp bar (below).
+
+  **Handing a chord over used to need arming.** It was its own **To Arp** toggle on the Pads
+  bar until 2026-07-27,
   on the reasoning that a pad must not quietly do something different than it did a minute
   ago. In practice the separate arming read as a button that did nothing: with the arp off,
   handing it a chord looks exactly like sustaining one, and that is the state the toggle was
@@ -374,6 +392,39 @@ The held chord is tagged `arpChordTag` so it never collides with pad or live-car
 scheduling, and `allNotesOff()` forgets it - otherwise a panic silences the chord while the
 launched slot still paints as playing.
 
+### Hold off, and `releaseArpHold()`
+
+Held means held: nothing follows the note-ons until something replaces them. With the card
+click turned into a retrigger, the way to stop a hold outright is a control of its own, so
+**Hold off** is a 24 px chip on the **arp bar**, next to On (2026-07-30). It is on the bar
+and not in the panel for the same reason On is: a chord can be held into a folded arp, and
+the only exit from it cannot be inside the section that is folded away. The editor's timer
+enables it exactly when there is something to let go of
+(`! processor.arpHeldNotes().empty() || processor.chainRunning()`) and greys it otherwise, so
+it never reads as a dead target. Its accessible name is "Arp hold off", because "Hold off"
+alone says nothing to a script driving the plugin through UI Automation.
+
+Both it and the panel's **Stop** button call one new processor method:
+
+```cpp
+void KeysProcessor::releaseArpHold()   // stopChain(), then releaseArpChord()
+```
+
+**The order and the pairing are the point.** `releaseArpChord()` alone is not "stop": with
+the Chain running it drops the chord and wins only until the next bar boundary, when
+`heartbeatTick()` launches the following slot and hands the arp another one. So the chain
+goes first. `stopChain()` is a no-op when nothing is chaining and releases the chord it was
+holding when it is, which leaves `releaseArpChord()` idempotent after it, and picking up
+whatever a card or a lone slot launch left behind. Anything that means "let go of the arp's
+chord, whatever put it there" should call `releaseArpHold()` and not either half.
+
+It is deliberately *not* All Off: the arp keeps running and goes back to arpeggiating
+whatever you play, which is the difference between letting go of a chord and panicking.
+`ArpPanel::launchSlot` is also unchanged and still **toggles per slot**: clicking the slot
+card that is already launched calls `stopArpSlot()`. A slot card is a launcher with a lit
+state, so one control starting and stopping it is what its ring already promises; a chord
+pad is a pad, and pads re-fire.
+
 ## Mouse-only interaction (the part nobody else got right)
 
 Verified: Serum's *feel* is the model, its *gestures* are not. Serum's editor
@@ -399,27 +450,34 @@ Concrete remaps:
 
 ## UI placement (decided: a section of its own)
 
-The arp is a foldable **section**, between the centre view and the chord pads, with its
-**On** toggle and a **Detach** button on its own bar. Folding the section destroys the
-editor, never the arpeggiator, which is why On lives on the bar rather than inside the
-panel — and why On is one of the few things that stays put when the section folds, while
-Detach hides with it. Detach moves the whole panel into a resizable window
-(`DetachedWindow`, shared with every other section since 2026-07-27); a detached section
-takes no height in the main window, and the Re-dock button travels into the window with it.
+The arp is a foldable **section**, between the Controls section and the chord pads, with its
+**On** toggle, a **Hold off** chip and a **Detach** button on its own bar. Folding the
+section destroys the editor, never the arpeggiator, which is why On lives on the bar rather
+than inside the panel, and why On and Hold off are two of the three things in the editor that
+stay put when their section folds (the theme swatch is the third). Detach hides with it.
+Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with every
+other section since 2026-07-27); a detached section takes no height in the main window, and
+the Re-dock button travels into the window with it.
 
-Clicking the bar anywhere but on **On** folds the panel away, which makes the arpeggiator
-easy to leave running behind a single dim strip.
+**Only the left end of the bar folds it** (2026-07-30). `SectionBar::hitTest` narrows the
+button to `foldZone()`, the chevron and the caption, about 92 px at the narrowest caption,
+with a painted hairline marking where the target ends. For three days the whole strip folded,
+and on this bar in particular that was expensive: a click aimed at On or Hold off that missed
+by a few pixels hid the arp instead. See `docs/ARCHITECTURE.md`, **Folding layout**. Folding
+is still one click and still leaves the arpeggiator running behind a single dim strip.
 
 It got there in three steps, all at Owen's request. A full-editor overlay first, changed to
 a centre view on 2026-07-25 because the overlay dimmed and covered the keyboard you are
 meant to be playing while you edit. Then a section later the same day, because as one of
 three centre views it competed with the knobs and the generator: picking the arp put away
-the chord cards it exists to chew on. The centre views are Perform and Chords now.
+the chord cards it exists to chew on. There is no centre view at all now: it went on
+2026-07-30 along with the chord generator's panel, leaving four sections stacked (Controls,
+Arp, Pads, Keyboard).
 
-**The chord pads are their own section** (2026-07-25), between the centre view and the
-keyboard, so they are on screen under Perform, Chords *and* Arp. This is the layout change
-the whole "cards into the arp" feature rests on: the arpeggiator's job is to chew on a
-chord, and it was the one view from which you could not reach one.
+**The chord pads are their own section** (2026-07-25), directly below the arp, so a chord
+card is on screen whatever else is open. This is the layout change the whole "cards into the
+arp" feature rests on: the arpeggiator's job is to chew on a chord, and it was the one view
+from which you could not reach one.
 
 ## Control band layout
 

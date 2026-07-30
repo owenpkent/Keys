@@ -15,8 +15,7 @@ on:
       - 'assets/**'
       - 'docs/**'
 
-# Least privilege: this workflow only reads source, caches the ONNX Runtime
-# download and uploads an artifact.
+# Least privilege: this workflow only reads source and uploads an artifact.
 permissions:
   contents: read
 
@@ -59,23 +58,12 @@ jobs:
           path: okstudio-juce-kit
           persist-credentials: false
 
-      # The Transcribe section links a prebuilt ONNX Runtime that unpacks to a few GB. It is
-      # fetched at configure time and never changes for a given release, so the key is the
-      # release itself: a hit skips the download entirely, and the only reason to bump the key
-      # is the kit pinning a different ONNX Runtime.
-      - name: Cache ONNX Runtime
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ github.workspace }}/onnxruntime-cache
-          key: onnxruntime-windows-x86_64-v1.14.1-neuralnote.1
-
       - name: Configure
         run: >
           cmake -B build
           -DCMAKE_BUILD_TYPE=Release
           -DKEYS_JUCE_PATH="${{ github.workspace }}/juce-sdk"
           -DOKSTUDIO_KIT_PATH="${{ github.workspace }}/okstudio-juce-kit"
-          -DOKSTUDIO_ONNXRUNTIME_CACHE="${{ github.workspace }}/onnxruntime-cache"
           -DKEYS_COPY_PLUGIN=OFF
 
       - name: Build VST3

@@ -13,18 +13,29 @@ namespace keys
 // contract for free: single left-click, no modifiers, and a real accessible name for the
 // UI Automation path the screenshot script uses.
 //
-// **The whole bar folds it** (2026-07-27, Owen's ask). It used to be the chevron end alone,
-// on the reasoning that a click missing one of the bar's own controls by a few pixels would
-// fold the section by accident. In practice the opposite was the problem: a 40 px target on
-// a 34 px-tall full-width strip reads as if the strip is the button, so aiming at the
-// chevron was the fiddly part, and the mouse-only contract is about making targets *bigger*.
-// The controls that ride on the bar are its siblings and sit in front of it (KeysEditor
-// toBack()s every bar), so they still take their own clicks; the bar only ever gets what
-// they do not want.
+// **Only the left end folds it** (2026-07-30, Owen's ask). For three days the whole strip
+// was the button, on the reasoning that a 34 px-tall full-width band reads as one target,
+// that the mouse-only contract is about making targets *bigger*, and that z-order already
+// stopped the bar stealing any control's click. That last part was true and still is: the
+// controls riding the bar are its siblings sitting in front of it (KeysEditor toBack()s
+// every bar), so a click that lands *on* Detach has always reached Detach.
+//
+// What it missed is that z-order only defends each control's own rectangle. It says nothing
+// about the gaps around them, and on a bar whose right end is mostly gap, a click aimed at
+// Detach that lands a few pixels off it hits bar, and the bar folded the section away. The
+// cost of that miss is asymmetric: hitting Detach does what you wanted, missing it hides
+// the thing you were reaching into. Bigger is only kinder when the extra area does what the
+// target does, and out there it did the opposite.
+//
+// So the fold target is the chevron and its caption again, `foldZone()`, still 92 px wide at
+// the narrowest caption, and the only part of the bar that lights under the mouse or answers
+// to one. Note this reverses the 2026-07-27 removal of this same override; docs that still
+// say "the whole bar is the target" are describing that three-day window.
 //
 // The bar is not just chrome: callers hang the section's own small controls in the space
 // to the right of the caption (see KeysEditor::resized), which is why it exposes
-// `contentArea()` rather than laying anything out itself.
+// `contentArea()` rather than laying anything out itself. That rectangle is measured off
+// `foldZone()`, so the clickable end and the free end cannot drift apart.
 class SectionBar : public juce::Button
 {
 public:
@@ -33,32 +44,32 @@ public:
     explicit SectionBar(const juce::String& caption) : juce::Button(caption), title(caption)
     {
         // Accessible name (a Button's own is its empty button text). "... section" and not
-        // the bare caption, because the centre bar's caption follows the view and would
-        // otherwise collide with the tab of the same name — ambiguous for a screen reader,
-        // and it made UI Automation fold the section when asked to click the tab.
+        // the bare caption, so a bar never shares a name with a control riding on it: the
+        // screenshot script drives this plugin through UI Automation, which takes the first
+        // match, and a bar that answered to the same name as a button would fold the section
+        // it was asked to click into.
         setTitle(caption + " section");
         setTooltip("Show or hide " + caption.toLowerCase() + ".");
         setClickingTogglesState(true);
         setToggleState(true, juce::dontSendNotification); // open
     }
 
-    // The centre bar's caption follows whichever view is showing, so it is not fixed at
-    // construction like the other two.
-    void setCaption(const juce::String& c)
-    {
-        if (c == title)
-            return;
-        title = c;
-        setTitle(c + " section"); // keep the accessible name honest, and still distinct
-        repaint();
-    }
+    // The part of the bar that folds it: the chevron (28 px) and the caption, plus 4 px of
+    // slack so the last letter is not on the edge of the target. In the bar's *own*
+    // coordinates, because that is what hitTest and paintButton are given.
+    juce::Rectangle<int> foldZone() const { return getLocalBounds().withWidth(28 + captionWidth() + 4); }
 
-    // Where a caller may put section controls: right of the caption, inset from the ends.
-    // In the *parent's* coordinates, because those controls are the bar's siblings, not
-    // its children — the bar is a Button and must keep the whole of itself clickable.
+    // Everything right of the fold zone belongs to the controls sitting on the bar, so the
+    // bar declines those clicks and they land on whatever is there (or on nothing).
+    bool hitTest(int x, int y) override { return foldZone().contains(x, y); }
+
+    // Where a caller may put section controls: right of the fold zone, inset from the ends.
+    // In the *parent's* coordinates, because those controls are the bar's siblings, not its
+    // children. Measured off foldZone() and not off captionWidth() a second time, so the
+    // clickable end and the free end are one number and can never disagree.
     juce::Rectangle<int> contentArea() const
     {
-        return getBoundsInParent().withTrimmedLeft(28 + captionWidth() + 12).withTrimmedRight(8).reduced(0, 4);
+        return getBoundsInParent().withTrimmedLeft(foldZone().getWidth() + 8).withTrimmedRight(8).reduced(0, 4);
     }
 
     void paintButton(juce::Graphics& g, bool highlighted, bool down) override
@@ -70,7 +81,7 @@ public:
         // Open and folded are deliberately different weights, not the same bar with a
         // different arrow (Owen's ask, 2026-07-27). An open section's header is a solid
         // ruled band that reads as the lid of the thing under it; a folded one is a flat
-        // dim strip that reads as a closed drawer. With six of these stacked, the shape of
+        // dim strip that reads as a closed drawer. With four of these stacked, the shape of
         // the window is legible before you read a single caption.
         if (open)
         {
@@ -99,12 +110,23 @@ public:
             g.drawRoundedRectangle(b.reduced(0.5f), skin::radius, 1.0f);
         }
 
-        // The whole bar is the target now, so the whole bar lights. Anything less would
-        // advertise a smaller button than the one that is actually there.
+        // Where the fold target ends. The strip paints as one object across the full width,
+        // but only its left end answers a click, so without a mark the rest reads as a
+        // button that ignores you. It cannot be taught by hover: hitTest means `highlighted`
+        // never comes up out there, so the one cue that would show the boundary is exactly
+        // the cue the boundary suppresses. Hence a hairline, drawn whether or not the mouse
+        // is anywhere near the bar.
+        g.setColour(juce::Colours::white.withAlpha(open ? 0.06f : 0.04f));
+        g.fillRect(juce::Rectangle<float>((float) foldZone().getRight(), 8.0f, 1.0f, b.getHeight() - 16.0f));
+
+        // Only the fold zone lights, because only the fold zone folds. hitTest already means
+        // `highlighted` cannot come up out there, but the fill has to be narrowed with it:
+        // a band that lit end to end promised a fold to a click that was about to land on
+        // Detach, which is the accident this whole arrangement exists to stop.
         if (highlighted || down)
         {
             g.setColour(juce::Colours::white.withAlpha(down ? 0.09f : 0.05f));
-            g.fillRoundedRectangle(b.reduced(1.0f), skin::radius);
+            g.fillRoundedRectangle(foldZone().toFloat().reduced(1.0f), skin::radius);
         }
 
         // Disclosure chevron: down when open, right when folded away.
@@ -135,9 +157,10 @@ public:
 private:
     // One font for measuring and for drawing. They used to differ - captionWidth() measured
     // the plain micro face while paintButton drew it letter-spaced - so the box was always a
-    // little narrower than the text in it, and the longest caption ellipsised to "TRANSCRI...".
-    // The kerning is also deliberately the same open and folded: it feeds contentArea(), and a
-    // caption box that changed width with the fold would shift every control on the bar.
+    // little narrower than the text in it, and the longest caption ellipsised.
+    // The kerning is also deliberately the same open and folded: it feeds foldZone() and so
+    // contentArea() too, and a caption box that changed width with the fold would move the
+    // clickable end of the bar and shift every control on it as the section opened.
     static juce::Font captionFont() { return skin::micro(10.0f).withExtraKerningFactor(0.2f); }
 
     int captionWidth() const

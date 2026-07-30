@@ -182,12 +182,25 @@ public:
     void setArpSlotBars(int index, int bars);
     int arpSlotBars(int index) const;
 
-    // Hold a chord into the arp without going through a slot: the Pads section's "To Arp"
-    // toggle sends a card here. Held means exactly that - the note-ons are emitted and no
+    // Hold a chord into the arp without going through a slot: a click on a chord card with
+    // the arp On sends it here. Held means exactly that - the note-ons are emitted and no
     // note-off follows until the next call, so the arp keeps chewing on it whether or not
     // its own Latch is on. With the arp bypassed the chord simply sustains, which is honest.
+    // Clicking the same card again retriggers the hold rather than ending it, so the way out
+    // is releaseArpHold: the Hold off chip on the arp bar, or the panel's Stop button.
     void holdArpChord(const std::vector<int>& notes, const juce::String& name);
     void releaseArpChord();
+
+    // What "let go of the held chord" means to a *user*, and the only thing the UI should
+    // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
+    // leaves chainOn set, so the next bar boundary launches the following slot and the chord
+    // is back. A button that undoes itself a bar later reads as broken, so the chain is part
+    // of the hold as far as letting go is concerned, and the rule lives here with the state
+    // rather than in whichever surface happens to own the button.
+    void releaseArpHold();
+
+    // Empty when nothing is held. Hold off reads this - together with chainRunning(), since a
+    // chain about to fire the next chord is something to let go of too - to grey itself out.
     const std::vector<int>& arpHeldNotes() const { return arpChordOn; }
 
     // Hold a chord pad's chord into the arp, remembering which pad it came from so the
@@ -200,7 +213,8 @@ public:
     // That used to be its own "To Arp" toggle on the Pads bar; it is simply *the arp being
     // on* since 2026-07-27, because a mode you had to arm separately from the arp read as
     // doing nothing whenever the arp happened to be off. Every surface that shows a chord
-    // card asks here, so the pad strip and the generator's grid can never disagree.
+    // card asks here rather than caching a mode of its own, which is what keeps the answer
+    // the same wherever a card is drawn.
     bool cardsFeedArp() const { return apvts.getRawParameterValue("arpOn")->load() > 0.5f; }
 
     // A stored pattern slot (A-H), independent of whichever pattern is currently
@@ -247,12 +261,10 @@ public:
     // back. Message thread only; the audio thread never reads it.
     struct LayoutState
     {
-        bool controls = true;   // the three header rows
-        bool centre = true;     // the centre view (Perform / Chords)
-        bool knobs = true;      // the CC knob bank
+        bool controls = true;   // the header rows and the knob bank under them
+        bool knobs = true;      // the CC knob bank, the bottom row of the controls band
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
-        bool transcribe = false; // the Transcribe section (off by default: it is tall too)
         bool wheels = true;     // mod + pitch, left of the keybed
         bool keyboard = true;   // the keybed itself
 
@@ -262,26 +274,21 @@ public:
         // `detached` keeps its bare name: it is the keybed's, and renaming it would drop
         // the setting out of every session saved before this.
         bool controlsDetached = false;
-        bool centreDetached = false;
         bool arpDetached = false;
         bool padsDetached = false;
-        bool transcribeDetached = false;
         bool detached = false;  // keybed lives in its own resizable window
 
         // Two rows of eight, or four rows of four with the full chord card on each. The tall
         // arrangement is what the chord generator used to draw over the top of these same
-        // pads; it belongs to the pads now, so it is available under every centre view.
+        // pads; it belongs to the pads now, so it is available whatever else is on screen.
         bool padsBig = false;
 
-        int  view = 0;          // which centre view: 0 = perform, 1 = chords
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.
         juce::Rectangle<int> controlsDetachedBounds {};
-        juce::Rectangle<int> centreDetachedBounds {};
         juce::Rectangle<int> arpDetachedBounds {};
         juce::Rectangle<int> padsDetachedBounds {};
-        juce::Rectangle<int> transcribeDetachedBounds {};
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
     };
     LayoutState layout;

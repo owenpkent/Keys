@@ -15,15 +15,15 @@ namespace keys
 //   * Click a filled pad to play/stop its chord (Exclusive makes a new pad choke the old).
 //   * Drag a pad onto another to move it, or off the row to clear it.
 //   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad to the
-//     piano; every latch change writes back live), Clear, Lock, Send to arp slot, and -
-//     while the Chords view is open - the generator's New chord and what could follow it.
-//     Part of the owner-directed right-click exception in CLAUDE.md.
+//     piano; every latch change writes back live), Clear, Lock, Send to arp slot, and the
+//     whole chord generator - New chord, what could follow this one, and its settings. Part
+//     of the owner-directed right-click exception in CLAUDE.md.
 //
 // Sixteen pads per page, as two rows of eight or (Big) four rows of four with the full chord
 // card on each: its notes with octave numbers and a mini keyboard of the shape under your
 // hand. The tall arrangement is the one the chord generator used to draw over the top of
 // these same pads, before that duplicate grid was removed on 2026-07-30; it lives here now,
-// so it is available under every centre view rather than only under Chords.
+// so it is available whatever else is on screen.
 //
 // The pad definitions and playback live in the processor, so they persist with the session
 // and keep sounding independent of the editor. This is just the view/controller.
@@ -52,13 +52,13 @@ public:
     // Two rows of eight, or four rows of four with room for the full chord card (the note
     // list and a mini keyboard of what is held). The tall arrangement is the one the chord
     // generator used to draw itself, over the top of these same sixteen pads; it belongs to
-    // the pads, so it is available under every centre view rather than only under Chords.
+    // the pads, so it is available whatever else is on screen.
     void setBigCards(bool);
     static int rowsFor(bool big) { return big ? 4 : 2; }
 
     // Extra items for a pad's right-click menu, from whoever can service them - today the
-    // chord generator, while its view is on screen. Ids 200 and up belong to the supplier;
-    // everything below is this class's own.
+    // chord generator, which has no surface of its own and reaches the cards through here.
+    // Ids 200 and up belong to the supplier; everything below is this class's own.
     static constexpr int extraMenuIdBase = 200;
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
@@ -80,7 +80,7 @@ private:
     // Whether a click on a chord card feeds the arpeggiator instead of playing the chord
     // for as long as the button is down. It is the arp's own On state (see
     // KeysProcessor::cardsFeedArp), asked rather than cached so the pads can never be in a
-    // different mode than the generator's grid, or than the arp itself.
+    // different mode than the arp itself.
     bool toArp() const;
     int editingSlot = -1;
     bool bigCards = false;

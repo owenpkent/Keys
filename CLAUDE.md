@@ -41,11 +41,17 @@ py run.py --no-build   # just relaunch what is already built
 Go to a real Live load test only for what the standalone genuinely cannot show: bus
 layout, plugin classification, installer, updater, host automation.
 
-**The first configure is slow now.** The Transcribe section pulls a multi-gigabyte prebuilt
-ONNX Runtime into the build tree, and forces the static MSVC runtime on the whole binary (both
-are properties of that library, not choices). `-DKEYS_TRANSCRIBE=OFF` drops the section and
-both costs, and is the right flag for work that never touches transcription. Deleting `build/`
-is no longer cheap.
+**The first configure is cheap again** (2026-07-30). It was not for a while: the Transcribe
+section pulled a multi-gigabyte prebuilt ONNX Runtime into the build tree and forced the
+static MSVC runtime on the whole binary, both properties of that library rather than choices.
+Transcribe is gone from Keys, so the download, the `KEYS_TRANSCRIBE` option and the runtime
+forcing all went with it, and Keys is back on the default dynamic CRT. Deleting `build/` costs
+what it always used to.
+
+**One trap if you reuse a build tree from before that.** Keys used to set the kit's option with
+`CACHE ... FORCE`, so an old `build/CMakeCache.txt` still says `OKSTUDIO_KIT_BASICPITCH=ON` and
+the kit dutifully fetches ONNX for a plugin that no longer links it. Configure once with
+`-DOKSTUDIO_KIT_BASICPITCH=OFF` (or delete the cache); after that it stays off.
 
 Full build (VST3 + install to the DAW):
 
@@ -68,9 +74,9 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
-- **Kit-based.** Theme, scales, state persistence, the mouse-only contract, the audio-to-MIDI
-  transcription engine, and the
-  updater all come from `../okstudio-juce-kit`. Fix shared behaviour there, not here.
+- **Kit-based.** Theme, scales, state persistence, the mouse-only contract and the updater all
+  come from `../okstudio-juce-kit`. Fix shared behaviour there, not here. (The kit still ships
+  `okstudio/Transcribe.h`; Keys stopped using it on 2026-07-30 and consumes no audio at all.)
 - **UI → audio note path is a `juce::MidiMessageCollector`.** The editor/keyboard
   call `processor.noteOn/noteOff` on the message thread; `processBlock` drains the
   collector. Never touch the outgoing `MidiBuffer` from the UI thread directly.
@@ -89,55 +95,82 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   chord, a shape and a rate; launching one installs all of it and holds the chord into the
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
   scheduling). Held means held: no note-off follows until something replaces it, so
-  `allNotesOff()` has to forget it explicitly.
+  `allNotesOff()` has to forget it explicitly, and clicking the card that is currently feeding
+  the arp **retriggers** the hold rather than ending it. The way out of a hold is
+  `releaseArpHold()` (`stopChain()` then `releaseArpChord()`, in that order, or the heartbeat
+  relaunches the next slot); the **Hold off** chip on the arp bar and ArpPanel's Stop both call
+  it, and the chip is on the bar so it survives the section being folded shut.
   The **Chord lane** reads those same slot chords per step, which is the one thing the arp
   engine reads from outside itself. Slot chords are message-thread `std::vector`s, so the
   processor keeps an `ArpEngine::ChordTable` mirror of atomics and `syncArpChordTable()`
   rebuilds it whole; there is no choke point for slot writes, so **its call sites are the
   contract** (set, clear, copy, whole-slot write, session load). Miss one and a lane plays a
   stale chord.
-- **The chord pads and the arpeggiator are each a section of their own**, stacked between
-  the centre view and the keyboard, so a chord card is on screen whatever else is open. The
-  centre views are Perform and Chords only: the arp stopped being a third one on
-  2026-07-25. **There is exactly one set of chord cards** (2026-07-30): the generator draws
-  none of its own, because the grid it used to draw was the same sixteen pads of the same
-  page as the strip below it. Its `Big` arrangement became the Pads section's, and its
-  per-card actions became items on the pad's menu (Lock always; New chord / Next through
-  `ChordGenPanel::addPadMenuItems`, offered only while the Chords view is alive). Anything
-  that wants to show a chord card should use the pads, not build a second grid. The arp bar carries its On toggle, which survives folding the section shut.
-  See `docs/ARP_DESIGN.md`.
+- **The chord pads and the arpeggiator are each a section of their own**, stacked above the
+  keyboard, so a chord card is on screen whatever else is open. **There is no centre view**
+  (2026-07-30): the arp stopped being one on 2026-07-25, Chords went the day the generator lost
+  its panel, Perform went with the Centre section itself, and there are no tabs left to switch.
+  **There is exactly one set of chord cards**: the generator draws none of its own, because the
+  grid it used to draw was the same sixteen pads of the same page as the strip below it. Its
+  `Big` arrangement became the Pads section's. **The generator has no surface at all**:
+  `ChordGenMenu` is a plain value member the editor holds for its whole life, reached from two
+  24 px chips at the right end of the Pads *bar* (Fill / Regen, the left-click path into
+  generation), from three 24 px combo boxes beside them (Key / Mode / Scale Compliance, APVTS
+  attachments so the bar and the menu are one state), and from a pad's card menu through
+  `addPadMenuItems` / `handlePadMenuChoice` - New chord, Next, Clear page, and every setting
+  as a submenu of discrete ticked values hanging **directly** off the pad menu, since a
+  `PopupMenu` cannot hold a slider and a wrapper submenu would cost a third leg of hover
+  travel. Two levels is the ceiling; the Markov five are the one group that keeps its own,
+  because they are inert unless Source is Markov. Clear page is a menu item
+  and not a third chip because it empties every unlocked pad on the page and there is no undo
+  anywhere in Keys. Those items are unconditional now: the old "is there a panel?" test hid
+  them whenever the Chords view was closed, and there is no view left to close. Anything
+  that wants to show a chord card should use the pads, not build a second grid. Controls that
+  belong to a section but must cost no height ride its bar: it is 34 px that already exists.
+  Fill and Regen stay live with the Pads section folded, for the same reason arp On does - the
+  other route to the generator is a right-click on a card, and the cards fold away with the
+  strip. See `docs/ARP_DESIGN.md`.
 - **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
-  table of six `Section`s (Controls, Centre, Arp, Pads, Transcribe, Keyboard); each owns a
-  `Holder` its content is parented into, a Detach button, and the `DetachedWindow` it is
+  table of four `Section`s (Controls, Arp, Pads, Keyboard); each owns a `Holder` its content
+  is parented into, a Detach button, and the `DetachedWindow` it is
   currently in. Detaching is one re-parent of that holder, and `idealHeight()`,
   `syncSectionControls()` and `paint()` walk the table rather than naming sections.
   (`sectionHeight()` is still a switch and `resized()` still lays each bar out in its own
   block, because what those two spend per section genuinely differs.) Add a section by
-  adding an entry, not by copying a code path.
-  The Re-dock button travels into the window; controls that belong to the editor rather
-  than the content (the centre tabs, arp On, the pad pages, the theme swatch) stay on the
-  bar. The keybed keeps two extras of its own via `Section::travellers`.
-  The **whole bar** folds its section, not just the chevron: the bar's controls are siblings
-  sitting in front of it (every bar is `toBack()`ed), so z-order already stops it stealing
-  their clicks and `SectionBar::hitTest` had nothing left to protect. **Detach hides with
-  its section** — the exceptions that stay on a folded bar are arp On, the centre tabs and
-  the theme swatch, each for a stated reason. Open and folded bars are painted at different
-  weights on purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
+  adding an entry, not by copying a code path. Centre and Transcribe were entries here until
+  2026-07-30; removing a section is deleting its `SectionId` and its entry, nothing else.
+  The Re-dock button travels into the window; controls that belong to the editor rather than
+  the content (arp On, the pad pages, the theme swatch) stay on the bar. The keybed keeps two
+  extras of its own via `Section::travellers`.
+  **Only the left end of a bar folds it** (2026-07-30, Owen's ask): `SectionBar::hitTest`
+  answers for `foldZone()` alone, the chevron plus its caption, 92 px at the narrowest, with a
+  hairline painted where the target ends and only that zone lighting under the mouse. The rest
+  of the strip is gap between controls that ride it, and z-order defends each control's own
+  rectangle but not the gaps around it, so a click aimed a few pixels off Detach used to hide
+  the section it was reaching into. This **reverses the 2026-07-27 removal** of the same
+  override; any doc still saying the whole bar is the target is describing that three-day
+  window. **Detach hides with its section**: the exceptions that stay on a folded bar are arp
+  On, the arp's Hold off, the generator's Fill and Regen, and the theme swatch, each for a
+  stated reason. Open and folded bars are painted at different weights on purpose;
+  `captionWidth()` and `paintButton()` must use the one `captionFont()`,
   or the caption ellipsises and the controls beside it shift as a section folds.
+- **The knob bank is the bottom row of the Controls section**, not a band of its own:
+  `knobRowH` is 110, which gives 60 px knobs. The Knobs chip that folds just that row rides
+  the Controls bar, so the row can go without the two header rows going with it. It is one of
+  the bar controls that *does* hide with its section: a chip that folds a row of a band which
+  is not on screen would be a control with nothing behind it.
 - **Keys watches its MIDI input but never consumes it.** `watchInputNotes()` runs first
   thing in `processBlock`, before the collector drains, and records which pitches the
   incoming stream turns on (a flag per pitch, not a count). `isNoteSounding()` answers
   true for those too, which is all it takes to light the keybed for a physical keyboard
   and feed the live chord card. The stream itself passes through untouched, as always.
-- **Transcribe is the only part of Keys that consumes audio.** Everything else produces MIDI.
-  Keys is an instrument, so a host sends it MIDI and never audio: there is no track input, and
-  `AudioCapture` opens an audio device of its own. That is what makes the section behave the
-  same in the plugin and the standalone, and it is why choosing an input never touches the
-  host's audio setup. The device is open only while the section is on screen or recording.
-  The engine is the kit's (`okstudio/Transcribe.h`, basic-pitch ported from NeuralNote); the
-  model runs on a background thread, never on the audio or message thread, and the panel is
-  built and destroyed with its fold because it holds a device and a network's weights. All of
-  it is behind `KEYS_TRANSCRIBE`, on by default. See `docs/ARCHITECTURE.md`.
+- **Keys consumes no audio at all.** Every part of it produces MIDI. Transcribe was the one
+  exception: it opened an audio device of its own (`AudioCapture`) because a host sends an
+  instrument MIDI and never audio, and it ran the kit's basic-pitch engine on a background
+  thread. The whole section came out on 2026-07-30 - panel, capture, the `KEYS_TRANSCRIBE`
+  option, the ONNX Runtime download and the static-MSVC-runtime forcing that library required.
+  If something needs audio in again, it needs its own device and its own thread; do not reach
+  for a track input, there isn't one.
 - **One note-on per sounding pitch, released by the last owner.** Four sources can ask for
   the same pitch at once (a chord pad, the live card, a chord held into the arp, the
   keybed). `KeysProcessor::noteOn` emits MIDI only on the 0→1 transition of `noteRefs` and
@@ -155,7 +188,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 - **Ports from Octavium are not transcriptions.** Two of its generator bugs were fixed
   rather than reproduced (non-diatonic Sus2/Add9 at 100% compliance; regenerate
   dropping the note-count filter), and its right-click affordances had to be rebuilt as
-  on-screen buttons. Check ported logic against the invariants before trusting it.
+  on-screen buttons. (Two of those went back to a menu on 2026-07-30 by Owen's call, when the
+  generator lost its panel; see the mouse-only invariant for which and why.) Check ported logic
+  against the invariants before trusting it.
 
 ## Invariants (don't break)
 
@@ -173,15 +208,31 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   optional accelerator with a left-click equivalent (per-note latch on the note surfaces,
   at Owen's request; its left-click release keys on the `latched` set, not on Latch mode,
   so it works with both buttons off).
-  One owner-directed exception (2026-07-22): chord-pad card menus are right-click —
-  in the generator (Lock / New chord / Next, restoring Octavium's card menu; the
-  page-wide left-click Fill/Regen/Clear stay as the bulk path) and on the main-page
-  strip (Edit on keyboard / Clear, plus **Send to arp slot** since 2026-07-25 — the
-  only item in the plugin with no left-click twin, since binding a chord to one
-  particular slot needs a target picker; a left click on a card with the arp **On**
-  is the left-click way to get a chord into the arp, which is what keeps that
-  exception to one item). Do not add further right-click-only
-  paths without Owen's explicit say-so.
+  **Owner-directed exceptions, and they are a closed list.** Each one is Owen's call on a
+  stated date, not something that drifted in:
+  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30). Edit on
+     keyboard / Clear pad / Lock, **Send to arp slot** (since 2026-07-25: binding a chord to
+     one particular slot needs a target picker, and a left click on a card with the arp **On**
+     is the left-click way to get a chord into the arp), and the whole chord generator, which
+     restores Octavium's card menu.
+  2. *Most of the generator's settings are right-click only* (2026-07-30, Owen's call when the
+     generator gave up its panel). New chord, Next, Clear page and every setting live on the
+     card menu, each setting a submenu of ticked discrete values one level down. **Fill and
+     Regen survive as 24 px chips on the Pads bar and are the left-click path into
+     generation**, and **Key, Mode and Scale Compliance are 24 px combo boxes beside them**,
+     which is what keeps this an exception rather than a hole: the thing you do most and the
+     three settings you change while auditioning stay one click, the rest became a menu. Those
+     three are on the menu too - the bar is the fast path, the menu is the complete one, and
+     both are the same parameters. Clear page is in the menu on purpose, because it is
+     destructive and Keys has no undo.
+  3. *A right-click release of a pedal-held note has no left-click twin* (2026-07-30, Owen
+     sanctioned the asymmetry). A right-click on a key **that surface holds** releases it out
+     of `latched` or `sustained` and leaves Sustain mode on, so a pedalled chord comes apart a
+     note at a time; on any other key it latches. The reason there is no twin is that the left
+     click is already spoken for: under Sustain a second click on a ringing key restrikes it,
+     by design, and that is the one behaviour Latch exists to distinguish from.
+
+  Do not add further right-click-only paths without Owen's explicit say-so.
   The arp slot cards also carry a right-click menu, but it is an ordinary accelerator:
   Launch is a click on the card, and Clear chord, Copy and Randomize all have buttons
   under the slot row (Copy and Clear arm, then take a slot click). Randomize is greyed
@@ -202,25 +253,27 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 Use `scripts/capture-window.ps1`, which is the PrintWindow approach (never
 SetForegroundWindow/SetCursorPos — Owen is often using the machine, and a mis-capture can
 grab his private windows). Screenshots live in `assets/screenshots/`, referenced from
-README and docs. To reach a view, don't synthesize clicks — posted WM_LBUTTONDOWN never
+README and docs. To reach a control, don't synthesize clicks: posted WM_LBUTTONDOWN never
 reaches JUCE. Invoke the button through UI Automation instead (`-InvokeButtons`); no cursor
 movement involved.
 
-Three things will bite otherwise:
+Four things will bite otherwise:
 
 - **Pass `-WindowTitle` for anything but plain Keys.** The default target is
   `MainWindowHandle`, a heuristic that lands on the *hosted instrument's* GUI in Keys Host
   (that GUI is a top-level window of the same process) and on an arbitrary section once any
-  are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Centre` /
-  `Keys Arpeggiator` / `Keys Chord Pads` / `Keys Transcribe` / `Keys Keyboard` for the
-  detached sections (the `wire(...)` calls in `PluginEditor.cpp`).
-- **The Detach buttons are named per section**, because six buttons reading "Detach" are
-  six identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
+  are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Arpeggiator` /
+  `Keys Chord Pads` / `Keys Keyboard` for the four detached sections (the `wire(...)` calls in
+  `PluginEditor.cpp`). `Keys Centre` and `Keys Transcribe` no longer exist.
+- **The Detach buttons are named per section**, because four buttons reading "Detach" are
+  four identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
   name flips with the button's state.
-- **A section bar is not reachable** (checked 2026-07-30): it is a plain Component with a
-  mouse handler and no accessibility handler, so `-InvokeButtons Arp` finds nothing and
-  there is no way to fold or unfold a section from a script. Any shot that needs a section
-  open needs Owen to click that bar once first — do not synthesize a click instead. Combo
+- **A section bar *is* reachable** (2026-07-30). `SectionBar` is a `juce::Button` that calls
+  `setTitle(caption + " section")`, so `-InvokeButtons "Arp section"` folds or unfolds a
+  section from a script and no shot needs Owen to click a bar first. The name carries the
+  " section" suffix on purpose: UIA takes the first match, and a bar answering to the bare
+  caption would collide with a control riding on it. Any doc saying a bar is a plain Component
+  with no accessibility handler is out of date. Combo
   boxes are reachable by their *current* text (`-SetValues "Up=Pattern"`), but two combos
   can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
   match; set the other one out of the way first.

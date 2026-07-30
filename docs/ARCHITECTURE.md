@@ -9,7 +9,7 @@ on-screen piano into MIDI. Everything shared with the rest of the line comes fro
 ```
 src/
 ├── PluginProcessor.{h,cpp}   # AudioProcessor: params, MIDI output, chord pads, state
-├── PluginEditor.{h,cpp}      # folding/detaching sections, centre views, layout, updater button
+├── PluginEditor.{h,cpp}      # folding/detaching sections, layout, updater button
 ├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
 ├── Chords.h                  # pure chord detector (names a note set), unit-tested
 ├── ScaleModes.h              # 12 modes + a chord quality per degree; emotion lines
@@ -19,20 +19,18 @@ src/
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys (docs/ARP_DESIGN.md)
-├── AudioCapture.{h,cpp}      # records from an audio input Keys opens itself, for the
-│                             # Transcribe section. Built only with KEYS_TRANSCRIBE
 ├── ui/
 │   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
 │   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
 │   │                         # built by Keys and Keys Host
-│   ├── KnobBank.{h,cpp}      # eight assignable CC rotary knobs above the playing surface
+│   ├── KnobBank.{h,cpp}      # eight assignable CC rotary knobs, the bottom row of the
+│   │                         # Controls section
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-│   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
+│   ├── ChordGenMenu.{h,cpp}  # the chord generator (algorithmic + Markov). No panel:
+│   │                         # two chips on the Pads bar and items on the pad menu
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
-│   ├── TranscribePanel.{h,cpp} # the Transcribe section: input picker, waveform, piano
-│   │                         # roll of the transcribed notes, MIDI drag-out
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── DetachedWindow.h      # a section popped out into its own resizable window
@@ -46,34 +44,19 @@ src/
                               # message thread (docs/MCP.md)
 ```
 
-## Transcription
+## Keys consumes no audio
 
-The Transcribe section records audio and turns it into notes. Three pieces, in a deliberate
-order:
+Every part of Keys produces MIDI and none of it reads any. There was a **Transcribe**
+section for a while, built on the kit's basic-pitch engine, and it was removed on
+2026-07-30: `TranscribePanel`, `AudioCapture`, the `KEYS_TRANSCRIBE` option and everything
+they dragged in are gone from this repo.
 
-- **`AudioCapture`** owns a `juce::AudioDeviceManager` of its own and records to one
-  preallocated mono buffer. Keys is an instrument: hosts send it MIDI and never audio, so
-  there is no track input to record and opening a device directly is the only way in. That
-  it is *our* device, not the host's, is what makes the section behave identically in the
-  plugin and in the standalone, and it means choosing an input never touches the host's
-  setup. The buffer is preallocated because the alternative is allocating on the device
-  thread; recording stops itself at `AudioCapture::maxSeconds` rather than growing forever.
-- **`okstudio::transcribe::Transcriber`** (the kit, `okstudio/Transcribe.h`) is the engine:
-  basic-pitch, ported from NeuralNote. It lives in the kit because Undertow, Beatform and
-  Contour would all have use for it. See the kit's `docs/TRANSCRIPTION.md`.
-- **`TranscribePanel`** is the UI, and owns the threading. The model runs for a good
-  fraction of the recording's length, so it runs on a `juce::Thread` and posts its notes
-  back with `MessageManager::callAsync`; the keyboard keeps playing throughout. Moving the
-  Sensitivity slider calls `retranscribe()`, which reruns only the note-event stage and is
-  cheap enough to follow the slider live.
-
-None of this touches the audio thread that `processBlock` runs on. The capture callback is a
-*different* device's thread, and writes only to its own buffer.
-
-The whole thing is behind `KEYS_TRANSCRIBE`, on by default. Off, `AudioCapture` and
-`TranscribePanel` are not compiled, the section reports zero height, and the kit's engine is
-never built — which also drops a multi-gigabyte ONNX Runtime download and the static MSVC
-runtime it forces on the binary.
+The engine itself is not lost. It stays in the kit (`okstudio/Transcribe.h`, its own
+`okstudio_basicpitch` target, the kit's `docs/TRANSCRIPTION.md`) for whichever product wants
+it next; Keys simply stops asking for it. What Keys sheds with it is that target's cost: a
+multi-gigabyte ONNX Runtime download on the first configure, and the static MSVC runtime that
+library forces on the *whole* binary. Keys is back on the default dynamic CRT, and `build/` is
+cheap to delete again. See `docs/BUILD.md`.
 
 ## Threading: UI → audio note path
 
@@ -115,9 +98,10 @@ surfaces were replaced by the knob row, and the Hex surface moved out to its own
 (`../Hex`) along with Hex Host. Their parameters are still registered — see **Parameters
 and state**.
 
-The tabs that exist now are a different thing: they pick which **centre view** occupies
-the middle of the editor (Perform or Chords), not which surface you play on. See
-**Folding layout, and the centre view**.
+There are no tabs left anywhere in the editor. The centre view that used to sit between the
+Controls and the Arp went with the chord generator's panel on 2026-07-30; the knob bank it
+held is the bottom row of the Controls section now, and what is left is a plain stack of
+four sections. See **Folding layout**.
 
 ## Note bookkeeping: one union, one diff (NoteSurface)
 
@@ -150,12 +134,26 @@ and panic is just "clear all three, refresh". When a polyphony limit is set, `re
 first steals the oldest voices (FIFO `voiceOrder`) until `want` fits the cap. Changing
 MIDI channel panics, so a note can't stick on the channel it was played on.
 
-**Right-click latch** is an optional accelerator on every note surface, and the
-accessibility contract is still satisfied because a left click releases what it holds
-(that release path is keyed on `latched`, not on Latch mode, so it works with every
-button off): right-click is never the only way out. It toggles the drawn id in the same `latched` set,
-so panic clears it. Octavium kept right-click latches in a private set no panic ever
-cleared; that was its worst stuck-note bug, not a behaviour to keep.
+**Right-click latch** is an optional accelerator on every note surface, and it works on the
+same three sets, so panic clears whatever it did. Octavium kept right-click latches in a
+private set no panic ever cleared; that was its worst stuck-note bug, not a behaviour to
+keep.
+
+What it does depends on whether the key is already ringing *on this surface*, and **release
+beats latch**: a right-click on a key held in either `latched` or `sustained` erases it from
+both and lets it go; only a silent key latches. Erasing both unconditionally is also what
+fixes a key caught by both, which used to leave one set and keep sounding out of the other.
+The point of the sustained half is that a chord the pedal is holding comes apart a note at a
+time without lifting Sustain, which is a thing one mouse could not otherwise do. Nothing
+here can release a key lit by a chord pad, the arp or MCP: those never enter these sets, so
+`refresh()` finds no `sounding` entry and their refcounts are left alone.
+
+**One sanctioned exception to the left-click twin rule** (Owen, 2026-07-30): the latched
+case has one, because a left click on a latched key releases it too (that path is keyed on
+`latched`, not on Latch mode, so it works with every button off), but the *sustained* case
+does not. Under Sustain a left click on a ringing key strikes it again by design, so a
+left-click twin for "let this one pedal note go" would have to overwrite the behaviour the
+pedal exists for.
 
 A subclass provides only geometry: `drawnAt` (hit test), `outputNote` (resolution),
 and optionally `noteChannel` (defaults to the global channel param; no built-in
@@ -272,60 +270,60 @@ degenerated to I-I-I-I for every user. Realisation is root-position through
 
 All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
 
-## Folding layout, and the centre view
+## Folding layout
 
-The editor is a stack of sections, each of which folds away so the window can be squeezed
-small when the screen is busy — and, since 2026-07-27, each of which also detaches into a
-window of its own: **Controls** (the two header rows), the **centre view**, the **Arp**, the
-**Pads**, **Transcribe**, and the **Keyboard** (with the wheels as a sub-fold).
-`SectionBar` is the fold affordance — a `juce::Button` so the mouse-only contract and the
-accessible name come for free, with the section's own small controls laid out as its
-siblings in `contentArea()`. The whole bar is the target, and it paints open and folded at
-different weights (see below). One trap: `captionWidth()` feeds both the caption's own text
-box and `contentArea()`, so it and `paintButton()` have to measure with the same
-`captionFont()` — measure narrower than you draw and the longest caption ellipsises; vary
-the font with the fold state and every control on the bar shifts when the section folds.
+The editor is a stack of **four** sections, each of which folds away so the window can be
+squeezed small when the screen is busy, and, since 2026-07-27, each of which also detaches
+into a window of its own: **Controls** (the two header rows plus the knob bank under them,
+which has its own Knobs sub-fold), the **Arp**, the **Pads**, and the **Keyboard** (with the
+wheels as a sub-fold). It was six until 2026-07-30, when the centre view and Transcribe both
+went; the centre's knob bank became the bottom row of Controls rather than a section of its
+own, because it is two rows of settings and eight knobs, not a view you switch to.
 
-**Transcribe** is the odd one out: it is the only part of Keys that consumes audio rather
-than producing MIDI, and the only section whose panel owns a device. Like the arp's, its
-panel is built when the section opens and destroyed when it folds — it holds an open audio
-input and a neural network's weights, neither worth keeping warm behind a folded bar. See
-"Transcription" below.
+`SectionBar` is the fold affordance: a `juce::Button`, so the mouse-only contract and the
+accessible name come for free. It calls `setTitle(caption + " section")`, which means the
+capture script's UI Automation path *can* fold and unfold a section (a bar answers to
+"Arp section", never to the bare caption a control riding on it might share). The section's
+own small controls are laid out as its siblings in `contentArea()`. One trap:
+`captionWidth()` feeds both the caption's own text box and `contentArea()`, so it and
+`paintButton()` have to measure with the same `captionFont()`. Measure narrower than you
+draw and the longest caption ellipsises; vary the font with the fold state and every control
+on the bar shifts when the section folds.
 
-The middle of the editor is a *view*, not a stack of overlays. `Perform` is the knob bank
-and `Chords` swaps `ChordGenPanel` into the same slot, with both tabs riding on the centre's
-own `SectionBar`. Only the view on show exists — the generator builds sixteen chord cards
-and is not worth keeping warm behind the knobs, and a folded centre holds neither.
+The **arpeggiator is a section of its own** rather than a centre view (changed 2026-07-25).
+Competing with the knobs and the generator was backwards for a panel that runs while you
+play, and the arp is the one thing you want on screen *next to* a chord. Its bar carries the
+**On** toggle, the **Hold off** chip and a **Detach**; the first two survive folding the
+panel away, because folding it destroys the view and never the arpeggiator, and a chord held
+into a folded arp needs a way out that is still on screen (see `docs/ARP_DESIGN.md`).
 
-The **arpeggiator is a section of its own** rather than a third centre view (changed
-2026-07-25). Competing with the knobs and the generator was backwards for a panel that runs
-while you play, and the arp is the one thing you want on screen *next to* a chord. Its bar
-carries the **On** toggle and a **Detach**, so both survive folding the panel away: folding
-it destroys the view, never the arpeggiator.
+The **chord pads are a section of their own** too, below the arp. They used to live inside
+the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
+chord) was also the one place you could not reach a chord. Their page buttons ride on the
+Pads bar, and so do the generator's **Fill** and **Regen** chips, at the right end. What a
+card click *means* is the arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp
+running, a click hands that chord over and leaves it there instead of playing it while the
+button is down, and a click on the card *already* feeding the arp retriggers it.
 
-The **chord pads are a section of their own** too, below the arp, so they are on screen
-under either centre view. They used to live inside Perform, which meant the arpeggiator —
-the one panel whose whole job is to chew on a chord — was also the one place you could not
-reach a chord. Their page buttons ride on the Pads bar. What a card click *means* is the
-arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp running, a click hands that
-chord over and leaves it there instead of playing it while the button is down.
+**Only the left end of a bar folds it** (2026-07-30, Owen's ask). `SectionBar::hitTest`
+narrows the button to `foldZone()`, the chevron and the caption, 92 px wide at the narrowest
+caption; a hairline is painted where that target ends, and only that end lights under the
+mouse. The bars are still full-width Buttons sent `toBack()` after construction, and the
+controls riding them are siblings sitting in front, so z-order has always meant that a click
+landing *on* Detach reaches Detach.
 
-The bars are full-width Buttons and the controls on them are *siblings*, not children. The
-whole strip answers a click, so folding a section is a 34 px-tall full-width target rather
-than a 40 px box at one end. What keeps that from swallowing the controls riding on it is
-z-order, not hit-testing: the bars are sent `toBack()` after construction, so every sibling
-sits in front and takes its own clicks first, and the bar only ever gets what none of them
-wanted. (That `toBack()` is load-bearing twice over — without it each bar also paints over
-its own tabs.)
+This **reverses** the 2026-07-27 change that removed the same override. For three days the
+whole strip folded, on the reasoning that a 34 px-tall full-width band is a bigger target and
+that z-order already protected the controls. The second half was true and still is; what it
+missed is that z-order only defends each control's own rectangle. It says nothing about the
+gaps around them, and on a bar whose right end is mostly gap, a click aimed at Detach that
+missed by a few pixels hit bar, and the bar hid the thing being reached into. That cost is
+asymmetric, so bigger is only kinder when the extra area does what the target does. Docs
+elsewhere in the line that still say "the whole bar is the target" are describing that
+three-day window.
 
-`SectionBar` used to narrow its own `hitTest` to the chevron end, on the reasoning that a
-click missing a control by a few pixels would fold the section by accident. It was solving a
-problem z-order already solved, and it cost the thing the mouse-only contract cares about
-most: a full-width strip that looks like a button but only answers along one end makes the
-target *harder* to hit, not safer.
-
-Open and folded bars are painted at deliberately different weights — the open one is a solid
-ruled band with an accent tick, the folded one flat and dim — so a stack of six reads as a
+Open and folded bars are painted at deliberately different weights (the open one a solid
+ruled band with an accent tick, the folded one flat and dim), so a stack of four reads as a
 shape before any caption is read. The Detach button hides with its section for the same
 reason, and because detaching a folded section only ever built a window that opened hidden.
 
@@ -353,7 +351,7 @@ perform. The panels keep an overlay mode (`setInlineMode(false)`) but nothing us
 `resized()` spends exactly the same constants, so the window a fold asks for and the
 layout it gets cannot drift. Standalone and in a DAW the editor resizes itself to that
 height; embedded in Keys Host it reports the number through `onIdealHeightChanged` and the
-host grows to fit, because a tall centre view would otherwise push the keybed off the end.
+host grows to fit, because an open arp would otherwise push the keybed off the end.
 
 ### Every section detaches
 
@@ -377,39 +375,65 @@ the editor's. Every detached window carries the button that undoes the detach on
 the top, so the control that re-docks a section is never in the window you are not looking at.
 
 Controls that belong to the *editor* rather than to the content stay behind on the bar: the
-centre-view tabs, the arp's **On**, the pads' page buttons, the theme swatch. A bar whose
-section is away says so, in the space its own controls did not use.
+arp's **On** and **Hold off**, the pads' page buttons and the generator's **Fill** / **Regen**
+chips, the Controls bar's **Knobs** chip and theme swatch. A bar whose section is away says
+so, in the space its own controls did not use.
 
-All of it (folds, current view, detached window bounds) is in `KeysProcessor::LayoutState`
-rather than the editor, so it survives the window closing, and it is saved in the session
-tree rather than as parameters: none of it changes a note, and exposing it to host
-automation would only add ways to break a session.
+All of it (folds, detached window bounds) is in `KeysProcessor::LayoutState` rather than the
+editor, so it survives the window closing, and it is saved in the session tree rather than as
+parameters: none of it changes a note, and exposing it to host automation would only add ways
+to break a session.
 
-## Chord generator panel
+## The chord generator has no panel
 
-`ChordGenPanel` is a centre view, not a dialog: a plugin editor has no business opening OS
-windows, and staying inside the editor keeps every target on the surface the mouse is
-already in. It fills the **current page**, so the four pages can hold four different keys.
+`ChordGenMenu` is a plain value member of `KeysEditor` (`chordGen`), not a view and never a
+dialog: a plugin editor has no business opening OS windows, and there is nothing left for a
+panel to draw. It works on the **current page**, so the four pages can hold four different
+keys.
 
-**It has no cards of its own** (2026-07-30). It drew a 4x4 grid of the sixteen pads on the
-current page — the same pads, through the same `setChordPad` — because it was written when
-the generator was a full-screen overlay and the pads had no section of their own. They have
-had one since 2026-07-25, on screen under every centre view, so the grid was the same page
-drawn twice, at two sizes, one of which could set a pad's lock state and one of which could
-only paint the dot for it.
+**It lost its cards first** (2026-07-30). `ChordGenPanel` drew a 4x4 grid of the sixteen pads
+on the current page (the same pads, through the same `setChordPad`), because it was written
+when the generator was a full-screen overlay and the pads had no section of their own. They
+have had one since 2026-07-25, so the grid was the same page drawn twice, at two sizes, one
+of which could set a pad's lock state and one of which could only paint the dot for it. The
+tall arrangement became the Pads section's **Big** switch (`layout.padsBig`, four rows of
+four), so the large card (chord name, its notes with octave numbers, a mini keyboard of what
+is held) is available whatever else is open.
 
-Deleting it moved two things rather than losing them. The tall arrangement became the Pads
-section's **Big** switch (`layout.padsBig`, four rows of four), so the large card — chord
-name, its notes with octave numbers, a mini keyboard of what is held — is available under
-*any* centre view. And the per-card actions Octavium reached by right-click became items on
-the pad's own menu: **Lock** unconditionally, since it needs nothing from the generator, and
-**New chord** / **Next** through `addPadMenuItems` / `handlePadMenuChoice`, which `ChordPads`
-calls only while this panel exists. That is the same availability they had before, when they
-lived on a card only this view drew. The page-wide Fill / Regen / Clear stay the left-click
-bulk path.
+**Then it lost the panel too**, in the same round that removed the centre view. With the
+cards gone, what was left was sliders and combo boxes for settings, sitting in a view you had
+to switch to. Everything moved onto the pad's own right-click menu, which is where the chord
+it applies to already is:
 
-Auditioning a chord reuses `pressChordPad` / `releaseChordPad` — it always did, and now
-there is one card doing it rather than two.
+- **Lock**, **New chord** and **Next** are items, through `addPadMenuItems` /
+  `handlePadMenuChoice`. They are now offered on **every pad on every page, always**: the
+  panel used to gate them on being alive, so the generator's own actions were unreachable
+  from a pad whenever the view was folded or another one was up. Making the generator a plain
+  member is precisely what eliminated that gate, and the test that asserted it went with it.
+- Every **setting** is a submenu of that same menu, hanging **directly** off it: source, key
+  and mode, octave, note counts, inversions, Scale Compliance, Lock Influence, then one
+  **Markov chains** submenu for the five that are inert unless the source is Markov. It was a
+  **Generator settings** wrapper until 2026-07-30; that made every setting a three-level
+  diagonal hover, and hover travel is the expensive thing with one mouse. Two levels is the
+  ceiling, the groups are separated by section headers and rules, and the Markov five keep a
+  level of their own only because flattening them too would run the menu off a 1080p screen. A
+  submenu shows its live value in its own caption, so nothing needs a panel to read the state
+  back.
+- **Fill** and **Regen** are the left-click bulk path, two 24 px chips at the **right end of
+  the Pads bar**, and **Key**, **Mode** and **Scale Compliance** are three 24 px combo boxes
+  beside them: the settings that get changed while a page is being auditioned, one click to
+  open and one to pick. They are `ComboBoxAttachment`s on the same parameters the menu writes,
+  so neither place has to know the other exists; Compliance is five steps of a continuous
+  0-100 parameter, which an attachment maps exactly. All five controls stay live with the Pads
+  section folded, so folding the strip cannot take the right-click menu and the bar together,
+  which would be the whole generator. They cost the window no height and 302 px of bar, which
+  is what moved `minWidthForView()` back to a single 1010 floor.
+- **Clear page** is an item on the pad menu and deliberately *not* a chip. It wipes every
+  unlocked pad on the page, there is no `juce::UndoManager` anywhere in Keys, and a bulk
+  destructive action with no undo does not belong 4 px from Regen.
+
+Auditioning a chord reuses `pressChordPad` / `releaseChordPad`. It always did, and now there
+is one card doing it rather than two.
 
 ## Parameters and state
 
@@ -451,9 +475,9 @@ convention here — removing a parameter outright would shift automation in proj
 already exist. `latch` came back off it in 2026-07-30, which is the other reason to keep
 dead parameters registered: a retired control is sometimes only resting.
 
-The folding layout (which sections are open, which centre view, where each detached
-window was left) and the instance's accent colour are **not** parameters: they change no
-note, and
+The folding layout (which of the four sections are open, whether the knobs and the wheels
+are, whether the pad cards are Big, and where each detached window was left) and the
+instance's accent colour are **not** parameters: they change no note, and
 exposing them to automation would only add ways to break a session. They live in
 `KeysProcessor::LayoutState` and ride along in the session tree. The Mod and
 Pitch wheels, knob positions, and the Markov Mood and
@@ -474,8 +498,9 @@ suggestion menu works the chord out from its notes instead.
 
 ## Editor
 
-`KeysEditor` owns the controls, the knob row, the playing surface, the
-`ChordPads` rows, and the update
+`KeysEditor` owns the controls, the knob row (the bottom band of the Controls section,
+`knobRowH` 110, which is what makes each knob 60 px square), the playing surface, the
+`ChordPads` rows, the `ChordGenMenu` and the update
 button. It sets the shared `LookAndFeel` (retinted locally toward Octavium's neutral
 grey), wires the playing surface and the pads to `KeysProcessor::baseVelocity01` (the
 midpoint of the velocity range), pushes the surface's sounding notes into the pads

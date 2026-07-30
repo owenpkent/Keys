@@ -103,6 +103,7 @@ void NoteSurface::panic()
     voiceOrder.clear();
     dragDrawn = -1;
     rightGesture = false;
+    releaseGesture = false; // both gesture flags, or a panic mid-gesture strands the other one
     refresh();
     processor.allNotesOff(); // belt-and-braces across all channels
 }
@@ -211,7 +212,17 @@ void NoteSurface::mouseDown(const juce::MouseEvent& e)
             const int d = drawnAt(e.position);
             if (d >= 0)
             {
-                if (latched.erase(d) == 0)
+                // Release beats latch, and it releases whichever hold has the note: a
+                // ringing key stops whether Latch toggled it on or the pedal caught it, so
+                // a sustained chord comes apart a note at a time without lifting Sustain
+                // itself. Only a silent key latches. Erasing both sets unconditionally is
+                // also what fixes a note caught by *both*, which used to leave one set and
+                // keep sounding from the other. Nothing here can release a key lit by a
+                // chord pad, the arp or MCP: those never enter these sets, so refresh()
+                // finds no `sounding` entry and their refcounts are left alone.
+                const bool wasLatched = latched.erase(d) > 0;
+                const bool wasPedal = sustained.erase(d) > 0;
+                if (! wasLatched && ! wasPedal)
                     latched.insert(d);
                 rightGesture = true;
                 refresh();

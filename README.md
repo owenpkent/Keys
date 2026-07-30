@@ -5,8 +5,9 @@ standalone app). Keys makes no sound of its own: you click the on-screen piano a
 it sends MIDI to whatever instrument sits downstream, in your DAW or over a virtual
 port. Built for creators who work entirely with a mouse, including users with motor
 disabilities: every control is a single click, a drag, or a scroll. No keyboard and no
-modifier keys. Right-click is only ever an accelerator, with one exception Owen asked for:
-**Send to arp slot**, in a chord card's menu, has no left-click twin.
+modifier keys. Right-click is only ever an accelerator, with two exceptions Owen asked for:
+**Send to arp slot**, in a chord card's menu, and releasing one note out of a chord the
+**Sustain** pedal is holding. Neither has a left-click twin.
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain and latch, the Humanize settings, the
@@ -33,12 +34,14 @@ Built with **JUCE 8** and **CMake**, on the shared
 
 The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex).
 
-One view, no tabs: header controls, a centre view (the eight knobs, or the chord
-generator), then the arpeggiator, the chord pads, the transcriber, and the playing surface.
-Every section folds away so the window can be squeezed small — click anywhere on its bar —
-and every one of them also detaches into a resizable window of its own. An open section's
-bar is a ruled band with a tick of accent; a folded one goes flat and dim, so the shape of
-the window reads before you have read a caption.
+One view, no tabs, and four sections stacked down the window: **Controls** (the dropdowns
+and the eight knobs under them), the **arpeggiator**, the **chord pads**, and the **playing
+surface**. Every section folds away so the window can be squeezed small: click the chevron
+at the left of its bar, or the caption beside it. That left end is the target, and a
+hairline shows where it stops, so a click that misses a bar control does nothing rather than
+hiding the thing you were reaching for. Every section also detaches into a resizable window
+of its own. An open section's bar is a ruled band with a tick of accent; a folded one goes
+flat and dim, so the shape of the window reads before you have read a caption.
 
 ![Keys](assets/screenshots/keys.png)
 
@@ -52,16 +55,16 @@ the window reads before you have read a caption.
 | **Click and drag** | Glide across keys (monophonic) |
 | **Sustain on**, click several keys | Notes keep sounding after release, like a pedal; with the pedal down a glide leaves a trail, and clicking a ringing key **plays it again**. **All Off** stops everything |
 | **Latch on**, click several keys | Each click holds that key, and clicking it again releases it — the way to build a chord note by note, or take one apart |
-| **Right-click** a key (optional) | Hold that one note — the Octavium accelerator. **Left-click it again** to release it |
-| **Knob row** | Eight rotary CC knobs above the keyboard, each with a one-click reassign button (see Controls below) |
+| **Right-click** a key (optional) | Toggle a hold on that one note, the Octavium accelerator. A key this keyboard is already holding lets go, so a walk along a ringing chord takes it apart a note at a time without lifting Sustain. Any other key latches on, and a plain **left click** releases that |
+| **Knob row** | Eight rotary CC knobs, the bottom row of the Controls section, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
-| **Chords** | Open the generator: fill a page of pads for a key and mode, or ask what chord could come next. It has no cards of its own — the chords it makes *are* the pads below it |
-| **Transcribe** | Record yourself singing or playing, and get the notes back as MIDI you can drag onto a track |
+| **Fill** / **Regen** | Two chips at the right of the Pads bar. Fill writes a chord to every unlocked pad on the page; Regen re-rolls the unlocked ones. Everything else the chord generator does is on a pad's right-click menu |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
 toggle, not a modifier key, on purpose. Right-click opens the card menus on the chord pads
-and the arp slots; only **Send to arp slot** lives nowhere else.
+and the arp slots, and toggles a hold on a key; only **Send to arp slot** and releasing a
+pedal-held note live nowhere else.
 
 ## Controls
 
@@ -78,77 +81,62 @@ and the arp slots; only **Send to arp slot** lives nowhere else.
 | **Sustain** | Hold notes after release (pedal). A repeated key is a repeated strike, so you can play over a chord that is still ringing |
 | **Latch** | Click to hold a key, click again to release it. Sustain's twin, and the difference between them is exactly that second click |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
-| **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu |
-| **Chord pads** | Their own section, on screen whatever the centre view is showing. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page, and **Big** swaps the two rows of eight for four rows of four, each card showing the chord's notes and a mini keyboard |
+| **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu. They are the bottom row of the Controls section, and the **Knobs** chip on that bar folds just that row |
+| **Chord pads** | Their own section, and the only chord cards in Keys. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page, and **Big** swaps the two rows of eight for four rows of four, each card showing the chord's notes and a mini keyboard |
 | **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
 | **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins |
-| **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
-| **Chords** | The chord generator — see below |
+| **Arp** | Its own section too. The bar carries an **On** toggle and a **Hold off** chip, so the arpeggiator can be switched on and made to let go of a chord with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
+| **Hold off** | On the Arp bar. Lets go of the chord being held into the arp and stops the Chain. Greyed out when there is nothing to let go of. Clicking the lit pad restrikes the chord instead, so this is the way to stop a hold outright |
+| **Fill** / **Regen** | The chord generator, at the right of the Pads bar, with **Key**, **Mode** and **Scale Compliance** as combo boxes beside them. Every setting it has is on a pad's right-click menu as well. See below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
-| **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it — click the bar to bring the section back first |
+| **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it, so unfold from the chevron first |
 | **All Off** | Stop everything |
 
 Full detail in [docs/CONTROLS.md](docs/CONTROLS.md).
 
 ## The chord generator
 
-**Chords** opens a panel that fills the current page of pads for a key and mode, so you
-can have a progression to play with before you know any theory. The chords it makes are the
-pads in the section below it — it draws no cards of its own, so what you audition is what
-you play.
+The generator fills the current page of pads for a key and mode, so you can have a
+progression to play with before you know any theory. It has **no panel and no view of its
+own**: the chords it makes are the sixteen pads, and there is exactly one set of chord cards
+in Keys, so what you audition is what you play.
 
-![The chord generator](assets/screenshots/chord-generator.png)
+It is two chips, three combo boxes and a card menu.
 
-The fastest way in is a **Feel** preset: Happy, Sad, Dreamy, Dark, Jazzy, Bluesy, Epic,
-Chill, Mysterious, Smooth. One click sets the key and mode, and moves Root and Scale to
-match so Scale Lock agrees. Then **Fill Page**.
+**Fill** and **Regen** sit at the right-hand end of the Pads bar. Fill writes a chord to
+every unlocked pad on the page; Regen re-rolls the unlocked pads that already have one. Both
+stay clickable when the pad strip is folded away, because they are the only left-click path
+into generation. Unfold and the page is written.
 
-| Control | What it does |
-|---------|--------------|
-| **Key** + **Mode** | 12 modes, each showing the character it carries (Dorian is "Jazzy, Sophisticated, Chill") |
-| **Scale Compliance** | How far outside the key it may go. 100% stays in the key; lower borrows from related modes, then reaches for secondary dominants, then anything |
-| **Lock** | Keep a chord when you regenerate |
-| **Lock Influence** | How much new chords copy the character of the ones you locked |
-| **New** | A different chord for that pad's place in the scale (or, for a Markov chord, the next step of the chain) |
-| **Next** | Chords that could follow this one — smooth voice-leading moves, circle-of-fifths, diatonic degrees, jazz substitutions — each with a play button to audition before it drops into the next free pad |
-| **Notes** / **Inversions** | Generate triads, 7ths and/or 9ths; allow root position and inversions |
-| **Source** | **Algorithmic** (the weighted pool above) or **Markov**: real-progression chains per Major / Minor / Modal, with **Temperature** (conservative to adventurous), **Length**, a **Mood** filter, and a **Start chord** |
+**Key**, **Mode** and **Scale Compliance** are combo boxes on that same bar, left of the two
+chips: the three settings you change while you are auditioning a page, one click to open and
+one to pick. They stay put when the strip folds too, and they are the same settings as the
+menu items of the same names, so setting one from either place shows in the other.
 
-Press any pad to hear it — turn **Big** on (Pads bar) if you want to read each chord's notes
-while you work. The page-wide actions are on-screen buttons: Fill Page, Regen Unlocked,
-Clear Page. Lock, New and Next act on one card, so they live in that pad's right-click menu.
+Everything else is on a **pad's right-click menu**:
 
-## Transcribing what you play
+| Item | What it does |
+|------|--------------|
+| **Lock** / **Unlock** | Keep this chord through a Fill or a Regen |
+| **New chord** | A different chord for that pad's place in the scale (or, for a Markov chord, the next step of the chain) |
+| **Next: could follow** | Chords that could follow this one, in four families: smooth voice-leading moves, circle-of-fifths, diatonic degrees, jazz substitutions. Every row has a play button to audition it before it drops into the next free pad |
+| **Clear page** | Empties the unlocked pads. It is a menu item and not a chip: sixteen pads is a lot to lose, Keys has no undo, and on the bar it sat a few pixels from the two things you click constantly |
+| **The settings** | Every setting the generator has, each opening a short list with the current value ticked. They sit on the menu itself, under a **Generator settings** heading, so reaching one is a hover and a click |
 
-**Transcribe** is the one place Keys listens instead of playing. Pick an audio input, hit
-**Record**, sing or play something, hit **Stop**, and the notes appear in a piano roll.
-Drag them from **DRAG MIDI** onto a track in your DAW and you have a MIDI file of what you
-just did.
+The settings: **Key** and **Mode** (12 modes, each showing the character it
+carries, so Dorian reads "Jazzy, Sophisticated, Chill"), **Octave**, **Scale Compliance**
+(how far outside the key it may go: 100% stays in, lower borrows from related modes, then
+reaches for secondary dominants, then anything), **Lock Influence** (how much new chords copy
+the character of the ones you locked), **Notes** and **Inversions** (triads, 7ths, 9ths; root
+position and inversions), and **Source**. Source is **Algorithmic** (the weighted pool) or
+**Markov**: real-progression chains per Major / Minor / Modal, with **Temperature**
+(conservative to adventurous), **Length**, a **Mood** filter and a **Start** chord. Those five
+are together under one **Markov chains** submenu, since none of them does anything until the
+source is Markov. Settings that belong to one source grey out under the other rather than
+being silently ignored.
 
-![Transcribe](assets/screenshots/transcribe.png)
-
-| Control | What it does |
-|---------|--------------|
-| **Driver** + **Input** | Which audio input to record from: a microphone, an interface, anything Windows lists. Remembered per machine, not per song |
-| **Record** / **Stop** | Record, then transcribe. The level meter beside the input shows signal arriving, so you can check the mic works before committing to a take |
-| **Sensitivity** | Higher finds more notes. It re-reads the same recording rather than running the model again, so it responds immediately |
-| **DRAG MIDI** | Drag onto a track to drop the notes there as a MIDI file |
-| **Clear** | Throw away the recording and the notes |
-
-Keys is an instrument, so your DAW sends it MIDI and never audio: there is no track input to
-record. The section opens an audio input itself, which is why it works the same in the plugin
-and in the standalone app, and why choosing an input here never disturbs your DAW's own audio
-settings. The input is only open while the section is showing or while you are recording, so
-Keys never sits on your microphone in the background.
-
-It is not live, and cannot be. The model needs the whole recording before it can work out
-where a note started, so takes under about a second produce nothing, and recording stops
-itself after two minutes. Transcription runs in the background, so the keyboard keeps playing
-while it thinks.
-
-The engine is Spotify's [basic-pitch](https://github.com/spotify/basic-pitch), ported from
-[NeuralNote](https://github.com/DamRsn/NeuralNote) by Damien Ronssin and Tibor Vass
-(Apache-2.0) and shared through the kit, so the other OK Studio plugins can use it too.
+Press any pad to hear it, and turn **Big** on (Pads bar) if you want to read each chord's
+notes while you work.
 
 ## Driving it with Claude
 
@@ -178,10 +166,12 @@ DAWs look automatically (`C:\Program Files\Common Files\VST3`). Or build from so
 Requires CMake 3.22+, Visual Studio 2022, a JUCE 8 checkout at `../JUCE`, and the
 kit at `../okstudio-juce-kit`.
 
-The Transcribe section downloads a large prebuilt ONNX Runtime the first time you configure,
-and forces the static MSVC runtime on the whole binary; both come with the transcription
-engine rather than being choices. `-DKEYS_TRANSCRIBE=OFF` builds without the section and
-without either cost.
+The configure is quick again. Keys used to carry an audio-to-MIDI Transcribe section, which
+downloaded a multi-gigabyte prebuilt ONNX Runtime and forced the static MSVC runtime on the
+whole binary; both came with that engine rather than being choices. The section is gone, so
+neither cost is, and Keys is back on the default dynamic CRT. If you are reusing a build
+directory configured before that, pass `-DOKSTUDIO_KIT_BASICPITCH=OFF` once to clear the
+cached setting.
 
 ```powershell
 ./build.ps1                 # VST3 -> %USERPROFILE%\Ableton\vst3
@@ -201,10 +191,11 @@ Details and troubleshooting: [docs/BUILD.md](docs/BUILD.md).
 
 Keys exists because most on-screen keyboards and controllers quietly assume two
 hands and a keyboard. Its rules: every function is reachable with single left-clicks,
-drags, and scrolls, bar the chord-card menus Owen asked to be right-click; no keyboard
-shortcut is ever required; no double-clicks, no modifier keys, no precision gestures on
-the critical path; large targets and high contrast. If something doesn't work for you
-with a mouse, that's a bug — open an issue.
+drags, and scrolls, bar the two right-click gestures Owen asked for (the chord-card menus,
+and releasing one note out of a pedal-held chord); no keyboard shortcut is ever required; no
+double-clicks, no modifier keys, no precision gestures on the critical path; large targets
+and high contrast. If something doesn't work for you with a mouse, that's a bug: open an
+issue.
 
 ## License
 

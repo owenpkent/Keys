@@ -554,7 +554,13 @@ void ArpPanel::refreshPatternButtons()
         cancelButton.setVisible(armed != armNone);
         resized(); // Cancel's width appears and disappears with it; see the action row
     }
-    stopButton.setEnabled(processor.arpLaunchedSlot() >= 0 || ! processor.arpHeldNotes().empty());
+    // The same three-way test the Hold off chip on the arp bar uses, and it has to be: the
+    // tooltip below says the two are one button. chainRunning() is not implied by the other
+    // two - an Exclusive pad press clears launchedSlot and the held chord while chainOn stays
+    // set - so without it Stop greyed out at the exact moment the bar chip lit, leaving the
+    // panel's own way out of a running chain disabled while the chain ran.
+    stopButton.setEnabled(processor.arpLaunchedSlot() >= 0 || ! processor.arpHeldNotes().empty()
+                          || processor.chainRunning());
 
     // Chain lights while it runs, and says so: the row is playing itself, which is a state
     // worth being able to read from across the room.
@@ -806,6 +812,9 @@ void ArpPanel::buildControls()
     addAndMakeVisible(latchButton);
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpLatch", latchButton);
     latchButton.setTooltip("Ignore note-offs until a new chord arrives.");
+    // Accessible name only; the button still reads "Latch". The keybed's Latch is on the
+    // Keyboard bar in the same window, and UI Automation takes the first name that matches.
+    latchButton.setTitle("Arp latch");
 
     // Retrigger was a toggle that only answered "on a new chord". The list adds the clock
     // half, so a five-step lane can still be made to land on the bar, and the two are
@@ -817,7 +826,7 @@ void ArpPanel::buildControls()
     retrigBox.onChange = [this] { applyRetrigChoice(); };
     addAndMakeVisible(retrigBox);
 
-    // The six lanes, in ArpEngine::Lane order.
+    // The ten lanes, in ArpEngine::Lane order. The original six first:
     buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note", -1, 8);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave", -3, 3);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
@@ -876,8 +885,14 @@ void ArpPanel::buildControls()
         slotCards[(size_t) i] = std::move(card);
     }
 
-    stopButton.onClick = [this] { processor.stopArpSlot(); refreshPatternButtons(); };
-    stopButton.setTooltip("Release the chord a slot is holding. The pattern stays put.");
+    // releaseArpHold, not stopArpSlot: the tooltip below says this is the same button as Hold
+    // off on the section bar, and it has to be. Releasing the chord while the chain runs only
+    // holds until the next bar line, when the following slot launches and hands over another.
+    stopButton.onClick = [this] { processor.releaseArpHold(); refreshPatternButtons(); };
+    stopButton.setTooltip("Let go of the chord being held into the arp, whichever card or "
+                          "slot put it there, and stop the Chain if it is running. The pattern "
+                          "stays put. Same button as Hold off on the section bar, which "
+                          "survives folding this panel away.");
     addAndMakeVisible(stopButton);
 
     copyButton.onClick = [this]

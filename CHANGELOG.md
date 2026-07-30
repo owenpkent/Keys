@@ -5,28 +5,333 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
-### Changed: the chord generator and the chord pads are one set of cards
+### Removed: the Centre section, and the knobs move into Controls
 
-Opening **Chords** used to put a second copy of the pads on screen. Not a similar grid — the
+The centre had been whittled down to one row. The arpeggiator became a section of its own on
+2026-07-25 and the chord generator lost its panel and its view earlier the same day, which
+left a whole section (a bar, a gap, a caption and a chevron) wrapped around the eight CC
+knobs. The knobs are the bottom row of the **Controls** band now, under the two rows of
+settings they always sat with, and the editor is four sections: **Controls**, **Arp**,
+**Pads**, **Keyboard**. There are no centre tabs and no Perform / Chords views; there is
+nothing left to switch between, so the **Perform** tab goes with the section that held it.
+
+Nothing is lost from the fold. The **Knobs** chip moved onto the Controls bar, which had
+several hundred px of caption zone doing nothing, so the knob row still folds away with one
+click and now costs the window no bar of its own to do it.
+
+The row keeps its 110 px, so the knobs stay 60 px square. It was briefly cut to `KnobBank`'s
+own 98 px floor to reclaim 12 px of window height, which put all eight rotaries at exactly
+48x48. That is the kit's *recommended minimum* for a rotary (`okstudio/RotaryKnob.h`), set
+deliberately above the 34 px mouse-only floor because a knob's usable drag arc shrinks faster
+than a linear slider's track as the control gets smaller. Keys is played with one mouse, and
+36% less knob area is a bad trade for 12 px, so it went straight back.
+
+**The default docked window is 699 px tall, down from 800.** That is one number moved by
+three changes in this release, and it is stated once rather than three times: Transcribe
+going took 40 (a section costs its bar and the 6 px gap above it, and nothing else), the
+keybed being measured rather than guessed took 23, and this merge takes 38 (the centre's bar,
+gap and top margin, less the 6 px gap the knob row needs inside Controls). The worst case,
+everything open and docked with Big cards on and the arp in Pattern shape, is 1473; see the
+resize-ceiling fix below.
+
+Detached, **Keys Centre** is no longer a window. The four are **Keys Controls**, **Keys
+Arpeggiator**, **Keys Chord Pads** and **Keys Keyboard**, and the knobs travel with Keys
+Controls, whose minimum height rises from 190 to 330 to fit them (112 header + 6 + 110 knob
+row, plus the holder's 12 px inset, the 38 px strip a detached section carries, and the
+window's own title bar and border).
+
+Sessions saved before this carry `centre`, `centreDetached`, `centreDetachedBounds` and
+`view` in their layout tree. Nothing reads them now, and an unread `ValueTree` property is
+simply dropped, so old sessions open unchanged: the knob fold comes back from `knobs`, which
+those sessions already carry. The `view` migrations retire with them, including the one that
+turned a session saved on the old Arp *view* into an open Arp *section*; that mapping has
+been in every release since 2026-07-25. No parameters moved.
+
+### Changed: the chord generator has no panel, no view and no grid of its own
+
+Three passes over one idea, landing as one change: **there is exactly one set of chord cards.**
+
+Opening **Chords** used to put a second copy of the pads on screen. Not a similar grid, the
 *same sixteen pads* of the *same page*, written through the same `setChordPad`, drawn once at
 full size in the generator and again as the strip below it. That made sense when the
 generator covered the whole plugin and the pads had nowhere else to live; the pads have had a
-section of their own, on screen under every centre view, since 2026-07-25.
+section of their own, on screen whatever else is open, since 2026-07-25. What was left once
+the duplicate went was a band of combo boxes and sliders sitting above the very cards it
+wrote to, and a whole centre view spent on it. That band is gone too, and the Chords view
+with it.
 
-So the duplicate is gone, and the two things it could do that the strip could not moved to
-where the cards actually are:
+`ChordGenMenu` is a plain value member of the editor now, alive for as long as the editor is,
+and it reaches the cards two ways, neither of which costs the window a pixel:
 
-- **Big**, on the Pads bar, swaps the two rows of eight for four rows of four with the full
-  chord card on each — the chord's notes with octave numbers, and a mini keyboard of the
-  shape under your hand. That is exactly the card the generator used to draw, and it now
-  works under Perform and the arp too, not only under Chords.
-- **Lock** is on the pad's right-click menu, always. The strip has painted a lock dot since
-  the pads existed and never been able to set it: the toggle lived on the generator's copy of
-  the card, so a state you could see while playing could only be changed from another view.
-- **New chord** and **Next: could follow** are on that same menu while the Chords view is
-  open, which is exactly when they were reachable before.
+- **Fill and Regen are chips at the right end of the Pads bar.** A bar is 34 px the window is
+  already spending, so a control riding one is free, and these two are the whole left-click
+  path into generation. They are never hidden, the way the arp's **On** is never hidden: the
+  only other way into the generator is a right-click on a pad card, which folds away with the
+  strip, so hiding them made folding Pads (exactly what you do when the screen is busy) leave
+  no route to generation at all. It survived that before the panel went, because it lived in
+  the centre section. They come off the *right* for the same reason On does: the page buttons
+  and **Big** are laid out from the left and disappear with the fold, so anything placed after
+  them would keep their hole. 24 px tall like the other bar controls that act rather than
+  fold; they were 22.
+- **Everything else is on a pad's right-click card menu.** **New chord** and **Next: could
+  follow** are on every pad, on every page, always. They used to appear only while the Chords
+  view was open, because the panel *was* the generator and the menu asked whether it existed;
+  there is nothing left to be closed. **Lock** is there too: the strip has painted a lock dot
+  since the pads existed and never been able to set it, because the toggle lived on the
+  generator's copy of the card, so a state you could see while playing could only be changed
+  from another view. Every generator *setting* is on that menu too: Source, Key, Octave, Mode
+  (each one carrying the character it plays in), Notes, Inversions, Scale Compliance, Lock
+  Influence, and the Markov chain's Chain, Mood, Start, Temperature and Length. A menu cannot
+  hold a slider, so each is a submenu of the handful of values worth having, with the live one
+  ticked and repeated in the parent item: the menu reads as the display the panel used to be
+  without being opened. The pool's settings grey out while the Markov source is up, as they did
+  on the panel.
 
-The Chords view is ~320 px shorter as a result, and there is one place a chord card lives.
+**Clear page** is on that menu as well, under a **This page** heading, and deliberately not a
+third chip. It empties every unlocked pad on the page, Keys has no undo of any kind, and as a
+chip it sat 4 px from **Regen** and a few more from the page buttons, the two things on that
+bar that get clicked constantly. Fill and Regen are constructive; a destructive bulk action is
+worth the extra click of a menu. `clearPage()` itself is unchanged, only what reaches it, and
+the item greys out when the page holds nothing to take.
+
+**Big**, on the Pads bar, is what the generator's grid used to be: four rows of four with the
+full chord card on each, the chord's notes with octave numbers and a mini keyboard of the
+shape under your hand. It works whatever else is on screen now, rather than only under Chords.
+
+### Changed: the generator's settings are two levels deep, and three of them are on the bar
+
+Two complementary answers to the same complaint: reaching a generator setting cost too much
+pointer travel.
+
+**The card menu is flat.** A setting used to be right-click, hover **Generator settings**,
+hover the setting, click the value: three legs of diagonal hover, and hover travel is the
+expensive part with one mouse. The wrapper submenu is gone and every setting hangs directly
+off the pad menu, so it is right-click, hover, click. Each keeps its ticked value and the
+live value repeated in its own parent item, so the menu still reads as a state display.
+
+The menu is longer for it, so it is grouped: **This pad** (Edit on keyboard, Clear pad, Lock,
+Send to arp slot, New chord, Next: could follow), **This page** (Clear page), then **Generator
+settings** (Source, Key, Octave, Mode, Notes, Inversions, Scale Compliance, Lock Influence),
+with a rule between each. **Markov chains** is the one group that keeps a level of its own:
+Chain, Mood, Start, Temperature and Length are five settings that do nothing at all until
+Source is Markov, which is not the default, and flattening them too would have pushed the menu
+off the bottom of a 1080p screen. The submenu opens whatever Source says, so the values can
+still be read and set before switching over.
+
+**Key, Mode and Scale Compliance are combo boxes on the Pads bar**, beside Fill and Regen.
+Those are the three you change while auditioning a page, and on the bar each is one click to
+open and one to pick instead of a right-click and a hover. They are 24 px like everything else
+on that bar, so the window is not a pixel taller, and like Fill and Regen they never hide when
+the Pads section folds: with the cards away they are the only generator settings left on
+screen. All three are still on the card menu as well, and all three are APVTS attachments, so
+the bar and the menu always show the same value whichever one set it. Compliance is a
+continuous 0-100 parameter and the combo is five steps of it (0 / 25 / 50 / 75 / 100 %), the
+same ladder the menu offers. Mode drops the parenthetical alias to fit the bar, so "Natural
+Minor (Aeolian)" reads **Natural Minor** there and in full on the menu.
+
+**The docked window's minimum width is 1010, and there is only one floor again.** It had
+dropped to 960 when the generator's panel went, with 1010 kept for the arpeggiator alone. The
+Pads bar now spends 834 px of its content area: 548 from the right (Detach 104, 6, Regen 70,
+4, Fill 62, 10, Compliance 74, 6, Mode 148, 6, Key 58) and 286 from the left (four page
+buttons at 46 + 4, 10, Big 62, 14). At 960 that area is 832 px, two short, and the only way to
+buy those two was off the page buttons, which are the most-clicked targets in the section.
+1010 hands it 882 and leaves 48 px of caption zone. Nothing shrank. The knob bank still does
+not raise the floor: it wants 532 px and gets 990.
+
+### Removed: Transcribe
+
+The audio-to-MIDI section is gone, at Owen's request. Keys produces MIDI and no longer
+consumes audio at all, so `AudioCapture` and `TranscribePanel` are deleted and the editor is
+down to four sections (Controls, Arp, Pads, Keyboard). A section costs its bar and the 6 px
+gap above it and nothing else while it is folded, so the docked window is 40 px shorter for
+it.
+
+The build gets the bigger win. `KEYS_TRANSCRIBE`, the multi-gigabyte prebuilt ONNX Runtime
+the engine linked, and the static MSVC runtime that library forced on *every* object in the
+binary are all gone with it, so a first configure is quick again and Keys links against the
+default DLL runtime. The engine itself stays in the kit (`okstudio/Transcribe.h`) for the
+other plugins in the line; Keys just stops asking for it. **An existing `build/` needs
+`-DOKSTUDIO_KIT_BASICPITCH=OFF` once**, because Keys used to set that variable with
+`CACHE FORCE` and a cache remembers what it was forced to.
+
+Sessions saved before this carry `transcribe`, `transcribeDetached` and
+`transcribeDetachedBounds` in their layout tree. Nothing reads them now, and a property no one
+asks for is simply dropped, so old sessions open unchanged. No parameters moved.
+
+### Added: Hold off, on the arp bar
+
+There was no way left to let go of a chord held into the arpeggiator without stopping
+something else as well. A click on a chord card retriggers the hold rather than ending it (see
+below), the arp panel's **Stop** button is destroyed the moment its section folds and that
+section starts folded, and **All Off** is a sledgehammer that also silences the pads and the
+live card. In the default layout the only exit was switching the arp off.
+
+**Hold off** rides the Arp section bar beside **On**, for the same reason On is out there: it
+survives folding the section away. One left click lets the chord go *and* stops the **Chain**
+if one is running. Both halves are the button. Releasing the chord alone leaves `chainOn` set,
+so the next bar line launches the following slot and the chord comes straight back, which is a
+button that undoes itself a bar later and reads as broken. `KeysProcessor::releaseArpHold()`
+does the pair and is the one call the UI makes; the arp panel's **Stop** goes through it too,
+which its own tooltip already claimed ("same button as Hold off on the section bar"). The arp
+itself keeps running and goes back to arpeggiating whatever you play.
+
+It greys out only when there is nothing to let go of, which means no chord held **and** no
+chain running: the gap between two chain chords is exactly when you want out.
+
+### Changed: a click on the card feeding the arp strikes it again
+
+Owen's call. With the arp **On**, clicking a chord card hands its chord over and holds it
+there; clicking that same card again used to take it back out. It **retriggers** now, the way
+a second press on a beat pad re-fires it, which is what a lit card under your finger looks
+like it should do. The retrigger never becomes a second owner of the same pitches:
+`holdArpChord` releases the previous hold before it fires, so the per-pitch refcount and the
+arpeggiator's own held set both unwind first, and Exclusive still applies to the new one.
+
+The way to stop a hold outright is **Hold off** on the arp bar, above. One case keeps the old
+meaning: a card cleared while it was still the one feeding the arp wears the ring with no
+notes behind it, so there is nothing to re-play and the click releases. That is the ring's own
+way out, and the reason it is drawn on a cleared card at all.
+
+This is the chord *pads*, not the arp's twelve slot cards. Clicking the slot that is already
+holding its chord still releases it, because a slot is one control that both starts and stops
+itself and there is nothing else on the row that undoes a launch.
+
+### Changed: right-click lets go of a note the keybed is holding
+
+A right-click on a note surface has been a per-note latch since Octavium. On a key **that
+surface is already holding** it now releases that key instead, out of whichever set has it:
+`latched`, `sustained`, or both at once. On any other key it latches, exactly as before.
+
+The point is the pedal. Under **Sustain** a chord rings on after you let go, and there was no
+way to drop one note of it without lifting the pedal and losing the rest. Now there is, and
+Sustain mode itself stays on. Taking the note out of *both* sets unconditionally also fixes a
+key caught by both, which used to leave one set and keep sounding from the other.
+
+This is a sanctioned exception to the rule that a right-click is only ever an accelerator with
+a left-click twin (Owen, 2026-07-30). The latch half still has its twin: a left click releases
+a latched note, with both toggles off. The `sustained` half cannot have one, because under
+Sustain a left click on a ringing key **strikes it again**, which is the whole point of
+Sustain being a pedal rather than a toggle. Owen took that trade explicitly, to get per-note
+release without giving up the restrike.
+
+Nothing here can release a key lit by a chord pad, the arp, MCP or the watched MIDI input:
+those never enter the keybed's own sets, so a right-click on one of them takes the latch path
+instead and adds the keybed as a second owner, which changes nothing you can see or hear until
+the other owner lets go.
+
+### Changed: a section bar folds from its left end again
+
+**This reverses "the whole bar folds it again", below**, which is three days old. The
+reasoning there was sound as far as it went: a 34 px-tall full-width band reads as one target,
+the mouse-only contract is about making targets bigger, and z-order already stops a bar
+stealing its own controls' clicks, because they are its siblings sitting in front of it. That
+last part is still true. A click that lands *on* Detach has always reached Detach.
+
+What it missed is that z-order only defends each control's own rectangle. It says nothing
+about the gaps around them, and on a bar whose right end is mostly gap, a click aimed at
+Detach that landed a few px off it hit bar, and the bar folded the section away. The cost of
+that miss is asymmetric: hitting Detach does what you wanted, missing it hides the thing you
+were reaching into. Bigger is only kinder when the extra area does what the target does.
+
+So the fold target is the chevron and its caption again, 92 px wide at the narrowest caption,
+and the only part of the bar that lights under the mouse or answers to one. A hairline marks
+where it ends, drawn whether or not the mouse is anywhere near the bar, because a boundary you
+cannot see is a boundary you find by being surprised by it. The controls' own strip is
+measured off that same rectangle, so the clickable end and the free end cannot drift apart.
+
+### Changed: the pad strip and the keybed give back 57 px
+
+Both bands were guessed high and are measured now.
+
+- **Big cards: 320 to 286 px.** A card draws its note list and mini keyboard while its text
+  area clears 58 px, which makes a pad 66 and four rows of them 286. The extra 34 px bought
+  4 px of mini keyboard.
+- **Keybed: 212 to 189 px.** A white key is capped at 185 docked and the keys are anchored to
+  the bottom, so 185 is the real floor; the fallboard rail and its shadow are painted
+  *downwards* over the keys and need no clearance above them. The remaining 4 px is body, and
+  any window taller than the folds ask for still hands all its slack to this section.
+
+Only the keybed's 23 px shows in the default layout, where Big is off. Both are already in the
+699 px figure above.
+
+### Fixed: the Chain kept coming back after things that should have stopped it
+
+A running chain launches the next slot at every bar line, so any control that let go of the
+chord without also stopping the chain was undone a bar later. Two did exactly that, a third
+was greyed out at the moment you needed it, and a fourth made the chain start in the wrong
+place.
+
+- **All Off.** `allNotesOff()` forgot the chord held into the arp but left `chainOn` set, so
+  the progression resumed out of the one button whose entire job is silence. It stops the
+  chain last, after the panic loop has zeroed the note references, so the stop cannot emit
+  note-offs for notes already gone. The MCP `all_notes_off` tool calls straight into
+  `allNotesOff()` and inherits the fix rather than carrying a copy of the bug.
+- **Hold off, and the arp panel's Stop.** Both go through `releaseArpHold()`, which stops the
+  chain and then releases the chord. See the entry above.
+- **The panel's Stop greyed out at the moment the bar chip lit.** Stop polled
+  `arpLaunchedSlot() >= 0 || arpHeldNotes()` and never gained the `chainRunning()` clause the
+  chip has, even though its own tooltip calls the two the same button. Pressing a chord pad
+  with **Exclusive** on clears the launched slot and the held chord while the chain keeps
+  running, so the panel's own way out of a running chain was disabled while it ran. Both
+  controls read the same three-way test now.
+- **A chain could start on its second slot.** `startChain()` armed `chainActive` without
+  clearing `chainAdvance`. The audio thread can raise that flag once more in the block that
+  straddles a stop, and nothing consumes it while the chain is off, so a stale `true` survived
+  into the next chain and stepped it forward on its first heartbeat: click **Chain** and the
+  first chord you asked for was gone before you heard it.
+
+### Fixed: two ways the window could be the wrong size
+
+- **Big cards resized the pads without resizing the window.** Toggling **Big** on the Pads bar
+  changed the section's height by 190 px and never told the window: it did three of the four
+  things a fold has to do and skipped `setSize` and `setResizeLimits`, so the cards grew into
+  a band that had not grown and the keybed was carved off the bottom edge. It goes through the
+  same `applyLayout()` every other fold uses now, which is a strict superset of what was
+  there.
+- **The maximum height was below the minimum.** `setResizeLimits` was capped at 1400 px while
+  a fully open editor (knobs, Big cards and the arp in Pattern shape) asks for 1473, and
+  `applyLayout()` passes that same figure in as the *minimum*, so every such layout handed
+  JUCE a minimum above its maximum. The ceiling is 1800 now, stated once in `maxEditorHeight`
+  with the worst case worked out line by line beside it.
+
+### Fixed: a 110 px hole in the Keyboard bar
+
+The detached keyboard window's own **Size** selector is a traveller marked "detached only", so
+while the section is docked it has no parent at all. `layoutDetachRow` placed it anyway,
+spending 110 px of the docked bar on a combo nobody can see and leaving a visible gap between
+**Wheels** and **All Off**. Detached-only travellers are skipped on the bar now.
+
+### Fixed: the names UI Automation sees
+
+The screenshot script drives Keys by accessible name (`scripts/capture-window.ps1
+-InvokeButtons`) and UI Automation returns the *first* control that matches, so a name that is
+missing, vague or shared is a script that clicks the wrong thing.
+
+- **Two Latch toggles and two Size combos.** The keybed's Latch and the arp panel's Latch both
+  answered to "Latch" whenever the arp was open, and the detached keyboard window's Size combo
+  answered to "Size" alongside the one in Controls. They are "Latch keys", "Arp latch" and
+  "Keybed size" now. Every one of them still reads the same on screen.
+- **The bar chips say what they do.** Fill and Regen are "Fill chord page" and "Regenerate
+  unlocked chords", and Hold off is "Arp hold off", because "Fill" and "Hold off" on their own
+  say nothing to a screen reader or a script.
+- **A section bar is reachable, and always was.** `SectionBar` is a `juce::Button` calling
+  `setTitle(caption + " section")`, so "Controls section", "Arp section", "Pads section" and
+  "Keyboard section" each fold or unfold that section from a script, and no capture needs Owen
+  to click a bar first. CLAUDE.md claimed the opposite (a plain Component with no accessibility
+  handler) and was simply wrong; it is corrected, along with the worked example in
+  `scripts/capture-window.ps1`, which still opened the Chords tab.
+- **Detach is still named per section** ("Detach Pads", "Re-dock Keyboard"), and there are four
+  of them now rather than six.
+
+### Fixed: stale tooltips
+
+The arp **On** tooltip still promised that a second click on a chord card takes the chord back
+out of the arp; it strikes it again, and Hold off beside it is what lets go. **Sustain** now
+mentions that a right-click drops a single ringing note, which is how a pedal-held chord comes
+apart without lifting the pedal. The arp panel's **Stop** said "the chord a slot is holding"
+when it releases any hold, whatever put it there, and now says it stops the Chain too.
+Comments describing the Transcribe section, the centre view and the chord generator's own grid
+of pads went with them.
 
 ### Added: Chain — the twelve arp slots play as a progression
 
@@ -149,10 +454,12 @@ what a second click does:
   click it again to release it. This is the one for building a chord a note at a time, or
   taking one apart, and it is what Sustain had been doing by accident.
 
-Both can be on at once; Latch wins on the keys it holds. Right-click's per-note latch is
-untouched and still has its left-click twin: clicking a note held that way releases it,
-with both buttons off, so the accessibility contract never depended on Sustain's old
-behaviour. **All Off** and turning either toggle off still clear everything.
+Both can be on at once; Latch wins on the keys it holds. Right-click's per-note *latch* keeps
+its left-click twin: clicking a note held that way releases it, with both toggles off, so the
+accessibility contract never depended on Sustain's old behaviour. (Right-click itself grew a
+second meaning later the same day, on a key the keybed is already holding; see "right-click
+lets go of a note the keybed is holding" above, which is where the one sanctioned exception to
+that contract is set out.) **All Off** and turning either toggle off still clear everything.
 
 Under the hood, a restrike is a note-off followed by a note-on, not a second note-on, so it
 goes through the same refcount the chord pads, the live card and the arp share: a key
@@ -186,7 +493,9 @@ section built a window that opened hidden. Every other control on a bar already 
 section — the pad pages, the Knobs chip, Wheels — so this was the odd one out rather than a
 rule being broken. The deliberate exceptions stay put: the arp's **On** (folding the panel
 must never stop the arpeggiator), the centre's two tabs (they are how a folded centre comes
-back) and the theme swatch (it belongs to the plugin, not to a section).
+back) and the theme swatch (it belongs to the plugin, not to a section). The centre and its
+tabs are gone since; **Hold off** and the generator's **Fill** and **Regen** joined the list
+of controls that outlive their section's fold, for reasons given in their own entries above.
 
 ### Fixed: run.py hung with a blank console instead of launching
 
@@ -354,18 +663,20 @@ leaves it there; with it off, cards play beat-pad style as they always have. Swi
 arp off releases a chord a card was holding into it, rather than leaving it droning with no
 click left to stop it.
 
-The generator's chord grid follows the same rule, and a left click on a card with the arp
-**On** is now the left-click way to get a chord into the arp, so right-click **Send to arp
-slot** stays the plugin's one item with no left-click twin rather than becoming two.
+The generator's chord grid followed the same rule while it existed, and a left click on a card
+with the arp **On** is now the left-click way to get a chord into the arp, so right-click
+**Send to arp slot** stays the plugin's one item with no left-click twin rather than becoming
+two.
 
 ### Added: every section detaches into a window of its own
 
 The keyboard and the arpeggiator could already be pulled out into their own resizable
-windows. Now all six can: **Controls**, the **centre view** (Perform / Chords), **Arp**,
-**Pads**, **Transcribe** and **Keyboard** each have a **Detach** button at the right-hand end
-of their bar. One screen's worth of plugin can be spread across as many windows as the desk
-has room for — the generator wide on one monitor, the pads under your hand, the keybed as
-large as it will go.
+windows. Now every section can: **Controls**, **Arp**, **Pads** and **Keyboard** each have a
+**Detach** button at the right-hand end of their bar. (Six sections when this landed; the
+centre and Transcribe have gone since, and the machinery never named a section, so the four
+that remain need no detach code of their own.) One screen's worth of plugin can be spread
+across as many windows as the desk has room for: the arp wide on one monitor, the pads under
+your hand, the keybed as large as it will go.
 
 Inside each detached window, a **Re-dock** button sits at the top, and the close box does the
 same thing. Both windows and both routes were deliberate: leaving the control that undoes a
@@ -380,8 +691,8 @@ empty slot, so the chevron still means one thing. A bar whose section is away sa
 **IN ITS OWN WINDOW** in the space its own controls were using.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
-Perform / Chords tabs, the arp's **On** toggle, the pad page buttons and the
-theme swatch — all of them keep working while the section they name is off in a window. The
+arp's **On** toggle, the pad page buttons and the theme swatch (and the Perform / Chords tabs,
+while there were tabs) keep working while the section they name is off in a window. The
 keyboard window keeps its own **Size** and **Wheels**, because those are the keybed's.
 
 Under the hood this stopped being two special cases and became one table: each section owns a
@@ -459,8 +770,10 @@ hold, the keybed) and they had no shared rule. Eight defects, three of them stuc
   handing a card to the arp never choked a sounding pad. It is a rule about *sources* now: one
   chord at a time whichever surface started it.
 - **Clearing the card that was feeding the arp orphaned the chord.** The ring vanished, the
-  empty pad stopped accepting clicks, and the only way out was All Off. Clearing releases it,
-  and the ring is drawn (and clickable) even on a cleared card.
+  empty pad stopped accepting clicks, and the only way out was All Off. Clearing releases the
+  chord now, and the ring is drawn and stays clickable on a card cleared any other way. Since
+  a click on a *filled* holder retriggers it (see "a click on the card feeding the arp strikes
+  it again" above), that empty case is the one place a card click still means release.
 - **To Arp was lost when the plugin window closed**, while the chord stayed held — leaving the
   pads back in momentary mode with a lit ring and no gesture that released it. The mode lives
   on the processor now and persists with the session.
@@ -563,8 +876,8 @@ command again. It now waits up to 4 minutes and says what it is waiting for.
 
 The pads used to live inside the Perform view, which meant picking Chords or Arp put them
 away — so the arpeggiator, whose whole job is to chew on a chord, was the one place you
-could not reach a chord. They now sit in a **Pads** section of their own between the centre
-view and the keyboard, visible under all three views and folding on their own chevron. Their
+could not reach a chord. They now sit in a **Pads** section of their own above the keyboard,
+on screen whatever else is open and folding on their own chevron. Their
 page buttons moved onto the Pads bar, where the row of four used to cost 34 px under the
 strip. Perform is the knob bank alone now, so the Pads chip on the view bar is gone.
 
@@ -572,7 +885,9 @@ strip. Perform is the knob bank alone now, so the Pads chip on the view bar is g
 
 - **To Arp**, a toggle on the Pads bar. Lit, a click on a chord card hands its chord to the
   arp and *leaves it there* — the notes are held with no note-off until you click the lit
-  card again or click another. The card wears a bright ring while it is the one feeding the
+  card again or click another. (The toggle went on 2026-07-27 and that second click strikes
+  the chord afresh since 2026-07-30; both have entries of their own above.) The card wears a
+  bright ring while it is the one feeding the
   arp. Unlit, pads behave exactly as before; this is a visible toggle rather than an implicit
   "the arp is on" mode, so a pad never quietly does something different than it did a minute
   ago. (With the arp bypassed the chord simply sustains, which is honest.)
