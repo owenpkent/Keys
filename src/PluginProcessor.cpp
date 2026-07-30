@@ -1191,11 +1191,13 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("knobs", layout.knobs, nullptr);
     tree.setProperty("pads", layout.pads, nullptr);
     tree.setProperty("arp", layout.arp, nullptr);
+    tree.setProperty("chance", layout.chance, nullptr);
     tree.setProperty("transcribe", layout.transcribe, nullptr);
     tree.setProperty("wheels", layout.wheels, nullptr);
     tree.setProperty("keyboard", layout.keyboard, nullptr);
     tree.setProperty("detached", layout.detached, nullptr);
     tree.setProperty("arpDetached", layout.arpDetached, nullptr);
+    tree.setProperty("chanceDetached", layout.chanceDetached, nullptr);
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
     tree.setProperty("centreDetached", layout.centreDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
@@ -1204,6 +1206,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
+    tree.setProperty("chanceDetachedBounds", layout.chanceDetachedBounds.toString(), nullptr);
     tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
     tree.setProperty("centreDetachedBounds", layout.centreDetachedBounds.toString(), nullptr);
     tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
@@ -1223,11 +1226,13 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.knobs = flag("knobs", true);
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
+    layout.chance = flag("chance", false);
     layout.transcribe = flag("transcribe", false);
     layout.wheels = flag("wheels", true);
     layout.keyboard = flag("keyboard", true);
     layout.detached = flag("detached", false);
     layout.arpDetached = flag("arpDetached", false);
+    layout.chanceDetached = flag("chanceDetached", false);
     layout.controlsDetached = flag("controlsDetached", false);
     layout.centreDetached = flag("centreDetached", false);
     layout.padsDetached = flag("padsDetached", false);
@@ -1257,6 +1262,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     };
     frame("detachedBounds", layout.detachedBounds);
     frame("arpDetachedBounds", layout.arpDetachedBounds);
+    frame("chanceDetachedBounds", layout.chanceDetachedBounds);
     frame("controlsDetachedBounds", layout.controlsDetachedBounds);
     frame("centreDetachedBounds", layout.centreDetachedBounds);
     frame("padsDetachedBounds", layout.padsDetachedBounds);
@@ -1379,6 +1385,26 @@ bool KeysProcessor::freezeChanceToSlot(int index)
     // "Pattern" is the shape after the eight directions in the Shape combo, and it is the one
     // that reads the lanes: a frozen phrase is worthless behind a shape that ignores them.
     pat.shape = ArpEngine::numDirections;
+
+    // Freezing to the *active* slot has to install the phrase live as well, or it does not
+    // survive. The active slot is a mirror of the live lanes: storeActiveArpPattern() copies
+    // those over it, and that runs on every session save (arpToTree) as well as on every slot
+    // switch. Chance writes no live lanes of its own, so a save landing between the freeze and
+    // the next read silently replaced the phrase with lane defaults - intermittently, and the
+    // active slot is this button's default destination, so it would have bitten constantly.
+    // Writing both makes the re-snapshot idempotent, and "freeze installs the phrase" is the
+    // more useful behaviour anyway. Found by driving the running plugin over MCP; the earlier
+    // run raced and read back all defaults, a later one happened not to.
+    if (index == activeArpPattern)
+    {
+        for (int l = 0; l < ArpEngine::numLanes; ++l)
+        {
+            for (int s = 0; s < ArpEngine::maxSteps; ++s)
+                arp.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
+            arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, len));
+            arp.lanes.clockDiv[(size_t) l].store(0);
+        }
+    }
     return true;
 }
 
@@ -1434,8 +1460,12 @@ void KeysProcessor::learnNote(int midiNote)
 juce::ValueTree KeysProcessor::chanceToTree() const
 {
     juce::ValueTree tree { "chance" };
-    // The seed is 64-bit, which a ValueTree property cannot hold as an int, so it goes as text.
-    tree.setProperty("seed", juce::String(arp.chance.seed()), nullptr);
+    // The seed is 64 bits, which a ValueTree property cannot hold as an int, so it goes as
+    // text - as HEX, not decimal. regenerateChance casts a signed nextInt64() to unsigned, so
+    // about half of all seeds land above int64's maximum; written in decimal, those came back
+    // through getLargeIntValue() saturated at 9223372036854775807, and every one of them
+    // reloaded as the same phrase. Hex round-trips all 64 bits exactly.
+    tree.setProperty("seed", juce::String::toHexString((juce::int64) arp.chance.seed()), nullptr);
 
     if (chanceHasLearned())
     {
@@ -1453,9 +1483,9 @@ void KeysProcessor::chanceFromTree(const juce::ValueTree& root)
     if (! tree.isValid())
         return; // sessions from before Chance: its defaults stand
 
-    const auto seed = tree.getProperty("seed").toString().getLargeIntValue();
+    const auto seed = (juce::uint64) tree.getProperty("seed").toString().getHexValue64();
     if (seed != 0)
-        arp.chance.setSeed((juce::uint64) seed);
+        arp.chance.setSeed(seed);
 
     clearChanceLearning();
     const auto counts = juce::StringArray::fromTokens(tree.getProperty("learn").toString(), ",", "");

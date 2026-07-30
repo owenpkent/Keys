@@ -247,6 +247,7 @@ public:
         bool knobs = true;      // the CC knob bank
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
+        bool chance = false;    // the Chance section (off by default: tall, and opt-in)
         bool transcribe = false; // the Transcribe section (off by default: it is tall too)
         bool wheels = true;     // mod + pitch, left of the keybed
         bool keyboard = true;   // the keybed itself
@@ -259,6 +260,7 @@ public:
         bool controlsDetached = false;
         bool centreDetached = false;
         bool arpDetached = false;
+        bool chanceDetached = false;
         bool padsDetached = false;
         bool transcribeDetached = false;
         bool detached = false;  // keybed lives in its own resizable window
@@ -270,6 +272,7 @@ public:
         juce::Rectangle<int> controlsDetachedBounds {};
         juce::Rectangle<int> centreDetachedBounds {};
         juce::Rectangle<int> arpDetachedBounds {};
+        juce::Rectangle<int> chanceDetachedBounds {};
         juce::Rectangle<int> padsDetachedBounds {};
         juce::Rectangle<int> transcribeDetachedBounds {};
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
