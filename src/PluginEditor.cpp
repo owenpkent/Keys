@@ -64,6 +64,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
       padsHolder(section(secPads).holder),
       transcribeHolder(section(secTranscribe).holder),
       keybedHolder(section(secKeyboard).holder),
+      chanceHolder(section(secChance).holder),
       keyboard(p), knobBank(p), chordPads(p)
 {
     setLookAndFeel(&lnf); // the Keys "Obsidian" skin; palette lives in KeysLookAndFeel.h
@@ -113,6 +114,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
                 case secPads:       layoutPadsHolder(); break;
                 case secTranscribe: layoutTranscribeHolder(); break;
                 case secKeyboard:   layoutKeybed(); break;
+                case secChance:     layoutChanceHolder(); break;
                 default: break;
             }
         };
@@ -131,6 +133,8 @@ KeysEditor::KeysEditor(KeysProcessor& p)
          "Transcribe", "Keys Transcribe", { 620, 300 }, { 940, 420 });
     wire(secKeyboard, keyboardBar, lay.keyboard, lay.detached, lay.detachedBounds,
          "Keyboard", "Keys Keyboard", { 420, 190 }, { 1000, 300 });
+    wire(secChance, chanceBar, lay.chance, lay.chanceDetached, lay.chanceDetachedBounds,
+         "Chance", "Keys Chance", { 900, 300 }, { 1100, 460 });
 
     // Wheels and the second Size selector belong to the keybed, not to the window it happens
     // to be in, so they follow it out. Owen asked for this: with them left behind, the
@@ -335,6 +339,16 @@ KeysEditor::KeysEditor(KeysProcessor& p)
                            "the card again.");
     addAndMakeVisible(arpOnButton);
     arpOnAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpOn", arpOnButton);
+
+    // Chance's On, on its bar for the same reason arp On is on its: it must survive folding
+    // the section. Turning it on also turns the arp on if that was off (timerCallback watches
+    // for the rising edge and does it) - Chance has no clock of its own, so an On that
+    // produces silence because the arp is off would be the dead state the mouse-only contract
+    // rules out.
+    chanceOnButton.setTooltip("Let Chance choose notes for the arp to play. Turning this on "
+                              "also turns the arp on, if it was off.");
+    addAndMakeVisible(chanceOnButton);
+    chanceOnAtt = std::make_unique<ButtonAtt>(processor.apvts, "chanceOn", chanceOnButton);
 
     themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
@@ -559,6 +573,7 @@ void KeysEditor::refreshSectionPanels()
     refreshCentrePanels();
     refreshArpPanel();
     refreshTranscribePanel();
+    refreshChancePanel();
 }
 
 void KeysEditor::refreshCentrePanels()
@@ -610,6 +625,25 @@ void KeysEditor::refreshArpPanel()
     arpHolder.addAndMakeVisible(*arpPanel);
     arpPanel->sendLookAndFeelChange();
     layoutArpHolder();
+}
+
+void KeysEditor::refreshChancePanel()
+{
+    // The panel is the *view* of Chance, not Chance itself: destroying it folds the editor
+    // away and leaves Chance (and the arp it drives) running, same reasoning as the arp's own
+    // panel beside it.
+    if (! processor.layout.chance)
+    {
+        chancePanel.reset();
+        return;
+    }
+    if (chancePanel != nullptr)
+        return;
+
+    chancePanel = std::make_unique<ChancePanel>(processor);
+    chanceHolder.addAndMakeVisible(*chancePanel);
+    chancePanel->sendLookAndFeelChange(); // configured pre-parenting, like arpPanel
+    layoutChanceHolder();
 }
 
 void KeysEditor::refreshTranscribePanel()
@@ -750,6 +784,11 @@ int KeysEditor::arpHeight() const
     return arpPanel != nullptr ? arpPanel->preferredHeight() : 0;
 }
 
+int KeysEditor::chanceHeight() const
+{
+    return chancePanel != nullptr ? chancePanel->preferredHeight() : 0;
+}
+
 int KeysEditor::sectionHeight(SectionId id) const
 {
     // Folded, or off in a window of its own: either way the section occupies no height here.
@@ -770,6 +809,7 @@ int KeysEditor::sectionHeight(SectionId id) const
             return 0;
            #endif
         case secKeyboard:   return dockedKeybedH;
+        case secChance:     return chanceHeight();
         default:            return 0;
     }
 }
@@ -1035,6 +1075,12 @@ void KeysEditor::layoutArpHolder()
         arpPanel->setBounds(holderContent(secArp));
 }
 
+void KeysEditor::layoutChanceHolder()
+{
+    if (chancePanel != nullptr)
+        chancePanel->setBounds(holderContent(secChance));
+}
+
 void KeysEditor::layoutKeybed()
 {
     auto area = holderContent(secKeyboard);
@@ -1133,6 +1179,17 @@ void KeysEditor::timerCallback()
     if (! arpOn && lastArpOn && processor.arpHeldPad() >= 0)
         processor.releaseArpChord();
     lastArpOn = arpOn;
+
+    // Chance has no clock of its own, so an On that produces silence because the arp is off
+    // is exactly the dead state the mouse-only contract rules out. Turning Chance on also
+    // turns the arp on if it was off - edge-triggered on the moment Chance switches on (not a
+    // standing invariant), so choosing to turn the arp back off afterwards is still honoured
+    // and is not fought on the next tick.
+    const bool chanceOn = apvts.getRawParameterValue("chanceOn")->load() > 0.5f;
+    if (chanceOn && ! lastChanceOn && ! arpOn)
+        if (auto* arpOnParam = processor.apvts.getParameter("arpOn"))
+            arpOnParam->setValueNotifyingHost(1.0f);
+    lastChanceOn = chanceOn;
 
     // Changing MIDI channel while notes sound would strand them on the old channel
     // (note-off goes to the new one), so panic on any channel change.
@@ -1331,6 +1388,24 @@ void KeysEditor::resized()
     {
         area.removeFromTop(4);
         arpHolder.setBounds(area.removeFromTop(h));
+    }
+
+    // --- Chance ----------------------------------------------------------------------
+    // Visually right after Arp (docs/CHANCE_DESIGN.md), even though secChance sorts last in
+    // SectionId - enum order and stacking order are independent, per every section here.
+    area.removeFromTop(6);
+    chanceBar.setBounds(area.removeFromTop(SectionBar::height));
+    {
+        // On sits on the bar, so it survives folding the section away (arp On's precedent).
+        auto bar = layoutDetachRow(secChance, chanceBar.contentArea(), true);
+        bar.removeFromRight(6);
+        chanceOnButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
+        section(secChance).caption = bar;
+    }
+    if (const int h = sectionHeight(secChance); h > 0)
+    {
+        area.removeFromTop(4);
+        chanceHolder.setBounds(area.removeFromTop(h));
     }
 
     // --- Pads -----------------------------------------------------------------------

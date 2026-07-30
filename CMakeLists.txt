@@ -49,7 +49,8 @@ set(KEYS_SOURCES
     src/ui/KnobBank.cpp
     src/ui/ChordPads.cpp
     src/ui/ChordGenPanel.cpp
-    src/ui/ArpPanel.cpp)
+    src/ui/ArpPanel.cpp
+    src/ui/ChancePanel.cpp)
 
 if (KEYS_TRANSCRIBE)
     list(APPEND KEYS_SOURCES

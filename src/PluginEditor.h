@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "ui/ArpPanel.h"
+#include "ui/ChancePanel.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
 #include "ui/DetachedWindow.h"
@@ -75,16 +76,21 @@ private:
     // The sections of the editor, in the order they stack down the window. Every one of them
     // folds, and since 2026-07-27 every one of them also detaches into a window of its own,
     // so the machinery below is written once and indexed by this rather than six times over.
-    enum SectionId { secControls, secCentre, secArp, secPads, secTranscribe, secKeyboard, numSections };
+    // secChance is appended after secKeyboard rather than slotted in next to secArp, so no
+    // existing enumerator's value moves (docs/CHANCE_DESIGN.md). Enum order need not match
+    // visual order: resized() places the Chance block right after Arp explicitly.
+    enum SectionId { secControls, secCentre, secArp, secPads, secTranscribe, secKeyboard, secChance, numSections };
 
     void setCentreView(int view);      // picks a view, unfolding the section if needed
     void refreshSectionPanels();       // builds/destroys the panels the current folds call for
     void refreshCentrePanels();        // creates/destroys the panel the state calls for
     void refreshArpPanel();            // the arp section's panel follows its own fold
     void refreshTranscribePanel();     // ditto the Transcribe section
+    void refreshChancePanel();         // ditto the Chance section
     void syncSectionControls();        // toggle states + visibility from processor.layout
     int  centreHeight() const;         // height the current centre view asks for, 0 if folded
     int  arpHeight() const;            // height the arp section asks for, 0 if folded
+    int  chanceHeight() const;         // height the Chance section asks for, 0 if folded
     int  sectionHeight(SectionId) const; // 0 when the section is folded or in its own window
     int  idealHeight() const;          // total height with the current folds
     int  minWidthForView() const;      // the centre views carry more controls than the player
@@ -106,6 +112,7 @@ private:
     void layoutPadsHolder();        // the chord-pad strip
     void layoutTranscribeHolder();  // the Transcribe panel
     void layoutArpHolder();         // the arp panel
+    void layoutChanceHolder();      // the Chance panel
     void layoutKeybed();            // wheels + keys
     // The centre bar's tabs and chip; hands back the bar space they did not use.
     juce::Rectangle<int> layoutToolRow(juce::Rectangle<int>);
@@ -128,8 +135,8 @@ private:
     };
 
     // One section of the editor: its content holder, the button that pops it out, and the
-    // window it lives in while it is out. The flags it reads live on the processor, so a
-    // window closed and reopened comes back the way it was left.
+    // window it lives in while it is out. The flags it reads live on the processor, so a window
+    // closed and reopened comes back the way it was left.
     struct Section
     {
         Holder holder;
@@ -186,6 +193,7 @@ private:
     Holder& padsHolder;
     Holder& transcribeHolder;
     Holder& keybedHolder;
+    Holder& chanceHolder;
 
     juce::Label title;
     juce::Rectangle<int> titleCaption; // "OK STUDIO" wordmark, in controlsHolder coordinates
@@ -236,6 +244,8 @@ private:
 
     // Alive whenever the arp section is open, wherever that section currently is.
     std::unique_ptr<ArpPanel> arpPanel;
+    // Ditto, for Chance.
+    std::unique_ptr<ChancePanel> chancePanel;
 
     // Section folds. Every section of the editor can be minimized so the window can be
     // squeezed small when the screen is busy; the state lives on the processor
@@ -259,6 +269,9 @@ private:
     std::unique_ptr<TranscribePanel> transcribePanel;
 #endif
     SectionBar keyboardBar { "Keyboard" };
+    // Chance, a section of its own beside the arp (docs/CHANCE_DESIGN.md). Visually placed
+    // right after the Arp block in resized(), even though secChance sorts last in SectionId.
+    SectionBar chanceBar { "Chance" };
     juce::TextButton knobsButton { "Knobs" };
     // The arp's power switch, and now also the thing that decides what a click on a chord
     // card means: with it lit, a card hands its chord to the arp instead of playing it while
@@ -267,6 +280,14 @@ private:
     juce::ToggleButton arpOnButton { "On" };
     std::unique_ptr<ButtonAtt> arpOnAtt;
     juce::TextButton wheelsButton { "Wheels" };
+
+    // Chance's own On, on its bar for the same reason arp On lives on its bar: it must
+    // survive folding the section, or stopping it means unfolding it first. Chance has no
+    // clock of its own, so turning it on also turns arp On on if that is off (see the
+    // comment beside lastChanceOn in timerCallback) - an On that produces silence is the
+    // dead state the mouse-only contract rules out.
+    juce::ToggleButton chanceOnButton { "On" };
+    std::unique_ptr<ButtonAtt> chanceOnAtt;
 
     // A second Size selector, for the detached keyboard window. The keybed's key count
     // lives in the Controls section, which is exactly the section you fold away once the
@@ -297,6 +318,7 @@ private:
     bool embedded = false;   // see setEmbedded()
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
     bool lastArpOn = false;   // to release a chord held into the arp when the arp goes off
+    bool lastChanceOn = false; // edge-detects chanceOn's rising edge, to force arpOn on with it
     bool pitchReturning = false; // pitch wheel is gliding back to centre (Octavium's ~160 ms ease)
     float panicFlash = 0.0f;  // 1 -> 0 decay behind the All Off button, on an explicit click only
 
