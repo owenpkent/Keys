@@ -5,6 +5,54 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Chance, a probabilistic note source
+
+A seventh section (`docs/CHANCE_DESIGN.md`), inspired by Mutable Instruments Marbles, the
+Music Thing Turing Machine, and a little borrowed vocabulary from machine learning. The arp
+already had a probability lane, which decides whether a step *you wrote* fires. Chance decides
+which note exists at all: it plays the notes you are holding, chosen by weighted draw, on a
+rhythm it decides for itself.
+
+Nine controls and three buttons. **Density** morphs a Euclidean pattern's pulse count rather
+than thinning it, so sparse still sounds even. **Deja Vu** is the loop lock, and its curve is a
+parabola with the frozen loop at the *centre* of its travel: turn either way and the loop comes
+apart, downward by writing new material in, upward by reordering what is already there. Turn it
+nowhere and you get a riff that repeats forever, which is the default. **Length** sets the
+loop's period. **Jitter** is timing feel, shaped so the first half of its travel is nearly
+inaudible. **Spread** and **Bias** place the register: at the bottom Spread is one fixed note,
+at the top it is a coin flip between the extremes of the range. **Temp** is the softmax
+temperature, so at zero it plays the strongest note in the key every time and at maximum it
+treats every candidate alike. **Wander** correlates consecutive choices, turning scattered
+leaps into a line that goes somewhere.
+
+Two sliders, deliberately not knobs, for the two ways of adhering to the key. **Key** collapses
+the available material in stages as you turn it up: all twelve notes, then the scale, then the
+strong degrees, then the triad, then the root alone. **Chord Pull** lifts the notes of the
+chord you are actually holding, and its real job is to carry them above Key's threshold so they
+survive that collapse: with Key high enough to leave only a triad, a held seventh still sounds.
+
+**Generate** gives you a new phrase. **Learn** means "follow what I play instead of the key":
+while it is on, a decaying histogram of the notes you play becomes the weighting, so the
+generator adopts your tonality. **Freeze** hands the phrase Chance just played to an arp slot as
+an ordinary editable pattern, which turns the generative brain into a phrase composer feeding an
+arp that already knows how to launch, save and edit phrases.
+
+Determinism is the point, not a detail. Every draw is a hash of the seed and the step, so the
+same seed is the same phrase at any buffer size, a DAW loop replays instead of drifting, and a
+locked loop is genuinely locked. One seed fans out into a whole step, so recycling a step
+recycles its character and not merely its gate, which is why a locked loop sounds like a figure
+you could hum rather than a statistic you could measure. The seed and the learned histogram save
+with the session.
+
+Chance has no clock of its own, by design: it rides the arpeggiator's, which stays the only
+thing in Keys that reads the playhead. Switching Chance on therefore switches the arp on too,
+because an On that makes no sound is a dead state.
+
+### Changed: the arp's Chance knob is now labelled Trig
+
+Two controls both called Chance is one too many. This is a label change only, so saved sessions
+and existing automation are untouched.
+
 ### Changed: the section bars read as headers, and the whole bar folds it again
 
 Three of Owen's asks, all about the same strip.

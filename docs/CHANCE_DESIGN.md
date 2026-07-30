@@ -47,9 +47,11 @@ than adding a second clock. Chance obeys this literally.
 
 - `src/ChanceEngine.h` is a new pure header: UI-free, lock-free, no allocation, no
   JUCE GUI dependency, unit-tested in `tests/ChanceTests.cpp` beside `ArpTests.cpp`.
-- It answers exactly two questions per step, and emits no MIDI:
-  `fires(step) -> bool` (the `t` generator) and `pick(step, pool) -> index`
-  (the `X` generator), plus velocity and gate scalars.
+- It has one entry point, `advance()`, called once per step whether or not that step
+  sounds, and it emits no MIDI. It returns a `Decision`: whether the step fires (the `t`
+  generator), which pool members sound (the `X` generator), and that hit's velocity,
+  gate, ratchet count and timing nudge. Called once per step *including* silent ones,
+  because the loop has to stay in phase with the grid either way.
 - `ArpEngine::fireStep()` routes to it as a third note source beside the `Direction`
   walk and the pattern lanes, gated the way `Params::usePattern` already gates lane
   data.
@@ -60,13 +62,20 @@ bug in this repo has lived. Not reimplementing them is the single largest risk
 reduction available, and it is worth more than any architectural tidiness a standalone
 engine would buy.
 
-Pitch resolution is the one genuinely new surface. Scale Lock is applied at the input
-surfaces today (`PianoKeyboard`, `NoteSurface`, via `keys::resolveOutputNote` in
-`src/NoteMath.h`), before notes ever reach the arp, and `ArpEngine.h` never calls
-`snapToScale`. Chance *invents* pitches downstream of those surfaces, so it is the
-first thing in Keys that needs scale resolution inside the engine.
-`keys::resolveOutputNote` gains a second call site rather than a second
-implementation.
+**Selection, never invention.** Every pitch Chance can return is already in the arp's
+candidate pool, which is the held set crossed with the octave range. It chooses among
+those; it does not synthesise a pitch and then correct it. That has three consequences
+worth stating plainly, because the first draft of this document had it the other way
+round and was wrong:
+
+- It cannot produce an out-of-key note, so it never calls `snapToScale` and
+  `keys::resolveOutputNote` in `src/NoteMath.h` gains no second call site. Whatever
+  Scale Lock did at the input surfaces still holds, untouched.
+- The Key control therefore re-weights the pool rather than quantizing a free value.
+  That is the same musical gesture (collapse toward the notes that matter) with none of
+  the risk.
+- It is truer to the product. Keys is played. A generator that invented pitches would
+  be authoring, which is Contour and Lattice's job.
 
 ## Determinism is the feature, not a nicety
 
@@ -123,12 +132,18 @@ is inverted (centre is maximum randomness, extremes lock); Marbles' polarity is 
 better one to copy because the musically useful setting sits at a detent you can find
 without looking.
 
-**Jitter** (0-100%, default 0) is timing feel, shaped as Marbles shapes it:
-`jitter⁴ x 36 semitones` of rate perturbation drawn from a fat-tailed Beta(3,3), with
-the phase pulled back toward its unjittered position each tick. The pull-back is what
-makes it read as a player lagging and catching up rather than drifting away, and the
-quartic curve keeps the first half of the knob's travel nearly inaudible, which is a
-feature on a 0-100 integer control.
+**Jitter** (0-100%, default 0) is timing feel, shaped as Marbles shapes it: a quartic
+amount curve on a fat-tailed symmetric bell. The quartic keeps the first half of the
+knob's travel nearly inaudible, which is a feature rather than waste on a 0-100 integer
+control, and the bell puts most steps near the grid while occasionally throwing one
+well off it.
+
+Marbles also pulls its phase back toward the unjittered position each tick, and **that
+part is not reproduced, because there is nothing here for it to correct.** Marbles
+jitters a free-running oscillator, so its error would accumulate without a restoring
+force. The arp re-derives every fire time from `ppqPosition` each block and never
+accumulates a counter, so a nudge is relative to that step's own grid position and the
+next step starts clean. Copying the pull-back would have been cargo cult.
 
 **Jitter does not conflict with Humanize, and needs no bypass.** Humanize is applied
 inside `KeysProcessor::noteOn` on the message thread, a path the arp's output never
@@ -159,16 +174,21 @@ the precedent already set by `scaleCompliance` in `src/ChordGen.h`, whose four
 weighted tiers open as compliance drops and whose roulette pick never hard-excludes
 anything.
 
-**Wander** (0-100%, default 60) crossfades independent draws against a 1/f
-Voss-McCartney random walk over scale degrees. Voss and Clarke measured real melodic
-lines at approximately 1/f, between flat white noise and the 1/f² of a plain Brownian
-walk, and the difference is audible in exactly the way the spectra predict: white
-noise is jagged and directionless, a Brownian walk drifts aimlessly across a phrase,
-1/f is correlated over short spans without long-range drift. Implementation is K
-uniform registers where register *k* is redrawn every 2^k steps, using McCartney's
-trailing-zero-count trick on a step counter to find the one register due, plus a
-running sum. Roughly twenty lines, run once per arp step rather than per audio sample,
-and the highest musical return per line in this document.
+**Wander** (0-100%, default 60) crossfades independent draws against a correlated walk.
+Voss and Clarke measured real melodic lines at approximately 1/f, between flat white
+noise and the 1/f² of a plain Brownian walk, and the difference is audible in exactly
+the way the spectra predict: white noise is jagged and directionless, a Brownian walk
+drifts aimlessly across a phrase, 1/f is correlated over short spans without long-range
+drift.
+
+**Not literal Voss-McCartney, deliberately.** That algorithm redraws register *k* every
+2^k steps off a monotone counter, and a monotone counter is exactly the thing that must
+not exist here: it would keep advancing while the deja-vu loop was locked, so a locked
+loop would not repeat, which is the one promise this module cannot break. Instead the
+walk is three one-pole filters with time constants of 2, 8 and 32 steps, each fed the
+step bundle's own white draw. Summing poles at octave-spaced time constants is the same
+construction in filter form, it approximates the same band, and because its only input
+is the bundle it stays inside the lock: when the loop repeats, so does the contour.
 
 ## Key and Chord Pull: two adherence axes
 
@@ -220,7 +240,7 @@ is state, serialized with the seed.
 ## Freeze to slot
 
 The arp's twelve slots already carry lane data *and* a chord, a shape and a rate.
-Freeze captures the last N generated steps into a slot, so what Chance just improvised
+Freeze captures the generated phrase into a slot, so what Chance just improvised
 becomes a deterministic pattern you can launch, edit, and keep.
 
 This is the strongest idea in the plan and the one no hardware module can do. Marbles
@@ -228,17 +248,45 @@ can lock a loop but cannot hand it to you as an editable object. Here the genera
 brain becomes a phrase composer feeding an arp that already knows how to play,
 serialize and launch phrases, and the whole thing is one left-click.
 
+**The mapping is exact, which is the pleasant part.** `seq[i]` is
+`{ sorted-held-index i % heldCount, octave (i / heldCount) * 12 }`, so a chosen pool
+index decomposes into precisely the note lane's 1..8 chord-tone index and the octave
+lane's added octaves. Velocity, gate and ratchet land in their own lanes as percentages.
+Nothing about the phrase is approximated on the way in, and a test decodes the captured
+lanes back and compares them against the pitches that actually sounded.
+
+A rest is captured as a probability of 0, not as a muted note, so the note the step
+*would* have played survives the freeze and lifting that lane brings it back.
+
+The capture is indexed by the deja-vu loop length rather than by a rolling cursor, so
+freezing a locked loop yields exactly that loop with step 0 of the pattern at step 0 of
+the phrase.
+
+**It writes to the active slot, and says so.** The button reads "Freeze to 3" rather
+than arming a slot click the way Copy and Clear do. Binding to a chosen slot needs a
+target picker, and a picker is the thing that turned Send to arp slot into this
+plugin's one right-click-only path; a button that names its destination is one click and
+needs no such exception. A picker can follow if choosing the slot turns out to matter.
+
 ## Modes
 
 Two selectors, both big buttons rather than combo boxes, since they have three states
 each and the mouse-only contract prefers a visible set to a dropdown.
 
-**Rhythm**: Coin / Clusters / Grooves, from Marbles' three shipped `t` modes.
-Complementary Bernoulli (one shared draw, so exactly one of two outcomes per tick),
-a ratio table producing integer multiples and divisions of the step, and stored
-eight-step patterns. Note that the Marbles *manual* numbers rather than names these,
-and the firmware also contains an inactive Independent Bernoulli, a plain Divider, and
-an unused `MARKOV` mode. Only the three shipped ones are worth reproducing.
+**Rhythm**: Coin / Euclid / Bursts, named for what they do here rather than for what
+Marbles calls them.
+
+- **Coin** is Bernoulli per step at Density. Marbles' Complementary Bernoulli collapses
+  to exactly this when there is one output rather than two, which is the case here.
+- **Euclid** is E(k, 16) with *k* morphed by Density, so it stays even at every setting.
+- **Bursts** is Euclid whose onsets may ratchet into 2-4 sub-hits, which is what Marbles'
+  Clusters mode is really doing when it makes integer multiples of the clock.
+
+Marbles' third mode, Drums, replays eighteen stored eight-step kick and snare tables.
+That has no meaning for a melodic arpeggiator and is not reproduced. Note also that the
+Marbles *manual* numbers rather than names its modes, and its firmware carries an
+inactive Independent Bernoulli, a plain Divider and an unused `MARKOV` mode that never
+reach the panel: firmware enums and panel behaviour are not the same list.
 
 **Voice**: Line / Duet / Cluster. Marbles' IDENTICAL, BUMP and TILT are about
 distributing three CV outputs, using a per-channel multiplier
@@ -286,17 +334,27 @@ nothing in this file uses one.
 | `chanceWander` | Int | 0..100 | 60 |
 | `chanceKey` | Int | 0..100 | 70 |
 | `chanceChord` | Int | 0..100 | 50 |
-| `chanceTMode` | Choice | Coin, Clusters, Grooves | Coin |
+| `chanceTMode` | Choice | Coin, Euclid, Bursts | Coin |
 | `chanceXMode` | Choice | Line, Duet, Cluster | Line |
-| `chanceLearnOn` | Bool | | false |
+| `chanceLearn` | Bool | | false |
 
-Seed and the learned weight table are not parameters. They are state, serialized
-beside the arp slots.
+Deja Vu is encoded 0..100 with the frozen loop at 50, not as a signed -100..100. The
+engine's curve `p = (2d - 1)²` is written against a unipolar 0..1, and a signed
+parameter would only move that conversion somewhere less obvious. It is still a
+centre-detented control on screen.
 
-**One naming collision to fix.** The arp already has a global `arpChance` knob
-labelled "Chance", and a section named Chance beside a knob named Chance is
-confusing. The fix is a display-name change only: relabel that knob "Trig" or "Fire".
-Parameter *ids* break saved sessions; display names do not.
+Seed and the learned weight table are not parameters. They are state, in their own
+`chance` child of the session tree beside the arp's.
+
+**The naming collision, fixed.** The arp's global `arpChance` knob was labelled
+"Chance", and a section named Chance beside a knob named Chance is confusing. It now
+reads "Trig". Display name only: the id is unchanged.
+
+**Appending is safer than the invariant suggests.** "Parameter-layout changes break
+saved sessions" is about removing or renaming ids. JUCE derives a VST3 parameter's id by
+hashing its string id, so appending moves only the order a host's generic parameter list
+shows. The comment already in `createLayout()` about `bpm` says so, and it is worth
+knowing before anyone refuses to add a control.
 
 ## What this deliberately does not do
 
@@ -344,20 +402,62 @@ CLAUDE.md is explicit that any new chord source has to go through
 rides the arp's existing emission path rather than opening a new one, which is why,
 but the regression test belongs in the suite regardless.
 
-## Build order
+## Build order, and where it got to
 
-0. Merge kit `strata-engine` into `main`. Reviewed separately; affects the whole line.
-1. `src/ChanceEngine.h` plus `tests/ChanceTests.cpp`. Density, Deja Vu, Spread, Bias,
-   Temperature, Key, Chord Pull. Wire into `ArpEngine::fireStep()` as a third source.
-   No UI at all: drive it from new tools in `src/mcp/KeysMcp.cpp` and verify it
-   headlessly. Keys' own MCP bridge is the fastest way to hear this thing before a
-   panel exists, which is a good reason it was built.
-2. Parameters, the section table entry, `ChancePanel`, the bar and its On.
-3. Wander (the 1/f walk), Jitter (the Beta phase perturbation), Learn (the decayed
-   histogram off `watchInputNotes()`).
-4. Freeze to slot.
-5. `CHANGELOG.md`, `docs/CONTROLS.md`, this document's status line, and screenshots
-   via `scripts/capture-window.ps1 -WindowTitle "Keys Chance"`.
+Built on branch `chance-probabilistic-module`.
+
+1. **Done.** `src/ChanceEngine.h` and `tests/ChanceTests.cpp`, wired into
+   `ArpEngine::fireStep()` as a third note source, with integration tests in
+   `tests/ArpTests.cpp`.
+2. **Done.** The fourteen parameters and the processor wiring.
+3. **Done.** Wander, Jitter, Learn.
+4. **Done.** Freeze to slot, including the capture round-trip test.
+5. **Done.** `ChancePanel`, the section table entry, the bar and its On.
+6. **Done.** MCP tools, so the thing can be driven headlessly.
+7. **Done.** `CHANGELOG.md` and this document.
+8. **Still owed.** The kit merge (see Prerequisites): CI pins the kit's `strata-engine`
+   branch on this branch as a stopgap, with a `TEMPORARY PIN` comment on the step. That
+   pin must go before this merges. `docs/CONTROLS.md` and screenshots via
+   `scripts/capture-window.ps1 -WindowTitle "Keys Chance"` are also outstanding.
+
+## What changed between the plan and the build
+
+Recorded because the reasons generalise, and because a design doc that quietly agrees
+with whatever got built is worth nothing.
+
+- **Selection replaced invention**, which is the big one. See the section above. It
+  removed a whole risk surface rather than managing it.
+- **The Humanize conflict did not exist.** The plan resolved a clash between Chance's
+  Jitter and the global Humanize. There was none to resolve: Humanize is applied inside
+  `KeysProcessor::noteOn`, a path arp output never takes, and its timing half
+  (`humanizeTime`, "Timing Spread") is retained-but-unread. Humanize is a velocity range
+  and arp step timing has never been humanized, so Jitter is the only timing control in
+  the chain by construction and needed no bypass.
+- **Jitter's pull-back and Wander's Voss-McCartney registers were both dropped**, each
+  because it assumed a free-running counter this architecture does not have. Details in
+  their own sections.
+- **Marbles' Drums mode went**, and the `t` modes are named for what they do here.
+- **The Key ladder dropped Marbles' hysteresis.** Eight hysteretic states exist to stop a
+  wobbling CV chattering across a threshold. Key is an integer knob and cannot wobble, so
+  the hysteresis would only make a control whose position did not fully determine its
+  behaviour, which is worse than useless here.
+- **A transport-jump resync was added**, which the plan did not anticipate. Marbles never
+  needs one because hardware has no transport. A plugin does, or a looped bar walks on
+  instead of replaying, so `ArpEngine::process()` resyncs Chance where it already
+  detects a jump to flush owed note-offs.
+- **The Euclid mask keys off the host step index, not an internal counter.** Counting
+  calls internally would start the pattern wherever the arp happened to be switched on
+  and drift on every loop. "Grid-locked" has to mean locked to the host's grid.
+- **Harmony is built per block**, with no timer, lock or seqlock. The plan assumed
+  handing a message-thread-built table to the audio thread would need one. It does not:
+  the interval table is static and taken by reference, the result is thirteen bytes by
+  value, and the loops run over seven degrees and twelve pitch classes.
+- **The engine primes itself at construction.** A default-constructed `DejaVuSequence`
+  has an all-zero ring and hands back the same value every step, which looks like a dead
+  engine rather than an unseeded one.
+- **Freeze targets the active slot** rather than arming a slot click. See its section.
+- **Learn became a plain toggle**: on follows what you play, off follows the key, one
+  click either way and no invisible state.
 
 ## Research caveats carried forward
 
