@@ -125,12 +125,23 @@ public:
     static constexpr juce::uint8 wOther    = 96;   // any other in-scale degree
     static constexpr juce::uint8 wOutside  = 8;    // not in the scale at all
 
-    /** Build the pitch-class weights for a key, a mode's intervals, and the live chord.
-        Message thread: it allocates nothing but it walks vectors and is not worth doing
-        per block. `chordMask` is a bit per pitch class (bit 0 = C); pass 0 for none.
-        `chordPull` 0..100 boosts chord tones over the rest of the scale. */
+    /** Build the pitch-class weights for a key, a scale's intervals, and the live chord.
+
+        Allocation-free: the interval table is taken by reference and lives in static storage,
+        the result is thirteen bytes returned by value, and the loops run over at most seven
+        degrees and twelve classes. So this is cheap enough to build per block rather than
+        needing a timer, a lock or a seqlock to hand it to the audio thread.
+
+        `chordMask` is a bit per pitch class, bit 0 = C; pass 0 for none. `chordPull` 0..100
+        lifts those classes, whose real purpose is to carry them above the Key threshold so
+        they survive that control's collapse.
+
+        `learnedWeights`, when given, replaces the interval-derived ladder entirely: it is the
+        histogram of what the player actually played (see Learn), so the key it implies is
+        evidence rather than a setting. Chord Pull still applies on top. */
     static Harmony buildHarmony (int rootPitchClass, const std::vector<int>& intervals,
-                                 juce::uint16 chordMask, int chordPull)
+                                 juce::uint16 chordMask, int chordPull,
+                                 const juce::uint8* learnedWeights = nullptr)
     {
         Harmony h;
         const int root = ((rootPitchClass % 12) + 12) % 12;
@@ -138,6 +149,12 @@ public:
         for (int pc = 0; pc < 12; ++pc)
             h.weight[(size_t) pc] = wOutside;
 
+        if (learnedWeights != nullptr)
+        {
+            for (int pc = 0; pc < 12; ++pc)
+                h.weight[(size_t) pc] = learnedWeights[pc];
+        }
+        else
         for (const auto interval : intervals)
         {
             const int deg = ((interval % 12) + 12) % 12;
@@ -153,9 +170,9 @@ public:
                 case 5: case 11:   w = wTendency; break;
                 default:           w = wOther;    break;
             }
-            // A mode can name the same pitch class twice (it cannot in the shipped table,
-            // but Blues and the pentatonics show the table is not just seven-note), so
-            // keep the strongest reading rather than the last one.
+            // A scale can name the same pitch class twice (it cannot in the shipped table, but
+            // Blues and the pentatonics show that table is not merely seven-note), so keep the
+            // strongest reading rather than the last one.
             h.weight[(size_t) pc] = juce::jmax (h.weight[(size_t) pc], w);
         }
 

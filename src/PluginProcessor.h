@@ -178,6 +178,28 @@ public:
     void releaseArpChord();
     const std::vector<int>& arpHeldNotes() const { return arpChordOn; }
 
+    // Chance, the probabilistic note source (docs/CHANCE_DESIGN.md). Its knobs are ordinary
+    // APVTS parameters ("chanceOn", "chanceDensity", ...); these three are the actions, which
+    // are not automatable values and so do not belong there.
+
+    /** A new phrase. Everything Chance does is a pure function of its seed, so this is the
+        whole meaning of Generate: a different phrase, and the same one again if you keep it. */
+    void regenerateChance();
+    juce::uint64 chanceSeed() const { return arp.chance.seed(); }
+
+    /** Hand the phrase Chance just played to a slot, as an ordinary editable pattern. The
+        generative brain becomes a phrase composer feeding an arp that already knows how to
+        launch, serialise and edit phrases. Returns false if it has not generated anything yet. */
+    bool freezeChanceToSlot(int index);
+    bool chanceHasPhrase() const { return arp.capturedLength.load() > 0; }
+
+    /** The twelve-bin histogram behind Learn, normalised the way Marbles normalises its scale
+        recorder: the most-played class becomes 255 and the rest scale against it. Empty until
+        something has been played with Learn armed. */
+    std::array<juce::uint8, 12> chanceLearnedWeights() const;
+    bool chanceHasLearned() const;
+    void clearChanceLearning();
+
     // Hold a chord pad's chord into the arp, remembering which pad it came from so the
     // strip can light it. Same one-at-a-time rule as a slot: a second call swaps.
     void holdArpChordFromPad(int padSlot);
@@ -341,6 +363,18 @@ private:
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
     bool lastArpOn = false;        // audio thread; to flush cleanly on bypass
+
+    // Chance's Learn: Dirichlet-style pseudo-counts per pitch class. Both a clicked surface
+    // (message thread) and the MIDI input (audio thread) feed it, so the cells are atomic; a
+    // lost increment costs one note's worth of evidence out of a decaying history, which is the
+    // same reasoning the lane atomics rest on. Counts decay before each increment so the model
+    // tracks what is being played now: strict conjugacy has no decay term, and a player is not
+    // a stationary process.
+    std::array<std::atomic<float>, 12> learnCounts {};
+    static constexpr float learnDecay = 0.97f;
+    void learnNote(int midiNote);  // either thread, only while "chanceLearn" is on
+    juce::ValueTree chanceToTree() const;
+    void chanceFromTree(const juce::ValueTree& root);
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

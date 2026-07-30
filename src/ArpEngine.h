@@ -114,6 +114,19 @@ public:
     // a seed is state, not an automatable value.
     ChanceEngine chance;
 
+    // What Chance last generated, in the step lanes' own vocabulary, so Freeze can hand an
+    // improvised phrase to a slot as an ordinary editable pattern. Written on the audio thread
+    // one step at a time, read on the message thread; the cells are already atomics and a
+    // half-captured phrase is only a phrase mid-capture, which is the same argument the lane
+    // atomics rest on.
+    //
+    // It maps exactly, which is the pleasant part. seq[i] is
+    // { sorted-held-index i % heldCount, octave (i / heldCount) * 12 }, so a chosen pool index
+    // decomposes into precisely the note lane's 1..8 chord-tone index and the octave lane's
+    // added octaves. Nothing about the phrase is approximated on the way in.
+    Lanes captured;
+    std::atomic<int> capturedLength { 0 }; // 0 until Chance has generated anything
+
     void prepare(double sampleRate)
     {
         sr = sampleRate > 0 ? sampleRate : 44100.0;
@@ -407,9 +420,11 @@ private:
         const int noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal < 0)
             return; // muted step
-        const int chance = laneValue(p, laneProbability, globalStep)
-                         * juce::jlimit(0, 100, p.chance) / 100;
-        if ((int) (rng() % 100u) >= chance)
+        // Named for the step, not just "chance", since the engine now also owns a ChanceEngine
+        // member and a local of that name would quietly shadow it.
+        const int stepChance = laneValue(p, laneProbability, globalStep)
+                             * juce::jlimit(0, 100, p.chance) / 100;
+        if ((int) (rng() % 100u) >= stepChance)
             return; // 100 always fires, 0 never does
 
         buildSequence(p);
@@ -494,6 +509,11 @@ private:
         const auto d = chance.advance(cp, p.harmony, poolPitches.data(), seqCount,
                                       (juce::int64) globalStep);
         ++stepCounter;
+
+        // Record it for Freeze, firing or not: a rest is part of the phrase, and it is the
+        // probability lane's 0 that carries it.
+        captureStep(cp, d, globalStep);
+
         if (! d.fires || d.voices <= 0)
             return;
 
@@ -525,6 +545,40 @@ private:
                     pending[(size_t) pendingCount++] = { note, src.channel, vel, on, durSamples };
             }
         }
+    }
+
+    // One generated step, written into captured[] in the step lanes' own terms (see the member).
+    // Indexed by the deja-vu loop length rather than by a rolling cursor, so freezing a locked
+    // loop yields exactly that loop: step 0 of the pattern is step 0 of the phrase.
+    void captureStep(const ChanceEngine::Params& cp, const ChanceEngine::Decision& d,
+                     long long globalStep)
+    {
+        const int len = juce::jlimit(1, maxSteps, cp.loopLen);
+        const long long m = globalStep % len;
+        const auto s = (size_t) (m < 0 ? m + len : m);
+
+        const int idx = juce::jlimit(0, juce::jmax(0, seqCount - 1), d.poolIndex[0]);
+        const int perOctave = juce::jmax(1, heldCount);
+
+        // A rest is a probability of 0 rather than a muted note, so the note it *would* have
+        // played survives the freeze and you can hear it again by lifting the lane.
+        captured.value[laneProbability][s].store(d.fires ? 100 : 0, std::memory_order_relaxed);
+        captured.value[laneNote][s].store(juce::jlimit(1, 8, (idx % perOctave) + 1),
+                                          std::memory_order_relaxed);
+        captured.value[laneOctave][s].store(juce::jlimit(-3, 3, idx / perOctave),
+                                            std::memory_order_relaxed);
+        captured.value[laneVelocity][s].store(
+            juce::jlimit(10, 200, (int) std::lround(d.velocityScale * 100.0f)), std::memory_order_relaxed);
+        captured.value[laneGate][s].store(
+            juce::jlimit(5, 200, (int) std::lround(d.gateScale * 100.0f)), std::memory_order_relaxed);
+        captured.value[laneRatchet][s].store(juce::jlimit(1, 4, d.ratchets), std::memory_order_relaxed);
+
+        for (int l = 0; l < numLanes; ++l)
+        {
+            captured.length[(size_t) l].store(len, std::memory_order_relaxed);
+            captured.clockDiv[(size_t) l].store(0, std::memory_order_relaxed);
+        }
+        capturedLength.store(len, std::memory_order_relaxed);
     }
 
     // One ratchet hit: close what it lands on top of, emit its note-on, and park its note-off

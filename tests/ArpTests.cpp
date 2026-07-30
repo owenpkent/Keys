@@ -866,6 +866,63 @@ public:
             expect(! pitchesAtBlockSize(p, 6000, 32).empty(), "global Chance 100 fired nothing");
         }
 
+        beginTest("Freeze captures the phrase it actually played");
+        {
+            // What makes Freeze worth having is that the mapping is exact, not approximate: a
+            // chosen pool index decomposes into the note lane's chord-tone index and the octave
+            // lane's added octaves with nothing lost. So the captured lanes have to decode back
+            // to the very pitches that sounded. Two octaves, or idx / heldCount is always 0 and
+            // the half of the decomposition most likely to be wrong goes untested.
+            auto p = chanceParams();
+            p.octaveRange = 2;
+            p.chanceParams.dejaVu = 50;   // frozen, so the phrase is a clean 8 steps
+            p.chanceParams.loopLen = 8;
+            p.chanceParams.jitter = 0;
+            p.chanceParams.xMode = ChanceEngine::XMode::line;
+
+            ArpEngine e;
+            e.prepare(sr);
+            e.chance.prepare(0xF00Du, 8);
+
+            ArpEngine::HostClock clock;
+            clock.playing = true;
+            clock.hasPpq = true;
+            clock.bpm = bpm;
+
+            std::vector<int> played;
+            juce::MidiBuffer in = chordOn({ 60, 64, 67 });
+            for (int b = 0; b < 8; ++b)
+            {
+                clock.ppq = (double) b * 0.25;
+                juce::MidiBuffer out;
+                e.process(p, clock, 6000, in, out);
+                in.clear();
+                for (auto& x : collect(out))
+                    if (x.on)
+                        played.push_back(x.note);
+            }
+
+            expectEquals(e.capturedLength.load(), 8, "Freeze should capture the loop's length");
+
+            // Decode the lanes the way the arp itself would, and line them up with what sounded.
+            // Only the steps that fired have a pitch to compare; a rest is a probability of 0.
+            const int sorted[3] = { 60, 64, 67 };
+            std::vector<int> decoded;
+            for (int s = 0; s < 8; ++s)
+            {
+                if (e.captured.value[ArpEngine::laneProbability][(size_t) s].load() == 0)
+                    continue;
+                const int noteIdx = e.captured.value[ArpEngine::laneNote][(size_t) s].load();
+                const int oct = e.captured.value[ArpEngine::laneOctave][(size_t) s].load();
+                expect(noteIdx >= 1 && noteIdx <= 3, "note lane out of the held set");
+                expect(oct >= 0 && oct <= 1, "octave lane outside the octave range");
+                decoded.push_back(sorted[noteIdx - 1] + 12 * oct);
+            }
+
+            expect(! played.empty(), "nothing played, so nothing was verified");
+            expect(decoded == played, "the captured phrase is not the phrase that sounded");
+        }
+
         beginTest("a transport jump replays rather than drifting");
         {
             // A looped bar has to sound the same on its second pass. The jump both flushes the

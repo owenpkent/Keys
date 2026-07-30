@@ -168,7 +168,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // "Pattern", so on a plain shape there was no way to shorten the notes or thin the run
     // out. They multiply the lane value, so the defaults leave an edited pattern untouched.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpGate", 1 }, "Arp Gate", 5, 200, 100));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpChance", 1 }, "Arp Chance", 0, 100, 100));
+    // Named "Trig", not "Chance", since the Chance section arrived: two different controls
+    // both called Chance is one too many in a plugin whose contract is that you can tell what
+    // a control does by looking at it. Display name only - the id stays arpChance, so saved
+    // sessions and existing automation are untouched.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpChance", 1 }, "Arp Trig", 0, 100, 100));
 
     // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
     // A host that is *playing* always wins: this is what Keys runs at when there is no
@@ -182,6 +186,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // decides is the order a host's generic parameter list shows - and chordStrumMax above
     // does insert mid-list, so this branch moves that order regardless.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
+
+    // Chance: the probabilistic note source (docs/CHANCE_DESIGN.md). Appended for the reason
+    // given above, and percentages are plain linear ints to match arpGate and arpChance rather
+    // than introducing this file's first skew.
+    //
+    // Deja Vu and Bias are the two bipolar controls. Deja Vu reads 0..100 with the frozen loop
+    // at 50 rather than -100..100, because the engine's own curve p = (2d-1)^2 is written
+    // against a unipolar 0..1 and a signed parameter would only move that conversion somewhere
+    // less obvious.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chanceOn", 1 }, "Chance", false));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceDensity", 1 }, "Chance Density", 0, 100, 50));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceDejaVu", 1 }, "Chance Deja Vu", 0, 100, 50));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chanceLoopLen", 1 }, "Chance Loop Length",
+                                                      StringArray { "1", "2", "3", "4", "6", "8", "12", "16" }, 5));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceJitter", 1 }, "Chance Jitter", 0, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceSpread", 1 }, "Chance Spread", 0, 100, 50));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceBias", 1 }, "Chance Bias", -100, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceTemp", 1 }, "Chance Temperature", 0, 100, 35));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceWander", 1 }, "Chance Wander", 0, 100, 60));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceKey", 1 }, "Chance Key", 0, 100, 70));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chanceChord", 1 }, "Chance Chord Pull", 0, 100, 50));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chanceTMode", 1 }, "Chance Rhythm",
+                                                      StringArray { "Coin", "Euclid", "Bursts" }, 0));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chanceXMode", 1 }, "Chance Voice",
+                                                      StringArray { "Line", "Duet", "Cluster" }, 0));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chanceLearn", 1 }, "Chance Learn", false));
 
     return layout;
 }
@@ -524,6 +554,12 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
         velocity01 = (float) (rnd - 1) / 126.0f;
     }
 
+    // Evidence for Chance's Learn, from every surface Keys owns: the keybed, the pads, the live
+    // card. External MIDI is counted in watchInputNotes instead, since it never comes through
+    // here. Counted before the refcount check below, because a pitch a second source also wants
+    // is still a note the player asked for.
+    learnNote(midiNote);
+
     // One note-on per *pitch*, not per owner. Four sources can ask for the same pitch at
     // once (a pad, the live card, a chord held into the arp, and the keybed), and emitting a
     // second note-on for a pitch already sounding is what made Exclusive and Sustain look
@@ -604,7 +640,14 @@ void KeysProcessor::watchInputNotes(const juce::MidiBuffer& midi)
     {
         const auto m = meta.getMessage();
         if (m.isNoteOn())
+        {
             set(m.getNoteNumber(), true);
+            // Evidence for Chance's Learn. Every arriving note-on counts, including a repeat of
+            // a pitch already down, because a note played twice is twice the evidence. This runs
+            // before the collector drains, so it sees only what came in from outside and never
+            // what Keys is playing itself.
+            learnNote(m.getNoteNumber());
+        }
         else if (m.isNoteOff())
             set(m.getNoteNumber(), false);
         else if (m.isAllNotesOff() || m.isAllSoundOff() || m.isResetAllControllers())
@@ -749,6 +792,62 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ap.retrigger = apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
         ap.gate = (int) apvts.getRawParameterValue("arpGate")->load();
         ap.chance = (int) apvts.getRawParameterValue("arpChance")->load();
+
+        // Chance, the third note source. It has no clock of its own by design, so it is only
+        // reachable with the arp on; the editor turns arp On alongside it, so there is no
+        // setting that looks live and makes no sound.
+        auto& cp = ap.chanceParams;
+        cp.enabled = apvts.getRawParameterValue("chanceOn")->load() > 0.5f;
+        if (cp.enabled)
+        {
+            static constexpr int loopLengths[8] = { 1, 2, 3, 4, 6, 8, 12, 16 };
+            cp.density     = (int) apvts.getRawParameterValue("chanceDensity")->load();
+            cp.dejaVu      = (int) apvts.getRawParameterValue("chanceDejaVu")->load();
+            cp.loopLen     = loopLengths[juce::jlimit(0, 7, (int) apvts.getRawParameterValue("chanceLoopLen")->load())];
+            cp.jitter      = (int) apvts.getRawParameterValue("chanceJitter")->load();
+            cp.spread      = (int) apvts.getRawParameterValue("chanceSpread")->load();
+            cp.bias        = (int) apvts.getRawParameterValue("chanceBias")->load();
+            cp.temperature = (int) apvts.getRawParameterValue("chanceTemp")->load();
+            cp.wander      = (int) apvts.getRawParameterValue("chanceWander")->load();
+            cp.key         = (int) apvts.getRawParameterValue("chanceKey")->load();
+            cp.chordPull   = (int) apvts.getRawParameterValue("chanceChord")->load();
+            cp.tMode       = (ChanceEngine::TMode) juce::jlimit(0, ChanceEngine::numTModes - 1,
+                                                                (int) apvts.getRawParameterValue("chanceTMode")->load());
+            cp.xMode       = (ChanceEngine::XMode) juce::jlimit(0, ChanceEngine::numXModes - 1,
+                                                                (int) apvts.getRawParameterValue("chanceXMode")->load());
+
+            // The pitch-class weights Chance selects against. Built here rather than behind a
+            // timer or a lock because it costs nothing to: the interval table is static and
+            // taken by reference, the result is thirteen bytes returned by value, and the loop
+            // runs over at most seven degrees and twelve classes. Nothing allocates.
+            //
+            // The chord mask is whatever is being held from a surface Keys owns (keybed, pads,
+            // live card) plus anything arriving on the MIDI input. Chord Pull lifts those
+            // classes' weights, and its real job is to carry them *above the Key threshold* so
+            // they survive that control's collapse: with Key high enough to leave only a triad,
+            // a held seventh or ninth still sounds if Chord Pull is up.
+            juce::uint16 chordMask = 0;
+            for (int n = 0; n < 128; ++n)
+                if (noteRefs[(size_t) n].load(std::memory_order_relaxed) > 0
+                    || inputNoteOn[(size_t) n].load(std::memory_order_relaxed))
+                    chordMask |= (juce::uint16) (1u << (n % 12));
+
+            // Learn on means "follow what I play"; off means "follow the key". Both are one
+            // click and neither leaves state you cannot see: the histogram keeps its contents
+            // while off, so switching back resumes rather than restarting. Armed but with
+            // nothing played yet falls through to the key, so the control is never a dead end.
+            const bool learning = apvts.getRawParameterValue("chanceLearn")->load() > 0.5f
+                               && chanceHasLearned();
+            const auto learned = learning ? chanceLearnedWeights() : std::array<juce::uint8, 12> {};
+
+            const auto& scaleTable = okstudio::scales::all();
+            const int scaleIndex = juce::jlimit(0, (int) scaleTable.size() - 1,
+                                                (int) apvts.getRawParameterValue("scale")->load());
+            ap.harmony = ChanceEngine::buildHarmony((int) apvts.getRawParameterValue("root")->load(),
+                                                    scaleTable[(size_t) scaleIndex].intervals,
+                                                    chordMask, cp.chordPull,
+                                                    learning ? learned.data() : nullptr);
+        }
 
         ArpEngine::HostClock hc;
         if (auto* playHead = getPlayHead())
@@ -1032,6 +1131,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     migrateStrumRange(root);
     chordPadsFromTree(root);
     arpFromTree(root);
+    chanceFromTree(root);
     layoutFromTree(root);
 }
 
@@ -1248,9 +1348,126 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
     }
 }
 
+void KeysProcessor::regenerateChance()
+{
+    // getSystemRandom is the one non-deterministic call in the whole feature, and it happens
+    // exactly here: everything downstream is a pure function of the result, which is what makes
+    // a seed worth saving and a phrase worth locking. The low bit is forced so the seed can
+    // never be zero, which splitmix64 would otherwise map to a fixed stream.
+    arp.chance.setSeed(((juce::uint64) juce::Random::getSystemRandom().nextInt64()) | 1ull);
+}
+
+bool KeysProcessor::freezeChanceToSlot(int index)
+{
+    if (index < 0 || index >= numArpPatterns)
+        return false;
+    const int len = arp.capturedLength.load();
+    if (len <= 0)
+        return false; // nothing generated yet; the caller greys the button rather than lying
+
+    auto& pat = arpPatterns[(size_t) index];
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        for (int s = 0; s < ArpEngine::maxSteps; ++s)
+            pat.value[(size_t) l][(size_t) s] = arp.captured.value[(size_t) l][(size_t) s].load();
+        pat.length[(size_t) l] = juce::jlimit(1, ArpEngine::maxSteps, len);
+        pat.clockDiv[(size_t) l] = 0;
+    }
+    // A frozen phrase is a pattern, not a chord launcher: it plays against whatever is held,
+    // exactly as it did when Chance generated it. Shape and rate are left as the slot found
+    // them, since the phrase was generated at the rate currently set.
+    // "Pattern" is the shape after the eight directions in the Shape combo, and it is the one
+    // that reads the lanes: a frozen phrase is worthless behind a shape that ignores them.
+    pat.shape = ArpEngine::numDirections;
+    return true;
+}
+
+std::array<juce::uint8, 12> KeysProcessor::chanceLearnedWeights() const
+{
+    std::array<juce::uint8, 12> out {};
+    float peak = 0.0f;
+    for (const auto& c : learnCounts)
+        peak = juce::jmax(peak, c.load(std::memory_order_relaxed));
+    if (peak <= 0.0f)
+        return out;
+
+    // round(255 * count / max), Marbles' scale-recorder normalisation. The most-played class
+    // becomes the root as far as the Key ladder is concerned, whatever the Root control says,
+    // which is the point: Learn is evidence, not a setting.
+    for (size_t i = 0; i < out.size(); ++i)
+        out[i] = (juce::uint8) juce::jlimit(0, 255,
+                                            (int) std::lround(255.0f * learnCounts[i].load(std::memory_order_relaxed) / peak));
+    return out;
+}
+
+bool KeysProcessor::chanceHasLearned() const
+{
+    for (const auto& c : learnCounts)
+        if (c.load(std::memory_order_relaxed) > 0.0f)
+            return true;
+    return false;
+}
+
+void KeysProcessor::clearChanceLearning()
+{
+    for (auto& c : learnCounts)
+        c.store(0.0f, std::memory_order_relaxed);
+}
+
+void KeysProcessor::learnNote(int midiNote)
+{
+    if (midiNote < 0 || midiNote > 127)
+        return;
+    if (apvts.getRawParameterValue("chanceLearn")->load() <= 0.5f)
+        return;
+
+    // Decay everything, then count this note. Folding to a pitch class is the whole of the
+    // clustering Marbles has to do in the analogue domain: in twelve-tone equal temperament
+    // the "merge if within 28 cents" step is just a modulo.
+    for (auto& c : learnCounts)
+        c.store(c.load(std::memory_order_relaxed) * learnDecay, std::memory_order_relaxed);
+
+    auto& cell = learnCounts[(size_t) (midiNote % 12)];
+    cell.store(cell.load(std::memory_order_relaxed) + 1.0f, std::memory_order_relaxed);
+}
+
+juce::ValueTree KeysProcessor::chanceToTree() const
+{
+    juce::ValueTree tree { "chance" };
+    // The seed is 64-bit, which a ValueTree property cannot hold as an int, so it goes as text.
+    tree.setProperty("seed", juce::String(arp.chance.seed()), nullptr);
+
+    if (chanceHasLearned())
+    {
+        juce::StringArray counts;
+        for (const auto& c : learnCounts)
+            counts.add(juce::String(c.load(std::memory_order_relaxed), 4));
+        tree.setProperty("learn", counts.joinIntoString(","), nullptr);
+    }
+    return tree;
+}
+
+void KeysProcessor::chanceFromTree(const juce::ValueTree& root)
+{
+    const auto tree = root.getChildWithName("chance");
+    if (! tree.isValid())
+        return; // sessions from before Chance: its defaults stand
+
+    const auto seed = tree.getProperty("seed").toString().getLargeIntValue();
+    if (seed != 0)
+        arp.chance.setSeed((juce::uint64) seed);
+
+    clearChanceLearning();
+    const auto counts = juce::StringArray::fromTokens(tree.getProperty("learn").toString(), ",", "");
+    for (int i = 0; i < 12 && i < counts.size(); ++i)
+        learnCounts[(size_t) i].store(juce::jmax(0.0f, (float) counts[i].getDoubleValue()),
+                                      std::memory_order_relaxed);
+}
+
 void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    okstudio::state::save(apvts, "KEYS", destData, { chordPadsToTree(), arpToTree(), layoutToTree() });
+    okstudio::state::save(apvts, "KEYS", destData,
+                          { chordPadsToTree(), arpToTree(), chanceToTree(), layoutToTree() });
 }
 
 void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
