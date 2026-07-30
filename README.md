@@ -33,7 +33,8 @@ Built with **JUCE 8** and **CMake**, on the shared
 The hex-grid sibling, **Hex Host**, moved out to its own repo: [`../Hex`](../Hex).
 
 One view, no tabs: header controls, a centre view (the eight knobs, or the chord
-generator), then the arpeggiator, the chord pads, the transcriber, and the playing surface.
+generator), then the arpeggiator, Chance, the chord pads, the transcriber, and the playing
+surface.
 Every section folds away so the window can be squeezed small — click anywhere on its bar —
 and every one of them also detaches into a resizable window of its own. An open section's
 bar is a ruled band with a tick of accent; a folded one goes flat and dim, so the shape of
@@ -80,6 +81,7 @@ the generator's cards and the arp slots; only **Send to arp slot** lives nowhere
 | **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
 | **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins |
 | **Arp** | Its own section too. The bar carries an **On** toggle, so the arpeggiator can be switched on with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there |
+| **Chance** | Its own section, under the arp, with its own **On** on the bar (switching it on switches the arp on too, since it plays through the arp's clock). Nine controls decide *what* gets played out of the notes you are holding: how many steps fire, how much the phrase loops or evolves, which register it favours, how adventurous it is, and how tightly it sticks to the key. **Generate** gives a new phrase, **Learn** follows what you play instead of the key, and **Freeze** hands the phrase it just played to an arp slot as an editable pattern |
 | **Chords** | The chord generator — see below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
 | **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it — click the bar to bring the section back first |
@@ -148,8 +150,8 @@ The engine is Spotify's [basic-pitch](https://github.com/spotify/basic-pitch), p
 ## Driving it with Claude
 
 Keys embeds an MCP server, so Claude Code (or any local MCP client) can set
-parameters, play notes and phrases, write and fire chord pads, and edit arp
-patterns directly. See [docs/MCP.md](docs/MCP.md).
+parameters, play notes and phrases, write and fire chord pads, edit arp
+patterns and drive Chance directly. See [docs/MCP.md](docs/MCP.md).
 
 ## Using it in Ableton Live
 

@@ -136,12 +136,19 @@ positive delays them into a shuffle, negative pulls them early to rush the beat,
 and the default 0 is straight), latch (on-screen toggle: ignore note-offs until a
 new chord), retrigger (restart at step 1 on new note), rate + dot/trip + anchor.
 
-**Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
+**Gate and Chance are global as well as per-step** (added 2026-07-25; the global Chance knob
+reads "Trig" on screen since the Chance section arrived, id unchanged). The lanes are gated
 behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or
 thin a run out at all - the two most reached-for arp controls on any hardware unit were
 unreachable on the default shape. `Params::gate` and `Params::chance` **multiply** the lane
 value in `fireStep`, so 100 leaves an edited pattern exactly as drawn, and each control
 means the same thing in both shapes.
+
+The "probability / random-select lane" below was answered differently, and larger: the
+**Chance** section (`docs/CHANCE_DESIGN.md`, 2026-07-29) is a whole generative note source
+that decides which note exists rather than another per-step mask, and it plays through this
+engine's scheduler as a third note source beside the direction walk and the step lanes. A
+random-select lane would now be a duplicate feature.
 
 v2 and later (nice-to-have per the research ranking): timing-offset (Late) lane,
 probability / random-select lane, harmony lane (second note within +/-1 octave),
@@ -278,7 +285,7 @@ Three ruled, captioned groups, after the hardware-arp arrangement Owen asked for
 | Group | Holds | Visible |
 |-------|-------|---------|
 | PATTERN  | Shape + `<` `>`, Rate + `<` `>`, Trip, Dot | always |
-| PLAYBACK | Swing, Gate, Chance (knobs), Octaves, Anchor, Latch, Retrigger | always |
+| PLAYBACK | Swing, Gate, Trig (knobs), Octaves, Anchor, Latch, Retrigger | always |
 | STEPS    | Steps, Speed, Link | Pattern shape only |
 
 The `<` `>` pairs matter more than they look: stepping to the next shape is the commonest

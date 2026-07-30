@@ -39,6 +39,11 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `set_arp_pattern` | Write one or more lanes of a pattern: the live lanes, or a stored slot. |
 | `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
+| `chance_state` | Read the whole Chance module back: every knob, both mode names, the seed, and whether a phrase has been captured or anything learned. |
+| `chance_set` | Set any subset of Chance's knobs in one call, on short names (the parameter ids minus the `chance` prefix). Every name is validated before anything is applied, so a typo cannot leave a half-installed sound. Note that turning `on` true does **not** also turn the arp on: Chance has no clock of its own, so send `set_params { "values": { "arpOn": true } }` too or it generates in silence. (The Chance section's On button does cascade; this tool deliberately does not second-guess a caller.) |
+| `chance_generate` | A new seed, hence a new phrase. Returns the seed. |
+| `chance_freeze` | Hand the phrase Chance just played to an arp slot (0..11, default the active one) as an ordinary editable pattern. Reports an explicit failure if nothing has been generated yet, rather than a silent success. |
+| `chance_learned` | Read the twelve learned pitch-class weights behind Learn, or clear them. |
 
 ## How scheduled notes are timed
 
@@ -96,6 +101,12 @@ A short session once `keys mcp` is connected:
 2. `set_chord_pad { "slot": 0, "notes": [50, 53, 57, 60], "name": "Dm7" }`: write a chord to the first pad.
 3. `press_chord_pad { "slot": 0, "durationMs": 1500 }`: hear it.
 4. `set_arp_pattern { "gate": [60, 80, 100, 100], "ratchet": [1, 1, 2, 1] }`: write a four-step feel into the live arp lanes, then `set_params { "values": { "arpOn": true, "arpPattern": true } }` to hear it against whatever's held.
+5. `set_params { "values": { "arpOn": true } }` then `chance_set { "values": { "on": true, "density": 100, "dejaVu": 50, "loopLen": "8" } }`: a locked eight-step generated loop. Hold something (`play_notes { "notes": [50, 53, 57, 60], "durationMs": 8000 }`) and `chance_freeze {}` turns what you just heard into an editable pattern in the active slot.
+
+Driving Chance this way is worth knowing about beyond convenience: it is how two bugs in it
+were found that the unit tests could not reach, one needing a real session save racing the
+audio thread and the other a process restart. A bridge that can hold notes, read state back
+and restart the host is a test harness for everything that happens *outside* an engine.
 
 `arpPattern` is not optional there. The step lanes are only read when it is on (it is the
 Shape menu's "Pattern" entry); with it off the arp runs as a plain shape and lanes you

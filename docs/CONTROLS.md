@@ -307,7 +307,7 @@ wrapping round.
 | **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. |
 | **Swing** | Playback | −0.75 – +0.75, starting centred. Shifts the offbeat steps: right delays them for a shuffle, left pulls them early to rush the beat, centre is dead straight. |
 | **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
-| **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
+| **Trig** | Playback | 0–100%. How likely each step is to fire: turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. It was called Chance until the Chance section arrived, and two controls of that name was one too many. With Chance on, this still thins what Chance generates. |
 | **Octaves** | Playback | 1–4. How many octaves a direction shape climbs before repeating. |
 | **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. |
 | **Latch** | Playback | Keep arpeggiating after you let go, until a new chord arrives. |
@@ -376,3 +376,67 @@ Two ways, both from the Pads section under the panel:
   nothing whenever the arp was off; it went on 2026-07-27.)
 - **Send to arp slot**, in a pad's right-click menu, parks a copy of that chord in one of
   the twelve slots to launch later.
+
+## Chance
+
+The arp's own probability lane decides whether a step *you wrote* fires. Chance is a
+different thing: it decides which note exists in the first place. It plays the notes you
+are holding, chosen by a weighted draw, on a rhythm it decides for itself.
+
+### Turning it on
+
+**On** lives on the Chance bar, the same as the arp's own On, so it survives folding the
+section shut. Turning Chance on also turns the arp on if it was off: Chance has no clock
+of its own, and an On that made no sound would be a dead end. Turn the arp back off
+afterwards and it stays off, Chance doesn't fight you for it.
+
+### Rhythm
+
+| Control | What it does |
+|---------|--------------|
+| **Density** | How many steps fire. Turning it up doesn't thin an even pattern, it morphs the pulse count, so a sparse setting still sounds deliberate rather than gappy. |
+| **Deja Vu** | The loop lock. Centred, it repeats a loop exactly, forever. Turn it down and new material gets written in; turn it up and the same notes stay but get reshuffled. Both ends are maximum change, just different kinds of it. |
+| **Length** | How many steps that loop reaches back over. |
+| **Jitter** | Timing feel. The first half of its travel is deliberately almost inaudible, so the useful range sits in the second half. |
+
+### Pitch
+
+| Control | What it does |
+|---------|--------------|
+| **Spread** | At the bottom, one fixed note. At the top, a coin flip between the two ends of the range. Between, a spread around wherever Bias points. |
+| **Bias** | Which register it favours, low to high. |
+| **Temp** | How adventurous the pick is. At zero it plays the strongest note in the key every time; at maximum every candidate is treated alike. |
+| **Wander** | How much one note relates to the next. Low is scattered leaps, high is a line that goes somewhere. |
+
+### Key and Chord Pull
+
+These two are sliders rather than knobs, on purpose: they are a different kind of control
+from the ones above.
+
+**Key** collapses what Chance may play in stages as you turn it up: all twelve notes, then
+the notes of the scale, then the strong ones, then the triad, then the root alone.
+
+**Chord Pull** lifts the notes of the chord you are holding, and its real use is carrying
+them above Key's threshold so they survive that collapse. With Key turned high enough to
+leave only a triad, a held seventh still sounds if Chord Pull is up.
+
+### Rhythm and Voice modes
+
+Six buttons, three each, one click.
+
+**Rhythm**: **Coin** (a scattered coin toss per step), **Euclid** (even and grid-locked),
+**Bursts** (Euclid, but onsets can fire as two to four rapid hits).
+
+**Voice**: **Line** (one note), **Duet** (two, mirrored around the register Bias points
+at), **Cluster** (three stacked).
+
+### Generate, Learn and Freeze
+
+| Button | What it does |
+|--------|--------------|
+| **Generate** | Gives Chance a new phrase. Keep it and it saves with the session. |
+| **Learn** | Follow what you play instead of the key. While it's on, the notes you play build up a picture of your tonality and the generator follows it; turn it off and Chance goes back to the key, keeping what it learned for next time. |
+| **Freeze** | Hands the phrase Chance just played to an arp slot as an ordinary editable pattern, so a generated line becomes something you can launch, edit and keep. The button names the slot it will write to, and it's greyed out until Chance has actually played something. |
+
+A frozen rest stays a rest: lift that step back up in the arp's Probability lane and the
+note it would have played comes back.

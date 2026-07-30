@@ -95,8 +95,20 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   centre views are Perform and Chords only: the arp stopped being a third one on
   2026-07-25. The arp bar carries its On toggle, which survives folding the section shut.
   See `docs/ARP_DESIGN.md`.
+- **Chance is a third note source for the arp, not a second clock.** `ChanceEngine.h`
+  decides *what to play* out of the notes you are holding: whether a step fires, which
+  member of the arp's candidate pool sounds, and that hit's velocity, gate, ratchet and
+  timing nudge. `ArpEngine::fireChanceStep` hands the answer to the same
+  `emitHit`/`pending[]`/`active[]` path the plain arp uses, so the note-off contract is
+  shared rather than duplicated. **Selection, never invention:** every pitch it can return
+  is already in the pool, so it cannot produce an out-of-key note and never calls
+  `snapToScale`. Its draws come from `okstudio::poly::hash01`, never from the arp's
+  `mt19937`, because loop-locking needs replayable draws and that RNG's variation comes
+  from real-time call ordering. One step seed fans out into the whole step, which is what
+  makes a locked loop a figure rather than a statistic. See `docs/CHANCE_DESIGN.md`.
 - **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
-  table of six `Section`s (Controls, Centre, Arp, Pads, Transcribe, Keyboard); each owns a
+  table of seven `Section`s (Controls, Centre, Arp, Chance, Pads, Transcribe, Keyboard);
+  each owns a
   `Holder` its content is parented into, a Detach button, and the `DetachedWindow` it is
   currently in. Detaching is one re-parent of that holder, and `idealHeight()`,
   `syncSectionControls()` and `paint()` walk the table rather than naming sections.
@@ -104,8 +116,8 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   block, because what those two spend per section genuinely differs.) Add a section by
   adding an entry, not by copying a code path.
   The Re-dock button travels into the window; controls that belong to the editor rather
-  than the content (the centre tabs, arp On, the pad pages, the theme swatch) stay on the
-  bar. The keybed keeps two extras of its own via `Section::travellers`.
+  than the content (the centre tabs, arp On, Chance On, the pad pages, the theme swatch)
+  stay on the bar. The keybed keeps two extras of its own via `Section::travellers`.
   The **whole bar** folds its section, not just the chevron: the bar's controls are siblings
   sitting in front of it (every bar is `toBack()`ed), so z-order already stops it stealing
   their clicks and `SectionBar::hitTest` had nothing left to protect. **Detach hides with
@@ -197,11 +209,16 @@ Three things will bite otherwise:
   `MainWindowHandle`, a heuristic that lands on the *hosted instrument's* GUI in Keys Host
   (that GUI is a top-level window of the same process) and on an arbitrary section once any
   are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Centre` /
-  `Keys Arpeggiator` / `Keys Chord Pads` / `Keys Transcribe` / `Keys Keyboard` for the
-  detached sections (the `wire(...)` calls in `PluginEditor.cpp`).
-- **The Detach buttons are named per section**, because six buttons reading "Detach" are
-  six identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
-  name flips with the button's state.
+  `Keys Arpeggiator` / `Keys Chance` / `Keys Chord Pads` / `Keys Transcribe` /
+  `Keys Keyboard` for the detached sections (the `wire(...)` calls in `PluginEditor.cpp`).
+- **The Detach buttons are named per section**, because seven buttons reading "Detach" are
+  seven identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on;
+  the name flips with the button's state. The two On toggles are the remaining ambiguity:
+  the arp's and Chance's are both named "On", so match on position or reach them through
+  the parameters instead.
+- **A disabled button vanishes from the UI Automation tree entirely**, rather than
+  appearing with `IsEnabled=false`. Chance's Freeze is greyed until something has been
+  generated, so it is simply absent until then. Do not read that as a missing control.
 - **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
   write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 

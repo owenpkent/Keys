@@ -19,6 +19,8 @@ src/
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys (docs/ARP_DESIGN.md)
+├── ChanceEngine.h            # pure probabilistic note chooser, unit-tested; owns no
+│                             # clock, ArpEngine calls it per step (docs/CHANCE_DESIGN.md)
 ├── AudioCapture.{h,cpp}      # records from an audio input Keys opens itself, for the
 │                             # Transcribe section. Built only with KEYS_TRANSCRIBE
 ├── ui/
@@ -31,6 +33,8 @@ src/
 │   ├── ChordGenPanel.{h,cpp} # the chord generator centre view (algorithmic + Markov)
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
+│   ├── ChancePanel.{h,cpp}   # the Chance section: five captioned groups of knobs,
+│   │                         # the two mode rows, and Generate / Learn / Freeze
 │   ├── TranscribePanel.{h,cpp} # the Transcribe section: input picker, waveform, piano
 │   │                         # roll of the transcribed notes, MIDI drag-out
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
@@ -261,6 +265,44 @@ degenerated to I-I-I-I for every user. Realisation is root-position through
 
 All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
 
+## Chance: a third note source, sharing the arp's clock
+
+`ChanceEngine.h` is the probabilistic generator (`docs/CHANCE_DESIGN.md`). It decides *what
+to play* out of the notes already held, and it owns no clock: `ArpEngine::process()` calls
+`advance()` once per step and plays the answer, so the arp stage remains the only thing in
+Keys that reads the playhead. Three properties are load-bearing.
+
+**Selection, never invention.** Every pitch it can return is already in the arp's candidate
+pool (the held set crossed with the octave range). So it cannot produce an out-of-key note,
+never calls `snapToScale`, and needs no scale resolution of its own: whatever Scale Lock did
+at the input surfaces still stands. The Key control re-weights that pool instead of
+quantizing a free value, which is the same musical gesture with none of the risk. A
+generator that invented pitches would be authoring, and authoring is Contour and Lattice's
+job, not a played keyboard's.
+
+**Determinism, because loop-locking is meaningless without it.** Draws come from
+`okstudio::poly::hash01`, a pure function of (seed, lane, step), never from `ArpEngine`'s
+`std::mt19937` whose variation comes from real-time call ordering. One 64-bit step seed then
+fans out into the *whole* step (fire, pitch, velocity, gate, ratchet, jitter), so recycling
+a step recycles its character rather than merely its gate. That is the mechanical reason a
+locked loop sounds like a figure you could hum instead of a statistic you could measure. The
+tests pin it: the same seed yields an identical phrase at 6000, 1500 and 500 sample buffers.
+`ArpEngine::process()` also resyncs Chance where it already detects a transport jump, so a
+looped bar replays rather than walking on.
+
+**One emission path, not two.** `fireChanceStep` hands its decision straight to the existing
+`emitHit` / `pending[]` / `active[]` machinery. The close-what-you-land-on rule and three
+separate stuck-note fixes live there, and duplicating them for a second note source would
+have been the most expensive possible way to save a function call.
+
+`captured` holds the last generated phrase in the step lanes' own vocabulary, which is what
+Freeze hands to a slot. The mapping is exact rather than approximate: `seq[i]` is
+`{ sorted-held-index i % heldCount, octave (i / heldCount) * 12 }`, so a chosen pool index
+decomposes into precisely the note lane's 1..8 and the octave lane's added octaves.
+Freezing to the *active* slot also writes the live lanes, because that slot is a mirror of
+them and `storeActiveArpPattern()` would otherwise copy lane defaults back over the phrase
+on the next session save.
+
 ## Folding layout, and the centre view
 
 The editor is a stack of sections, each of which folds away so the window can be squeezed
@@ -406,6 +448,20 @@ tempo anything timed in beats runs at when there is no transport to follow, whic
 moment in the standalone and every stopped transport in a DAW; a host that is *playing*
 still wins. It replaced the arp's last-known-host-tempo fallback, which nothing in the
 standalone could ever reach and nobody anywhere could change.
+
+Chance appends fourteen more (`chanceOn`, `chanceDensity`, `chanceDejaVu`, `chanceLoopLen`,
+`chanceJitter`, `chanceSpread`, `chanceBias`, `chanceTemp`, `chanceWander`, `chanceKey`,
+`chanceChord`, `chanceTMode`, `chanceXMode`, `chanceLearn`). Worth knowing before anyone
+refuses to add a control: "parameter-layout changes break saved sessions" is about
+*removing or renaming* ids. JUCE derives a VST3 parameter's id by hashing its string id, so
+appending moves only the order a host's generic parameter list shows.
+
+Chance's seed and its learned histogram are **state, not parameters**, and ride in their own
+`chance` child of the session tree beside the arp's. The seed is written as hex on purpose:
+`regenerateChance` casts a signed `nextInt64()` to unsigned, so about half of all seeds land
+above `int64`'s maximum, and a decimal string read back through `getLargeIntValue()`
+saturates. That collapsed half the seed space onto a single phrase until it was found by
+driving the running plugin over MCP.
 
 A growing set is **registered but no longer read**, kept only so a session (and any host
 automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,
