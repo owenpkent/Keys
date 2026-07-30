@@ -233,6 +233,13 @@ private:
     juce::TextButton cancelButton { "Cancel" };
     juce::TextButton randomizeButton { "Randomize" };
     juce::TextButton stopButton { "Stop" }; // release the launched chord, without a panic
+    // Progression mode: Chain walks the slots that hold a chord, each for its own number of
+    // bars. Bars edits the *active* slot - the one whose lanes the editor is showing - which
+    // a slot click already makes it, so setting a length is click the card, click the plus.
+    juce::TextButton chainButton { "Chain" };
+    juce::TextButton barsMinus { "-" }, barsPlus { "+" };
+    juce::Label barsReadout;
+    void nudgeBars(int delta);
 
     // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
     // mouse-only contract wants a left-click path for everything). Both arm: click the

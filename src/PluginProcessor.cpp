@@ -229,6 +229,12 @@ KeysProcessor::KeysProcessor()
    #endif
       apvts(*this, nullptr, "PARAMS", createLayout())
 {
+    // 50 Hz. It only ever notices things, so the rate is about how late a chord change is
+    // allowed to be: 20 ms is comfortably inside a 1/16 step at any tempo anyone plays at,
+    // and the arp itself stays anchored to the bar grid regardless.
+    heartbeat.tick = [this] { heartbeatTick(); };
+    heartbeat.startTimerHz(50);
+
     // Last thing the constructor does: everything else this processor owns already
     // exists by the time the MCP bridge can be reached from another thread.
     mcpBridge = std::make_unique<KeysMcp>(*this);
@@ -238,6 +244,7 @@ KeysProcessor::~KeysProcessor()
 {
     // Stop taking MCP calls before anything else tears down.
     mcpBridge.reset();
+    heartbeat.stopTimer();
     stopTimer();
     deferred.clear();
 }
@@ -842,6 +849,53 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         arp.process(ap, hc, buffer.getNumSamples(), midi, arpScratch);
         midi.swapWith(arpScratch);
     }
+
+    advanceChainClock(buffer.getNumSamples());
+}
+
+// Audio thread. Counting the chain's bars belongs here because this is the only place with
+// a tempo, and outside the arpOn block because a progression is a chord player first: it
+// keeps moving whether or not anything is arpeggiating what it hands over. The *launch*
+// cannot happen here - it moves host parameters and fires notes - so this only ever raises
+// a flag for the heartbeat to act on.
+void KeysProcessor::advanceChainClock(int numSamples)
+{
+    if (! chainActive.load(std::memory_order_relaxed))
+    {
+        chainBeatsPlayed = 0.0;
+        return;
+    }
+
+    const int epoch = chainEpoch.load(std::memory_order_acquire);
+    if (epoch != chainSeenEpoch)
+    {
+        chainSeenEpoch = epoch;
+        chainBeatsPlayed = 0.0; // a slot was just launched: its bars start now
+    }
+
+    double bpm = (double) apvts.getRawParameterValue("bpm")->load();
+    double beatsPerBar = 4.0;
+    if (auto* playHead = getPlayHead())
+        if (auto pos = playHead->getPosition())
+        {
+            if (pos->getIsPlaying())
+                if (auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
+                    bpm = *hostBpm;
+            // A bar is four beats only in four-four. Asking the host costs nothing and is
+            // the difference between a chain that lands on the bar in 3/4 and one that does
+            // not; with no host to ask, four it is.
+            if (auto sig = pos->getTimeSignature(); sig && sig->denominator > 0)
+                beatsPerBar = 4.0 * (double) sig->numerator / (double) sig->denominator;
+        }
+
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    chainBeatsPlayed += bpm / 60.0 / sr * numSamples;
+    const double target = chainTargetBeats.load(std::memory_order_relaxed) * beatsPerBar / 4.0;
+    if (chainBeatsPlayed >= target)
+    {
+        chainBeatsPlayed = 0.0; // the epoch bump that follows will zero it again, harmlessly
+        chainAdvance.store(true, std::memory_order_release);
+    }
 }
 
 juce::ValueTree KeysProcessor::chordPadsToTree() const
@@ -1012,6 +1066,99 @@ void KeysProcessor::launchArpSlot(int index)
 void KeysProcessor::stopArpSlot()
 {
     releaseArpChord(); // clears launchedSlot too
+}
+
+int KeysProcessor::nextChainSlot(int from) const
+{
+    // The chain plays the slots that hold a chord. A pattern-only slot is a place to keep a
+    // rhythm, not a step of a progression, and walking through one would leave the previous
+    // chord ringing under a pattern that says nothing about it.
+    for (int i = 1; i <= numArpPatterns; ++i)
+    {
+        const int idx = (from + i) % numArpPatterns;
+        if (! arpPatterns[(size_t) idx].chordNotes.empty())
+            return idx;
+    }
+    return from >= 0 && ! arpPatterns[(size_t) from].chordNotes.empty() ? from : -1;
+}
+
+void KeysProcessor::startChain()
+{
+    const int first = nextChainSlot(numArpPatterns - 1); // wraps to the lowest filled slot
+    if (first < 0)
+        return; // nothing to play: the button does not stick on for an empty row
+    chainOn = true;
+    chainIndex = first;
+    launchArpSlot(first);
+    chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) first].bars));
+    chainEpoch.fetch_add(1); // tells the audio thread to count this slot from zero
+    chainActive.store(true);
+}
+
+void KeysProcessor::stopChain()
+{
+    if (! chainOn)
+        return;
+    chainOn = false;
+    chainIndex = -1;
+    chainActive.store(false);
+    chainAdvance.store(false);
+    stopArpSlot(); // the chord the chain was holding is the chain's to release
+}
+
+void KeysProcessor::setArpSlotBars(int index, int bars)
+{
+    if (index < 0 || index >= numArpPatterns)
+        return;
+    arpPatterns[(size_t) index].bars = juce::jlimit(1, 16, bars);
+    if (chainOn && index == chainIndex)
+        chainTargetBeats.store(4.0 * arpPatterns[(size_t) index].bars); // takes effect now
+}
+
+int KeysProcessor::arpSlotBars(int index) const
+{
+    if (index < 0 || index >= numArpPatterns)
+        return 1;
+    return juce::jlimit(1, 16, arpPatterns[(size_t) index].bars);
+}
+
+void KeysProcessor::heartbeatTick()
+{
+    // Releasing a chord held into the arp when the arp goes off. This lived in the editor's
+    // timer and was gated on the chord having come from a *pad*, so a chord handed over from
+    // the live card was never released - and with no editor open nothing polled at all, so
+    // automation or an MCP client writing arpOn false left it sounding with no way to stop
+    // it but All Off. Both edges close here: the processor owns the chord, so the processor
+    // is what should notice.
+    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
+    if (! arpOn && lastArpOnHeartbeat)
+    {
+        // The chain goes first: a progression cycling with nothing arpeggiating it is the
+        // same drone-with-no-owner this whole check exists to prevent, and its Chain button
+        // is on the arp panel, so switching the arp off is switching the chain off.
+        stopChain();
+        // What is left is a chord a *card* handed over - a pad, or the live card, which is
+        // the case the editor's version of this missed entirely. A chord an arp *slot*
+        // launched is left alone on purpose: the lit card is still on screen and still
+        // releases it on a click, so it has an owner and this does not have to be one.
+        if (arpLaunchedSlot() < 0 && ! arpHeldNotes().empty())
+            releaseArpChord();
+    }
+    lastArpOnHeartbeat = arpOn;
+
+    if (chainOn && chainAdvance.exchange(false))
+    {
+        const int next = nextChainSlot(chainIndex);
+        if (next < 0)
+        {
+            stopChain(); // every chord was cleared out from under it
+            return;
+        }
+        chainIndex = next;
+        launchArpSlot(next);
+        chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) next].bars));
+        chainEpoch.fetch_add(1);
+    }
 }
 
 // Message thread. The Chord lane reads slot chords on the audio thread, so they live in a
@@ -1263,6 +1410,11 @@ juce::ValueTree KeysProcessor::arpToTree() const
     const_cast<KeysProcessor*>(this)->storeActiveArpPattern();
     juce::ValueTree tree { "arp" };
     tree.setProperty("active", activeArpPattern, nullptr);
+    // A slot's `shape` is a direction index, with numDirections itself meaning "Pattern" -
+    // so the number that means Pattern moves every time a shape is added. Writing it down is
+    // what lets a session saved when there were eight shapes still open on twelve; without
+    // it, the four shapes added on 2026-07-30 silently turned every Pattern slot into Random.
+    tree.setProperty("shapeBase", ArpEngine::numDirections, nullptr);
     for (int pIndex = 0; pIndex < numArpPatterns; ++pIndex)
     {
         const auto& pat = arpPatterns[(size_t) pIndex];
@@ -1280,6 +1432,7 @@ juce::ValueTree KeysProcessor::arpToTree() const
         }
         pt.setProperty("shape", pat.shape, nullptr);
         pt.setProperty("rate", pat.rate, nullptr);
+        pt.setProperty("bars", pat.bars, nullptr); // how long the chain holds this slot
         for (int l = 0; l < ArpEngine::numLanes; ++l)
         {
             juce::StringArray vals;
@@ -1302,6 +1455,11 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
     const auto tree = root.getChildWithName("arp");
     if (! tree.isValid())
         return; // sessions from before the arp: defaults stand
+    // What "Pattern" was numbered when this session was written. Absent means it predates
+    // the four shapes added on 2026-07-30, when there were eight directions and Pattern was
+    // eight; every save since says so itself.
+    const int savedShapeBase = juce::jlimit(1, ArpEngine::numDirections,
+                                            (int) tree.getProperty("shapeBase", 8));
     for (int c = 0; c < tree.getNumChildren(); ++c)
     {
         const auto pt = tree.getChild(c);
@@ -1315,7 +1473,11 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
                 pat.chordNotes.push_back(juce::jlimit(0, 127, n.getIntValue()));
         pat.chordName = pt.getProperty("chordName").toString();
         pat.shape = (int) pt.getProperty("shape", -1);
+        if (pat.shape == savedShapeBase)
+            pat.shape = ArpEngine::numDirections; // "Pattern" is wherever Pattern is now
+        pat.shape = juce::jlimit(-1, ArpEngine::numDirections, pat.shape);
         pat.rate = (int) pt.getProperty("rate", -1);
+        pat.bars = juce::jlimit(1, 16, (int) pt.getProperty("bars", 1)); // absent before the chain
         for (int lc = 0; lc < pt.getNumChildren(); ++lc)
         {
             const auto lt = pt.getChild(lc);

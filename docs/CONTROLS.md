@@ -349,6 +349,20 @@ follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
 The **Mute** row under the grid silences individual steps without disturbing their
 values, so you can take a step out and put it back unchanged.
 
+### Playing the row as a progression
+
+The twelve slot cards hold a chord each. **Chain** (on the button row) plays the ones that
+hold a chord, one after another, each for the number of bars on its card — one click and the
+row is a twelve-chord song. Click it again to stop.
+
+**Bars** (the `-` `+` beside it) sets how long the **selected** slot lasts, 1 to 16. Clicking
+a slot card selects it (as well as launching it), so setting a length is: click the card,
+click the plus. A card shows `x2` and up in its top-right corner; a slot of one bar stays
+quiet about it. Slots with no chord are skipped — a pattern-only slot is somewhere to keep a
+rhythm, not a step of a progression.
+
+Switching the arp **Off** stops the chain and releases whatever it was holding.
+
 **Steps** sets how many steps the pattern runs before repeating (1–32), and **Speed**
 runs the lane at full, half or quarter rate. Both apply to the lane you are looking at.
 

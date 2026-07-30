@@ -555,6 +555,15 @@ void ArpPanel::refreshPatternButtons()
         resized(); // Cancel's width appears and disappears with it; see the action row
     }
     stopButton.setEnabled(processor.arpLaunchedSlot() >= 0 || ! processor.arpHeldNotes().empty());
+
+    // Chain lights while it runs, and says so: the row is playing itself, which is a state
+    // worth being able to read from across the room.
+    const bool chaining = processor.chainRunning();
+    chainButton.setToggleState(chaining, juce::dontSendNotification);
+    chainButton.setButtonText(chaining ? "Chaining" : "Chain");
+    const int activeBars = processor.arpSlotBars(processor.arpActivePattern());
+    barsReadout.setText(juce::String(activeBars) + (activeBars == 1 ? " bar" : " bars"),
+                        juce::dontSendNotification);
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +615,13 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
 
     g.setColour(launched ? accent : skin::textFaint);
     g.setFont(skin::micro(9.0f));
-    g.drawText(juce::String(index + 1), area.removeFromTop(11.0f), juce::Justification::topLeft);
+    const auto top = area.removeFromTop(11.0f);
+    g.drawText(juce::String(index + 1), top, juce::Justification::topLeft);
+    // How many bars the chain holds this slot for, opposite the number. Only when it is not
+    // the default: twelve cards each saying "x1" would be twelve pieces of noise for the one
+    // case where the answer does not matter.
+    if (const int bars = processor.arpSlotBars(index); bars > 1)
+        g.drawText("x" + juce::String(bars), top, juce::Justification::topRight);
 
     // The chord it will play, which is the whole reason a slot is a card and not a letter.
     g.setColour(slot.chordNotes.empty() ? skin::textFaint : skin::text);
@@ -618,8 +633,14 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
 
     // What it will install: the shape and the rate, or "--" where the slot leaves the
     // current setting alone.
+    // One name per shape, then Pattern - and it has to stay one per shape: the guard below
+    // admits everything up to numDirections, so a shape added without a name here reads off
+    // the end of this array.
     static const char* shapeNames[] = { "Up", "Down", "Up-Dn", "Dn-Up",
-                                        "Up&Dn", "Dn&Up", "Played", "Rev", "Pattern" };
+                                        "Up&Dn", "Dn&Up", "Played", "Rev",
+                                        "Rnd", "Rnd-O", "Rnd-1", "Chord", "Pattern" };
+    static_assert(sizeof(shapeNames) / sizeof(shapeNames[0]) == ArpEngine::numDirections + 1,
+                  "every shape needs a card label, plus Pattern");
     static const char* rateNames[] = { "16 bar", "8 bar", "4 bar", "2 bar", "1 bar",
                                        "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" };
     juce::String sub;
@@ -878,6 +899,45 @@ void ArpPanel::buildControls()
 
     randomizeButton.onClick = [this] { processor.randomizeActiveArpPattern(); };
     addAndMakeVisible(randomizeButton);
+
+    // Chain: one click plays the row as a progression. It starts at the lowest slot holding
+    // a chord and walks the filled ones, giving each the bars its card shows, so a page of
+    // twelve cards is a twelve-chord song and not just twelve things to click.
+    chainButton.onClick = [this]
+    {
+        if (processor.chainRunning())
+            processor.stopChain();
+        else
+            processor.startChain();
+        refreshPatternButtons();
+    };
+    chainButton.setTooltip("Play the slots that hold a chord, one after another, each for the "
+                           "bars on its card. Click again to stop.");
+    addAndMakeVisible(chainButton);
+
+    barsReadout.setJustificationType(juce::Justification::centred);
+    barsReadout.setFont(juce::Font(juce::FontOptions(14.0f)));
+    addAndMakeVisible(barsReadout);
+    barsMinus.onClick = [this] { nudgeBars(-1); };
+    barsPlus.onClick = [this] { nudgeBars(1); };
+    barsMinus.setTitle("Fewer bars");
+    barsPlus.setTitle("More bars");
+    for (auto* b : { &barsMinus, &barsPlus })
+    {
+        b->setTooltip("How many bars the chain holds the selected slot. Click a slot card to "
+                      "select it.");
+        addAndMakeVisible(*b);
+    }
+}
+
+void ArpPanel::nudgeBars(int delta)
+{
+    const int slot = processor.arpActivePattern();
+    processor.setArpSlotBars(slot, processor.arpSlotBars(slot) + delta);
+    refreshPatternButtons();
+    for (auto& c : slotCards)
+        if (c != nullptr)
+            c->repaint();
 }
 
 void ArpPanel::timerCallback()
@@ -1186,6 +1246,15 @@ void ArpPanel::resized()
         stopButton.setBounds(actionRow.removeFromLeft(84));
         actionRow.removeFromLeft(12);
         randomizeButton.setBounds(actionRow.removeFromLeft(110));
+
+        // Chain and its Bars stepper sit at the far end, away from the four that act on one
+        // slot: these two are about the row as a whole.
+        auto barsCell = actionRow.removeFromRight(126);
+        barsPlus.setBounds(barsCell.removeFromRight(34));
+        barsMinus.setBounds(barsCell.removeFromLeft(34));
+        barsReadout.setBounds(barsCell); // says "2 bars", so it needs no caption beside it
+        actionRow.removeFromRight(8);
+        chainButton.setBounds(actionRow.removeFromRight(96));
     }
 
     // Everything left exists only in Pattern shape. Laying it out regardless is harmless

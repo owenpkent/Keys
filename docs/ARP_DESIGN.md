@@ -227,8 +227,57 @@ ever stored recalled as *every lane at zero* - velocity 0 clamps to a near-silen
 gate 0 to 5%, so launching an untouched slot made the arp whisper rather than doing nothing.
 It fills from `laneDefaults` now.
 
+### Progression mode: the chain
+
+**Chain** walks the slots that hold a chord, giving each the number of bars its card shows,
+and launches each in turn. One click plays the row as a twelve-chord song, which is what a
+row of cards showing chord names has looked like it should do since the slots stopped being
+eight lettered buttons. `Bars` (1..16, on the action row) edits the **active** slot - the one
+whose lanes the editor is showing - which a click on a card already makes it, so setting a
+length is click the card, click the plus. A card shows `x2` and up; twelve cards each saying
+`x1` would be twelve pieces of noise for the one case where the answer does not matter.
+
+Slots with no chord are skipped. A pattern-only slot is a place to keep a rhythm, not a step
+of a progression, and walking through one would leave the previous chord ringing under a
+pattern that says nothing about it.
+
+**The clock is split across two threads on purpose.** Counting bars belongs on the audio
+thread, the only place with a tempo (and the only place that can ask the host for a time
+signature - a bar is four beats only in four-four). Launching a slot cannot happen there: it
+moves host parameters and fires notes. So `advanceChainClock()` accumulates beats and raises
+one atomic flag, and the heartbeat below acts on it. An epoch counter runs the other way, so
+a launch tells the audio thread to count the new slot from zero rather than from wherever the
+old one ended, and the chain never drifts.
+
+### The heartbeat
+
+`KeysProcessor` runs a second timer at 50 Hz, separate from the 1 ms strum scheduler (which
+stops itself the moment nothing is queued). It exists because two things need a pulse that
+outlives the editor:
+
+- The chain, above.
+- **Releasing a chord held into the arp when the arp is switched off.** This check used to
+  live in the editor's timer with two holes it could not close: it was gated on the chord
+  having come from a *pad*, so a chord handed over from the live card was never released, and
+  with no window open nothing polled at all - so a host or an MCP client writing `arpOn`
+  false left the chord droning with no click left to stop it. Both close here, because the
+  processor owns the chord and runs whether or not anyone is looking. A chord an arp *slot*
+  launched is still left alone on purpose: its lit card is on screen and still releases it.
+
+50 Hz is not a note clock. It only decides how late a chord change may be - 20 ms, comfortably
+inside a 1/16 step at any tempo anyone plays at, and the arp itself stays anchored to the bar
+grid regardless.
+
+### A trap this round walked into
+
+`ArpPattern::shape` is a direction index where `numDirections` *itself* means "Pattern" - so
+the number that means Pattern moves every time a shape is added, and the four new shapes
+silently turned every stored Pattern slot into Random. Sessions now record `shapeBase` (what
+Pattern was numbered when they were written) and `arpFromTree` remaps it. Anything else that
+stores an enum whose end is a sentinel needs the same treatment.
+
 Still unbuilt from the v2 list below: per-step CC lanes, chord mode (inversion stacking),
-pattern chaining, arp-on-note-count.
+arp-on-note-count.
 
 **Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
 behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or

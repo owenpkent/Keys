@@ -1131,14 +1131,12 @@ void KeysEditor::timerCallback()
         processor.stopAllChordPads();
     lastSustain = sus;
 
-    // Switching the arp off releases a chord a *card* was holding into it. Without this the
-    // chord drones on with nothing arpeggiating it, the pads are back in beat-pad mode, and
-    // the lit card has no gesture left that releases it. A chord an arp slot launched is
-    // left alone: that one was not put there from a card.
-    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
-    if (! arpOn && lastArpOn && processor.arpHeldPad() >= 0)
-        processor.releaseArpChord();
-    lastArpOn = arpOn;
+    // Switching the arp off releases a chord held into it. That check used to live here, and
+    // it had two holes an editor could not close: it was gated on the chord having come from
+    // a *pad*, so a chord handed over from the live card was never released, and with no
+    // window open nothing polled at all. It belongs to the processor's heartbeat now (see
+    // KeysProcessor::heartbeatTick), which owns the chord and runs whether or not anyone is
+    // looking.
 
     // Changing MIDI channel while notes sound would strand them on the old channel
     // (note-off goes to the new one), so panic on any channel change.

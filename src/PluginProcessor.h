@@ -170,6 +170,18 @@ public:
     void setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name);
     void clearArpSlotChord(int index);
 
+    // Progression mode: walk the slots that hold a chord, giving each one its own number of
+    // bars, and launch each in turn. One click plays a twelve-chord song, which is what the
+    // slot row has looked like it should do since it stopped being eight lettered buttons.
+    // Bars are counted on the audio thread (the only place with a tempo) and the launch is
+    // done on the message thread, because launching moves host parameters and fires notes.
+    void startChain();
+    void stopChain();
+    bool chainRunning() const { return chainOn; }
+    int chainSlot() const { return chainOn ? chainIndex : -1; }
+    void setArpSlotBars(int index, int bars);
+    int arpSlotBars(int index) const;
+
     // Hold a chord into the arp without going through a slot: the Pads section's "To Arp"
     // toggle sends a card here. Held means exactly that - the note-ons are emitted and no
     // note-off follows until the next call, so the arp keeps chewing on it whether or not
@@ -223,6 +235,7 @@ public:
         juce::String chordName;
         int shape = -1;  // 0..numDirections-1 a direction, numDirections = Pattern
         int rate = -1;   // index into the arpRate choice list
+        int bars = 1;    // how long the chain holds this slot before moving on
     };
     const ArpPattern& arpPatternSlot(int index) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
@@ -357,6 +370,33 @@ private:
     // slot's chord - there is no single choke point, so the call sites are the contract.
     ArpEngine::ChordTable arpChordTable;
     void syncArpChordTable();
+
+    // --- Progression mode ---------------------------------------------------------------
+    // The heartbeat is a second timer, separate from the strum scheduler above (which stops
+    // itself the moment nothing is queued). It runs for the life of the processor because
+    // two things need a pulse that outlives the editor: the chain, and releasing a chord
+    // held into the arp when the arp is switched off. That release used to live in the
+    // editor's timer, so it did nothing at all with no window open - a host or an MCP client
+    // writing arpOn false left the chord droning with no click left to stop it.
+    struct Heartbeat : juce::Timer
+    {
+        std::function<void()> tick;
+        void timerCallback() override { if (tick) tick(); }
+    };
+    Heartbeat heartbeat;
+    void heartbeatTick();
+
+    bool chainOn = false;       // message thread
+    int chainIndex = -1;        // message thread: the slot currently playing
+    bool lastArpOnHeartbeat = false;
+    std::atomic<bool> chainActive { false };   // message -> audio: count bars at all
+    std::atomic<bool> chainAdvance { false };  // audio -> message: this slot's bars are up
+    std::atomic<int> chainEpoch { 0 };         // message -> audio: restart the count
+    std::atomic<double> chainTargetBeats { 4.0 };
+    double chainBeatsPlayed = 0.0; // audio thread only
+    int chainSeenEpoch = 0;        // audio thread only
+    void advanceChainClock(int numSamples); // audio thread; raises chainAdvance, never launches
+    int nextChainSlot(int from) const; // the next slot holding a chord, wrapping; -1 if none
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
     bool lastArpOn = false;        // audio thread; to flush cleanly on bypass

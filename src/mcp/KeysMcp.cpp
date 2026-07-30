@@ -8,12 +8,17 @@ namespace keys
 {
 namespace
 {
-    const char* laneNames[ArpEngine::numLanes] = { "note", "octave", "velocity", "gate", "ratchet", "probability" };
+    // Both of these are sized by numLanes and both must stay full: the loops below walk
+    // every entry, so a lane added upstream without a name here leaves a null string and a
+    // {0, 0, 0} range that silently clamps the *note* lane to zero.
+    const char* laneNames[ArpEngine::numLanes] = { "note", "octave", "velocity", "gate", "ratchet",
+                                                   "probability", "transpose", "late", "harmony", "chord" };
 
     // Legal per-lane range, straight from ArpEngine.h's Lanes comment: note is
     // -1 (mute) .. 8 (fixed chord-note index, 0 = follow direction mode); octave is
     // added octaves; velocity/gate are percentages; ratchet is sub-hits; probability
-    // is a percent chance.
+    // is a percent chance; transpose counts scale degrees; late is a percentage of a
+    // step; harmony counts chord tones; chord names an arp slot, 1-based, 0 = off.
     struct LaneRange
     {
         int lane;
@@ -26,6 +31,10 @@ namespace
         { ArpEngine::laneGate, 5, 200 },
         { ArpEngine::laneRatchet, 1, 4 },
         { ArpEngine::laneProbability, 0, 100 },
+        { ArpEngine::laneTranspose, -7, 7 },
+        { ArpEngine::laneLate, 0, 90 },
+        { ArpEngine::laneHarmony, 0, 7 },
+        { ArpEngine::laneChord, 0, 12 },
     };
 
     juce::var intVectorToVar(const std::vector<int>& values)
@@ -218,6 +227,8 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("arpVelRamp", text("arpVelRamp"));
         obj->setProperty("arpHumanize", text("arpHumanize"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
+        // Progression mode: -1 when it is not running, else the slot it is playing.
+        obj->setProperty("arpChainSlot", processor.chainSlot());
         obj->setProperty("padPage", processor.padPage());
         int padCount = 0;
         for (int i = 0; i < KeysProcessor::numChordPads; ++i)
@@ -695,7 +706,11 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "mode, 1..8 = fixed chord-note index), octave (-3..3 added octaves), velocity "
         "(10..200, percent of the played velocity), gate (5..200, percent of the step "
         "length; over 100 ties into the next step), ratchet (1..4 sub-hits per step), "
-        "probability (0..100, percent chance the step fires). Each lane array you supply "
+        "probability (0..100, percent chance the step fires), transpose (-7..7, counted in "
+        "*scale degrees* of the current Root/Scale, not semitones), late (0..90, percent of "
+        "a step to delay this step by), harmony (0..7, adds a second voice that many chord "
+        "tones above), chord (0 = off, 1..12 = play the chord stored in that arp slot for "
+        "this step instead of a note of what is held). Each lane array you supply "
         "also sets that lane's length to the array's size (clamped 1..32). Shorter "
         "arrays make a shorter pattern for that lane, for polymeter against the others. "
         "clockDivs is an optional map of lane name -> 0 (every step) / 1 (every 2nd) / 2 "
@@ -710,6 +725,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         { "gate", "array", "Per-step gate lane (5..200).", false },
         { "ratchet", "array", "Per-step ratchet lane (1..4).", false },
         { "probability", "array", "Per-step probability lane (0..100).", false },
+        { "transpose", "array", "Per-step transpose lane, in scale degrees (-7..7).", false },
+        { "late", "array", "Per-step delay lane, percent of a step (0..90).", false },
+        { "harmony", "array", "Per-step harmony lane, chord tones above (0..7).", false },
+        { "chord", "array", "Per-step chord lane: 0 = off, 1..12 = that arp slot's chord.", false },
         { "clockDivs", "object", "Optional map of lane name -> clock divider 0/1/2.", false },
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var

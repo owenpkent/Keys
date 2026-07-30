@@ -5,6 +5,44 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Chain — the twelve arp slots play as a progression
+
+Each slot card already held a chord, a shape and a rate. Give it a number of bars as well and
+the row becomes a song: **Chain** walks the slots that hold a chord, launching each in turn
+for the bars its card shows. One click plays a twelve-chord progression, which is what a row
+of cards showing chord names has looked like it should do since the slots stopped being eight
+lettered buttons.
+
+**Bars** (the `-` `+` beside Chain) sets the **selected** slot's length, 1 to 16. Clicking a
+card selects it as well as launching it, so setting a length is: click the card, click the
+plus. A card shows `x2` and up; a one-bar slot stays quiet about it. Slots with no chord are
+skipped, and switching the arp Off stops the chain.
+
+The bar count is kept on the audio thread, the only place with a tempo — and the only place
+that can ask the host for a time signature, so a bar is three beats in 3/4 rather than
+always four. The launch itself happens on the message thread, because it moves host
+parameters and fires notes.
+
+### Fixed: a chord held into the arp could drone with nothing left to release it
+
+Switching the arp off is supposed to release a chord a chord-card handed to it. That check
+lived in the editor's timer and had two holes it could not close: it only fired for a chord
+that came from a **pad**, so one handed over from the **live card** was never released — and
+with no plugin window open, nothing polled at all, so a host or an MCP client writing `arpOn`
+false left the chord sounding with no gesture left to stop it but All Off.
+
+The processor owns that chord, so the processor now watches for it, on a heartbeat that runs
+whether or not anyone is looking. A chord an arp *slot* launched is still left alone
+deliberately: its lit card is on screen and still releases it on a click.
+
+### Fixed: adding arp shapes renamed what stored slots would play
+
+A slot's shape is a direction index in which "Pattern" is the number *after* the last
+direction — so adding four shapes moved it, and every slot that had stored "Pattern" quietly
+came back as "Random". Sessions now record which number meant Pattern when they were written,
+and remap on load, so slots saved before this branch open as what they were. Caught by a
+screenshot, not by a test: nothing about it fails to compile or crash.
+
 ### Added: four more arp lanes — Transpose, Late, Harmony and Chord
 
 Six step lanes became ten, on the same tab bar and edited exactly the same way.

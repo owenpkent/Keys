@@ -300,7 +300,6 @@ private:
     int lastChannel = -1;    // to panic on MIDI-channel change (avoids notes stuck on the old channel)
     bool embedded = false;   // see setEmbedded()
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
-    bool lastArpOn = false;   // to release a chord held into the arp when the arp goes off
     bool pitchReturning = false; // pitch wheel is gliding back to centre (Octavium's ~160 ms ease)
     float panicFlash = 0.0f;  // 1 -> 0 decay behind the All Off button, on an explicit click only
 
