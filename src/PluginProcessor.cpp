@@ -146,9 +146,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpDot", 1 }, "Arp Dotted", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrip", 1 }, "Arp Triplet", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpAnchor", 1 }, "Arp Anchor", true));
+    // The four shapes after "Reversed" were appended in 2026-07-30 and had to go on the end:
+    // this is a choice parameter, and inserting anywhere else renumbers what every saved
+    // session and automation lane already holds. The Shape combo lists them in this order and
+    // puts "Pattern" last, which is a display decision the panel makes, not this list.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDirection", 1 }, "Arp Direction",
                                                       StringArray { "Up", "Down", "Up-Down", "Down-Up",
-                                                                    "Up & Down", "Down & Up", "As Played", "Reversed" }, 0));
+                                                                    "Up & Down", "Down & Up", "As Played", "Reversed",
+                                                                    "Random", "Random Other", "Random Once", "Chord" }, 0));
     // Added after the arp shipped, both additive so an older session still loads: a
     // missing parameter falls back to its default here rather than shifting any
     // existing parameter's range. Note the default: arpPattern off means a session
@@ -172,6 +177,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // out. They multiply the lane value, so the defaults leave an edited pattern untouched.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpGate", 1 }, "Arp Gate", 5, 200, 100));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpChance", 1 }, "Arp Chance", 0, 100, 100));
+
+    // The 2026-07-30 expansion, all appended and all defaulting to what the arp did before
+    // them, so an older session sounds identical until one of them is moved.
+    //
+    // Distance is Octaves' other half: Octaves says how many times the chord repeats up the
+    // keyboard, Distance says how far each repeat goes. It defaulted to an octave forever
+    // because that was hardcoded. The scale-relative entries are the ones no stock arp has -
+    // "a third" that follows Root and Scale rather than a fixed three or four semitones.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDistance", 1 }, "Arp Distance",
+                                                      StringArray { "Octave", "5th", "4th", "Maj 3rd", "min 3rd",
+                                                                    "Scale 2nd", "Scale 3rd", "Scale 5th", "Scale 7th" }, 0));
+    // Where the pattern starts. Rotates the lane reads and the direction walk together, so
+    // "the same run, heard from its third note" is one control rather than a re-drawn lane.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOffset", 1 }, "Arp Offset", 0, 31, 0));
+    // Retrigger's other half, after Ableton: the toggle restarts on a new chord, this
+    // restarts on the clock, so a 5-step lane can still land on the bar.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRetrigBars", 1 }, "Arp Retrigger Every",
+                                                      StringArray { "Off", "1 Beat", "2 Beats", "1 Bar", "2 Bars", "4 Bars" }, 0));
+    // Velocity ramp: over Ramp Time from the moment a chord starts, velocity scales toward
+    // (100 + Ramp)%. Negative fades a held chord out, positive swells it.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpVelRamp", 1 }, "Arp Velocity Ramp", -100, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpRampBeats", 1 }, "Arp Ramp Time", 1, 32, 8));
+    // One knob of "played, not programmed": nudges each hit late and takes a little off its
+    // velocity. The arp has never been humanized - Humanize proper lives in noteOn, which the
+    // arp's own notes never pass through - so this is the first thing that touches its feel.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpHumanize", 1 }, "Arp Humanize", 0, 100, 0));
 
     // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
     // A host that is *playing* always wins: this is what Keys runs at when there is no
@@ -752,6 +783,41 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ap.retrigger = apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
         ap.gate = (int) apvts.getRawParameterValue("arpGate")->load();
         ap.chance = (int) apvts.getRawParameterValue("arpChance")->load();
+        ap.offset = (int) apvts.getRawParameterValue("arpOffset")->load();
+        ap.velRamp = (int) apvts.getRawParameterValue("arpVelRamp")->load();
+        ap.rampBeats = (double) (int) apvts.getRawParameterValue("arpRampBeats")->load();
+        ap.humanize = (int) apvts.getRawParameterValue("arpHumanize")->load();
+
+        // Distance: what each repeat past the first adds. The list names intervals rather
+        // than numbers because "5th" is the thing you want and "+7 semitones" is the way you
+        // would have had to ask for it; the scale-relative half of the list is the part no
+        // stock arp offers, and it costs Keys nothing because Root and Scale are already here.
+        {
+            static constexpr int dist[]  = { 12, 7, 5, 4, 3, 1, 2, 4, 6 };
+            static constexpr bool degs[] = { false, false, false, false, false, true, true, true, true };
+            const int di = juce::jlimit(0, (int) std::size(dist) - 1,
+                                        (int) apvts.getRawParameterValue("arpDistance")->load());
+            ap.spread = dist[di];
+            ap.spreadDegrees = degs[di];
+        }
+        // Restart every N beats, on top of the restart a new chord asks for.
+        {
+            static constexpr double bars[] = { 0.0, 1.0, 2.0, 4.0, 8.0, 16.0 };
+            ap.retrigBeats = bars[juce::jlimit(0, (int) std::size(bars) - 1,
+                                               (int) apvts.getRawParameterValue("arpRetrigBars")->load())];
+        }
+        // The scale, as a mask of pitch classes, for a Distance counted in scale degrees.
+        // Built here rather than in the engine so ArpEngine.h stays free of the scale tables
+        // and its tests can state a scale as a number.
+        ap.rootPc = (int) apvts.getRawParameterValue("root")->load();
+        {
+            const int scaleIdx = (int) apvts.getRawParameterValue("scale")->load();
+            unsigned int mask = 0;
+            for (int k = 0; k < 12; ++k)
+                if (okstudio::scales::isInScale(ap.rootPc + k, ap.rootPc, scaleIdx))
+                    mask |= 1u << k;
+            ap.scaleMask = mask != 0 ? mask : 0xFFFu; // an empty table would silence degree walking
+        }
 
         ArpEngine::HostClock hc;
         if (auto* playHead = getPlayHead())

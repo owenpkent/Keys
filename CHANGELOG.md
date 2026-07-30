@@ -5,6 +5,46 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the arpeggiator grew four shapes, a spread, a ramp and a feel
+
+A second research pass (Ableton Live 12's Arpeggiator, the Kirnu Cream manual, Cthulhu,
+Scaler 3, the NDLR) against what Keys already had. Everything here is additive and defaults
+to exactly what the arp did before it, so an existing session sounds identical until you
+move one of them. Full notes in `docs/ARP_DESIGN.md`.
+
+**Four new shapes.** **Random**, **Random Other** (never the same note twice running) and
+**Random Once** (a shuffled order, held for as long as the chord is) join the eight
+directions. So does **Chord**, which plays *every* note of the held chord on every step —
+that one changes what the arp is for, turning gate, ratchet, chance and swing into a comping
+part instead of an ornament. A fixed Note-lane step still means that one note, so an edited
+pattern does not silently become block chords.
+
+**A SPREAD group: Repeats, Distance, Offset.** "Octaves" was always "stack the chord N
+times", with the interval hardcoded to an octave. It is **Repeats** now, and **Distance**
+says how far each stack goes: Octave, 5th, 4th, Maj 3rd, min 3rd — or **Scale 2nd / 3rd /
+5th / 7th**, which count degrees of Root and Scale rather than semitones. A Scale 3rd lifts C
+to E and D to F; a fixed +4 would have given F# and left the key. No stock arp does this, and
+it costs Keys nothing, because Root and Scale were already here. **Offset** starts the run
+further in, rotating the step lanes and the walk together.
+
+**A FEEL group: Ramp, Time, Human.** Ramp scales velocity toward ±100% over Time (1–32
+beats) from the moment a chord starts, so a held chord can fade away or swell. **Human**
+nudges every hit a little late and a little quieter, differently each time — the first
+control in Keys that touches the arp's feel at all, since Humanize proper lives on a path the
+arp's own notes never take. It is late-only and quieter-only by design, and clamped so a
+nudge can never carry one ratchet sub-hit past the next.
+
+**Retrigger is a list, not a toggle**, after Ableton: Off, Note, or a clock window (1 or 2
+beats, 1, 2 or 4 bars). A clock window is what lets a five-step lane still land on the bar.
+**This also fixes what Retrigger claimed to do**: it used to reset only the direction walk,
+because lane reads came off the absolute step index, so a control whose tooltip said "restart
+at step 1" never restarted the steps. It does now.
+
+New parameters (`arpDistance`, `arpOffset`, `arpRetrigBars`, `arpVelRamp`, `arpRampBeats`,
+`arpHumanize`) are all appended, and the four shapes are appended to `arpDirection`'s list,
+so no saved session or automation lane moves. The arp panel is 64 px taller for the second
+band row.
+
 ### Changed: Sustain is a pedal again, and Latch is back as its own toggle
 
 Owen's call. Sustain had quietly become a per-note switch: with it on, clicking a key that

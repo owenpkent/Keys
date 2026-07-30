@@ -256,6 +256,7 @@ ArpPanel::ArpPanel(KeysProcessor& p) : processor(p)
     buildControls();
     selectLane(selectedLane); // tab toggles + which grid is visible
     refreshShape();           // and whether the step editor is showing at all
+    refreshRetrig();
     refreshLaneReadouts();
     refreshPatternButtons();
     startTimerHz(10); // repaints the lane grid so edits made elsewhere stay current
@@ -352,6 +353,37 @@ void ArpPanel::applyShapeChoice()
             dir->endChangeGesture();
         }
     refreshShape();
+}
+
+// Retrigger, the same two-parameter dance as Shape. Item 0 is off, item 1 is the old
+// toggle, and 2.. are the clock windows; picking a clock window turns the note retrigger
+// off, because "restart every bar AND on every chord" is not a thing anyone means by one
+// control (Ableton's Retrigger is one choice for the same reason).
+void ArpPanel::applyRetrigChoice()
+{
+    const int chosen = retrigBox.getSelectedItemIndex();
+    auto& apvts = processor.apvts;
+    if (auto* on = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpRetrigger")))
+    {
+        on->beginChangeGesture();
+        *on = chosen == 1;
+        on->endChangeGesture();
+    }
+    if (auto* bars = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpRetrigBars")))
+    {
+        bars->beginChangeGesture();
+        *bars = chosen >= 2 ? chosen - 1 : 0;
+        bars->endChangeGesture();
+    }
+}
+
+void ArpPanel::refreshRetrig()
+{
+    const int bars = (int) processor.apvts.getRawParameterValue("arpRetrigBars")->load();
+    const bool onNote = processor.apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
+    const int wanted = bars > 0 ? bars + 1 : (onNote ? 1 : 0);
+    if (retrigBox.getSelectedItemIndex() != wanted)
+        retrigBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
 }
 
 // Parameters are the truth (a host can automate them), so the combo and the step
@@ -626,8 +658,12 @@ void ArpPanel::buildControls()
 
     styleLabel(shapeLabel, "Shape");
     addAndMakeVisible(shapeLabel);
+    // Twelve shapes then "Pattern", which stays last however many shapes are added: it is
+    // the one entry that changes what is on screen, and the < > steppers clamp at the ends,
+    // so a click too many on the shape before it cannot throw the step editor open.
     shapeBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up",
-                           "Up & Down", "Down & Up", "As Played", "Reversed" }, 1);
+                           "Up & Down", "Down & Up", "As Played", "Reversed",
+                           "Random", "Random Other", "Random Once", "Chord" }, 1);
     shapeBox.addItem("Pattern", ArpEngine::numDirections + 1);
     shapeBox.onChange = [this] { applyShapeChoice(); };
     shapeBox.setTooltip("A shape arpeggiates the held chord. \"Pattern\" opens the step editor.");
@@ -654,13 +690,60 @@ void ArpPanel::buildControls()
     ratePrev.setTitle("Slower rate");
     rateNext.setTitle("Faster rate");
 
-    styleLabel(octavesLabel, "Octaves");
+    // "Repeats", not "Octaves", since 2026-07-30: it says how many times the chord is
+    // stacked, and Distance beside it says how far each stack goes. An octave is only the
+    // default now, not the only answer.
+    styleLabel(octavesLabel, "Repeats");
     addAndMakeVisible(octavesLabel);
     octavesSlider.setSliderStyle(juce::Slider::IncDecButtons);
     octavesSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 34, 26);
     octavesSlider.setRange(1, 4, 1);
+    octavesSlider.setTooltip("How many times the chord repeats, each one Distance further up.");
     addAndMakeVisible(octavesSlider);
     octavesAtt = std::make_unique<SliderAtt>(processor.apvts, "arpOctaves", octavesSlider);
+
+    styleLabel(distanceLabel, "Distance");
+    addAndMakeVisible(distanceLabel);
+    distanceBox.addItemList({ "Octave", "5th", "4th", "Maj 3rd", "min 3rd",
+                              "Scale 2nd", "Scale 3rd", "Scale 5th", "Scale 7th" }, 1);
+    distanceBox.setTooltip("How far each repeat of the chord goes up. The Scale entries count "
+                           "degrees of Root and Scale, so a third stays a third of this key.");
+    addAndMakeVisible(distanceBox);
+    distanceAtt = std::make_unique<ComboAtt>(processor.apvts, "arpDistance", distanceBox);
+
+    styleLabel(offsetLabel, "Offset");
+    addAndMakeVisible(offsetLabel);
+    offsetSlider.setSliderStyle(juce::Slider::IncDecButtons);
+    offsetSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 34, 26);
+    offsetSlider.setRange(0, 31, 1);
+    offsetSlider.setTooltip("Start the run further in: rotates the step lanes and the walk together.");
+    addAndMakeVisible(offsetSlider);
+    offsetAtt = std::make_unique<SliderAtt>(processor.apvts, "arpOffset", offsetSlider);
+
+    // FEEL's three. Horizontal, because this row is one row tall (see resized), and with the
+    // value on the right where a knob would have put it underneath.
+    const auto bar = [this](juce::Slider& s, juce::Label& lab, const juce::String& text,
+                            double lo, double hi, const juce::String& suffix, const juce::String& tip)
+    {
+        styleLabel(lab, text);
+        addAndMakeVisible(lab);
+        s.setSliderStyle(juce::Slider::LinearHorizontal);
+        s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 22);
+        s.setRange(lo, hi, 1.0);
+        s.setTextValueSuffix(suffix);
+        s.setTooltip(tip);
+        addAndMakeVisible(s);
+    };
+    bar(rampSlider, rampLabel, "Ramp", -100.0, 100.0, "%",
+        "Velocity change over Time, from the moment a chord starts. Left fades a held chord "
+        "out, right swells it, centre is flat.");
+    rampAtt = std::make_unique<SliderAtt>(processor.apvts, "arpVelRamp", rampSlider);
+    bar(rampTimeSlider, rampTimeLabel, "Time", 1.0, 32.0, " beats", "How long the Ramp takes.");
+    rampTimeAtt = std::make_unique<SliderAtt>(processor.apvts, "arpRampBeats", rampTimeSlider);
+    bar(humanSlider, humanLabel, "Human", 0.0, 100.0, "%",
+        "Nudges each hit a little late and a little quieter, by a different amount every time. "
+        "The arp is dead on the grid at 0.");
+    humanAtt = std::make_unique<SliderAtt>(processor.apvts, "arpHumanize", humanSlider);
 
     // Swing, Gate and Chance as knobs with the value in the middle: three continuous
     // controls side by side, where three labelled horizontal sliders would have eaten the
@@ -694,12 +777,19 @@ void ArpPanel::buildControls()
          "run out on any shape.");
     chanceAtt = std::make_unique<SliderAtt>(processor.apvts, "arpChance", chanceSlider);
 
-    for (auto* b : { &latchButton, &retriggerButton })
-        addAndMakeVisible(*b);
+    addAndMakeVisible(latchButton);
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpLatch", latchButton);
-    retriggerAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpRetrigger", retriggerButton);
     latchButton.setTooltip("Ignore note-offs until a new chord arrives.");
-    retriggerButton.setTooltip("Restart at step 1 when a note arrives on an empty set.");
+
+    // Retrigger was a toggle that only answered "on a new chord". The list adds the clock
+    // half, so a five-step lane can still be made to land on the bar, and the two are
+    // alternatives on one control rather than two switches that can disagree.
+    styleLabel(retrigLabel, "Retrigger");
+    addAndMakeVisible(retrigLabel);
+    retrigBox.addItemList({ "Off", "Note", "1 Beat", "2 Beats", "1 Bar", "2 Bars", "4 Bars" }, 1);
+    retrigBox.setTooltip("When the pattern starts over: never, on a new chord, or on the clock.");
+    retrigBox.onChange = [this] { applyRetrigChoice(); };
+    addAndMakeVisible(retrigBox);
 
     // The six lanes, in ArpEngine::Lane order.
     buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note", -1, 8);
@@ -782,6 +872,7 @@ void ArpPanel::buildControls()
 void ArpPanel::timerCallback()
 {
     refreshShape(); // the host can automate arpPattern/arpDirection out from under us
+    refreshRetrig();
     refreshLaneReadouts();
     refreshPatternButtons();
     if (! patternMode())
@@ -819,13 +910,19 @@ namespace
     constexpr int arpBandRow = 42;
     constexpr int arpBandInner = arpBandRow * 2 + 6;
     constexpr int arpBandH = arpBandTop + arpBandInner + 4;
+    // The second band row (Spread and Feel) is one control row tall, not two: eight more
+    // controls for 64 px rather than the 112 a second full band would have cost, in a panel
+    // that is already the tallest thing in the editor.
+    constexpr int arpBand2H = arpBandTop + arpBandRow + 4;
     constexpr int arpSlotsH = 58;
-    constexpr int arpShapeH = 12 + (arpBandH + 12) + (arpSlotsH + 8) + 34 + 12;
+    constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
     constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10);
 
-    // The band's three groups. Weights, not pixels: the panel is as wide as the editor and
-    // the groups share whatever that is.
-    constexpr int groupWeights[3] = { 36, 42, 22 }; // Pattern, Playback, Steps
+    // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
+    // groups share whatever that is. Row one is Pattern / Playback / Steps, row two is
+    // Spread / Feel.
+    constexpr int groupWeights[3] = { 36, 42, 22 };
+    constexpr int group2Weights[2] = { 44, 56 };
 } // namespace
 
 int ArpPanel::preferredHeight() const
@@ -896,6 +993,8 @@ void ArpPanel::resized()
 
     // --- The control band: three captioned groups sharing the width ---------------
     auto band = area.removeFromTop(arpBandH);
+    area.removeFromTop(8);
+    auto band2 = area.removeFromTop(arpBand2H);
     area.removeFromTop(12);
     {
         const int gaps = 2 * 10;
@@ -908,10 +1007,17 @@ void ArpPanel::resized()
             if (i < 2)
                 band.removeFromLeft(10);
         }
+        const int usable2 = band2.getWidth() - 10;
+        const int total2 = group2Weights[0] + group2Weights[1];
+        groups[3].bounds = band2.removeFromLeft(usable2 * group2Weights[0] / total2);
+        band2.removeFromLeft(10);
+        groups[4].bounds = band2;
     }
     groups[0].caption = "Pattern";
     groups[1].caption = "Playback";
     groups[2].caption = "Steps";
+    groups[3].caption = "Spread";
+    groups[4].caption = "Feel";
 
     // Inside a group: past the caption rule, then two rows of controls, or the full height
     // for a knob column. A control with a label above it gets `cell`; a bare toggle gets
@@ -990,10 +1096,35 @@ void ArpPanel::resized()
         // drawToggleButton), which is why they look wider than their words.
         juce::Rectangle<int> rowA, rowB;
         splitRows(inner, rowA, rowB);
-        cell(rowA, 104, octavesLabel, octavesSlider); // fixed: stretched, its +/- became slabs
-        toggleCell(rowA, 83, anchorButton);
+        // Retrigger is a combo where Repeats used to be a stepper, and it needs the whole
+        // row: at 128 px beside Anchor's 83 the group ran ~24 px over and ellipsised the
+        // *toggle*, which is the one control on the band with no room to lose any. Anchor
+        // moves down beside Latch, where there is now a whole row spare.
+        cell(rowA, juce::jmax(120, rowA.getWidth()), retrigLabel, retrigBox);
         toggleCell(rowB, 78, latchButton);
-        toggleCell(rowB, 111, retriggerButton);
+        toggleCell(rowB, 83, anchorButton);
+    }
+
+    // SPREAD: how wide the chord is stacked, and where the run starts inside it. The three
+    // belong together - Repeats without Distance is only ever octaves, and Offset is the
+    // other thing you reach for once the run is longer than the chord.
+    {
+        auto inner = groupInner(groups[3].bounds).withHeight(arpBandRow);
+        auto row = inner;
+        cell(row, 104, octavesLabel, octavesSlider);
+        cell(row, juce::jlimit(96, 128, row.getWidth() - 120), distanceLabel, distanceBox);
+        cell(row, 104, offsetLabel, offsetSlider);
+    }
+
+    // FEEL: the three that decide whether it sounds played. Sliders share what is left
+    // equally, since none of them has a natural width and all three are dragged, not read.
+    {
+        auto inner = groupInner(groups[4].bounds).withHeight(arpBandRow);
+        auto row = inner;
+        const int each = juce::jmax(120, (row.getWidth() - 16) / 3);
+        cell(row, each, rampLabel, rampSlider);
+        cell(row, each, rampTimeLabel, rampTimeSlider);
+        cell(row, juce::jmax(120, row.getWidth()), humanLabel, humanSlider);
     }
 
     // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives

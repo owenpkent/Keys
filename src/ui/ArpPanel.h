@@ -170,11 +170,16 @@ private:
         juce::Rectangle<int> bounds;
         bool visible = true;
     };
-    std::array<Group, 3> groups;
+    std::array<Group, 5> groups;
 
     bool patternMode() const; // Shape == "Pattern": the step editor is in play
     void applyShapeChoice();  // combo -> parameters
     void refreshShape();      // parameters -> combo, and show/hide the step editor
+    // Retrigger spans two parameters the same way Shape does (a bool for "on a new chord"
+    // and a choice for "every N beats"), so it cannot be a plain attachment either. One
+    // combo, because the two are alternatives in practice and Ableton proved the list.
+    void applyRetrigChoice();
+    void refreshRetrig();
 
     // The card the panel draws, sized to the controls actually in it. The overlay still
     // covers the editor (it dims what's behind and swallows clicks), but on a shape
@@ -192,8 +197,8 @@ private:
     // Shape carries the eight directions plus "Pattern", after Serum 2, whose step
     // editor only exists while SHAPE is "Pattern". It cannot be a plain APVTS
     // attachment because it spans two parameters (arpDirection + arpPattern).
-    juce::ComboBox rateBox, shapeBox;
-    juce::Label rateLabel, shapeLabel;
+    juce::ComboBox rateBox, shapeBox, distanceBox, retrigBox;
+    juce::Label rateLabel, shapeLabel, distanceLabel, retrigLabel;
     // The < > pairs beside Shape and Rate. Not decoration: stepping to the next shape is
     // the commonest thing you do to an arp, and a button is one click where the combo is a
     // click, a travel and a second click.
@@ -201,7 +206,14 @@ private:
     juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
     juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
     juce::Label octavesLabel, swingLabel, gateLabel, chanceLabel;
-    juce::ToggleButton latchButton { "Latch" }, retriggerButton { "Retrigger" };
+    juce::ToggleButton latchButton { "Latch" };
+    // The second band row (2026-07-30). SPREAD is Repeats + Distance + Offset - how far the
+    // chord is stacked and where the run starts; FEEL is the three that decide whether it
+    // sounds played. Horizontal sliders rather than the band's rotaries: a knob column spans
+    // both rows of a group and this row is one row tall, which is what keeps the panel from
+    // growing by a whole band.
+    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider;
+    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel;
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
     int selectedLane = (int) ArpEngine::laneNote;
@@ -231,9 +243,10 @@ private:
     void setArmed(Armed, int fromIndex = -1);
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, retriggerAtt, linkAtt;
-    std::unique_ptr<ComboAtt> rateAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, linkAtt;
+    std::unique_ptr<ComboAtt> rateAtt, distanceAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
+    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)
 };

@@ -211,7 +211,12 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         // lanes are only read while arpPattern is on (Shape "Pattern").
         obj->setProperty("arpPattern", text("arpPattern"));
         obj->setProperty("arpOctaves", text("arpOctaves"));
+        obj->setProperty("arpDistance", text("arpDistance"));
+        obj->setProperty("arpOffset", text("arpOffset"));
         obj->setProperty("arpLatch", text("arpLatch"));
+        obj->setProperty("arpRetrigBars", text("arpRetrigBars"));
+        obj->setProperty("arpVelRamp", text("arpVelRamp"));
+        obj->setProperty("arpHumanize", text("arpHumanize"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
         obj->setProperty("padPage", processor.padPage());
         int padCount = 0;

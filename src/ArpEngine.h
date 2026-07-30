@@ -3,7 +3,9 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
 #include <atomic>
+#include <limits>
 #include <random>
+#include <utility>
 
 namespace keys
 {
@@ -65,8 +67,14 @@ public:
         }
     };
 
-    enum class Direction { up = 0, down, upDown, downUp, upAndDown, downAndUp, asPlayed, asPlayedReverse };
-    static constexpr int numDirections = 8; // keep in step with Direction; the Shape combo lists these then "Pattern"
+    // The four after asPlayedReverse were appended in 2026-07-30, deliberately at the end:
+    // `arpDirection` is a choice parameter and inserting anywhere else would renumber the
+    // shapes every saved session already carries. `chord` is the odd one out - it is not a
+    // walk order at all but "play the whole held chord on every step", which turns the arp
+    // into a comping engine (Ableton calls it Chord Trigger).
+    enum class Direction { up = 0, down, upDown, downUp, upAndDown, downAndUp, asPlayed, asPlayedReverse,
+                           random, randomOther, randomOnce, chord };
+    static constexpr int numDirections = 12; // keep in step with Direction; the Shape combo lists these then "Pattern"
 
     struct Params
     {
@@ -89,6 +97,33 @@ public:
         int chance = 100;         // 0..100 (% of the lane's own probability)
         bool latch = false;
         bool retrigger = true;    // restart at step 1 when a note arrives on an empty set
+        // Restart every N beats as well, 0 = off (Ableton's Retrigger: Beat). Retrigger-on-
+        // note answers "a new chord starts the pattern over"; this answers "the pattern is
+        // one bar long whatever the lanes say", which is the other half of the same control.
+        double retrigBeats = 0.0;
+        // Where the pattern starts: rotates both the lane read index and the direction walk
+        // by this many steps, so the same lanes can be heard from a different foot.
+        int offset = 0;           // 0..31
+        // What each repeat past the first adds, in semitones - or in scale degrees when
+        // `spreadDegrees` is set, which is the thing the stock arps cannot do and Keys can,
+        // because Root and Scale are already its own. 12 semitones is the octave stacking
+        // every arp defaults to, and is what `octaveRange` alone used to mean.
+        int spread = 12;
+        bool spreadDegrees = false;
+        int rootPc = 0;           // for degree walking
+        // Bit k set = the pitch class (rootPc + k) % 12 is in the current scale. Passed in
+        // rather than looked up so the engine stays free of the scale tables (and testable).
+        unsigned int scaleMask = 0xFFFu;
+        // Velocity ramp: over `rampBeats` from the moment a chord starts, the played
+        // velocity scales toward (100 + velRamp)%. Negative fades a run out, positive swells
+        // it. 0 is off, and costs nothing.
+        int velRamp = 0;          // -100..+100
+        double rampBeats = 8.0;
+        // One knob's worth of "played, not programmed": nudges each hit late by up to
+        // 25 ms and takes up to 30% off its velocity, both scaled by this. The arp has never
+        // been humanized at all (Humanize lives in KeysProcessor::noteOn, which the arp path
+        // does not go through), so 0 leaves the engine bit-identical to before.
+        int humanize = 0;         // 0..100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
     };
 
@@ -126,6 +161,14 @@ public:
         physicallyHeld = 0;
         stepCounter = 0;
         dirCursor = 0;
+        stepBase = 0;
+        lastRetrigWindow = std::numeric_limits<long long>::min();
+        pendingRetrig = false;
+        heldBeats = 0.0;
+        rampScale = 1.0f;
+        lastPicked = -1;
+        permCount = 0;
+        permDirty = true;
         freePhaseBeats = 0.0;
         havePrevPpq = false;
     }
@@ -179,6 +222,16 @@ public:
         // middle of the note that replaced it. Draining here instead put a tie's note-off
         // *after* the note-on that superseded it: two note-ons for one pitch with nothing in
         // between, which hangs a voice on any synth that allocates per note-on.
+        // The velocity ramp is sampled once per block, not once per hit: the shortest useful
+        // ramp is a bar and the longest block is a few milliseconds, so the stair this leaves
+        // is far below the 1/127 the velocity is quantized to anyway.
+        rampScale = 1.0f;
+        if (p.velRamp != 0 && p.rampBeats > 0.0)
+        {
+            const double t = juce::jlimit(0.0, 1.0, heldBeats / p.rampBeats);
+            rampScale = (float) (1.0 + (double) p.velRamp / 100.0 * t);
+        }
+
         if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
             // Fire every step whose *fire time* lands inside [pos, pos + blockBeats). Not
@@ -203,6 +256,29 @@ public:
                     break;
                 if (offset >= 0)
                 {
+                    // Restarts, both kinds, decided here rather than where they are asked for:
+                    // "step 1" only means anything at a step boundary, and the note that asks
+                    // for a retrigger arrives in the middle of a block. Whichever fires first
+                    // after the request becomes step 1, for the lanes (stepBase) and for the
+                    // direction walk (dirCursor) alike. Before this the lanes never restarted
+                    // at all - they were read straight off the absolute step index, so the
+                    // Retrigger toggle only ever reset the walk.
+                    if (p.retrigBeats > 0.0)
+                    {
+                        const long long win = (long long) std::floor(boundaryBeats / p.retrigBeats + 1.0e-9);
+                        if (win != lastRetrigWindow)
+                        {
+                            lastRetrigWindow = win;
+                            pendingRetrig = true;
+                        }
+                    }
+                    if (pendingRetrig)
+                    {
+                        pendingRetrig = false;
+                        stepBase = globalStep;
+                        dirCursor = 0;
+                    }
+
                     // Any ratchet sub-hit carried in from an earlier block that is due before
                     // this step goes first, so hits reach emitHit in time order.
                     firePendingBefore(offset, numSamples, out);
@@ -227,6 +303,12 @@ public:
         // on time instead of hanging until the next flush.
         retireDue(numSamples - 1, out);
         advanceBlock(numSamples);
+
+        // How long this chord has been up, which is what the velocity ramp rides on. It
+        // counts beats rather than seconds so a ramp written at one tempo means the same
+        // thing at another, and it stops counting the moment the keys come up.
+        if (heldCount > 0)
+            heldBeats += blockBeats;
     }
 
     int heldNoteCount() const noexcept { return heldCount; }
@@ -263,11 +345,17 @@ private:
             heldCount = 0;
             dirCursor = 0;
         }
-        if (heldCount == 0 && p.retrigger)
+        if (heldCount == 0)
         {
-            stepCounter = 0;
-            dirCursor = 0;
+            heldBeats = 0.0; // a new chord restarts the velocity ramp
+            if (p.retrigger)
+            {
+                stepCounter = 0;
+                dirCursor = 0;
+                pendingRetrig = true; // the next step to fire becomes step 1, lanes included
+            }
         }
+        permDirty = true; // the locked random order is per chord, and the chord just changed
         for (int i = 0; i < heldCount; ++i)
             if (held[(size_t) i].note == note)
             {
@@ -301,6 +389,7 @@ private:
                     for (int j = i; j < heldCount - 1; ++j)
                         held[(size_t) j] = held[(size_t) j + 1];
                     --heldCount;
+                    permDirty = true;
                 }
                 return;
             }
@@ -317,8 +406,32 @@ private:
         const auto li = (size_t) l;
         const int div = lanes.clockDiv[li].load(std::memory_order_relaxed);
         const int len = juce::jlimit(1, maxSteps, lanes.length[li].load(std::memory_order_relaxed));
-        const long long idx = (globalStep >> juce::jlimit(0, 2, div)) % len;
+        // Relative to the last restart, not to the absolute step index, so Retrigger means
+        // step 1 for the lanes too; plus Offset, which starts the same lanes further in.
+        const long long rel = (globalStep - stepBase) >> juce::jlimit(0, 2, div);
+        const long long idx = ((rel + p.offset) % len + len) % len; // rel can be negative
         return lanes.value[li][(size_t) idx].load(std::memory_order_relaxed);
+    }
+
+    // Walk `degrees` scale steps from `note`, using the mask of in-scale pitch classes. A
+    // note that is not itself in the scale lands on the next one in the direction of travel,
+    // which is the same rounding Scale Lock does upstream.
+    static int shiftByDegrees(int note, int degrees, unsigned int mask, int rootPc) noexcept
+    {
+        if (degrees == 0 || (mask & 0xFFFu) == 0)
+            return note;
+        const int dir = degrees > 0 ? 1 : -1;
+        int remaining = degrees > 0 ? degrees : -degrees;
+        int n = note;
+        for (int guard = 0; guard < 128 && remaining > 0; ++guard)
+        {
+            n += dir;
+            if (n < 0 || n > 127)
+                return juce::jlimit(0, 127, n);
+            if ((mask >> ((((n - rootPc) % 12) + 12) % 12)) & 1u)
+                --remaining;
+        }
+        return n;
     }
 
     // Sorted-note order for direction modes (as-played uses arrival order).
@@ -335,10 +448,19 @@ private:
                 for (int j = i; j > 0 && held[(size_t) order[j]].note < held[(size_t) order[j - 1]].note; --j)
                     std::swap(order[j], order[j - 1]);
 
+        // Repeats of the chord, each one `spread` further up. Twelve semitones is the octave
+        // stacking this used to hardcode; in degrees it follows Root/Scale, so a spread of a
+        // third stays a third of *this* key rather than of the chromatic scale.
         const int octs = juce::jlimit(1, 4, p.octaveRange);
         for (int o = 0; o < octs; ++o)
             for (int i = 0; i < heldCount && seqCount < (int) seq.size(); ++i)
-                seq[(size_t) seqCount++] = { order[i], o * 12 };
+            {
+                const int base = held[(size_t) order[i]].note;
+                const int shifted = p.spreadDegrees
+                                  ? shiftByDegrees(base, o * p.spread, p.scaleMask, p.rootPc)
+                                  : base + o * p.spread;
+                seq[(size_t) seqCount++] = { order[i], shifted - base };
+            }
     }
 
     // The sequence is always built ascending (or in arrival order); directions are
@@ -348,20 +470,27 @@ private:
     {
         const int n = seqCount;
         if (n <= 1)
+        {
+            ++dirCursor;
             return 0;
+        }
+        // Offset starts the walk further in. Added to the cursor rather than to the result,
+        // so a ping-pong starts at the right place *in its cycle* instead of being reflected
+        // to some other note.
+        const long long cursor = dirCursor++ + p.offset;
         switch (p.direction)
         {
             case Direction::up:
             case Direction::asPlayed:
-                return (int) (dirCursor++ % n);
+                return (int) (cursor % n);
             case Direction::down:
             case Direction::asPlayedReverse:
-                return n - 1 - (int) (dirCursor++ % n);
+                return n - 1 - (int) (cursor % n);
             case Direction::upDown:
             case Direction::downUp:
             {
                 const int period = 2 * (n - 1);
-                const int c = (int) (dirCursor++ % period);
+                const int c = (int) (cursor % period);
                 const int i = c < n ? c : period - c;
                 return p.direction == Direction::upDown ? i : n - 1 - i;
             }
@@ -369,12 +498,45 @@ private:
             case Direction::downAndUp:
             {
                 const int period = 2 * n;
-                const int c = (int) (dirCursor++ % period);
+                const int c = (int) (cursor % period);
                 const int i = c < n ? c : period - 1 - c;
                 return p.direction == Direction::upAndDown ? i : n - 1 - i;
             }
+            case Direction::random:
+                lastPicked = (int) (rng() % (unsigned) n);
+                return lastPicked;
+            case Direction::randomOther:
+            {
+                // Draw from the other n-1 notes and skip past the last one, rather than
+                // re-drawing until it differs: one draw, always, and no unbounded loop on
+                // the audio thread.
+                int r = (int) (rng() % (unsigned) (n - 1));
+                if (lastPicked >= 0 && lastPicked < n && r >= lastPicked)
+                    ++r;
+                lastPicked = juce::jlimit(0, n - 1, r);
+                return lastPicked;
+            }
+            case Direction::randomOnce:
+                rebuildPermIfNeeded();
+                return perm[(size_t) (cursor % n)];
+            case Direction::chord:
+                return (int) (cursor % n); // fireStep plays them all; this is the fallback
         }
         return 0;
+    }
+
+    // A shuffled order held for as long as the chord is: random, but the same random every
+    // time round, which is the one random mode that sounds composed rather than sprayed.
+    void rebuildPermIfNeeded()
+    {
+        if (! permDirty && permCount == seqCount)
+            return;
+        permCount = seqCount;
+        for (int i = 0; i < permCount; ++i)
+            perm[(size_t) i] = i;
+        for (int i = permCount - 1; i > 0; --i) // Fisher-Yates
+            std::swap(perm[(size_t) i], perm[(size_t) (rng() % (unsigned) (i + 1))]);
+        permDirty = false;
     }
 
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
@@ -392,47 +554,85 @@ private:
         if (seqCount == 0)
             return;
 
-        const int seqIndex = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
-                                          : nextDirectionIndex(p);
+        // Which sequence entries this step plays. One, normally. All of them on the Chord
+        // shape, which is what makes it a comping engine rather than a walk order - a fixed
+        // Note-lane index still means that one note, so an edited pattern keeps its meaning
+        // over a chord shape instead of silently turning into block chords.
+        int playIdx[maxHeld * 4];
+        int playCount = 0;
+        if (p.direction == Direction::chord && noteVal == 0)
+        {
+            for (int i = 0; i < seqCount; ++i)
+                playIdx[playCount++] = i;
+        }
+        else
+        {
+            playIdx[playCount++] = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
+                                                : nextDirectionIndex(p);
+        }
 
-        const auto& entry = seq[(size_t) juce::jlimit(0, seqCount - 1, seqIndex)];
-        const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
-
-        const int note = juce::jlimit(0, 127,
-                                      src.note + entry.octaveOffset
-                                          + 12 * juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep)));
-        const float vel = juce::jlimit(0.05f, 1.0f,
-                                       src.velocity * (float) laneValue(p, laneVelocity, globalStep) / 100.0f);
+        const int octaveShift = 12 * juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep));
+        const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale;
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
 
         const double subLen = stepSamplesF / ratchets;
+        // Humanize never reorders anything: it only ever pushes a hit late, and never by more
+        // than 40% of the gap to the next sub-hit. Unbounded, a 25 ms nudge at a fast ratchet
+        // could carry one sub-hit past the next, and two hits of one pitch arriving out of
+        // order is exactly the shape emitHit's close-what-you-land-on rule cannot survive.
+        const int maxLate = p.humanize > 0
+                          ? (int) juce::jmin(0.025 * sr * (juce::jlimit(0, 100, p.humanize) / 100.0),
+                                             subLen * 0.4)
+                          : 0;
+
         for (int r = 0; r < ratchets; ++r)
         {
-            const int on = offset + (int) std::floor(subLen * r);
+            const int at = offset + (int) std::floor(subLen * r);
             const int durSamples = juce::jmax(1, (int) std::floor(subLen * gate));
 
-            // A ratchet subdivides one step, and a step is routinely longer than a buffer -
-            // at 1/16 and 120 bpm a step is 6000 samples against a 512-sample block - so every
-            // sub-hit but the first normally belongs to a *later* block. They used to be
-            // stamped at their raw offset anyway, which puts a note-on at sample 4500 of a
-            // 512-sample buffer: out of range, dropped or clamped by whatever is downstream,
-            // and ratchets therefore silently did nothing at any realistic buffer size. The
-            // mistake is deciding an event belongs to this block because the thing that
-            // *caused* it did.
-            //
-            // So park what does not fit and let the next block fire it. The step itself is
-            // still decided exactly once, here: the RNG draw, the sequence walk and
-            // stepCounter must not be repeated, which is why this parks the resolved hit
-            // rather than re-deriving the step later.
-            if (on < numSamples)
-                emitHit(note, src.channel, vel, on, durSamples, numSamples, out);
-            else if (pendingCount < maxPending)
-                pending[(size_t) pendingCount++] = { note, src.channel, vel, on, durSamples };
-            // else: out of carry slots, and the hit is dropped rather than mistimed. A ratchet
-            // parks at most three, and a step's carry is drained before the next step fires,
-            // so sixteen is five steps' worth in flight at once - which no rate reaches.
+            for (int k = 0; k < playCount; ++k)
+            {
+                const auto& entry = seq[(size_t) juce::jlimit(0, seqCount - 1, playIdx[k])];
+                const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
+                const int note = juce::jlimit(0, 127, src.note + entry.semitoneOffset + octaveShift);
+
+                int on = at;
+                float vel = src.velocity * velScale;
+                if (p.humanize > 0)
+                {
+                    // Late and quieter, never early and never louder: a nudge that can also
+                    // rush is what Swing is for, and a velocity that can also rise makes an
+                    // edited Velocity lane mean less than it says.
+                    if (maxLate > 0)
+                        on += (int) (rng() % (unsigned) (maxLate + 1));
+                    const double amt = juce::jlimit(0, 100, p.humanize) / 100.0;
+                    vel *= (float) (1.0 - (double) (rng() % 1000u) / 1000.0 * 0.30 * amt);
+                }
+                vel = juce::jlimit(0.05f, 1.0f, vel);
+
+                // A ratchet subdivides one step, and a step is routinely longer than a buffer -
+                // at 1/16 and 120 bpm a step is 6000 samples against a 512-sample block - so every
+                // sub-hit but the first normally belongs to a *later* block. They used to be
+                // stamped at their raw offset anyway, which puts a note-on at sample 4500 of a
+                // 512-sample buffer: out of range, dropped or clamped by whatever is downstream,
+                // and ratchets therefore silently did nothing at any realistic buffer size. The
+                // mistake is deciding an event belongs to this block because the thing that
+                // *caused* it did.
+                //
+                // So park what does not fit and let the next block fire it. The step itself is
+                // still decided exactly once, here: the RNG draw, the sequence walk and
+                // stepCounter must not be repeated, which is why this parks the resolved hit
+                // rather than re-deriving the step later.
+                if (on < numSamples)
+                    emitHit(note, src.channel, vel, on, durSamples, numSamples, out);
+                else if (pendingCount < maxPending)
+                    pending[(size_t) pendingCount++] = { note, src.channel, vel, on, durSamples };
+                // else: out of carry slots, and the hit is dropped rather than mistimed. The
+                // capacity is a chord's worth of ratchets over several steps; a step's carry is
+                // drained before the next step fires, so nothing that fits reaches it.
+            }
         }
         ++stepCounter;
     }
@@ -553,7 +753,10 @@ private:
             pending[(size_t) i].at -= numSamples;
     }
 
-    struct SeqEntry { int heldIndex; int octaveOffset; };
+    // `semitoneOffset` used to be an octave count times twelve. It is a resolved semitone
+    // shift now, because a spread in scale degrees is not a fixed interval: the same repeat
+    // is 3 or 4 semitones depending which note of the chord it is lifting.
+    struct SeqEntry { int heldIndex; int semitoneOffset; };
 
     double sr = 44100.0;
     std::array<Held, maxHeld> held {};
@@ -562,13 +765,27 @@ private:
     std::array<Active, maxActive> active {};
     int activeCount = 0;
 
-    static constexpr int maxPending = 16; // ratchet sub-hits carried into a later block
+    // Sub-hits carried into a later block. Sized for the worst case the Chord shape makes
+    // reachable - every note of a spread chord ratcheting at once - rather than the single
+    // note's three the old sixteen covered.
+    static constexpr int maxPending = 96;
     std::array<PendingHit, maxPending> pending {};
     int pendingCount = 0;
     std::array<SeqEntry, maxHeld * 4> seq {};
     int seqCount = 0;
     long long stepCounter = 0;
-    int dirCursor = 0;
+    long long dirCursor = 0;
+    // Where the lanes count from: the step index of the last restart, so Retrigger and the
+    // beat-retrigger window both mean "step 1 next", and Offset counts from a known origin.
+    long long stepBase = 0;
+    long long lastRetrigWindow = std::numeric_limits<long long>::min();
+    bool pendingRetrig = false;
+    double heldBeats = 0.0;  // how long the current chord has been up, for the velocity ramp
+    float rampScale = 1.0f;  // that ramp, resolved once per block
+    int lastPicked = -1;     // for Random Other
+    std::array<int, maxHeld * 4> perm {}; // the locked order Random Once walks
+    int permCount = 0;
+    bool permDirty = true;
     double freePhaseBeats = 0.0;
     double expectedNextPpq = 0.0;
     bool havePrevPpq = false;

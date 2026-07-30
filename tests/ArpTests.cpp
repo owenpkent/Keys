@@ -689,6 +689,206 @@ public:
             for (int i = 0; i < (int) onsets.size(); ++i)
                 expectWithinAbsoluteError(onsets[(size_t) i], i * 6000, 2);
         }
+
+        // ---------------------------------------------------------------------------------
+        // The 2026-07-30 expansion. Each of these pins a default as much as a feature: every
+        // parameter below is additive and has to leave an untouched arp sounding as it did.
+        // ---------------------------------------------------------------------------------
+
+        // Walk one step per block and hand back the note-ons of each, which is the shape
+        // most of these tests want and none of the older helpers provide.
+        const auto stepNotes = [&](ArpEngine& e, ArpEngine::Params sp, int steps,
+                                   const juce::MidiBuffer& first)
+        {
+            std::vector<std::vector<int>> perStep;
+            auto c = clock;
+            for (int i = 0; i < steps; ++i)
+            {
+                juce::MidiBuffer out;
+                c.ppq = 0.25 * i;
+                e.process(sp, c, block, i == 0 ? first : juce::MidiBuffer {}, out);
+                std::vector<int> ons;
+                for (const auto meta : out)
+                    if (meta.getMessage().isNoteOn())
+                        ons.push_back(meta.getMessage().getNoteNumber());
+                perStep.push_back(std::move(ons));
+            }
+            return perStep;
+        };
+
+        beginTest("Chord shape plays the whole held chord on every step");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto cp = p;
+            cp.direction = ArpEngine::Direction::chord;
+            const auto steps = stepNotes(e, cp, 3, chordOn({ 60, 64, 67 }));
+            for (int i = 0; i < 3; ++i)
+            {
+                expectEquals((int) steps[(size_t) i].size(), 3, "every step is the whole chord");
+                if (steps[(size_t) i].size() == 3)
+                {
+                    auto s = steps[(size_t) i];
+                    std::sort(s.begin(), s.end());
+                    expect(s[0] == 60 && s[1] == 64 && s[2] == 67, "and it is the chord as played");
+                }
+            }
+        }
+
+        beginTest("Distance in semitones stacks each repeat by that interval");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.octaveRange = 2;
+            sp.spread = 7; // a fifth, not the octave this used to hardcode
+            const auto steps = stepNotes(e, sp, 4, chordOn({ 60, 64 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 60);
+            expectEquals(steps[1].empty() ? -1 : steps[1][0], 64);
+            expectEquals(steps[2].empty() ? -1 : steps[2][0], 67);
+            expectEquals(steps[3].empty() ? -1 : steps[3][0], 71);
+        }
+
+        beginTest("Distance in scale degrees follows the key, not a fixed interval");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.octaveRange = 2;
+            sp.spread = 2; // two degrees: a third of the scale
+            sp.spreadDegrees = true;
+            sp.rootPc = 0;
+            sp.scaleMask = 0b101010110101u; // C major
+            const auto steps = stepNotes(e, sp, 4, chordOn({ 60, 62 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 60);
+            expectEquals(steps[1].empty() ? -1 : steps[1][0], 62);
+            // C lifts a major third to E, D lifts a *minor* third to F. That difference is
+            // the whole point: a fixed +4 would have given F# and left the key.
+            expectEquals(steps[2].empty() ? -1 : steps[2][0], 64);
+            expectEquals(steps[3].empty() ? -1 : steps[3][0], 65);
+        }
+
+        beginTest("Offset rotates the lane read");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneOctave][1].store(1); // only step 2 jumps an octave
+            auto sp = lp;
+            sp.offset = 1;
+            const auto steps = stepNotes(e, sp, 1, chordOn({ 60 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 72,
+                         "with Offset 1 the run starts on what was step 2");
+        }
+
+        beginTest("beat retrigger restarts the lanes on its window");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneOctave][0].store(1); // step 1 of the lane only
+            auto sp = lp;
+            sp.retrigBeats = 1.0; // one beat = four 1/16 steps
+            const auto steps = stepNotes(e, sp, 5, chordOn({ 60 }));
+            expectEquals(steps[0].empty() ? -1 : steps[0][0], 72, "step 1 is the lane's first");
+            expectEquals(steps[1].empty() ? -1 : steps[1][0], 60);
+            expectEquals(steps[4].empty() ? -1 : steps[4][0], 72,
+                         "and the next beat starts the lane over");
+        }
+
+        beginTest("Random Once locks its order for as long as the chord is held");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.direction = ArpEngine::Direction::randomOnce;
+            const auto steps = stepNotes(e, sp, 6, chordOn({ 60, 64, 67 }));
+            for (int i = 0; i < 3; ++i)
+            {
+                expect(! steps[(size_t) i].empty() && ! steps[(size_t) (i + 3)].empty(),
+                       "every step fires");
+                if (! steps[(size_t) i].empty() && ! steps[(size_t) (i + 3)].empty())
+                    expectEquals(steps[(size_t) (i + 3)][0], steps[(size_t) i][0],
+                                 "the second time round is the same order");
+            }
+        }
+
+        beginTest("Random Other never repeats a note back to back");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.direction = ArpEngine::Direction::randomOther;
+            const auto steps = stepNotes(e, sp, 24, chordOn({ 60, 64, 67 }));
+            int prev = -1;
+            for (const auto& s : steps)
+                if (! s.empty())
+                {
+                    expect(s[0] != prev, "consecutive steps differ");
+                    prev = s[0];
+                }
+        }
+
+        beginTest("the velocity ramp falls away over its time and not before");
+        {
+            const auto firstVelocity = [](const juce::MidiBuffer& b)
+            {
+                for (const auto meta : b)
+                    if (meta.getMessage().isNoteOn())
+                        return meta.getMessage().getFloatVelocity();
+                return -1.0f;
+            };
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.velRamp = -100;  // fade to nothing
+            sp.rampBeats = 1.0; // over one beat, which is four steps here
+            float first = -1.0f, last = -1.0f;
+            for (int i = 0; i < 5; ++i)
+            {
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * i;
+                e.process(sp, clock, block, i == 0 ? chordOn({ 60 }) : juce::MidiBuffer {}, out);
+                const float v = firstVelocity(out);
+                if (i == 0)
+                    first = v;
+                if (i == 4)
+                    last = v;
+            }
+            expect(first > 0.7f, "the first hit is the velocity it was played at");
+            expect(last >= 0.0f && last < 0.15f, "and a beat later it has faded out");
+        }
+
+        beginTest("Humanize is late-only, bounded, and does nothing at zero");
+        {
+            const auto onsetsWith = [&](int human)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto sp = p;
+                sp.humanize = human;
+                std::vector<int> onsets;
+                for (int i = 0; i < 8; ++i)
+                {
+                    juce::MidiBuffer out;
+                    clock.ppq = 0.25 * i;
+                    e.process(sp, clock, block, i == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                    for (const auto meta : out)
+                        if (meta.getMessage().isNoteOn())
+                            onsets.push_back(meta.samplePosition);
+                }
+                return onsets;
+            };
+            for (const int at : onsetsWith(0))
+                expectEquals(at, 0, "at zero every step lands exactly on its boundary");
+            const auto loose = onsetsWith(100);
+            bool sawLate = false;
+            for (const int at : loose)
+            {
+                expect(at >= 0, "never early");
+                expect(at <= 1200, "and never later than 25 ms"); // 0.025 * 48000
+                sawLate = sawLate || at > 0;
+            }
+            expect(sawLate, "something actually moved");
+        }
     }
 };
 

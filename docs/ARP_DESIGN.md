@@ -136,6 +136,68 @@ positive delays them into a shuffle, negative pulls them early to rush the beat,
 and the default 0 is straight), latch (on-screen toggle: ignore note-offs until a
 new chord), retrigger (restart at step 1 on new note), rate + dot/trip + anchor.
 
+## The 2026-07-30 expansion (research round two)
+
+A second research pass, over the Ableton Live 12 Arpeggiator and Arpeggiate transformation,
+the Kirnu Cream manual, Cthulhu, Scaler 3's Motions and humanize, and the NDLR. Everything
+below is additive and defaults to what the arp did before it, so an untouched session sounds
+identical.
+
+**Four more shapes**, appended to `arpDirection` (which is a choice parameter: inserting
+anywhere but the end renumbers every saved session).
+
+| Shape | What it does | Prior art |
+|-------|--------------|-----------|
+| Random | a note of the chord at random each step | every arp has one; Keys did not |
+| Random Other | random, but never the same note twice running | Ableton's Random Other |
+| Random Once | a shuffled order, locked for as long as the chord is held | Ableton's Random Once |
+| Chord | *every* note of the chord on every step | Ableton's Chord Trigger |
+
+Chord is the one that changes what the arp is for: with it the arp stops being a run and
+becomes a rhythm engine, which is what makes gate, ratchet, probability and swing into a
+comping part rather than an ornament. It is a direction only in the sense that it answers
+the same question ("which note next"); `fireStep` plays the whole resolved sequence for the
+step instead of one entry of it, and a fixed Note-lane index still overrides it, so an
+edited pattern does not silently turn into block chords.
+
+**Spread: Repeats + Distance.** `octaveRange` always meant "stack the chord N times", and
+the interval it stacked by was hardcoded at twelve semitones. Distance names it, and half its
+list counts **scale degrees** instead of semitones, resolved through a 12-bit mask of the
+current Root/Scale passed into `Params`. That is the differentiator the original spec called
+out and never spent: a Scale 3rd lifts C to E and D to F, where a fixed +4 would give F# and
+leave the key. The engine keeps no scale tables of its own - the mask arrives already built,
+so `ArpEngine.h` stays dependency-free and a test can state a scale as a number.
+
+**Offset** rotates the lane read index and the direction walk together, so a pattern can be
+heard from its third note without being redrawn (Ableton's Pattern Offset).
+
+**Retrigger became a list**: Off / Note / 1 or 2 beats / 1, 2 or 4 bars (Ableton's
+Off/Note/Beat). Two consequences worth knowing. The clock windows are what let a five-step
+lane still land on the bar. And **the lanes restart now**: retrigger used to reset only the
+direction cursor, because lane reads were derived from the absolute step index, so a control
+whose tooltip said "restart at step 1" never restarted the steps. Lane reads are relative to
+`stepBase` (the step index of the last restart) since this round.
+
+**Velocity ramp** (Ableton's Decay/Target, restated in beats): over `rampBeats` from the
+moment a chord starts, velocity scales toward (100 + `velRamp`)%. It rides on `heldBeats`,
+which counts only while something is held and resets with each fresh chord, and it is
+sampled once per block - the shortest useful ramp is a bar and the longest block is a few
+milliseconds, so the stair is far under the 1/127 velocity is quantized to anyway.
+
+**Humanize** is the first thing in Keys to touch the arp's feel at all: `Humanize` proper
+lives in `KeysProcessor::noteOn`, which the arp's own notes never pass through, so arp steps
+have always been exactly on the grid. One control nudges each hit late (up to 25 ms) and
+takes up to 30% off its velocity. Late-only and quieter-only, on purpose: a nudge that can
+also rush is what Swing is for, and a velocity that can also rise makes an edited Velocity
+lane mean less than it says. **The nudge is clamped to 40% of the gap to the next sub-hit**,
+because unbounded it can carry one ratchet sub-hit past the next, and two hits of one pitch
+arriving out of order is the one thing `emitHit`'s close-what-you-land-on rule cannot
+survive. At 0 the engine draws no random numbers at all, which is also what keeps the older
+tests deterministic.
+
+Still unbuilt from the v2 list below: the Late and Harmony lanes, per-step transpose, chord
+mode (inversion stacking), per-step CC lanes, pattern chaining, arp-on-note-count.
+
 **Gate and Chance are global as well as per-step** (added 2026-07-25). The lanes are gated
 behind Shape being "Pattern", so on a plain shape there was no way to shorten a note or
 thin a run out at all - the two most reached-for arp controls on any hardware unit were
@@ -278,8 +340,18 @@ Three ruled, captioned groups, after the hardware-arp arrangement Owen asked for
 | Group | Holds | Visible |
 |-------|-------|---------|
 | PATTERN  | Shape + `<` `>`, Rate + `<` `>`, Trip, Dot | always |
-| PLAYBACK | Swing, Gate, Chance (knobs), Octaves, Anchor, Latch, Retrigger | always |
+| PLAYBACK | Swing, Gate, Chance (knobs), Retrigger, Latch, Anchor | always |
 | STEPS    | Steps, Speed, Link | Pattern shape only |
+| SPREAD   | Repeats, Distance, Offset | always |
+| FEEL     | Ramp, Time, Human | always |
+
+The last two are a **second band row**, added 2026-07-30 with the controls above. It is one
+control row tall where the first band is two, which is what kept eight new controls to 64 px
+of a panel that is already the tallest thing in the editor: a knob column spans both rows of
+a group, so FEEL uses horizontal sliders instead. Anchor moved down beside Latch in the same
+change - Retrigger grew from a toggle into a list, and at 128 px next to Anchor's 83 the
+PLAYBACK group ran over and ellipsised the *toggle*, which is the one thing on the band with
+no width to lose.
 
 The `<` `>` pairs matter more than they look: stepping to the next shape is the commonest
 thing you do to an arp and it used to cost a click, a travel down a menu and a second click.

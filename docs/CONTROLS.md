@@ -298,28 +298,34 @@ generator stay on screen above.
 **On** and **Detach** live on the Arp bar rather than inside the panel, so folding the
 panel away leaves the arpeggiator running and still switchable. The section starts folded.
 
-**Shape decides how much of the panel exists.** The eight directions are plain
-arpeggios and show nothing but the controls below. The ninth entry, **Pattern**, opens
-the step editor and adds the STEPS group to the band.
+**Shape decides how much of the panel exists.** The twelve shapes are plain arpeggios and
+show nothing but the controls below. The last entry, **Pattern**, opens the step editor and
+adds the STEPS group to the band.
 
-Controls are grouped: **PATTERN** is what it plays, **PLAYBACK** is how it behaves, and
-**STEPS** (Pattern shape only) drives the step editor. The `<` and `>` buttons beside Shape
-and Rate step to the next entry without opening the menu; they stop at the ends rather than
-wrapping round.
+Controls are grouped: **PATTERN** is what it plays, **PLAYBACK** is how it behaves,
+**SPREAD** is how wide it reaches and where it starts, **FEEL** is whether it sounds played,
+and **STEPS** (Pattern shape only) drives the step editor. The `<` and `>` buttons beside
+Shape and Rate step to the next entry without opening the menu; they stop at the ends rather
+than wrapping round.
 
 | Control | Group | What it does |
 |---------|-------|--------------|
 | **On** | header | Arp on or off. Everything else stays editable while it is off. |
-| **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, or **Pattern** (opens the step editor). |
+| **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, **Random**, **Random Other** (never the same note twice running), **Random Once** (a shuffled order, kept for as long as the chord is held), **Chord** (every note of the chord on every step, so the arp plays rhythm instead of a run), or **Pattern** (opens the step editor). |
 | **Rate** | Pattern | Step length, 16 bars down to 1/64. |
 | **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. |
 | **Swing** | Playback | −0.75 – +0.75, starting centred. Shifts the offbeat steps: right delays them for a shuffle, left pulls them early to rush the beat, centre is dead straight. |
 | **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
 | **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
-| **Octaves** | Playback | 1–4. How many octaves a direction shape climbs before repeating. |
+| **Retrigger** | Playback | When the pattern starts over: **Off**, **Note** (a new chord restarts it), or a clock window — 1 or 2 beats, 1, 2 or 4 bars. A clock window is what makes a five-step lane still land on the bar. |
 | **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. |
 | **Latch** | Playback | Keep arpeggiating after you let go, until a new chord arrives. |
-| **Retrigger** | Playback | Restart at step 1 when a note arrives on an empty set. |
+| **Repeats** | Spread | 1–4. How many times the chord is stacked up the keyboard before the run repeats. (This was "Octaves", back when an octave was the only thing it could stack by.) |
+| **Distance** | Spread | How far each repeat goes: **Octave**, **5th**, **4th**, **Maj 3rd**, **min 3rd**, or the scale-relative **Scale 2nd / 3rd / 5th / 7th**. The scale entries count degrees of Root and Scale, so a third stays a third *of this key* — C lifts to E, D lifts to F — which is the one thing the stock arps cannot do. |
+| **Offset** | Spread | 0–31. Start the run further in. Rotates the step lanes and the walk together, so the same pattern can be heard from a different foot without redrawing it. |
+| **Ramp** | Feel | −100 – +100%. Velocity change over **Time**, counted from the moment a chord starts. Left fades a held chord away, right swells it, centre is flat. |
+| **Time** | Feel | 1–32 beats. How long the Ramp takes. |
+| **Human** | Feel | 0–100%. Nudges each hit a little late and a little quieter, by a different amount every time. At 0 the arp is dead on the grid, which is what it always was before this control existed. |
 
 ### The step editor (Shape → Pattern)
 
