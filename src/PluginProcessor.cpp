@@ -143,6 +143,52 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRate", 1 }, "Arp Rate",
                                                       StringArray { "16 bars", "8 bars", "4 bars", "2 bars", "1 bar",
                                                                     "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" }, 8));
+    // The same rate as a free-running frequency, and a switch between the two. Both added
+    // 2026-07-30, both additive: the choice list above is byte-identical, so every saved
+    // session and every automation lane still means what it did, and a session from before
+    // these two loads with Free off - which is exactly today's behaviour.
+    //
+    // The range is not a round number by choice. It is what the eleven divisions above span
+    // at 120 bpm: "1/64" is 32 steps a second, "16 bars" is one step per 32 seconds. Anything
+    // narrower would make Hz reach less than the list beside it. Those ends are ten octaves
+    // apart, so a linear dial would spend nine tenths of its travel between 3 and 32 Hz and
+    // put everything from "1 bar" down inside the last two degrees.
+    //
+    // The mapping is therefore exponential outright, not a skew: value = lo * (hi/lo)^t, so
+    // every octave gets exactly a tenth of the travel and one degree of the dial is the same
+    // *ratio* wherever you are on it. A skew is a power law, which is a different curve with
+    // a superficially similar shape - setSkewForCentre(1.0f) on these ends works out at ~0.198
+    // and spends 25.3% of the dial between 0.031 and 0.062 Hz against 12.9% between 16 and 32,
+    // so adjacent octaves came out four times apart and a quarter of the whole control was the
+    // gap between its two slowest settings. 1 Hz still lands at the centre (it is the
+    // geometric mean of the ends, and "1/2" at 120 bpm), now as a consequence rather than as
+    // the one point the curve was fitted through.
+    //
+    // Default 8 Hz = 1/16 at 120 bpm, matching arpRate's own default, so flipping the switch
+    // at a default tempo changes the sound not at all - only what the rate is tied to.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpRateFree", 1 }, "Arp Rate Free", false));
+    {
+        // JUCE clamps the proportion going in and the result coming out, so these two only
+        // have to guard the log against a value at or below zero.
+        NormalisableRange<float> hzRange {
+            (float) ArpEngine::minRateHz, (float) ArpEngine::maxRateHz,
+            [](float lo, float hi, float t) { return lo * std::pow(hi / lo, t); },
+            [](float lo, float hi, float v) { return std::log(jlimit(lo, hi, v) / lo) / std::log(hi / lo); }
+        };
+        layout.add(std::make_unique<AudioParameterFloat>(
+            ParameterID { "arpRateHz", 1 }, "Arp Rate Hz", hzRange, 8.0f,
+            AudioParameterFloatAttributes()
+                // No .withLabel("Hz"): the suffix is already in the text below, and a host
+                // that renders value-plus-unit printed "8.00 Hz Hz". The in-plugin readout is
+                // this string, so the suffix has to stay in it rather than move to the label.
+                // Decimals by decade, one copy of the rule (see ArpEngine::rateHzText): 0.031
+                // and 32.0 both have to read as themselves, and a fixed 2 would print the
+                // bottom of the range as "0.03" for a whole octave of the dial.
+                .withStringFromValueFunction([](float v, int) {
+                    return ArpEngine::rateHzText(v) + " Hz";
+                })
+                .withValueFromStringFunction([](const String& s) { return s.getFloatValue(); })));
+    }
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpDot", 1 }, "Arp Dotted", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrip", 1 }, "Arp Triplet", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpAnchor", 1 }, "Arp Anchor", true));
@@ -786,6 +832,11 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ArpEngine::Params ap;
         ap.enabled = true;
         ap.rateIndex = (int) apvts.getRawParameterValue("arpRate")->load();
+        // Free: the rate is a frequency and the engine free-runs at it whatever the transport
+        // is doing. Both read every block like every other arp global, so the mode can be
+        // automated and the engine sees the change on the next boundary.
+        ap.rateFree = apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
+        ap.rateHz = (double) apvts.getRawParameterValue("arpRateHz")->load();
         ap.dotted = apvts.getRawParameterValue("arpDot")->load() > 0.5f;
         ap.triplet = apvts.getRawParameterValue("arpTrip")->load() > 0.5f;
         ap.anchored = apvts.getRawParameterValue("arpAnchor")->load() > 0.5f;
@@ -1071,7 +1122,31 @@ void KeysProcessor::launchArpSlot(int index)
             setChoice("arpDirection", slot.shape); // "Pattern" leaves the direction alone
     }
     if (slot.rate >= 0)
+    {
         setChoice("arpRate", slot.rate);
+        // The mode travels with the rate, and both move through the host for the same reason
+        // the choice above does. A slot saved before Hz existed reads back rateFree false, so
+        // this writes the mode it already had.
+        if (auto* free = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpRateFree")))
+        {
+            free->beginChangeGesture();
+            *free = slot.rateFree;
+            free->endChangeGesture();
+        }
+        // Only a slot captured in Hz brings a Hz value with it. `rateHz` is not a value every
+        // slot has: arpFromTree synthesises 8.0 for every slot in a session saved before the
+        // mode existed, so writing it unconditionally meant opening an old session, dialling
+        // 0.5 Hz and clicking any slot silently reset the rate to a fabricated 8 Hz. A Sync
+        // slot leaves the Hz control exactly where it found it, which is what the struct
+        // comment beside ArpPattern::rateHz already promises.
+        if (slot.rateFree)
+            if (auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("arpRateHz")))
+            {
+                hz->beginChangeGesture();
+                *hz = slot.rateHz;
+                hz->endChangeGesture();
+            }
+    }
 
     // Hold last, so the chord starts against the pattern the slot just installed.
     if (! slot.chordNotes.empty())
@@ -1220,6 +1295,9 @@ void KeysProcessor::setArpSlotChord(int index, const std::vector<int>& notes, co
                                             ? ArpEngine::numDirections
                                             : (int) apvts.getRawParameterValue("arpDirection")->load();
     arpPatterns[(size_t) index].rate = (int) apvts.getRawParameterValue("arpRate")->load();
+    // ...and the mode it is in, so a slot captured in Hz launches in Hz.
+    arpPatterns[(size_t) index].rateFree = apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
+    arpPatterns[(size_t) index].rateHz = apvts.getRawParameterValue("arpRateHz")->load();
 }
 
 void KeysProcessor::clearArpSlotChord(int index)
@@ -1295,6 +1373,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     // silently did nothing in Keys Host until this became one function. Anything session
     // shaped belongs here, not in either override.
     migrateStrumRange(root);
+    migrateRateMode(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -1346,6 +1425,44 @@ void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
 
     if (auto* param = apvts.getParameter("chordStrumMax"))
         param->setValueNotifyingHost(param->convertTo0to1(low));
+}
+
+void KeysProcessor::migrateRateMode(const juce::ValueTree& root)
+{
+    // The arp rate gained a second unit on 2026-07-30: "arpRateFree" picks it and "arpRateHz"
+    // holds it. Neither exists in any session saved before that, and an absent parameter is
+    // not a reset - APVTS creates an adapter's child on the spot and flushes the *current*
+    // value into it. On a fresh instance that current value is the default and everything is
+    // right; in a live instance it is whatever the user has been playing with. So loading an
+    // old preset while the dial was in Hz restored and displayed arpRate while the engine
+    // carried on free-running at the Hz value from before the load, with the panel showing a
+    // division it was not playing. Exactly the shape migrateStrumRange above repairs, and the
+    // same fix: the tell is the absence, and the repair is to write the default explicitly.
+    //
+    // getDefaultValue() rather than a literal: it is already normalised, and it stays correct
+    // if either default ever moves. Reads the tree, not the live parameters, for the reason
+    // given above - this runs while the state is still landing.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    bool sawFree = false, sawHz = false;
+    for (int i = 0; i < params.getNumChildren(); ++i)
+    {
+        const auto id = params.getChild(i).getProperty("id").toString();
+        sawFree = sawFree || id == "arpRateFree";
+        sawHz = sawHz || id == "arpRateHz";
+    }
+
+    // Independently, though the two shipped together: a tree carrying one and not the other
+    // is malformed rather than old, and there is no reading of it under which the missing one
+    // meant anything but its default.
+    if (! sawFree)
+        if (auto* param = apvts.getParameter("arpRateFree"))
+            param->setValueNotifyingHost(param->getDefaultValue());
+    if (! sawHz)
+        if (auto* param = apvts.getParameter("arpRateHz"))
+            param->setValueNotifyingHost(param->getDefaultValue());
 }
 
 juce::ValueTree KeysProcessor::layoutToTree() const
@@ -1442,6 +1559,11 @@ juce::ValueTree KeysProcessor::arpToTree() const
         }
         pt.setProperty("shape", pat.shape, nullptr);
         pt.setProperty("rate", pat.rate, nullptr);
+        // The rate's mode, written alongside it. Absent in every session saved before Hz
+        // existed, which reads back as Sync at the `rate` index above - what those sessions
+        // actually played.
+        pt.setProperty("rateFree", pat.rateFree, nullptr);
+        pt.setProperty("rateHz", (double) pat.rateHz, nullptr);
         pt.setProperty("bars", pat.bars, nullptr); // how long the chain holds this slot
         for (int l = 0; l < ArpEngine::numLanes; ++l)
         {
@@ -1487,6 +1609,11 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
             pat.shape = ArpEngine::numDirections; // "Pattern" is wherever Pattern is now
         pat.shape = juce::jlimit(-1, ArpEngine::numDirections, pat.shape);
         pat.rate = (int) pt.getProperty("rate", -1);
+        // Both absent before the Hz mode: false and the default 8 Hz, so an old session's
+        // slot launches the division it stored, exactly as it always did.
+        pat.rateFree = (bool) pt.getProperty("rateFree", false);
+        pat.rateHz = (float) juce::jlimit((double) ArpEngine::minRateHz, (double) ArpEngine::maxRateHz,
+                                          (double) pt.getProperty("rateHz", 8.0));
         pat.bars = juce::jlimit(1, 16, (int) pt.getProperty("bars", 1)); // absent before the chain
         for (int lc = 0; lc < pt.getNumChildren(); ++lc)
         {

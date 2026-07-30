@@ -81,6 +81,11 @@ math was adversarially refuted as a pattern to copy. Requirements:
   list so automation stays on even divisions) and an **Anchor toggle**: anchored =
   affixed to the host bar cycle (position may jump on rate change), free = no jump,
   may drift off the bar.
+- **The rate is a dial with two units** (2026-07-30). `arpRateFree` picks between the
+  division list and `arpRateHz`, a free-running 0.031 to 32 Hz, and the panel swaps which
+  of the two the dial is attached to rather than formatting anything itself: the parameter
+  brings the range, the detents (eleven, one per division, in Sync), the skew and the
+  readout text with it. See "The rate dial" below.
 - **Transport stopped / standalone:** fall back to an internal clock so the arp keeps
   sounding while auditioning. Cthulhu goes silent with the transport stopped and that is a
   known annoyance. (Decided by Owen, 2026-07-19.) The fallback is the **BPM** parameter
@@ -485,7 +490,7 @@ Three ruled, captioned groups, after the hardware-arp arrangement Owen asked for
 
 | Group | Holds | Visible |
 |-------|-------|---------|
-| PATTERN  | Shape + `<` `>`, Rate + `<` `>`, Trip, Dot | always |
+| PATTERN  | Rate (dial, spans both rows), Shape + `<` `>`, Rate `<` `>`, Sync/Hz, Trip, Dot | always |
 | PLAYBACK | Swing, Gate, Chance (knobs), Retrigger, Latch, Anchor | always |
 | STEPS    | Steps, Speed, Link | Pattern shape only |
 | SPREAD   | Repeats, Distance, Offset | always |
@@ -503,6 +508,58 @@ The `<` `>` pairs matter more than they look: stepping to the next shape is the 
 thing you do to an arp and it used to cost a click, a travel down a menu and a second click.
 They **clamp** rather than wrap, so one click too many on "Up" cannot land on "Pattern" and
 throw the step editor open under you.
+
+### The rate dial
+
+Rate stopped being a combo box on 2026-07-30, when the Hz mode arrived: 0.031 to 32 Hz is a
+continuum, and a list of it would be either a menu of guesses or a number to type. It is the
+kit's rotary (`okstudio/RotaryKnob.h`, the same one `KnobBank` uses), in a knob column that
+spans both rows of the PATTERN group, and it costs the panel no height at all.
+
+Four things carry it:
+
+- **Two attachments, one alive.** `refreshRateMode()` destroys one and builds the other on a
+  mode change, so the dial follows `arpRate` in Sync and `arpRateHz` in Hz. That is what makes
+  the range, the interval (eleven detents in Sync, so it cannot land between two divisions),
+  the skew and the readout text all come from the parameter: the panel formats nothing, and a
+  change from any source (a host, the MCP bridge, a slot launch) shows on the dial. The mode
+  itself is derived from `arpRateFree` on the 10 Hz timer as well as from the button, the same
+  way Shape is, because a host can automate it.
+- **The Sync / Hz chip** beside it reads the unit that is live, not the one a click would
+  pick, and lights in Hz. A dial position means two different things in the two modes, so the
+  readout under the dial ("1/8" against "4.00 Hz") says it a second time in its own units.
+- **The `<` `>` pair is not a convenience here, it is the contract.** A dial is a *drag*
+  target and drag precision is the hardest thing for this instrument's owner, so the steppers
+  are the click-only path to every value the dial can hold, in both units. In Sync a click is
+  one division. In Hz it is a quarter of an octave on a ladder anchored at 1 Hz, so four
+  clicks halve or double the rate (the same jump one entry of the Sync list makes, four times
+  finer), both ends of the range and every power of two are rungs, and repeated clicks always
+  land on the same forty values. Those two and the chip are laid out at 34 px tall rather than
+  the band's 28 for the same reason.
+- **Dot, Trip and Anchor grey out in Hz**, because the engine ignores all three there. Dot
+  and Trip subdivide a beat and there is no beat, so a dotted 8 Hz would only make the number
+  on the dial a lie; Anchor is skipped by `process()`'s `&& ! p.rateFree`, since a
+  free-running rate has no bar grid to affix itself to. A control that does nothing greys out
+  rather than sitting lit.
+- **The Hz mapping is exponential, not skewed.** `value = lo * (hi/lo)^t`, written out as the
+  parameter's two conversion functions, so each of the ten octaves gets a tenth of the travel
+  and one degree of the dial is the same *ratio* at either end. `setSkewForCentre(1.0f)` was
+  tried first and is a power law, which is a different curve: its exponent works out at ~0.198
+  on these ends, which spent 25.3% of the dial between 0.031 and 0.062 Hz against 12.9%
+  between 16 and 32. 1 Hz still lands at the centre, now as a consequence.
+- **Swapping the two attachments waits out a drag.** `SliderParameterAttachment` opens a
+  parameter gesture on `sliderDragStarted` and closes it on `sliderDragEnded`, and its
+  destructor only removes the listener. `refreshRateMode()` runs off the 10 Hz timer, so a
+  Chain launching slots on bar lines (or a host, or an MCP client) could otherwise destroy the
+  live attachment mid-drag and strand a begin with no end. The panel holds the swap while
+  `rateKnob` is down and `onDragEnd` applies it on the mouse-up.
+
+The dial column takes 72 px off the group's two rows, and `groupWeights` hands about 37 of
+them back (36/42/22 became 40/42/18). All of that 4 points is STEPS' - it had about 50 px
+spare in each of its two rows - and none of it is PLAYBACK's, whose second row is the one
+place on the band with nothing left to give. The rest came from the two rows themselves: the
+Shape cell went from 234 px to 200, and Trip and Dot from 58/54 to 56/52, all still clear of
+their text. Nothing overlaps and the panel is not a pixel taller.
 
 Sizing note for anyone editing `ArpPanel::resized()`: every number in there is a *logical*
 pixel and the panel is only about 950 of them wide at the editor's minimum. On a 150%

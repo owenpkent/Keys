@@ -1,6 +1,7 @@
 #include "ArpPanel.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
+#include <cmath>
 
 namespace keys
 {
@@ -260,6 +261,7 @@ ArpPanel::ArpPanel(KeysProcessor& p) : processor(p)
     okstudio::ui::makeMouseOnly(*this);
     buildControls();
     selectLane(selectedLane); // tab toggles + which grid is visible
+    refreshRateMode();        // installs the dial's first attachment; lastRateFree is -1 here
     refreshShape();           // and whether the step editor is showing at all
     refreshRetrig();
     refreshLaneReadouts();
@@ -448,6 +450,122 @@ void ArpPanel::stepCombo(juce::ComboBox& box, int delta)
     const int next = juce::jlimit(0, n - 1, box.getSelectedItemIndex() + delta);
     if (next != box.getSelectedItemIndex())
         box.setSelectedItemIndex(next); // notifies, so the attachment/onChange runs
+}
+
+// The rate steppers, in whichever unit is live. Both branches clamp at the ends rather than
+// wrapping, for the reason stepCombo gives: a button that does nothing at the end of its
+// travel is easy to feel, where one that jumps to the other end is a nasty surprise.
+void ArpPanel::stepRate(int delta)
+{
+    auto& apvts = processor.apvts;
+
+    if (apvts.getRawParameterValue("arpRateFree")->load() > 0.5f)
+    {
+        auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("arpRateHz"));
+        if (hz == nullptr)
+            return;
+        // A click is a quarter of an octave, so four of them halve or double the rate - which
+        // is exactly the jump one entry of the Sync list makes, so the button means the same
+        // amount of change in both modes, four times finer here. The ladder is anchored on
+        // 1 Hz, which puts both ends of the range (2^-5 and 2^5) and every power of two on it,
+        // so repeated clicks always land on the same forty values. floor/ceil rather than
+        // round, so a value a host left off the ladder still moves a full step the way it was
+        // asked to instead of snapping backwards.
+        const double rungs = std::log2((double) hz->get()) * 4.0;
+        const int wanted = delta > 0 ? (int) std::floor(rungs + 1.0e-4) + 1
+                                     : (int) std::ceil(rungs - 1.0e-4) - 1;
+        const auto next = (float) juce::jlimit(ArpEngine::minRateHz, ArpEngine::maxRateHz,
+                                               std::pow(2.0, (double) wanted * 0.25));
+        if (next != hz->get())
+        {
+            // By hand, like Shape: these are buttons, not an attachment, and without the
+            // brackets a host in touch or latch never arms on a rate change.
+            hz->beginChangeGesture();
+            *hz = next;
+            hz->endChangeGesture();
+        }
+        return;
+    }
+
+    if (auto* rate = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpRate")))
+    {
+        const int next = juce::jlimit(0, rate->choices.size() - 1, rate->getIndex() + delta);
+        if (next != rate->getIndex())
+        {
+            rate->beginChangeGesture();
+            *rate = next;
+            rate->endChangeGesture();
+        }
+    }
+}
+
+// The mode is a change of *unit*, so it changes what the dial is attached to, what its
+// readout says, what a stepper click means, and whether Dot and Trip mean anything at all.
+// Parameters are the truth - a host can automate arpRateFree - so this is derived and runs
+// off the timer as well as off the button.
+void ArpPanel::refreshRateMode()
+{
+    const bool free = processor.apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
+    if (lastRateFree == (int) free)
+        return;
+
+    // Never swap the dial's attachment out from under a live drag. A drag is a parameter
+    // *gesture*: SliderParameterAttachment turns sliderDragStarted into beginChangeGesture and
+    // sliderDragEnded into endChangeGesture, and its destructor only removes the listener - it
+    // never closes one in flight. This function runs off the 10 Hz timer, so anything writing
+    // arpRateFree from outside the panel (a Chain launching a slot on the bar line, host
+    // automation, an MCP client) could otherwise destroy the live attachment mid-drag, leaving
+    // a begin with no end on one parameter and an end with no begin on the other: a debug
+    // assertion in JUCE, and a host latched in automation-write in a release build. So the
+    // mode change waits. It is not deferred by a whole timer tick either: rateKnob.onDragEnd
+    // calls back here the moment the button comes up, after the attachment has closed its own
+    // gesture (Slider invokes onDragEnd only once every listener's sliderDragEnded has run).
+    if (rateDragging)
+        return;
+
+    lastRateFree = (int) free;
+
+    // Swap, don't hand-sync. Destroy first so only one attachment is ever listening to the
+    // dial, then build the other: it brings the parameter's range, its interval (eleven
+    // detents in Sync, continuous in Hz), its skew and its text formatting with it, which is
+    // why the readout reads "1/8" in one mode and "4.00 Hz" in the other with no code here.
+    rateHzAtt.reset();
+    rateSyncAtt.reset();
+    if (free)
+        rateHzAtt = std::make_unique<SliderAtt>(processor.apvts, "arpRateHz", rateKnob);
+    else
+        rateSyncAtt = std::make_unique<SliderAtt>(processor.apvts, "arpRate", rateKnob);
+
+    rateModeButton.setButtonText(free ? "Hz" : "Sync"); // the live unit, not the one a click would pick
+    rateModeButton.setTooltip(free ? "Rate is free-running in Hz: no tempo, no bar grid, and it "
+                                     "runs whether the transport rolls or not. Click for tempo-synced "
+                                     "divisions."
+                                   : "Rate is tempo-synced, in divisions of the host bar. Click to "
+                                     "free-run it in Hz instead.");
+    rateKnob.setTooltip(free ? "Step rate as a frequency, 0.031 to 32 Hz - the same span the "
+                               "divisions cover at 120 bpm. The dial is near enough logarithmic, "
+                               "with 1 Hz at its centre."
+                             : "Step length, from 16 bars down to 1/64. The dial detents onto each "
+                               "of the eleven divisions, so it cannot land between two.");
+    ratePrev.setTooltip(free ? "Slower: down a quarter of an octave. Four clicks halve the rate."
+                             : "Slower: the next division up the list.");
+    rateNext.setTooltip(free ? "Faster: up a quarter of an octave. Four clicks double the rate."
+                             : "Faster: the next division down the list.");
+
+    // Dot and Trip subdivide a *beat*, and in Hz there is no beat: the engine ignores them
+    // there (see ArpEngine::stepLengthBeats), so they grey out rather than sitting lit and
+    // doing nothing.
+    dotButton.setEnabled(! free);
+    tripButton.setEnabled(! free);
+    // Anchor goes with them, for exactly the same reason. ArpEngine::process() takes the
+    // bar-affixed branch on `clock.playing && clock.hasPpq && p.anchored && ! p.rateFree`, so
+    // in Hz the toggle is inert - a free-running rate has no bar grid to lock to. It used to
+    // sit lit and enabled while it did nothing at all.
+    anchorButton.setEnabled(! free);
+    anchorButton.setTooltip(free ? "Nothing to anchor to in Hz: a free-running rate follows no "
+                                   "bar grid. Switch the rate to Sync to lock the steps to one."
+                                 : "Anchored: locked to the host bar grid. Free: never jumps, "
+                                   "may drift.");
 }
 
 void ArpPanel::setArmed(Armed a, int fromIndex)
@@ -653,7 +771,17 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
     if (slot.shape >= 0 && slot.shape <= ArpEngine::numDirections)
         sub = shapeNames[slot.shape];
     if (slot.rate >= 0 && slot.rate < (int) (sizeof(rateNames) / sizeof(rateNames[0])))
-        sub += (sub.isEmpty() ? "" : " ") + juce::String(rateNames[slot.rate]);
+        // A slot captured in Hz says Hz. `rate` still holds a division (it is captured
+        // whatever the mode is), so printing it regardless would name a speed the launch
+        // will not play.
+        //
+        // The parameter's own decimals-by-decade rule, not a decimal place of the card's
+        // choosing: at one place 0.031 Hz and 0.062 Hz both painted as "0.0Hz" and 0.125 as
+        // "0.1Hz", so a card naming a rate could name a stopped arp - which is the one thing
+        // printing the rate at all is here to prevent.
+        sub += (sub.isEmpty() ? "" : " ")
+             + (slot.rateFree ? ArpEngine::rateHzText(slot.rateHz) + "Hz"
+                              : juce::String(rateNames[slot.rate]));
     g.setColour(skin::textDim);
     g.setFont(skin::ui(10.0f));
     g.drawText(sub.isEmpty() ? juce::String("--") : sub, area.removeFromTop(13.0f),
@@ -674,19 +802,53 @@ void ArpPanel::buildControls()
     // Keys Host has something to fall back on, but nothing parents them any more.
 
     // Globals: rate + feel.
+    //
+    // Rate is the band's fourth knob (2026-07-30), where it was a list of eleven divisions.
+    // The dial is the kit's rotary, the same one KnobBank uses, because a rate that can be a
+    // *frequency* has no list to be: 0.031 to 32 Hz is a continuum, and a combo of it would be
+    // either a menu of guesses or a number to type. In Sync the attachment gives it eleven
+    // detents, one per division, so it still cannot land between two.
     styleLabel(rateLabel, "Rate");
     addAndMakeVisible(rateLabel);
-    rateBox.addItemList({ "16 bars", "8 bars", "4 bars", "2 bars", "1 bar",
-                          "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" }, 1);
-    addAndMakeVisible(rateBox);
-    rateAtt = std::make_unique<ComboAtt>(processor.apvts, "arpRate", rateBox);
+    // 60 px of text box, not the 52 the PLAYBACK knobs use: this one prints "16 bars" and
+    // "0.031 Hz", where those three print a number.
+    //
+    // Read-only, and every text box in this panel is: the second argument is isReadOnly, and
+    // passing false makes JUCE call valueBox->setEditable(true), which is edit-on-*single*
+    // click. One left click on this 60x16 strip opened a TextEditor and took keyboard focus,
+    // in a plugin whose owner has no keyboard - the only way out was clicking somewhere else.
+    // Worse here than anywhere: in Sync the dial is on an AudioParameterChoice, whose
+    // getValueForText is choices.indexOf(text), so anything that is not an exact division
+    // name returns -1, clamps to 0 and drops the rate to "16 bars". The `<` `>` pair reaches
+    // every value the dial holds, so nothing is lost by making the readout a readout.
+    rateKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 60, 16);
+    rateKnob.setTitle("Arp rate");
+    addAndMakeVisible(rateKnob);
+    // No attachment here: refreshRateMode() installs whichever of the two the mode calls for,
+    // and it is the only place that ever touches those two pointers.
+    //
+    // These two exist only so that place can tell whether a drag is in flight. Destroying an
+    // attachment mid-drag strands the parameter gesture it opened; see refreshRateMode(). The
+    // mouse-up call is what keeps a deferred mode change from waiting on the timer.
+    rateKnob.onDragStart = [this] { rateDragging = true; };
+    rateKnob.onDragEnd = [this] { rateDragging = false; refreshRateMode(); };
+
+    // The mode switch. A TextButton rather than a ToggleButton: a tick box beside the word
+    // "Hz" would read as "add Hz to something", where a chip that names the live unit and
+    // lights while the arp is off the tempo grid reads as the switch it is.
+    rateModeButton.setClickingTogglesState(true);
+    rateModeButton.setTitle("Arp rate mode");
+    rateModeButton.onClick = [this] { refreshRateMode(); }; // attached, so the parameter is already set
+    addAndMakeVisible(rateModeButton);
+    rateModeAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpRateFree", rateModeButton);
 
     for (auto* b : { &dotButton, &tripButton, &anchorButton })
         addAndMakeVisible(*b);
     dotAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpDot", dotButton);
     tripAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpTrip", tripButton);
     anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpAnchor", anchorButton);
-    anchorButton.setTooltip("Anchored: locked to the host bar grid. Free: never jumps, may drift.");
+    // Anchor's tooltip is written by refreshRateMode(), beside its enablement: it says
+    // something different in Hz, where there is no bar grid to anchor to.
 
     styleLabel(shapeLabel, "Shape");
     addAndMakeVisible(shapeLabel);
@@ -708,12 +870,13 @@ void ArpPanel::buildControls()
         addAndMakeVisible(*b);
     shapePrev.onClick = [this] { stepCombo(shapeBox, -1); };
     shapeNext.onClick = [this] { stepCombo(shapeBox, 1); };
-    ratePrev.onClick = [this] { stepCombo(rateBox, -1); };
-    rateNext.onClick = [this] { stepCombo(rateBox, 1); };
+    // The rate pair is not decoration and never becomes it: the dial beside them is a drag
+    // target, and these two are how every rate it can hold is reached with clicks alone.
+    // refreshRateMode() writes their tooltips, which say what a click does in the live mode.
+    ratePrev.onClick = [this] { stepRate(-1); };
+    rateNext.onClick = [this] { stepRate(1); };
     shapePrev.setTooltip("Previous shape.");
     shapeNext.setTooltip("Next shape.");
-    ratePrev.setTooltip("Slower rate.");
-    rateNext.setTooltip("Faster rate.");
     // A button's accessible name is its text, and all four of these say "<" or ">". Name
     // them properly: a screen reader gets something meaningful, and the screenshot script
     // can drive one particular stepper through UI Automation instead of the first match.
@@ -728,7 +891,7 @@ void ArpPanel::buildControls()
     styleLabel(octavesLabel, "Repeats");
     addAndMakeVisible(octavesLabel);
     octavesSlider.setSliderStyle(juce::Slider::IncDecButtons);
-    octavesSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 34, 26);
+    octavesSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, true, 34, 26); // read-only; see rateKnob
     octavesSlider.setRange(1, 4, 1);
     octavesSlider.setTooltip("How many times the chord repeats, each one Distance further up.");
     addAndMakeVisible(octavesSlider);
@@ -746,7 +909,7 @@ void ArpPanel::buildControls()
     styleLabel(offsetLabel, "Offset");
     addAndMakeVisible(offsetLabel);
     offsetSlider.setSliderStyle(juce::Slider::IncDecButtons);
-    offsetSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 34, 26);
+    offsetSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, true, 34, 26); // read-only; see rateKnob
     offsetSlider.setRange(0, 31, 1);
     offsetSlider.setTooltip("Start the run further in: rotates the step lanes and the walk together.");
     addAndMakeVisible(offsetSlider);
@@ -760,7 +923,7 @@ void ArpPanel::buildControls()
         styleLabel(lab, text);
         addAndMakeVisible(lab);
         s.setSliderStyle(juce::Slider::LinearHorizontal);
-        s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 22);
+        s.setTextBoxStyle(juce::Slider::TextBoxRight, true, 46, 22); // read-only; see rateKnob
         s.setRange(lo, hi, 1.0);
         s.setTextValueSuffix(suffix);
         s.setTooltip(tip);
@@ -787,7 +950,7 @@ void ArpPanel::buildControls()
         styleLabel(lab, text);
         addAndMakeVisible(lab);
         s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
-        s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 52, 16);
+        s.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 52, 16); // read-only; see rateKnob
         s.setRange(lo, hi, step);
         s.setTooltip(tip);
         addAndMakeVisible(s);
@@ -958,6 +1121,7 @@ void ArpPanel::nudgeBars(int delta)
 void ArpPanel::timerCallback()
 {
     refreshShape(); // the host can automate arpPattern/arpDirection out from under us
+    refreshRateMode(); // ... and arpRateFree, which decides what the dial is even measuring
     refreshRetrig();
     refreshLaneReadouts();
     refreshPatternButtons();
@@ -1007,7 +1171,14 @@ namespace
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
     // groups share whatever that is. Row one is Pattern / Playback / Steps, row two is
     // Spread / Feel.
-    constexpr int groupWeights[3] = { 36, 42, 22 };
+    //
+    // PATTERN went from 36 to 40 on 2026-07-30, when Rate became a dial: a knob column spans
+    // both rows and takes 72 px off them (62 plus its two gaps) where the combo took none of
+    // it, and 4 points of the weight hands ~37 px back. The 4 came out of STEPS, which had
+    // ~50 px spare in each of its two rows (its widest control is a 150 px cell with a 120 px
+    // floor), and none out of PLAYBACK, whose second row is the one place on the band with
+    // nothing left to give - see the note beside Retrigger below.
+    constexpr int groupWeights[3] = { 40, 42, 18 };
     constexpr int group2Weights[2] = { 44, 56 };
 } // namespace
 
@@ -1150,21 +1321,41 @@ void ArpPanel::resized()
         next.setBounds(c.removeFromRight(34));
     };
 
-    // PATTERN: what it plays and how fast. Shape leads - it decides what else exists.
+    // PATTERN: what it plays and how fast. The rate dial takes the left column and spans both
+    // rows, the way the PLAYBACK knobs do; Shape leads the rows, since it decides what else
+    // exists. Everything on the second row is about the rate the dial shows.
     {
+        auto inner = groupInner(groups[0].bounds);
+        // 62, where the PLAYBACK knobs get 50: this one's readout has to fit "16 bars" as
+        // well as a number. In a single 42 px row it would have come out a ~26 px knob, well
+        // under the kit's 48 px floor for a rotary (okstudio/RotaryKnob.h).
+        knobColumn(inner, 62, rateLabel, rateKnob);
+        inner.removeFromLeft(4);
+
         juce::Rectangle<int> rowA, rowB;
-        splitRows(groupInner(groups[0].bounds), rowA, rowB);
-        // Fixed widths, not "whatever is left": letting the combo soak up the slack starved
+        splitRows(inner, rowA, rowB);
+        // Fixed widths, not "whatever is left": letting a control soak up the slack starved
         // Trip and Dot down to an ellipsis while Rate sat wider than its longest entry.
-        // These add up to the ~315 px this group actually gets at the editor's minimum
-        // width, which is a good deal less than it looks on a 150% display - every number
-        // here is logical pixels, and the panel is ~950 of them wide, not ~1450.
+        // These add up to the ~280 px the two rows get at the editor's minimum width (the
+        // group's ~352, less the dial column), which is a good deal less than it looks on a
+        // 150% display - every number here is logical pixels, and the panel is ~950 of them
+        // wide, not ~1450.
         cell(rowA, juce::jlimit(110, 235, rowA.getWidth() - 80), shapeLabel, shapeBox);
         stepper(rowA, shapePrev, shapeNext);
-        cell(rowB, 100, rateLabel, rateBox);
-        stepper(rowB, ratePrev, rateNext);
-        toggleCell(rowB, 58, tripButton);
-        toggleCell(rowB, 54, dotButton);
+
+        // The rate steppers and the mode switch are the only band controls laid out at the
+        // full 34 px hit height instead of the band's 28. The dial beside them is a drag
+        // target and these three are the click-only way to everything it holds, which makes
+        // them worth 6 px of a row that had the room. Bottom-aligned, so the row still reads
+        // as one line with Trip and Dot.
+        auto rateSteps = rowB.removeFromLeft(72).removeFromBottom(34);
+        rowB.removeFromLeft(8);
+        ratePrev.setBounds(rateSteps.removeFromLeft(34));
+        rateNext.setBounds(rateSteps.removeFromRight(34));
+        rateModeButton.setBounds(rowB.removeFromLeft(58).removeFromBottom(34));
+        rowB.removeFromLeft(6);
+        toggleCell(rowB, 56, tripButton);
+        toggleCell(rowB, 52, dotButton);
     }
 
     // PLAYBACK: how the run behaves once it is going. Three knobs down the left, then the

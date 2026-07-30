@@ -5,6 +5,72 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the arp rate can free-run in Hz
+
+The rate list stays exactly as it was, eleven tempo-synced divisions from "16 bars" to
+"1/64", and a new **Sync / Hz** switch beside it hands the timing to a **Hz** value instead.
+In Hz the arp free-runs always, transport rolling or stopped, and the playhead is not read
+for step timing at all: no bar grid, no tempo, just a frequency. That is a thing the synced
+list cannot express and every ambient patch eventually wants.
+
+**Rate is a dial now**, not a drop-down list. A frequency has no list to be, so the control
+became the kit's rotary, and the unit switch sits beside it: the chip reads **Sync** or
+**Hz**, whichever is live, and lights in Hz. In Sync the dial detents onto the eleven
+divisions and cannot land between two, and its readout says "1/8" or "4 bars"; in Hz it
+sweeps the frequency and says "4.00 Hz". Whatever moves the rate moves the dial, including a
+slot launch, the host and the MCP bridge.
+
+The `<` and `>` beside it stay, and stay meaningful in both units, because a dial is a drag
+target and these are the click-only way to reach every value it holds. In Sync a click is one
+division, as before. In Hz it is a quarter of an octave, so four clicks halve or double the
+rate, which is exactly the jump one entry of the Sync list makes; the ladder is anchored on
+1 Hz, so both ends of the range and every power of two sit on it and repeated clicks always
+land on the same values. **Dot**, **Trip** and **Anchor** grey out while Hz is on, since the
+engine ignores all three there: the first two subdivide a beat and the third follows a bar
+grid, and a free-running rate has neither.
+
+The readout under the dial is **read-only**, like every other value box in the arp panel.
+JUCE's `setTextBoxStyle` takes `isReadOnly`, and passing `false` there makes the box
+edit-on-*single*-click: one click opened a text editor and took keyboard focus, which in a
+plugin built for a mouse alone is a trap with no way out but clicking elsewhere. In Sync it
+was worse than a trap, since `AudioParameterChoice::getValueForText` returns -1 for anything
+that is not an exact division name and the rate would drop to "16 bars". The `<` and `>`
+reach every value either unit holds, so nothing was lost.
+
+The dial spans both rows of the PATTERN group, so the arp section is not one pixel taller
+than it was. It needed 72 px of width: about half came from the STEPS group, which had some
+50 px spare in each of its rows, and the rest from PATTERN's own two rows, where the Shape
+list and the Trip and Dot toggles all had room over their longest text.
+
+**Two parameters are new: `arpRateFree` (off) and `arpRateHz` (8 Hz).** Both are additive
+and `arpRate` is untouched, so a saved session loads in Sync and plays precisely what
+it always did. Automation lanes on any existing parameter are unaffected. That holds for a
+*live* instance too, not only a freshly created one: APVTS does not reset a parameter absent
+from a restored tree - it creates the child and flushes whatever value is currently there -
+so recalling an older session while the dial sat in Hz used to leave the arp free-running
+while the panel showed the division it had just restored. `migrateRateMode` writes both
+parameters back to their defaults when the tree carries neither, the same shape as the strum
+migration that ships beside it.
+
+The Hz range is 0.03125 to 32 Hz, which is not a round number by choice: it is exactly what
+the eleven divisions span at 120 bpm ("1/64" is 32 steps a second, "16 bars" is one step per
+32 seconds), so Hz reaches everything the list does. The ends are ten octaves apart, and the
+dial maps them **exponentially** - `value = lo * (hi/lo)^t` - so each octave gets a tenth of
+the travel and 1 Hz ("1/2" at 120 bpm, the geometric mean of the ends) falls at the centre.
+Without that, everything from "1 bar" down would live in the last two degrees of travel.
+Dot and Trip do nothing in Hz mode, deliberately: they subdivide a beat and there is no beat,
+so a dotted 8 Hz would only make the number on the dial a lie. Anchor is the same story with
+the bar grid. Retrigger Every and Ramp Time are counted in beats, so while Hz is on they read
+as seconds.
+
+The twelve arp slots carry the mode and the Hz value alongside the division they already
+remembered, so a slot captured in Hz launches in Hz rather than silently dropping back to
+Sync, and its card says so - to the same decimals-by-decade rule the parameter uses, so a
+card can never round 0.031 Hz down to "0.0Hz" and name a stopped arp. A slot captured in
+**Sync** leaves the Hz value alone entirely rather than installing the 8 Hz that a pre-Hz
+session synthesises for it. Slots in a session saved before this read back as Sync at the
+division they stored.
+
 ### Removed: the Centre section, and the knobs move into Controls
 
 The centre had been whittled down to one row. The arpeggiator became a section of its own on

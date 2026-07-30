@@ -45,6 +45,27 @@ public:
     // arpeggiator even after the step lanes have been edited.
     static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0 };
 
+    // The Hz mode's range, which is not a round number by choice: it is exactly what the
+    // eleven synced divisions span at 120 bpm. "1/64" is 32 steps a second and "16 bars" is
+    // one step per 32 seconds, so a Hz mode narrower than this would reach less than the
+    // list it sits beside. Ten octaves, and the parameter maps them exponentially, so each
+    // one gets a tenth of the dial's travel (1 Hz - "1/2" at 120 bpm - lands dead centre as a
+    // consequence, not as the thing being aimed at). Declared here rather than in the
+    // parameter layout so the engine's clamp and the dial's ends are the same two numbers.
+    static constexpr double minRateHz = 0.03125;
+    static constexpr double maxRateHz = 32.0;
+
+    // How a rate in Hz is written, wherever it is written: decimals by decade, so 0.031 Hz
+    // and 32.0 Hz both read as themselves. A fixed 2 prints the bottom octave of the range as
+    // "0.03", and a fixed 1 collapses the bottom *two* octaves onto "0.0" - which is how the
+    // slot cards came to label a running arp as a stopped one. One copy of the rule, spent by
+    // the arpRateHz parameter's text function and by ArpPanel's slot card; the unit suffix is
+    // the caller's, since the two do not space it the same way.
+    static juce::String rateHzText(double hz)
+    {
+        return juce::String(hz, hz < 1.0 ? 3 : (hz < 10.0 ? 2 : 1));
+    }
+
     // The chords the twelve slots hold, mirrored into atomics so a step can call one up on
     // the audio thread. The processor owns it and refreshes it on the message thread
     // whenever a slot's chord changes; the engine only ever reads.
@@ -97,6 +118,12 @@ public:
     {
         bool enabled = false;
         int rateIndex = 8;        // index into rateInBeats(), default 1/16
+        // The rate as a frequency instead of a division. True and the engine free-runs at
+        // `rateHz` always - transport rolling or stopped, anchored or not - and neither the
+        // playhead, `rateIndex`, `dotted` nor `triplet` is read for step timing. There is
+        // still only one scheduler: the mode picks which clock drives it (see process()).
+        bool rateFree = false;
+        double rateHz = 8.0;      // 8 Hz is 1/16 at 120 bpm, so the default is the same speed
         bool dotted = false;
         bool triplet = false;
         bool anchored = true;     // affixed to the host bar grid vs free-running
@@ -212,14 +239,38 @@ public:
                 out.addEvent(m, meta.samplePosition);
         }
 
-        const double bpm = (clock.playing && clock.bpm > 0) ? clock.bpm : p.fallbackBpm;
+        // Switching between Hz and Sync is a change of *timebase*, not of speed: one counts
+        // seconds and the other beats, so the phase carried across means nothing on the far
+        // side and the step in flight belongs to a timeline that no longer exists. Treated
+        // exactly like a transport jump below - close what is owed at the top of this block,
+        // then start the new clock from zero - so nothing is left stranded on note-on.
+        if (p.rateFree != lastRateFree)
+        {
+            lastRateFree = p.rateFree;
+            flushInto(out);
+            freePhaseBeats = 0.0;
+            havePrevPpq = false;
+            stepBase = 0;
+            lastRetrigWindow = std::numeric_limits<long long>::min();
+        }
+
+        // One scheduler, two clocks, and the mode picks which drives it. Hz mode pins the
+        // tempo to 60 so that one "beat" of everything below is one second; the step is then
+        // 1/hz of that unit, and every quantity measured as a *fraction of a step* (swing,
+        // the Late lane, gate, ratchet spacing) keeps its meaning with no second code path.
+        // The two things measured in beats outright, Retrigger Every and the velocity ramp's
+        // Ramp Time, therefore read as seconds while Hz is on. That is the honest reading:
+        // there is no bar to restart on when nothing is following a transport.
+        const double bpm = p.rateFree ? 60.0
+                                      : ((clock.playing && clock.bpm > 0) ? clock.bpm : p.fallbackBpm);
         const double beatsPerSample = bpm / 60.0 / sr;
         const double stepBeats = stepLengthBeats(p);
         const double blockBeats = beatsPerSample * numSamples;
 
-        // Position in beats at the start of this block.
+        // Position in beats at the start of this block. Hz mode never takes the anchored
+        // branch: following the bar grid is the one thing a free-running rate cannot do.
         double pos;
-        if (clock.playing && clock.hasPpq && p.anchored)
+        if (clock.playing && clock.hasPpq && p.anchored && ! p.rateFree)
         {
             pos = clock.ppq;
             // A jump (loop, relocate) means owed note-offs' timelines are invalid.
@@ -361,6 +412,23 @@ private:
 
     double stepLengthBeats(const Params& p) const
     {
+        // Hz mode: process() has pinned the clock to 60 bpm, so a "beat" is a second and the
+        // step length is simply the period. Dot and Trip are deliberately not applied - they
+        // are subdivisions of a beat, and there is no beat here; all a dotted 8 Hz would do
+        // is make the number on the dial a lie.
+        //
+        // The clamp is not only about musical range: it is the only thing keeping the step
+        // loop in process() terminating, and this runs on the audio thread. At rateHz 0 the
+        // period is +inf, the Late lane's `stepBeats * lane` term goes NaN, every comparison
+        // against it is false, the computed offset is INT_MIN on every pass, and the
+        // `offset >= numSamples` break never trips. Mutation-tested on 2026-07-30 by deleting
+        // this jlimit: the test binary hung and had to be killed. A negative rate is harmless
+        // by comparison, since `stepBeats > 0.0` catches it and simply fires nothing. So do
+        // not move this clamp to the parameter and trust it: the engine takes whatever a
+        // session, a host automation lane or an MCP client hands it.
+        if (p.rateFree)
+            return 1.0 / juce::jlimit(minRateHz, maxRateHz, p.rateHz);
+
         static constexpr double base[11] = { 64.0, 32.0, 16.0, 8.0, 4.0,   // 16,8,4,2,1 bars
                                              2.0, 1.0, 0.5, 0.25, 0.125, 0.0625 }; // 1/2..1/64
         double b = base[juce::jlimit(0, 10, p.rateIndex)];
@@ -883,6 +951,11 @@ private:
     double freePhaseBeats = 0.0;
     double expectedNextPpq = 0.0;
     bool havePrevPpq = false;
+    // The rate mode the last block ran under, so process() can spot the timebase changing
+    // under it. Deliberately not cleared by hardReset(): it is not playback state but a
+    // memory of what was read, and zeroing it would report a mode change that never happened
+    // (harmless - hardReset has already done the same work - but it would be a lie).
+    bool lastRateFree = false;
     std::mt19937 rng { 0xFAB1E5EDu }; // fixed seed: deterministic tests, free variation live
 };
 } // namespace keys

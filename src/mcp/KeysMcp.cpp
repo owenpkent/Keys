@@ -196,7 +196,8 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
     t.name = "get_state";
     t.description = "Snapshot of Keys' current performance state: product and version, "
                      "the load-bearing controls (root, scale, scale lock, octave, sustain, "
-                     "latch, velocity, arp on/rate/direction/octaves/latch, which arp "
+                     "latch, velocity, arp on/rate (both the synced division and the "
+                     "free-running Hz, plus which of the two is live)/direction/octaves/latch, which arp "
                      "pattern is active, and which chord-pad page is showing), plus how "
                      "many chord pads currently hold a chord. Call this first to orient "
                      "before changing anything.";
@@ -215,6 +216,10 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("velocity", juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         obj->setProperty("arpOn", text("arpOn"));
         obj->setProperty("arpRate", text("arpRate"));
+        // Which of the two rates is actually running. Without this a client reads arpRate,
+        // sees "1/16" and cannot tell that the arp is free-running at 3 Hz instead.
+        obj->setProperty("arpRateFree", text("arpRateFree"));
+        obj->setProperty("arpRateHz", text("arpRateHz"));
         obj->setProperty("arpDirection", text("arpDirection"));
         // Without this a client cannot tell why lanes it just wrote are silent: the step
         // lanes are only read while arpPattern is on (Shape "Pattern").

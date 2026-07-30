@@ -3,6 +3,7 @@
 #include "../ArpEngine.h"
 #include "../PluginProcessor.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <okstudio/RotaryKnob.h>
 #include <array>
 #include <functional>
 #include <memory>
@@ -163,7 +164,13 @@ private:
     void recallOrCopy(int index);
     void launchSlot(int index);   // left-click on a slot card
     void showSlotMenu(int index); // right-click accelerator; everything in it is also a button
-    void stepCombo(juce::ComboBox&, int delta); // the < > pair beside Shape and Rate
+    void stepCombo(juce::ComboBox&, int delta); // the < > pair beside Shape
+    // Rate spans two parameters and two units, so its < > pair cannot be stepCombo: in Sync it
+    // walks the division list, in Hz it multiplies the frequency. See stepRate().
+    void stepRate(int delta);
+    // Which of the two rate parameters the dial is attached to, plus everything that has to
+    // say which unit is live. Driven off arpRateFree, so a host automating it lands here too.
+    void refreshRateMode();
 
     // The captioned, ruled group boxes the band is drawn as. Filled in by resized() and
     // painted by paint(), because a caption and a rule are two lines of Graphics each and
@@ -192,6 +199,11 @@ private:
 
     bool inlineMode = false;
     int lastPatternMode = -1; // -1 = not yet laid out; else the last bool seen
+    int lastRateFree = -1;    // same trick for the rate mode: -1 = no attachment installed yet
+    // Is the rate dial being dragged right now? A drag is an open parameter gesture, and the
+    // attachment that opened it cannot be destroyed until it closes; refreshRateMode() defers
+    // the swap while this is set, and rateKnob.onDragEnd calls it back on the mouse-up.
+    bool rateDragging = false;
 
     KeysProcessor& processor;
 
@@ -201,11 +213,22 @@ private:
     // Shape carries the eight directions plus "Pattern", after Serum 2, whose step
     // editor only exists while SHAPE is "Pattern". It cannot be a plain APVTS
     // attachment because it spans two parameters (arpDirection + arpPattern).
-    juce::ComboBox rateBox, shapeBox, distanceBox, retrigBox;
+    juce::ComboBox shapeBox, distanceBox, retrigBox;
     juce::Label rateLabel, shapeLabel, distanceLabel, retrigLabel;
+    // Rate is a dial, and which parameter it turns depends on the mode: in Sync it detents
+    // through the eleven divisions of arpRate, in Hz it sweeps arpRateHz. One attachment is
+    // alive at a time (refreshRateMode swaps them), which is what makes the dial's range, its
+    // detents, its skew and its readout all come from the parameter rather than from here.
+    okstudio::RotaryKnob rateKnob;
+    // The switch between the two, reading the mode that is live. A dial position means two
+    // different things in the two modes, so this says which one you are looking at, and the
+    // readout under the dial says it a second time in its units.
+    juce::TextButton rateModeButton { "Sync" };
     // The < > pairs beside Shape and Rate. Not decoration: stepping to the next shape is
     // the commonest thing you do to an arp, and a button is one click where the combo is a
-    // click, a travel and a second click.
+    // click, a travel and a second click. Beside the rate dial they are load-bearing rather
+    // than a convenience - a dial is a *drag* target, and these are the click-only path to
+    // every value it can hold, in both modes.
     juce::TextButton shapePrev { "<" }, shapeNext { ">" }, ratePrev { "<" }, rateNext { ">" };
     juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
     juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
@@ -254,8 +277,10 @@ private:
     void setArmed(Armed, int fromIndex = -1);
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, linkAtt;
-    std::unique_ptr<ComboAtt> rateAtt, distanceAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, linkAtt, rateModeAtt;
+    std::unique_ptr<ComboAtt> distanceAtt;
+    // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
+    std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
     std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt;
 

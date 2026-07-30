@@ -982,6 +982,336 @@ public:
             }
             expect(sawLate, "something actually moved");
         }
+
+        // ---------------------------------------------------------------------------------
+        // Hz mode: the second timebase. `rateFree` swaps the beat grid for a free-running
+        // frequency - process() pins the tempo to 60 so that one "beat" is one second and the
+        // step is 1/hz of it, and the playhead stops being read for step timing at all.
+        // Everything below is a question about *when* a step fires, so it all goes through
+        // one helper: n buffers, each block's ppq chosen by the caller, and back come the
+        // absolute samples of every note-on.
+        // ---------------------------------------------------------------------------------
+        const auto onsetsOf = [&](const ArpEngine::Params& sp, ArpEngine::HostClock c,
+                                  int blockSize, int blocks, auto ppqAt)
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            std::vector<int> onsets;
+            for (int b = 0; b < blocks; ++b)
+            {
+                juce::MidiBuffer out;
+                c.ppq = ppqAt(b);
+                e.process(sp, c, blockSize, b == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                for (auto& x : collect(out))
+                    if (x.on)
+                        onsets.push_back(b * blockSize + x.sample);
+            }
+            return onsets;
+        };
+
+        // 8 Hz is a step every 6000 samples at 48 kHz, which is deliberately the same speed as
+        // the 1/16 at 120 bpm the rest of this suite runs at: the two timebases can then be
+        // read against each other onset for onset.
+        auto hzp = p;
+        hzp.rateFree = true;
+        hzp.rateHz = 8.0;
+
+        const auto steady = [](int b) { return 0.25 * b; }; // an honest 120 bpm playhead
+        const auto wild = [](int b)
+        {
+            // Loop points, relocates and a scrub backwards, one per block, and none of them on
+            // a step boundary - a jump that happens to land on one would move a synced arp
+            // nowhere either, and prove nothing about a free one.
+            static constexpr double jumps[] = { 0.0, 7.1, 3.33, 128.2, 0.5, 64.07, 0.125, 96.4 };
+            return jumps[(size_t) (b % 8)];
+        };
+
+        beginTest("Hz mode never reads the playhead");
+        {
+            // Anchored is on and the transport is rolling, which in Sync is exactly the case
+            // that affixes steps to the host bar grid. In Hz the anchored branch is skipped
+            // outright, so a loop, a relocate and a scrub have to leave every onset where it
+            // was: the free phase is the only clock there is.
+            const auto straight = onsetsOf(hzp, clock, block, 8, steady);
+            const auto jumping = onsetsOf(hzp, clock, block, 8, wild);
+            expectEquals((int) straight.size(), 8, "8 Hz is one step per 6000-sample block");
+            expect(jumping == straight, "a jumping playhead moves nothing in Hz mode");
+            for (int i = 0; i < (int) straight.size(); ++i)
+                expectWithinAbsoluteError(straight[(size_t) i], i * 6000, 2);
+        }
+
+        beginTest("Sync mode does follow the playhead, on the same clock and chord");
+        {
+            // The other half of the claim above: what differs is the mode, not the helper.
+            // Half a step of ppq offset moves every synced onset half a step, and the wild
+            // playhead that Hz sat still through moves it about at will.
+            const auto onGrid = onsetsOf(p, clock, block, 8, steady);
+            const auto shifted = onsetsOf(p, clock, block, 8, [](int b) { return 0.25 * b + 0.125; });
+            expectEquals((int) onGrid.size(), 8);
+            expectEquals((int) shifted.size(), 8);
+            for (int i = 0; i < 8 && i < (int) shifted.size(); ++i)
+                expectWithinAbsoluteError(shifted[(size_t) i], i * 6000 + 3000, 2);
+            expect(onsetsOf(p, clock, block, 8, wild) != onGrid,
+                   "a synced arp goes where the transport goes");
+        }
+
+        beginTest("the Hz step is one over the rate, and Dot and Trip do not touch it");
+        {
+            // Sync divides a beat, so Dot and Trip are subdivisions of one. Hz has no beat to
+            // subdivide, and all a dotted 8 Hz could do is make the number on the dial a lie.
+            const auto period = [&](const ArpEngine::Params& sp, int blocks)
+            {
+                const auto on = onsetsOf(sp, clock, block, blocks, steady);
+                return on.size() >= 2 ? on[1] - on[0] : -1;
+            };
+            auto slow = hzp;
+            slow.rateHz = 4.0; // 12000 samples
+            auto fast = hzp;
+            fast.rateHz = 16.0; // 3000 samples
+            expectWithinAbsoluteError(period(hzp, 4), 6000, 2);
+            expectWithinAbsoluteError(period(slow, 6), 12000, 2);
+            expectWithinAbsoluteError(period(fast, 4), 3000, 2);
+
+            auto dot = hzp;
+            dot.dotted = true;
+            auto trip = hzp;
+            trip.triplet = true;
+            auto both = hzp;
+            both.dotted = both.triplet = true;
+            expectWithinAbsoluteError(period(dot, 4), 6000, 2, "Dot is not applied in Hz");
+            expectWithinAbsoluteError(period(trip, 4), 6000, 2, "and neither is Trip");
+            expectWithinAbsoluteError(period(both, 4), 6000, 2, "nor the two together");
+
+            // ...and both still mean exactly what they always did on the synced side.
+            auto syncDot = p;
+            syncDot.dotted = true;
+            auto syncTrip = p;
+            syncTrip.triplet = true;
+            expectWithinAbsoluteError(period(syncDot, 4), 9000, 2, "a dotted 1/16 is a step and a half");
+            expectWithinAbsoluteError(period(syncTrip, 4), 4000, 2, "a triplet 1/16 is two thirds of one");
+        }
+
+        beginTest("a rate-mode flip mid-note closes everything it owed, at offset 0");
+        {
+            // A change of timebase is treated exactly like a transport jump: the step in
+            // flight belongs to a timeline that no longer exists, so what is owed is closed at
+            // the top of the block rather than left to land somewhere on the new clock. Gate
+            // 200% keeps two pitches ringing across the flip, which is the leak this guards.
+            // Both directions, because what is watched is the flag, not the way it moved.
+            const auto flipCheck = [&](bool startFree, const juce::String& what)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto before = p;
+                before.gate = 200; // every note is owed two steps past its own
+                before.rateFree = startFree;
+                auto after = before;
+                after.rateFree = ! startFree;
+
+                std::array<int, 128> sounding {};
+                auto c = clock;
+                for (int b = 0; b < 3; ++b)
+                {
+                    juce::MidiBuffer out;
+                    c.ppq = 0.25 * b;
+                    e.process(before, c, block,
+                              b == 0 ? chordOn({ 60, 64, 67, 72 }) : juce::MidiBuffer {}, out);
+                    for (auto& x : collect(out))
+                        sounding[(size_t) x.note] += x.on ? 1 : -1;
+                }
+                int owed = 0;
+                for (int n : sounding)
+                    owed += n;
+                expect(owed > 0, what + ": something is still ringing when the mode flips");
+
+                juce::MidiBuffer out;
+                c.ppq = 0.75;
+                e.process(after, c, block, {}, out);
+                const auto ev = collect(out);
+                int firstOn = (int) ev.size();
+                for (int i = 0; i < (int) ev.size(); ++i)
+                    if (ev[(size_t) i].on)
+                    {
+                        firstOn = i;
+                        break;
+                    }
+                expect(firstOn < (int) ev.size(), what + ": the new clock fires in this very block, "
+                                                         "so there is something to sort against");
+
+                std::array<int, 128> fired {};
+                for (int i = 0; i < (int) ev.size(); ++i)
+                {
+                    const auto& x = ev[(size_t) i];
+                    if (! x.on)
+                    {
+                        expectEquals(x.sample, 0, what + ": every owed note-off is flushed at the "
+                                                         "top of the block");
+                        expect(i < firstOn, what + ": and before any note-on at the same sample");
+                    }
+                    else
+                        ++fired[(size_t) x.note];
+                    sounding[(size_t) x.note] += x.on ? 1 : -1;
+                }
+
+                int leaked = 0;
+                for (int n = 0; n < 128; ++n)
+                    if (sounding[(size_t) n] != fired[(size_t) n])
+                        ++leaked;
+                expectEquals(leaked, 0, what + ": every pitch that had a note-on has its note-off; "
+                                               "nothing hangs on the far side of the timebase");
+            };
+            flipCheck(false, "Sync to Hz");
+            flipCheck(true, "Hz to Sync");
+        }
+
+        beginTest("swing is a fraction of the Hz step, not of a beat");
+        {
+            // Under the 60 bpm pinning a "beat" is a second, so everything measured in steps
+            // has to scale with the Hz period instead. Half a step of swing is 6000 samples at
+            // 4 Hz and 3000 at 8 Hz; a swing that had leaked into real beats would move both
+            // offbeats by the same amount.
+            auto slow = hzp;
+            slow.rateHz = 4.0;
+            slow.swing = 0.5f;
+            auto fast = hzp;
+            fast.swing = 0.5f; // 8 Hz
+            const auto a = onsetsOf(slow, clock, block, 8, steady);
+            expectEquals((int) a.size(), 4, "no offbeat lost to the block its swing pushed it into");
+            if (a.size() == 4)
+            {
+                expectWithinAbsoluteError(a[0], 0, 2);
+                expectWithinAbsoluteError(a[1], 18000, 2); // 12000 + half of a 12000-sample step
+                expectWithinAbsoluteError(a[2], 24000, 2);
+                expectWithinAbsoluteError(a[3], 42000, 2);
+            }
+            const auto b = onsetsOf(fast, clock, block, 8, steady);
+            expectEquals((int) b.size(), 8);
+            if (b.size() == 8)
+            {
+                expectWithinAbsoluteError(b[1], 9000, 2); // 6000 + half of a 6000-sample step
+                expectWithinAbsoluteError(b[3], 21000, 2);
+            }
+        }
+
+        beginTest("gate measures the note against the Hz step, not against a beat");
+        {
+            const auto firstOffOf = [&](double hz, int gate, int blocks)
+            {
+                auto sp = hzp;
+                sp.rateHz = hz;
+                sp.gate = gate;
+                ArpEngine e;
+                e.prepare(sr);
+                auto c = clock;
+                // Four held notes, so the note under test fires once and is not closed early
+                // by its own retrigger on the next step.
+                for (int i = 0; i < blocks; ++i)
+                {
+                    juce::MidiBuffer out;
+                    c.ppq = 0.25 * i;
+                    e.process(sp, c, block,
+                              i == 0 ? chordOn({ 60, 64, 67, 72 }) : juce::MidiBuffer {}, out);
+                    for (auto& x : collect(out))
+                        if (! x.on && x.note == 60)
+                            return i * block + x.sample;
+                }
+                return -1;
+            };
+            // Half a step is half of 1/hz seconds, and nothing else.
+            expectWithinAbsoluteError(firstOffOf(8.0, 50, 4), 3000, 2);
+            expectWithinAbsoluteError(firstOffOf(4.0, 50, 4), 6000, 2);
+            expectWithinAbsoluteError(firstOffOf(16.0, 50, 4), 1500, 2);
+        }
+
+        beginTest("the Late lane delays by a fraction of the Hz step");
+        {
+            // Two rates, because one proves nothing: a lane that had quietly gone on measuring
+            // itself against a beat would still look right at whichever rate happens to match
+            // the synced division underneath it.
+            const auto lateRun = [&](double hz, int blocks)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                e.lanes.value[ArpEngine::laneLate][1].store(50); // step 2, half a step late
+                auto sp = hzp;
+                sp.usePattern = true;
+                sp.rateHz = hz;
+                std::vector<int> onsets;
+                auto c = clock;
+                for (int i = 0; i < blocks; ++i)
+                {
+                    juce::MidiBuffer out;
+                    c.ppq = 0.25 * i;
+                    e.process(sp, c, block, i == 0 ? chordOn({ 60 }) : juce::MidiBuffer {}, out);
+                    for (auto& x : collect(out))
+                        if (x.on)
+                            onsets.push_back(i * block + x.sample);
+                }
+                return onsets;
+            };
+
+            const auto fast = lateRun(8.0, 3); // a 6000-sample step, so half of one is 3000
+            expectEquals((int) fast.size(), 3, "every step still fires exactly once");
+            if (fast.size() == 3)
+            {
+                expectWithinAbsoluteError(fast[0], 0, 2);
+                expectWithinAbsoluteError(fast[1], 9000, 2); // 6000 + half a 6000-sample step
+                expectWithinAbsoluteError(fast[2], 12000, 2);
+            }
+
+            const auto slow = lateRun(4.0, 6); // a 12000-sample step, so half of one is 6000
+            expectEquals((int) slow.size(), 3, "and at half the rate, still exactly once");
+            if (slow.size() == 3)
+            {
+                expectWithinAbsoluteError(slow[0], 0, 2);
+                expectWithinAbsoluteError(slow[1], 18000, 2); // twice the shift, for twice the step
+                expectWithinAbsoluteError(slow[2], 24000, 2);
+            }
+        }
+
+        beginTest("an out-of-range Hz is clamped; zero neither divides nor hangs");
+        {
+            // The step length is 1/hz, so an unclamped zero is an infinite step - and a NaN
+            // boundary on the very next iteration of the step loop - while an unclamped
+            // negative is a negative step length, which the scheduler reads as "never fire".
+            // Both are one hand-edited session away.
+            const auto countAt = [&](double hz, int blocks)
+            {
+                auto sp = hzp;
+                sp.rateHz = hz;
+                return (int) onsetsOf(sp, clock, block, blocks, steady).size();
+            };
+            // 300 blocks is 1.8 M samples and the slowest rate is one step per 1.536 M: two.
+            expectEquals(countAt(ArpEngine::minRateHz, 300), 2, "the slowest rate still fires");
+            expectEquals(countAt(0.0, 300), 2, "zero reads as the slowest rate, not as forever");
+            expectEquals(countAt(-8.0, 300), 2, "and so does a negative");
+            expectEquals(countAt(ArpEngine::maxRateHz, 1), 4, "32 Hz is four steps in a 6000-sample block");
+            expectEquals(countAt(1.0e6, 1), 4, "and anything past the top reads as 32 Hz");
+        }
+
+        beginTest("Hz free-runs with the transport stopped, and with no tempo at all");
+        {
+            // The point of a rate in Hz: an arp that runs whether or not anything is playing.
+            // Sync falls back to an internal clock when the transport stops; Hz was never on
+            // the transport to begin with, so stopped and rolling have to be the same run.
+            ArpEngine::HostClock stopped;
+            stopped.playing = false;
+            stopped.hasPpq = false;
+            stopped.bpm = 0.0;
+            const auto still = onsetsOf(hzp, stopped, block, 8, steady);
+            const auto rolling = onsetsOf(hzp, clock, block, 8, steady);
+            expectEquals((int) still.size(), 8, "one step per 6000-sample block, transport or not");
+            expect(still == rolling, "stopped and rolling are the same clock in Hz mode");
+
+            // And no tempo reaches it either way: 60 bpm is pinned, so neither the host's bpm
+            // nor the internal clock's fallback can stretch the period.
+            auto odd = hzp;
+            odd.fallbackBpm = 200.0;
+            auto slowHost = clock;
+            slowHost.bpm = 45.0;
+            expect(onsetsOf(odd, stopped, block, 8, steady) == still, "fallbackBpm is not read");
+            expect(onsetsOf(odd, slowHost, block, 8, steady) == still, "and neither is the host's bpm");
+        }
     }
 };
 

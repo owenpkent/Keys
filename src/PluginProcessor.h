@@ -249,6 +249,16 @@ public:
         juce::String chordName;
         int shape = -1;  // 0..numDirections-1 a direction, numDirections = Pattern
         int rate = -1;   // index into the arpRate choice list
+        // The rate's *mode*, captured with it. A slot stored while the rate was in Hz has to
+        // bring the Hz value and the switch back with it, or launching it drops the user into
+        // Sync at whatever division `rate` happens to hold - silently, since the pattern and
+        // the chord would both be right. Read only when `rate >= 0`, which stays the single
+        // "this slot remembers a rate at all" flag - and `rateHz` only when `rateFree` is
+        // also set, because a Sync slot has no Hz value of its own to install (a session
+        // saved before the mode reads back as the default 8, which is not anything the user
+        // asked for and must not overwrite what they dialled in).
+        bool rateFree = false;
+        float rateHz = 8.0f;
         int bars = 1;    // how long the chain holds this slot before moving on
     };
     const ArpPattern& arpPatternSlot(int index) const;
@@ -299,6 +309,9 @@ protected:
     void restoreSharedState(const juce::ValueTree& root);
     // Repairs a session saved before Strum became a range; see the definition for the tell.
     void migrateStrumRange(const juce::ValueTree& root);
+    // Same shape: puts the arp rate back in Sync when a session predates the Hz mode, since an
+    // absent parameter keeps the live instance's current value rather than resetting.
+    void migrateRateMode(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);

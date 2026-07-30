@@ -394,17 +394,26 @@ and **STEPS** (Pattern shape only) drives the step editor. The `<` and `>` butto
 Shape and Rate step to the next entry without opening the menu; they stop at the ends rather
 than wrapping round.
 
+**Rate is a dial with two units.** The chip beside it reads the one that is live, **Sync** or
+**Hz**, and one click swaps them. In Sync the dial detents onto the eleven divisions, so it
+cannot land between two, and the readout under it says "1/8" or "4 bars". In Hz it sweeps a
+frequency and the readout says "4.00 Hz". The `<` and `>` beside it are the click-only path
+to every value in both units: in Sync a click is one division, in Hz it is a quarter of an
+octave, so four clicks halve or double the rate, which is the same jump one entry of the Sync
+list makes.
+
 | Control | Group | What it does |
 |---------|-------|--------------|
 | **On** | header | Arp on or off. Everything else stays editable while it is off. |
 | **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, **Random**, **Random Other** (never the same note twice running), **Random Once** (a shuffled order, kept for as long as the chord is held), **Chord** (every note of the chord on every step, so the arp plays rhythm instead of a run), or **Pattern** (opens the step editor). |
-| **Rate** | Pattern | Step length, 16 bars down to 1/64. |
-| **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. |
+| **Rate** | Pattern | A dial. In **Sync**, step length from 16 bars down to 1/64, detented onto the eleven divisions. In **Hz**, a free-running 0.031 to 32 Hz, which is the same span those divisions cover at 120 bpm. The Hz dial is exponential: ten octaves, a tenth of the travel each, so 1 Hz sits at the centre and a degree of the dial is the same *ratio* wherever you are on it. |
+| **Sync** / **Hz** | Pattern | Which unit the dial is in. Sync follows the host tempo and its bar grid; Hz ignores both and runs whether the transport rolls or not. The chip reads the live unit and lights in Hz. |
+| **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. Greyed out in Hz: they subdivide a beat, and there is no beat there. |
 | **Swing** | Playback | −0.75 – +0.75, starting centred. Shifts the offbeat steps: right delays them for a shuffle, left pulls them early to rush the beat, centre is dead straight. |
 | **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
 | **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
 | **Retrigger** | Playback | When the pattern starts over: **Off**, **Note** (a new chord restarts it), or a clock window — 1 or 2 beats, 1, 2 or 4 bars. A clock window is what makes a five-step lane still land on the bar. |
-| **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. |
+| **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. Greyed out in Hz, alongside Dot and Trip: a free-running rate follows no bar grid, so there is nothing there to anchor to. |
 | **Latch** | Playback | Keep arpeggiating after you let go, until a new chord arrives. |
 | **Repeats** | Spread | 1–4. How many times the chord is stacked up the keyboard before the run repeats. (This was "Octaves", back when an octave was the only thing it could stack by.) |
 | **Distance** | Spread | How far each repeat goes: **Octave**, **5th**, **4th**, **Maj 3rd**, **min 3rd**, or the scale-relative **Scale 2nd / 3rd / 5th / 7th**. The scale entries count degrees of Root and Scale, so a third stays a third *of this key* — C lifts to E, D lifts to F — which is the one thing the stock arps cannot do. |
