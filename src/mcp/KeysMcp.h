@@ -56,6 +56,11 @@ private:
     okstudio::mcp::Tool toolSetArpPattern();
     okstudio::mcp::Tool toolRecallArpPattern();
     okstudio::mcp::Tool toolStoreArpPattern();
+    okstudio::mcp::Tool toolChanceState();
+    okstudio::mcp::Tool toolChanceSet();
+    okstudio::mcp::Tool toolChanceGenerate();
+    okstudio::mcp::Tool toolChanceFreeze();
+    okstudio::mcp::Tool toolChanceLearned();
 
     KeysProcessor& processor;
     okstudio::mcp::Server server;

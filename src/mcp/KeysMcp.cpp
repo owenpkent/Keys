@@ -75,6 +75,40 @@ namespace
         obj.setProperty("lengths", juce::var(lengthsObj));
         obj.setProperty("clockDivs", juce::var(clockDivsObj));
     }
+
+    // chance_set's short names, matching docs/CHANCE_DESIGN.md's Parameters table with the
+    // "chance" prefix dropped (every one of these ids already carries it).
+    struct ChanceKnob
+    {
+        const char* shortName;
+        const char* paramId;
+    };
+    const ChanceKnob chanceKnobs[] = {
+        { "on", "chanceOn" },
+        { "density", "chanceDensity" },
+        { "dejaVu", "chanceDejaVu" },
+        { "loopLen", "chanceLoopLen" },
+        { "jitter", "chanceJitter" },
+        { "spread", "chanceSpread" },
+        { "bias", "chanceBias" },
+        { "temp", "chanceTemp" },
+        { "wander", "chanceWander" },
+        { "key", "chanceKey" },
+        { "chord", "chanceChord" },
+        { "tMode", "chanceTMode" },
+        { "xMode", "chanceXMode" },
+        { "learn", "chanceLearn" },
+    };
+
+    // nullptr for anything not in the table above, so callers get one validation error
+    // listing every bad name rather than failing on the first.
+    const char* chanceParamIdFor(const juce::String& shortName)
+    {
+        for (const auto& k : chanceKnobs)
+            if (shortName == k.shortName)
+                return k.paramId;
+        return nullptr;
+    }
 } // namespace
 
 KeysMcp::KeysMcp(KeysProcessor& p)
@@ -95,6 +129,11 @@ KeysMcp::KeysMcp(KeysProcessor& p)
     server.addTool(toolSetArpPattern());
     server.addTool(toolRecallArpPattern());
     server.addTool(toolStoreArpPattern());
+    server.addTool(toolChanceState());
+    server.addTool(toolChanceSet());
+    server.addTool(toolChanceGenerate());
+    server.addTool(toolChanceFreeze());
+    server.addTool(toolChanceLearned());
     server.start();
     startTimer(5); // was 30: chord releases tolerate it, scheduled notes do not
 }
@@ -816,6 +855,184 @@ okstudio::mcp::Tool KeysMcp::toolStoreArpPattern()
     {
         processor.storeActiveArpPattern();
         return juce::var(true);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolChanceState()
+{
+    okstudio::mcp::Tool t;
+    t.name = "chance_state";
+    t.description = "Snapshot of the Chance module (docs/CHANCE_DESIGN.md): whether it's "
+                     "on, every knob's current value, the Rhythm/Voice mode names and Loop "
+                     "Length, the current seed (as a string - it's 64-bit state, not a "
+                     "parameter), whether a phrase has been captured (so chance_freeze has "
+                     "something to grab), and whether Learn has built a histogram yet. Call "
+                     "this first to see what chance_set can change.";
+    t.run = [this](const juce::var&, juce::String&) -> juce::var
+    {
+        auto raw = [this](const char* id) { return processor.apvts.getRawParameterValue(id)->load(); };
+        auto text = [this](const char* id) { return processor.apvts.getParameter(id)->getCurrentValueAsText(); };
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("on", raw("chanceOn") > 0.5f);
+        obj->setProperty("density", (int) raw("chanceDensity"));
+        obj->setProperty("dejaVu", (int) raw("chanceDejaVu"));
+        obj->setProperty("loopLen", text("chanceLoopLen"));
+        obj->setProperty("jitter", (int) raw("chanceJitter"));
+        obj->setProperty("spread", (int) raw("chanceSpread"));
+        obj->setProperty("bias", (int) raw("chanceBias"));
+        obj->setProperty("temp", (int) raw("chanceTemp"));
+        obj->setProperty("wander", (int) raw("chanceWander"));
+        obj->setProperty("key", (int) raw("chanceKey"));
+        obj->setProperty("chord", (int) raw("chanceChord"));
+        obj->setProperty("tMode", text("chanceTMode"));
+        obj->setProperty("xMode", text("chanceXMode"));
+        obj->setProperty("learn", raw("chanceLearn") > 0.5f);
+        obj->setProperty("seed", juce::String(processor.chanceSeed()));
+        obj->setProperty("hasPhrase", processor.chanceHasPhrase());
+        obj->setProperty("hasLearned", processor.chanceHasLearned());
+        return juce::var(obj);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolChanceSet()
+{
+    okstudio::mcp::Tool t;
+    t.name = "chance_set";
+    t.description = "Set any subset of the Chance module's knobs in one call, so a whole "
+                     "sound installs in one round trip. Keys are the same names as the "
+                     "parameters with the \"chance\" prefix dropped: on, density, dejaVu, "
+                     "loopLen, jitter, spread, bias, temp, wander, key, chord, tMode, xMode, "
+                     "learn (see chance_state). loopLen/tMode/xMode accept either their "
+                     "string name or their numeric index, same as set_params. Every name is "
+                     "validated before anything changes: if any is unknown, the whole call "
+                     "fails and nothing is applied. Values are clamped to their legal range. "
+                     "Returns each knob's new text value. Note: turning \"on\" true does not "
+                     "also turn the arp on (Chance has no clock of its own) - set_params "
+                     "{values:{arpOn:true}} too, or it generates silently.";
+    t.params = { { "values", "object", "Map of short knob name -> new value (string, number, or boolean).", true } };
+    t.run = [this](const juce::var& args, juce::String& error) -> juce::var
+    {
+        auto* values = args.getProperty("values", juce::var()).getDynamicObject();
+        if (values == nullptr)
+        {
+            error = "values must be an object of knob name -> value";
+            return {};
+        }
+
+        // Validate every name before touching anything, same contract as set_params.
+        juce::StringArray unknown;
+        for (const auto& prop : values->getProperties())
+            if (chanceParamIdFor(prop.name.toString()) == nullptr)
+                unknown.add(prop.name.toString());
+        if (! unknown.isEmpty())
+        {
+            error = "unknown Chance knob(s): " + unknown.joinIntoString(", ");
+            return {};
+        }
+
+        auto* result = new juce::DynamicObject();
+        for (const auto& prop : values->getProperties())
+        {
+            auto* param = processor.apvts.getParameter(chanceParamIdFor(prop.name.toString()));
+            const juce::var& v = prop.value;
+            float normalized;
+            if (v.isBool())
+                normalized = ((bool) v) ? 1.0f : 0.0f;
+            else if (v.isString())
+                normalized = param->getValueForText(v.toString());
+            else
+                normalized = param->convertTo0to1((float) v);
+
+            param->beginChangeGesture();
+            param->setValueNotifyingHost(juce::jlimit(0.0f, 1.0f, normalized));
+            param->endChangeGesture();
+            result->setProperty(prop.name, param->getCurrentValueAsText());
+        }
+        return juce::var(result);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolChanceGenerate()
+{
+    okstudio::mcp::Tool t;
+    t.name = "chance_generate";
+    t.description = "New seed for the Chance module, hence a new phrase: everything Chance "
+                     "plays is a pure function of its seed (docs/CHANCE_DESIGN.md), so this "
+                     "is the whole meaning of Generate. Returns the new seed.";
+    t.run = [this](const juce::var&, juce::String&) -> juce::var
+    {
+        processor.regenerateChance();
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("seed", juce::String(processor.chanceSeed()));
+        return juce::var(obj);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolChanceFreeze()
+{
+    okstudio::mcp::Tool t;
+    t.name = "chance_freeze";
+    t.description = "Hand the phrase Chance just played to an arp pattern slot, as an "
+                     "ordinary editable pattern (docs/CHANCE_DESIGN.md) - one left-click's "
+                     "worth of work. Defaults to the active arp pattern slot when none is "
+                     "given. Fails explicitly if Chance has not generated anything yet.";
+    t.params = { { "slot", "integer", "Arp pattern slot 0..11 to freeze into. Default: the active arp pattern.", false } };
+    t.run = [this](const juce::var& args, juce::String& error) -> juce::var
+    {
+        const int slot = args.hasProperty("slot") ? (int) args.getProperty("slot", -1) : processor.arpActivePattern();
+        if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
+        {
+            error = "slot out of range 0..11";
+            return {};
+        }
+        if (! processor.freezeChanceToSlot(slot))
+        {
+            error = "nothing generated yet: call chance_generate (or turn Chance on with the arp running) first";
+            return {};
+        }
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("slot", slot);
+        return juce::var(obj);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolChanceLearned()
+{
+    okstudio::mcp::Tool t;
+    t.name = "chance_learned";
+    t.description = "Read the twelve pitch-class weights behind Chance's Learn (0..255 "
+                     "each, index 0 = C, docs/CHANCE_DESIGN.md), the histogram Key quantizes "
+                     "against and Temperature samples from once it exists. Learn builds it "
+                     "from whatever plays on the keybed or a physical keyboard while "
+                     "\"chanceLearn\" is on. Pass clear:true to erase it instead of reading it.";
+    t.params = { { "clear", "boolean", "Clear the learned histogram instead of reading it. Default false.", false } };
+    t.run = [this](const juce::var& args, juce::String&) -> juce::var
+    {
+        if ((bool) args.getProperty("clear", false))
+        {
+            processor.clearChanceLearning();
+            return juce::var(true);
+        }
+
+        static const char* pitchClasses[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        const auto weights = processor.chanceLearnedWeights();
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("hasLearned", processor.chanceHasLearned());
+        juce::Array<juce::var> classes;
+        for (int i = 0; i < 12; ++i)
+        {
+            auto* c = new juce::DynamicObject();
+            c->setProperty("pitchClass", pitchClasses[i]);
+            c->setProperty("weight", (int) weights[(size_t) i]);
+            classes.add(juce::var(c));
+        }
+        obj->setProperty("weights", classes);
+        return juce::var(obj);
     };
     return t;
 }
