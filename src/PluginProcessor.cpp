@@ -1341,6 +1341,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("centreDetached", layout.centreDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
     tree.setProperty("transcribeDetached", layout.transcribeDetached, nullptr);
+    tree.setProperty("padsBig", layout.padsBig, nullptr);
     tree.setProperty("view", layout.view, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
@@ -1373,6 +1374,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.centreDetached = flag("centreDetached", false);
     layout.padsDetached = flag("padsDetached", false);
     layout.transcribeDetached = flag("transcribeDetached", false);
+    layout.padsBig = flag("padsBig", false); // absent before the pads could be tall
     // "view" is 0 = Perform, 1 = Chords, and used to carry two more values that have each
     // since become a flag of their own. Both legacy values leave no centre view to restore -
     // they replaced it rather than sitting beside it - so both fall back to Perform, which

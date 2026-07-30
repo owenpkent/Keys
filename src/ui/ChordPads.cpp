@@ -2,6 +2,8 @@
 #include "../Chords.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
+#include <okstudio/Scales.h>
+#include <algorithm>
 
 namespace keys
 {
@@ -10,9 +12,62 @@ namespace
     constexpr float kCardW = 108.0f;
     constexpr float kGap = 6.0f;
     constexpr float kRadius = 6.0f;
-    constexpr int kRows = 2; // two rows of eight, Octavium parity
     constexpr float kSaveW = 38.0f; // the edit tick's strip at the right end of a pad
+    // Below this a pad is a name and nothing else; above it there is room for the note list
+    // and the mini keyboard as well. A height, not a mode flag, so the card draws whatever
+    // its space affords and Big/Small stays purely a question of layout.
+    constexpr float kRichCardH = 58.0f;
     bool isChord(const std::vector<int>& n) { return n.size() >= 2; }
+
+    // The two halves of the full chord card. They were the chord generator's, drawn onto its
+    // own copy of this same page of pads; the generator's grid is gone and they live here.
+    juce::String noteListText(const std::vector<int>& notes)
+    {
+        const auto names = okstudio::scales::noteNames();
+        juce::String out;
+        for (const int n : notes)
+            out << (out.isEmpty() ? "" : "  ") << names[((n % 12) + 12) % 12] << juce::String(n / 12 - 1);
+        return out;
+    }
+
+    // Two octaves (three when the chord spills over) from the low note's C, held keys lit.
+    // Purely informative, never a target.
+    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes,
+                          skin::Accent ac)
+    {
+        if (notes.empty())
+            return;
+        const int lo = *std::min_element(notes.begin(), notes.end());
+        const int hi = *std::max_element(notes.begin(), notes.end());
+        const int base = (lo / 12) * 12;
+        const int octaves = hi < base + 24 ? 2 : 3;
+        const auto held = [&notes](int n)
+        { return std::find(notes.begin(), notes.end(), n) != notes.end(); };
+
+        constexpr int whitePc[7] = { 0, 2, 4, 5, 7, 9, 11 };
+        const int whites = octaves * 7;
+        const float ww = r.getWidth() / (float) whites;
+        for (int i = 0; i < whites; ++i)
+        {
+            const int note = base + (i / 7) * 12 + whitePc[i % 7];
+            const auto key = juce::Rectangle<float>(r.getX() + ww * (float) i, r.getY(),
+                                                    ww, r.getHeight()).reduced(0.5f, 0.0f);
+            g.setColour(held(note) ? ac.base : juce::Colours::white.withAlpha(0.30f));
+            g.fillRoundedRectangle(key, 1.0f);
+        }
+
+        constexpr int blackAfterWhite[5] = { 0, 1, 3, 4, 5 }; // C# D# F# G# A#
+        constexpr int blackPc[5] = { 1, 3, 6, 8, 10 };
+        const float bw = ww * 0.62f, bh = r.getHeight() * 0.62f;
+        for (int o = 0; o < octaves; ++o)
+            for (int b = 0; b < 5; ++b)
+            {
+                const int note = base + o * 12 + blackPc[b];
+                const float x = r.getX() + ww * (float) (o * 7 + blackAfterWhite[b] + 1) - bw * 0.5f;
+                g.setColour(held(note) ? ac.hot : juce::Colour(0xff101216));
+                g.fillRoundedRectangle({ x, r.getY(), bw, bh }, 1.0f);
+            }
+    }
 } // namespace
 
 ChordPads::ChordPads(KeysProcessor& p) : processor(p)
@@ -26,11 +81,19 @@ juce::Rectangle<float> ChordPads::cardBounds() const
     return r.removeFromLeft(kCardW);
 }
 
+void ChordPads::setBigCards(bool big)
+{
+    if (bigCards == big)
+        return;
+    bigCards = big;
+    repaint(); // geometry is computed per paint, so there is nothing else to move
+}
+
 juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
-    const int rows = kRows;
-    const int cols = KeysProcessor::padsPerPage / kRows; // 16 / 2 = 8 across
+    const int rows = rowsFor(bigCards);
+    const int cols = KeysProcessor::padsPerPage / rows; // 16 as 2x8 or 4x4
     r.removeFromLeft(kCardW + 10.0f); // card + separation
     const int row = visibleIndex / cols;
     const int col = visibleIndex % cols;
@@ -139,21 +202,52 @@ void ChordPads::paint(juce::Graphics& g)
             g.setColour(juce::Colours::white.withAlpha(0.035f));
             g.drawRoundedRectangle(b, kRadius, 1.0f);
         }
-        else if (active)
-        {
-            g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(), skin::accentOf(*this).base, 0.0f, b.getBottom(), false });
-            g.fillRoundedRectangle(b, kRadius);
-            skin::glowRect(g, b, kRadius, skin::accentOf(*this).base);
-            g.setColour(inkOnAccent);
-            g.setFont(skin::uiSemi(13.5f));
-            g.drawText(pad.name, nameArea.reduced(4.0f), juce::Justification::centred);
-        }
         else
         {
-            skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
-            g.setColour(skin::text);
-            g.setFont(skin::uiSemi(13.5f));
-            g.drawText(pad.name, nameArea.reduced(4.0f), juce::Justification::centred);
+            if (active)
+            {
+                g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(),
+                                    skin::accentOf(*this).base, 0.0f, b.getBottom(), false });
+                g.fillRoundedRectangle(b, kRadius);
+                skin::glowRect(g, b, kRadius, skin::accentOf(*this).base);
+            }
+            else
+            {
+                skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+            }
+
+            // Tall enough, and the card says what the chord *is* as well as what it is
+            // called: the note list with octave numbers, and a mini keyboard of the shape
+            // under your hand. Short, and there is only room for the name, which is the
+            // strip this section has always been.
+            const auto ink = active ? inkOnAccent : skin::text;
+            auto text = nameArea.reduced(4.0f);
+            if (text.getHeight() >= kRichCardH)
+            {
+                text = text.reduced(6.0f, 4.0f);
+                const float kbH = juce::jmin(24.0f, text.getHeight() * 0.34f);
+                const auto kb = text.removeFromBottom(kbH)
+                                    .withSizeKeepingCentre(juce::jmin(170.0f, text.getWidth()), kbH);
+                text.removeFromBottom(3.0f);
+                const auto noteLine = text.removeFromBottom(13.0f);
+
+                g.setColour(ink);
+                g.setFont(skin::uiSemi(16.0f));
+                g.drawText(pad.name, text, juce::Justification::centred, true);
+
+                g.setColour(active ? inkOnAccent.withAlpha(0.75f) : skin::textDim);
+                g.setFont(skin::micro(10.0f));
+                g.drawText(noteListText(pad.notes), noteLine.toNearestInt(),
+                           juce::Justification::centred, true);
+
+                drawMiniKeyboard(g, kb, pad.notes, skin::accentOf(*this));
+            }
+            else
+            {
+                g.setColour(ink);
+                g.setFont(skin::uiSemi(13.5f));
+                g.drawText(pad.name, text, juce::Justification::centred);
+            }
         }
 
         // The pad currently feeding the arp. A ring rather than the "active" fill, because
@@ -251,6 +345,16 @@ void ChordPads::showPadMenu(int slot)
     juce::PopupMenu menu;
     menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");
     menu.addItem(2, "Clear pad", ! pad.notes.empty() && ! pad.locked);
+    // Lock lives here now. The strip has always painted the lock dot and never been able to
+    // set it - the toggle was on the chord generator's own copy of these same pads, so a
+    // state you could see from the keyboard could only be changed from another view.
+    menu.addItem(3, pad.locked ? "Unlock" : "Lock", ! pad.notes.empty());
+
+    // Whatever else can act on this pad right now. The generator adds New chord and its
+    // suggestion families while the Chords view is open; with it closed there is nothing to
+    // add, and nothing that pretends to be there.
+    if (onExtraMenuItems)
+        onExtraMenuItems(slot, menu);
 
     // Bind this card to an arp slot, so launching that slot plays this chord through that
     // slot's pattern. The other half of the "cards into the arp" pair: To Arp holds a card
@@ -286,10 +390,18 @@ void ChordPads::showPadMenu(int slot)
                 safe->onEditToggle(slot); // end the edit before wiping its target
             safe->processor.clearChordPad(slot);
         }
+        else if (choice == 3)
+        {
+            safe->processor.setChordPadLocked(slot, ! safe->processor.chordPad(slot).locked);
+        }
         else if (choice >= 100 && choice < 100 + KeysProcessor::numArpPatterns)
         {
             const auto& pad = safe->processor.chordPad(slot);
             safe->processor.setArpSlotChord(choice - 100, pad.notes, pad.name);
+        }
+        else if (choice >= extraMenuIdBase && safe->onExtraMenuChoice)
+        {
+            safe->onExtraMenuChoice(slot, choice);
         }
     });
 }

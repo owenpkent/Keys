@@ -14,13 +14,19 @@ namespace keys
 //   * Drag a filled pad onto the card to recall its chord for editing (onRecall).
 //   * Click a filled pad to play/stop its chord (Exclusive makes a new pad choke the old).
 //   * Drag a pad onto another to move it, or off the row to clear it.
-//   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad
-//     to the piano; every latch change writes back live) and Clear. Part of the
-//     owner-directed right-click exception in CLAUDE.md.
+//   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad to the
+//     piano; every latch change writes back live), Clear, Lock, Send to arp slot, and -
+//     while the Chords view is open - the generator's New chord and what could follow it.
+//     Part of the owner-directed right-click exception in CLAUDE.md.
 //
-// Sixteen pads per page, laid out as two rows of eight (Octavium parity). The pad
-// definitions and playback live in the processor, so they persist with the session and
-// keep sounding independent of the editor. This is just the view/controller.
+// Sixteen pads per page, as two rows of eight or (Big) four rows of four with the full chord
+// card on each: its notes with octave numbers and a mini keyboard of the shape under your
+// hand. The tall arrangement is the one the chord generator used to draw over the top of
+// these same pads, before that duplicate grid was removed on 2026-07-30; it lives here now,
+// so it is available under every centre view rather than only under Chords.
+//
+// The pad definitions and playback live in the processor, so they persist with the session
+// and keep sounding independent of the editor. This is just the view/controller.
 class ChordPads : public juce::Component
 {
 public:
@@ -43,9 +49,23 @@ public:
     std::function<void(int)> onEditToggle;
     void setEditingSlot(int slot); // absolute slot being edited, or -1
 
+    // Two rows of eight, or four rows of four with room for the full chord card (the note
+    // list and a mini keyboard of what is held). The tall arrangement is the one the chord
+    // generator used to draw itself, over the top of these same sixteen pads; it belongs to
+    // the pads, so it is available under every centre view rather than only under Chords.
+    void setBigCards(bool);
+    static int rowsFor(bool big) { return big ? 4 : 2; }
+
+    // Extra items for a pad's right-click menu, from whoever can service them - today the
+    // chord generator, while its view is on screen. Ids 200 and up belong to the supplier;
+    // everything below is this class's own.
+    static constexpr int extraMenuIdBase = 200;
+    std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
+    std::function<void(int slot, int itemId)> onExtraMenuChoice;
+
 private:
     juce::Rectangle<float> cardBounds() const;
-    juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1: row = i/8, col = i%8
+    juce::Rectangle<float> padBounds(int visibleIndex) const; // 0..padsPerPage-1, row-major
 
     // The tick that ends a keyboard edit, on the pad being edited. Only that one pad has
     // one, and only while the link lasts; a full-height strip at its right end rather than
@@ -63,6 +83,7 @@ private:
     // different mode than the generator's grid, or than the arp itself.
     bool toArp() const;
     int editingSlot = -1;
+    bool bigCards = false;
     std::vector<int> currentNotes;
     juce::String currentName;
 

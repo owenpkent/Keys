@@ -99,7 +99,12 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 - **The chord pads and the arpeggiator are each a section of their own**, stacked between
   the centre view and the keyboard, so a chord card is on screen whatever else is open. The
   centre views are Perform and Chords only: the arp stopped being a third one on
-  2026-07-25. The arp bar carries its On toggle, which survives folding the section shut.
+  2026-07-25. **There is exactly one set of chord cards** (2026-07-30): the generator draws
+  none of its own, because the grid it used to draw was the same sixteen pads of the same
+  page as the strip below it. Its `Big` arrangement became the Pads section's, and its
+  per-card actions became items on the pad's menu (Lock always; New chord / Next through
+  `ChordGenPanel::addPadMenuItems`, offered only while the Chords view is alive). Anything
+  that wants to show a chord card should use the pads, not build a second grid. The arp bar carries its On toggle, which survives folding the section shut.
   See `docs/ARP_DESIGN.md`.
 - **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
   table of six `Section`s (Controls, Centre, Arp, Pads, Transcribe, Keyboard); each owns a

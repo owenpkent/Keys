@@ -232,6 +232,11 @@ private:
     // clicking the lit one folds the centre away, which is how the centre section is
     // minimized (it needs no chevron of its own, unlike the other sections).
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
+    // Two rows of eight, or four rows of four with the full chord card on each. The tall
+    // arrangement is the one the chord generator used to draw over the top of these same
+    // pads before its grid was removed; it belongs to the pads, so it works under every
+    // centre view rather than only under Chords.
+    juce::TextButton padsBigButton { "Big" };
     juce::TextButton performButton { "Perform" }, chordsButton { "Chords" };
 
     // Only the centre view currently showing is alive; the generator builds 16 chord cards

@@ -268,6 +268,11 @@ public:
         bool transcribeDetached = false;
         bool detached = false;  // keybed lives in its own resizable window
 
+        // Two rows of eight, or four rows of four with the full chord card on each. The tall
+        // arrangement is what the chord generator used to draw over the top of these same
+        // pads; it belongs to the pads now, so it is available under every centre view.
+        bool padsBig = false;
+
         int  view = 0;          // which centre view: 0 = perform, 1 = chords
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 

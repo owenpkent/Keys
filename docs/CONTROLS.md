@@ -56,7 +56,7 @@ the window reads at a glance, before you have read a single caption.
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Velocity, Humanize, Strum, Dir, BPM |
 | **Perform / Chords** | middle | Whichever centre view is showing. Both tabs stay visible while it is folded, so picking one both unfolds and switches. **Knobs** folds the knob bank inside Perform. |
 | **Arp** | below the centre | The arpeggiator. Its **On** toggle and **Detach** ride on the bar, so the arp can be switched on, off and detached with the panel folded shut — folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
-| **Pads** | below the arp | The chord-pad strip, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons ride on the bar. |
+| **Pads** | below the arp | The chord pads, on screen under either centre view — so a chord stays reachable while you edit the generator or the arp. Its page buttons and the **Big** card-size switch ride on the bar. |
 | **Transcribe** | below the pads | Audio to MIDI: the input picker, the waveform, the piano roll and the MIDI drag handle. It starts folded, like the arp, because open it is tall. Folding it also closes the audio input, so Keys is not holding your microphone while it is shut. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
@@ -197,7 +197,11 @@ and the playing area. They let you keep a palette of chords a single click away.
 5. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
    the rows to empty it, or drag a pad onto the live card to bring its notes back onto
    the keyboard (held) for editing — capture in reverse.
-6. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
+6. **Make the cards bigger.** **Big**, on the Pads bar, swaps the two rows of eight for four
+   rows of four, each card showing the chord's notes with octave numbers and a mini keyboard
+   of the shape under your hand. It is the arrangement the chord generator used to draw over
+   the top of these same pads, and it works under every centre view, not just Chords.
+7. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
    chord latches onto the keys, and every key you add or remove is written straight back
    to the pad, with the name re-detected as you go. That pad wears a **✓** at its
    right-hand end while the link lasts — click it to finish. (The pad is written as you
@@ -219,6 +223,12 @@ work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 **Chords** is the centre view that holds the generator. It works on the page of pads you
 are looking at, so each page can be a different key. **Close** goes back to Perform.
 
+It has no cards of its own: the chords it makes are the pads in the **Pads** section below,
+which is on screen under every centre view. (It used to draw its own copy of that same page
+at full size, from back when the generator covered the whole plugin and the pads had nowhere
+else to live. **Big** on the Pads bar gives you those large cards where the pads actually
+are.)
+
 ### Filling a page
 
 1. **Pick a key.** Set **Key** and **Mode**: each mode shows the character it carries
@@ -228,8 +238,8 @@ are looking at, so each page can be a different key. **Close** goes back to Perf
    chords you're about to get.
 2. **Fill Page.** Every unlocked pad gets a chord. The seven chords that belong to the
    key come first, in order, then the remaining pads get something richer from the key.
-3. **Play them.** Press a chord in the grid to hear it, or close the panel and play the
-   pads.
+3. **Play them.** Press a pad to hear it. Turn **Big** on if you want to read the notes of
+   each chord while you work.
 
 ### Shaping what you get
 
@@ -242,7 +252,9 @@ are looking at, so each page can be a different key. **Close** goes back to Perf
 
 ### Keeping what you like
 
-**Lock** a chord you want to keep, from its card's right-click menu. **Regen Unlocked**
+**Lock** a chord you want to keep, from the pad's right-click menu — which offers it whether
+the generator is open or not, since the lock dot on the card was always visible from
+everywhere. **Regen Unlocked**
 gives every other pad a new chord; locked ones stay. **Clear Page** empties the unlocked
 pads.
 

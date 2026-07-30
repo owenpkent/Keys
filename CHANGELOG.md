@@ -5,6 +5,29 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the chord generator and the chord pads are one set of cards
+
+Opening **Chords** used to put a second copy of the pads on screen. Not a similar grid — the
+*same sixteen pads* of the *same page*, written through the same `setChordPad`, drawn once at
+full size in the generator and again as the strip below it. That made sense when the
+generator covered the whole plugin and the pads had nowhere else to live; the pads have had a
+section of their own, on screen under every centre view, since 2026-07-25.
+
+So the duplicate is gone, and the two things it could do that the strip could not moved to
+where the cards actually are:
+
+- **Big**, on the Pads bar, swaps the two rows of eight for four rows of four with the full
+  chord card on each — the chord's notes with octave numbers, and a mini keyboard of the
+  shape under your hand. That is exactly the card the generator used to draw, and it now
+  works under Perform and the arp too, not only under Chords.
+- **Lock** is on the pad's right-click menu, always. The strip has painted a lock dot since
+  the pads existed and never been able to set it: the toggle lived on the generator's copy of
+  the card, so a state you could see while playing could only be changed from another view.
+- **New chord** and **Next: could follow** are on that same menu while the Chords view is
+  open, which is exactly when they were reachable before.
+
+The Chords view is ~320 px shorter as a result, and there is one place a chord card lives.
+
 ### Added: Chain — the twelve arp slots play as a progression
 
 Each slot card already held a chord, a shape and a rate. Give it a number of bars as well and

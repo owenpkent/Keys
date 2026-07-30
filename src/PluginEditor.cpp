@@ -21,7 +21,8 @@ namespace
     constexpr int rowH = 46;                          // one row of header controls
     constexpr int headerH = 14 + rowH * 2 + 6;        // both of them, plus label lead-in
     constexpr int knobRowH = 110;
-    constexpr int padRowH = 96;
+    constexpr int padRowH = 96;      // two rows of eight, names only
+    constexpr int padBigRowH = 320;  // four rows of four, with room for the full chord card
     constexpr int dockedKeybedH = 212;                // 185 px of key plus a little body
     constexpr int detachWidth = 104;                  // the Detach / Re-dock button
 
@@ -333,6 +334,25 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         addAndMakeVisible(b);
     }
 
+    // Two rows of eight, or four rows of four with the full chord card on each - the tall
+    // arrangement the chord generator used to draw over the top of these same pads. It sits
+    // on the Pads bar because it is a question about the pads, not about the generator, and
+    // it is worth reaching from any view.
+    padsBigButton.setClickingTogglesState(false); // syncSectionControls owns the lit state
+    padsBigButton.setTooltip("Bigger cards: four rows of four, each showing the chord's notes "
+                             "and a mini keyboard.");
+    padsBigButton.onClick = [this]
+    {
+        processor.layout.padsBig = ! processor.layout.padsBig;
+        chordPads.setBigCards(processor.layout.padsBig);
+        syncSectionControls();
+        if (onIdealHeightChanged)
+            onIdealHeightChanged(idealHeight());
+        resized();
+    };
+    addAndMakeVisible(padsBigButton);
+    chordPads.setBigCards(processor.layout.padsBig);
+
     // On rides on the Arp *bar*, not inside the section, so folding the editor away does not
     // take the arp's power switch with it. Same reasoning as Sustain and All Off living on
     // the Keyboard bar.
@@ -377,6 +397,21 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Right-click "Edit on keyboard": the pad's notes latch onto the piano and every
     // latch change writes straight back to the pad, name re-detected live.
     chordPads.onEditToggle = [this](int slot) { toggleEditPad(slot); };
+
+    // The generator's half of a pad's card menu - New chord, and what could follow it. Asked
+    // for on every menu rather than installed once, because the generator only exists while
+    // the Chords view is open: with it closed the items are simply not offered, which is
+    // exactly what happened before, when they lived on a card only that view drew.
+    chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m)
+    {
+        if (genPanel != nullptr)
+            genPanel->addPadMenuItems(slot, m);
+    };
+    chordPads.onExtraMenuChoice = [this](int slot, int id)
+    {
+        if (genPanel != nullptr)
+            genPanel->handlePadMenuChoice(slot, id);
+    };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
@@ -570,8 +605,9 @@ void KeysEditor::refreshSectionPanels()
 void KeysEditor::refreshCentrePanels()
 {
     // Only the view on show exists, and nothing exists while the section is folded. The
-    // generator builds 16 chord cards, which is cheap enough to do on a click and expensive
-    // enough not to keep warm behind the knob bank.
+    // generator is a band of controls now - its own copy of the pad grid was removed on
+    // 2026-07-30, being the same sixteen pads the Pads section already shows - so what is
+    // built and thrown away here is cheap either way.
     const auto& lay = processor.layout;
     const int now = lay.centre ? lay.view : -1;
 
@@ -732,6 +768,8 @@ void KeysEditor::syncSectionControls()
     // already looking at is one click either way.
     for (auto& b : pageButtons)
         b.setVisible(lay.pads); // pointless without pads
+    padsBigButton.setVisible(lay.pads);
+    padsBigButton.setToggleState(lay.padsBig, juce::dontSendNotification);
 
     wheelsButton.setVisible(lay.keyboard);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
@@ -768,7 +806,7 @@ int KeysEditor::sectionHeight(SectionId id) const
         case secControls:   return headerH;
         case secCentre:     return centreHeight();
         case secArp:        return arpHeight();
-        case secPads:       return padRowH;
+        case secPads:       return processor.layout.padsBig ? padBigRowH : padRowH;
         case secTranscribe:
            #if KEYS_TRANSCRIBE
             return TranscribePanel::idealHeight;
@@ -1350,6 +1388,8 @@ void KeysEditor::resized()
             b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
             bar.removeFromLeft(4);
         }
+        bar.removeFromLeft(10);
+        padsBigButton.setBounds(bar.removeFromLeft(62).reduced(1, 2));
         section(secPads).caption = bar;
     }
     if (const int h = sectionHeight(secPads); h > 0)

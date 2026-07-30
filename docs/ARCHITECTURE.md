@@ -202,8 +202,8 @@ ordering and the scheduling are one implementation rather than two that drift.
 
 Pads live in the processor (`ChordPad`), so they persist and keep
 sounding independent of the editor; `ChordPads` is just the view. They are arranged as
-four pages of sixteen (`padsPerPage` × `numPadPages`, Octavium's 4x4 per page; the
-strip draws each page as two rows of eight). The strip shows the page `padPage`
+four pages of sixteen (`padsPerPage` × `numPadPages`, Octavium's 4x4 per page; drawn as two
+rows of eight, or as that 4x4 with the full chord card on each when **Big** is on). The strip shows the page `padPage`
 selects and indexes by **absolute slot**, so a chord left ringing on another page keeps
 sounding and a drag can't land on the wrong pad. Sessions saved when pages held eight
 carry a `padsPerPage` marker (absent = 8) and each slot is re-based on load, so every
@@ -391,13 +391,25 @@ automation would only add ways to break a session.
 windows, and staying inside the editor keeps every target on the surface the mouse is
 already in. It fills the **current page**, so the four pages can hold four different keys.
 
-Its pad grid repeats the strip at full size on purpose. The per-card actions Octavium
-reached by right-click (Lock, New chord, Next) were on-screen buttons here at first, and
-are a right-click card menu again since 2026-07-22 at Owen's request; the page-wide
-Fill / Regen / Clear stay the left-click bulk path. At strip size none of those targets
-would clear the 34 px minimum. Selecting the view grows the editor to fit rather than
-shrinking them. Auditioning a chord in the grid reuses
-`pressChordPad` / `releaseChordPad`, so it is the same code path as playing the strip.
+**It has no cards of its own** (2026-07-30). It drew a 4x4 grid of the sixteen pads on the
+current page — the same pads, through the same `setChordPad` — because it was written when
+the generator was a full-screen overlay and the pads had no section of their own. They have
+had one since 2026-07-25, on screen under every centre view, so the grid was the same page
+drawn twice, at two sizes, one of which could set a pad's lock state and one of which could
+only paint the dot for it.
+
+Deleting it moved two things rather than losing them. The tall arrangement became the Pads
+section's **Big** switch (`layout.padsBig`, four rows of four), so the large card — chord
+name, its notes with octave numbers, a mini keyboard of what is held — is available under
+*any* centre view. And the per-card actions Octavium reached by right-click became items on
+the pad's own menu: **Lock** unconditionally, since it needs nothing from the generator, and
+**New chord** / **Next** through `addPadMenuItems` / `handlePadMenuChoice`, which `ChordPads`
+calls only while this panel exists. That is the same availability they had before, when they
+lived on a card only this view drew. The page-wide Fill / Regen / Clear stay the left-click
+bulk path.
+
+Auditioning a chord reuses `pressChordPad` / `releaseChordPad` — it always did, and now
+there is one card doing it rather than two.
 
 ## Parameters and state
 
