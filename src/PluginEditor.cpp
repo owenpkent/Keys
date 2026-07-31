@@ -435,11 +435,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         b.onClick = std::move(action);
         addAndMakeVisible(b);
     };
-    genChip(fillButton, "Fill chord page", "Fill every pad on this page (locked pads are kept).",
-            [this] { chordGen.fillPage(false); });
+    // Fill is the safe one and Regen is the destructive one, and the tooltips say so in those
+    // words: Fill only ever writes empty pads, Regen replaces chords. Each also greys out when
+    // it would find nothing to do (see timerCallback), which says the same thing without a
+    // hover.
+    genChip(fillButton, "Fill chord page",
+            "Fill the empty pads on this page. Nothing already on the page is touched.",
+            [this] { chordGen.fillPage(); });
     genChip(regenButton, "Regenerate unlocked chords",
-            "New chords for the unlocked pads that already have one.",
-            [this] { chordGen.fillPage(true); });
+            "Replace the chords on this page with new ones, except on locked pads. This is the "
+            "one that overwrites; lock a card to keep it.",
+            [this] { chordGen.regeneratePage(); });
 
     // The three settings that get changed while you are auditioning a page, on the bar beside
     // the two chips (see the member declarations for why these three and why attachments). The
@@ -537,6 +543,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // be closed, so these items are on every pad on every page. They used to be offered only
     // while the Chords view was up, which is the test that had to go with it.
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
+    chordPads.onExtraPageItems = [this](juce::PopupMenu& m) { chordGen.addPageMenuItems(m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
@@ -1278,6 +1285,14 @@ void KeysEditor::timerCallback()
     const bool scaleDriven = chordGen.readsScaleSettings();
     genModeBox.setEnabled(scaleDriven);
     genComplianceBox.setEnabled(scaleDriven);
+
+    // Each chip says whether it would do anything, which is also the clearest statement of
+    // which of the two is which: Fill lights only while there is a blank to fill, Regen only
+    // while there is an unlocked chord to replace. Polled here rather than pushed because the
+    // pads change from six places (a drag, a capture, an edit, Clear pad, Clear page, a
+    // session load) and none of them owe the editor a callback.
+    fillButton.setEnabled(chordGen.pageHasEmptyPads());
+    regenButton.setEnabled(chordGen.pageHasRegeneratablePads());
 
     // Changing MIDI channel while notes sound would strand them on the old channel
     // (note-off goes to the new one), so panic on any channel change.

@@ -117,14 +117,30 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   24 px chips at the right end of the Pads *bar* (Fill / Regen, the left-click path into
   generation), from three 24 px combo boxes beside them (Key / Mode / Scale Compliance, APVTS
   attachments so the bar and the menu are one state), and from a pad's card menu through
-  `addPadMenuItems` / `handlePadMenuChoice` - New chord, Next, Clear page, and every setting
-  as a submenu of discrete ticked values hanging **directly** off the pad menu, since a
-  `PopupMenu` cannot hold a slider and a wrapper submenu would cost a third leg of hover
-  travel. Two levels is the ceiling; the Markov five are the one group that keeps its own,
-  because they are inert unless Source is Markov. Clear page is a menu item
-  and not a third chip because it empties every unlocked pad on the page and there is no undo
-  anywhere in Keys. Those items are unconditional now: the old "is there a panel?" test hid
-  them whenever the Chords view was closed, and there is no view left to close. Anything
+  `addPadMenuItems` / `addPageMenuItems` / `handlePadMenuChoice` - New chord, Next, Clear page,
+  and every setting as a submenu of discrete ticked values behind one **Generator settings**
+  row, since a `PopupMenu` cannot hold a slider. **That menu has a budget and it is rows**: it
+  is anchored to a pad near the bottom of a 699 px window at a 34 px item height, so it grows
+  *upwards* off the screen, and JUCE answers a too-tall menu by splitting it into columns or
+  making it hover-scroll - and a scrolling popup cannot be worked with one mouse. It is **11
+  top-level rows, 429 px** (rows 34, separators 17, a section header 51 because JUCE adds half
+  an item to one), and any new item has to displace one. The settings were flattened
+  onto the top level for part of 2026-07-30 and put back the same day; that is what the budget
+  is for. **Nothing generation does overwrites a chord** (Owen, same day): `fillPage()` writes
+  only empty pads, a picked suggestion goes to the first empty pad and the row greys when
+  there is none, `regeneratePage()` is the destructive one and skips locks, and each chip greys
+  when it would do nothing. "Empty" means empty, locked or not - one definition,
+  `emptyPadsOnPage()`. Clear page is a menu item and not a third chip because it empties every
+  unlocked pad on the page and there is no undo anywhere in Keys. The **lock chip on a card is
+  a target and is painted as one**: `ChordPads::lockBadgeBounds` scales it to the card
+  (24 px docked, 34 on a Big card) and `drawLockBadge` fills that whole rectangle, with the
+  menu item as its accelerator. Octave down/up and Next voicing are menu-only edits to one
+  pad's stored chord that go through `rewritePadChord` so a ringing or arp-held card follows
+  its notes (hold restored before press, and with Exclusive on only the hold, since both calls
+  choke every source); they grey on the card being edited, which the keybed owns. A lock
+  protects a chord from *generation*, never from the user. Those items are unconditional
+  otherwise: the old "is there a panel?" test hid them whenever the Chords view was closed, and
+  there is no view left to close. Anything
   that wants to show a chord card should use the pads, not build a second grid. Controls that
   belong to a section but must cost no height ride its bar: it is 34 px that already exists.
   Fill and Regen stay live with the Pads section folded, for the same reason arp On does - the

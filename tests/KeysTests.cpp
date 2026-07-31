@@ -8,6 +8,7 @@
 #include <juce_core/juce_core.h>
 #include <algorithm>
 #include <iostream>
+#include <set> // used below; ChordGen.h happens to pull it in, which is not a contract
 
 namespace
 {
@@ -106,6 +107,82 @@ struct ChordGenTests : juce::UnitTest
         expect(keys::chordgen::applyInversion({ 60, 64, 67 }, 2) == std::vector<int> { 67, 72, 76 });
         // Never lifts every note: that would just be the same chord an octave up.
         expect(keys::chordgen::applyInversion({ 60, 64, 67 }, 9) == std::vector<int> { 67, 72, 76 });
+
+        beginTest("root position is read back out of any arrangement, in the same register");
+        const std::vector<int> cRoot { 60, 64, 67 };
+        expect(keys::chordgen::rootPosition(cRoot, 0) == cRoot);
+        expect(keys::chordgen::rootPosition({ 64, 67, 72 }, 0) == cRoot);        // 1st inversion
+        expect(keys::chordgen::rootPosition({ 67, 72, 76 }, 0) == cRoot);        // 2nd inversion
+        expect(keys::chordgen::rootPosition({ 60, 67, 76 }, 0) == cRoot);        // spread
+        expect(keys::chordgen::rootPosition({ 64, 60, 67 }, 0) == cRoot);        // unsorted input
+        // A doubled pitch class collapses, and the register survives it. Stacking the double an
+        // octave up instead read {60,64,67,72} back as {60,72,76,79}, which is neither the same
+        // register nor a voicing of anything - and two hands on the keybed produce a doubled
+        // root constantly.
+        expect(keys::chordgen::rootPosition({ 60, 64, 67, 72 }, 0) == cRoot);   // doubled root
+        expect(keys::chordgen::rootPosition({ 60, 64, 67, 76 }, 0) == cRoot);   // doubled third
+        expect(keys::chordgen::rootPosition({ 48, 55, 60, 64, 67 }, 0)
+               == std::vector<int> { 48, 52, 55 });                             // two-handed C
+
+        beginTest("the voicing cycle walks root, the inversions, the spread, then round again");
+        // Every step is the same pitch classes in a different arrangement, and the walk stays
+        // in one register: this is what "Next voicing" on a pad menu does, over and over.
+        const auto walk = [](std::vector<int> notes, int rootPc, int steps)
+        {
+            for (int i = 0; i < steps; ++i)
+                notes = keys::chordgen::applyVoicing(keys::chordgen::rootPosition(notes, rootPc),
+                                                     keys::chordgen::voicingOf(notes, rootPc) + 1);
+            return notes;
+        };
+        expect(walk(cRoot, 0, 1) == std::vector<int> { 64, 67, 72 });
+        expect(walk(cRoot, 0, 2) == std::vector<int> { 67, 72, 76 });
+        expect(walk(cRoot, 0, 3) == std::vector<int> { 60, 67, 76 }); // spread: root stays in the bass
+        expect(walk(cRoot, 0, 4) == cRoot);                           // and round, with no octave drift
+        expect(walk(cRoot, 0, 12) == cRoot);
+
+        beginTest("every voicing is a distinct arrangement of the same pitch classes");
+        const std::vector<int> maj7 { 60, 64, 67, 71 };
+        std::set<std::vector<int>> shapes;
+        const std::set<int> maj7Pcs { 0, 4, 7, 11 };
+        for (int v = 0; v < keys::chordgen::voicingCount(4); ++v)
+        {
+            const auto arranged = keys::chordgen::applyVoicing(maj7, v);
+            expectEquals((int) arranged.size(), 4);
+            for (int n : arranged)
+                expect(maj7Pcs.count(keys::chords::pitchClass(n)) == 1, "re-voicing changed a note");
+            expect(shapes.insert(arranged).second, "two voicings came out identical");
+            expectEquals(keys::chordgen::voicingOf(arranged, 0), v); // and each one identifies itself
+        }
+        expectEquals((int) shapes.size(), 5); // root, three inversions, spread
+
+        beginTest("a chord that is none of the voicings restarts the cycle at root position");
+        // A hand-built spacing off the keyboard - C major with both upper voices an octave up -
+        // is no voicing in the cycle, so voicingOf says -1 and the next step is root position.
+        const std::vector<int> wide { 60, 76, 79 };
+        expectEquals(keys::chordgen::voicingOf(wide, 0), -1);
+        expect(walk(wide, 0, 1) == cRoot);
+
+        beginTest("a doubled pitch class walks without drifting an octave or repeating a note");
+        // Two hands on the keybed is the ordinary way to build one of these. Keeping the double
+        // read {60,64,67,72} as the 2nd inversion of {60,72,76,79}, so the first press wrote
+        // {72,79,84,88} - an octave up - and it climbed again on every press until the chord ran
+        // off the keyboard and the item greyed for good with no way back to root position. The
+        // other half of the same bug: {60,72,76,79} read as root position, whose 1st inversion
+        // is {72,72,76,79}, the same MIDI note twice on one pad.
+        const std::vector<int> doubledRoot { 60, 64, 67, 72 };
+        expect(walk(doubledRoot, 0, 1) == cRoot); // the double collapses on the way in
+        expect(walk(doubledRoot, 0, 5) == cRoot); // and round from there, in the same register
+        expect(walk({ 60, 72, 76, 79 }, 0, 1) == cRoot);
+        for (int step = 1; step <= 12; ++step)
+        {
+            const auto v = walk(doubledRoot, 0, step);
+            const auto label = " at step " + juce::String(step);
+            expect(std::adjacent_find(v.begin(), v.end()) == v.end(), "duplicate MIDI note" + label);
+            expect(v.front() >= 60 && v.back() <= 76, "the walk drifted out of its register" + label);
+            for (int n : v)
+                expect(std::set<int> { 0, 4, 7 }.count(keys::chords::pitchClass(n)) == 1,
+                       "re-voicing changed a note" + label);
+        }
 
         beginTest("strict diatonic fill is the seven triads of the key, in degree order");
         keys::chordgen::Options strict; // defaults: compliance 1.0, root position, all sizes
@@ -263,12 +340,14 @@ int main()
     runner.setAssertOnFailure(false);
     runner.runAllTests();
 
-    int failures = 0;
+    int failures = 0, cases = 0, checks = 0;
     for (int i = 0; i < runner.getNumResults(); ++i)
     {
         const auto* r = runner.getResult(i);
         if (r == nullptr)
             continue;
+        ++cases;
+        checks += r->passes + r->failures;
         failures += r->failures;
         if (r->failures > 0)
         {
@@ -277,7 +356,9 @@ int main()
                 std::cout << "        " << m << "\n";
         }
     }
+    // The counts, always: "All tests passed" alone cannot tell a full suite from one that
+    // silently stopped registering itself.
     std::cout << (failures == 0 ? "All tests passed." : "Failures: " + juce::String(failures).toStdString())
-              << std::endl;
+              << "  (" << cases << " cases, " << checks << " checks)" << std::endl;
     return failures == 0 ? 0 : 1;
 }

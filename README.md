@@ -58,7 +58,7 @@ flat and dim, so the shape of the window reads before you have read a caption.
 | **Right-click** a key (optional) | Toggle a hold on that one note, the Octavium accelerator. A key this keyboard is already holding lets go, so a walk along a ringing chord takes it apart a note at a time without lifting Sustain. Any other key latches on, and a plain **left click** releases that |
 | **Knob row** | Eight rotary CC knobs, the bottom row of the Controls section, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing |
-| **Fill** / **Regen** | Two chips at the right of the Pads bar. Fill writes a chord to every unlocked pad on the page; Regen re-rolls the unlocked ones. Everything else the chord generator does is on a pad's right-click menu |
+| **Fill** / **Regen** | Two chips at the right of the Pads bar. Fill writes chords to the *empty* pads and never overwrites; Regen re-rolls the pads that already have one, except the locked ones. Everything else the chord generator does is on a pad's right-click menu |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
@@ -103,8 +103,10 @@ in Keys, so what you audition is what you play.
 
 It is two chips, three combo boxes and a card menu.
 
-**Fill** and **Regen** sit at the right-hand end of the Pads bar. Fill writes a chord to
-every unlocked pad on the page; Regen re-rolls the unlocked pads that already have one. Both
+**Fill** and **Regen** sit at the right-hand end of the Pads bar. Fill is the safe one: it
+writes chords to the *empty* pads and leaves everything already on the page alone. Regen is
+the one that overwrites, re-rolling the pads that already have a chord and skipping the ones
+you locked. Each greys out when it would do nothing, so you can see which is which. Both
 stay clickable when the pad strip is folded away, because they are the only left-click path
 into generation. Unfold and the page is written.
 
@@ -117,11 +119,13 @@ Everything else is on a **pad's right-click menu**:
 
 | Item | What it does |
 |------|--------------|
-| **Lock** / **Unlock** | Keep this chord through a Fill or a Regen |
+| **Lock** / **Unlock** | Keep this chord through a Regen. The lock chip in the card's top-right corner does the same thing with a left click |
+| **Octave down** / **Octave up** | Move the whole chord an octave, without changing what it is |
+| **Next voicing** | The same chord arranged differently: root position, the inversions, then a spread. Works on a locked card too, because a lock protects a chord from the generator and not from you |
 | **New chord** | A different chord for that pad's place in the scale (or, for a Markov chord, the next step of the chain) |
 | **Next: could follow** | Chords that could follow this one, in four families: smooth voice-leading moves, circle-of-fifths, diatonic degrees, jazz substitutions. Every row has a play button to audition it before it drops into the next free pad |
 | **Clear page** | Empties the unlocked pads. It is a menu item and not a chip: sixteen pads is a lot to lose, Keys has no undo, and on the bar it sat a few pixels from the two things you click constantly |
-| **The settings** | Every setting the generator has, each opening a short list with the current value ticked. They sit on the menu itself, under a **Generator settings** heading, so reaching one is a hover and a click |
+| **Generator settings** | Every setting the generator has, each opening a short list with the current value ticked. One row, because the menu hangs off a pad near the bottom of the window and a long one runs off the top of the screen |
 
 The settings: **Key** and **Mode** (12 modes, each showing the character it
 carries, so Dorian reads "Jazzy, Sophisticated, Chill"), **Octave**, **Scale Compliance**

@@ -352,28 +352,23 @@ void ChordGenMenu::timerCallback()
     stopPreview(); // the only thing on a clock here: an audition that has had its 800 ms
 }
 
-void ChordGenMenu::fillPageMarkov(bool onlyUnlocked)
+void ChordGenMenu::regeneratePageMarkov()
 {
+    // Octavium regenerates unlocked cards left to right, each stepping the chain
+    // from its (possibly just-updated) left neighbour, so changes cascade.
     const int offset = processor.padPageOffset();
-
-    if (onlyUnlocked)
-    {
-        // Octavium regenerates unlocked cards left to right, each stepping the chain
-        // from its (possibly just-updated) left neighbour, so changes cascade.
-        for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        {
-            const int slot = offset + v;
-            const auto& pad = processor.chordPad(slot);
-            if (! pad.locked && ! pad.notes.empty())
-                regeneratePadMarkov(slot);
-        }
-        return;
-    }
-
-    std::vector<int> targets;
     for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        if (! processor.chordPad(offset + v).locked)
-            targets.push_back(offset + v);
+    {
+        const int slot = offset + v;
+        const auto& pad = processor.chordPad(slot);
+        if (! pad.locked && ! pad.notes.empty())
+            regeneratePadMarkov(slot);
+    }
+}
+
+void ChordGenMenu::fillPageMarkov()
+{
+    const auto targets = emptyPadsOnPage();
     if (targets.empty())
         return;
 
@@ -417,34 +412,71 @@ void ChordGenMenu::regeneratePadMarkov(int slot)
     processor.setChordPad(slot, pad);
 }
 
-void ChordGenMenu::fillPage(bool onlyUnlocked)
+std::vector<int> ChordGenMenu::emptyPadsOnPage() const
+{
+    std::vector<int> out;
+    const int offset = processor.padPageOffset();
+    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
+        if (processor.chordPad(offset + v).notes.empty())
+            out.push_back(offset + v);
+    return out;
+}
+
+std::vector<int> ChordGenMenu::regeneratablePadsOnPage() const
+{
+    std::vector<int> out;
+    const int offset = processor.padPageOffset();
+    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
+    {
+        const auto& pad = processor.chordPad(offset + v);
+        if (! pad.locked && ! pad.notes.empty())
+            out.push_back(offset + v);
+    }
+    return out;
+}
+
+// Fill: the empty pads, and only ever the empty pads (Owen, 2026-07-30 - "new generations
+// shouldn't overwrite existing"). It used to write every unlocked slot on the page, which
+// made the one constructive button on the bar the fastest way to lose sixteen chords, with no
+// undo behind it and only a lock as protection - and locking each of fifteen keepers to
+// generate a sixteenth is not a way anyone works. Filling blanks needs no protection at all,
+// so this asks for none: locked or not is beside the point when the slot is empty.
+void ChordGenMenu::fillPage()
 {
     if (markovActive())
     {
-        fillPageMarkov(onlyUnlocked);
+        fillPageMarkov();
         return;
     }
 
-    const int offset = processor.padPageOffset();
-    const auto opts = currentOptions();
-    const auto locked = lockedTypesOnPage();
-
-    // Which slots we're allowed to write. Fill replaces everything except locks; Regen only
-    // touches unlocked slots. Either way a locked pad is never overwritten.
-    std::vector<int> targets;
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-    {
-        const int slot = offset + v;
-        if (processor.chordPad(slot).locked)
-            continue;
-        if (onlyUnlocked && processor.chordPad(slot).notes.empty())
-            continue; // Regen refreshes what's there; it doesn't fill blanks
-        targets.push_back(slot);
-    }
+    const auto targets = emptyPadsOnPage();
     if (targets.empty())
         return;
 
-    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(), opts, locked, rng);
+    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(),
+                                           currentOptions(), lockedTypesOnPage(), rng);
+    for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
+        writeChord(targets[(size_t) i], chords[(size_t) i]);
+}
+
+// Regen: the destructive one, and the only one. It rerolls the pads that already carry a
+// chord and skips the locked ones, which is the whole point of it - replacing what is there
+// is what "regenerate" means, and the lock is what says "not this one". A blank is left blank;
+// Fill is what blanks are for.
+void ChordGenMenu::regeneratePage()
+{
+    if (markovActive())
+    {
+        regeneratePageMarkov();
+        return;
+    }
+
+    const auto targets = regeneratablePadsOnPage();
+    if (targets.empty())
+        return;
+
+    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(),
+                                           currentOptions(), lockedTypesOnPage(), rng);
     for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
         writeChord(targets[(size_t) i], chords[(size_t) i]);
 }
@@ -498,49 +530,50 @@ void ChordGenMenu::newChordFor(int slot)
 }
 
 // The generator's half of a pad's card menu, added to the menu the pad strip is already
-// building. Lock is not here: it needs nothing from the generator and belongs to the card
-// itself, so ChordPads offers it either way. Everything else the generator has is here, and
-// it is offered on every pad on every page, because there is no longer a view whose absence
-// could take it away.
+// building. Two calls, because its items land in two different groups of that menu and
+// ChordPads owns the rules between them: this one closes the **this pad** group (ChordPads
+// opened it with Edit, Clear pad, Lock, and the octave and voicing items), addPageMenuItems
+// below is the **this page** group at the foot. ChordPads calls them in that order, which is
+// what lets this one own the rebuild of both id tables.
 //
-// Three groups, in the order the mouse wants them and each under a section header: what acts
-// on **this pad** (ChordPads opened that group, this continues it with New chord and Next),
-// what acts on **this page**, then the **settings**. Everything is two levels deep at most.
+// Lock is not here: it needs nothing from the generator and belongs to the card itself, so
+// ChordPads offers it either way. Everything else the generator has is reachable from here,
+// on every pad on every page, because there is no longer a view whose absence could take it
+// away.
 void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
 {
     const auto& pad = processor.chordPad(slot);
     const bool filled = ! pad.notes.empty();
-    const int offset = processor.padPageOffset();
     juce::WeakReference<ChordGenMenu> safe(this);
 
     lastSuggestions.clear();
     lastSuggestTarget = -1;
     lastSettings.clear();
 
-    // No separator first: New chord and Next act on the card ChordPads has just offered Edit,
-    // Clear pad and Lock for, so they belong inside that group rather than after a rule.
     menu.addItem(idNewChord, "New chord", ! pad.locked);
 
     // "What could follow this?" - the four suggestion families, each row carrying a
     // play button so it can audition without closing the menu (Octavium's per-row
-    // preview). A pick lands in the next free pad on the page rather than replacing
-    // the chord you asked about; with the page full it takes the slot right after,
-    // which is where a progression would go anyway.
-    int target = -1;
-    if (filled)
-    {
-        for (int v = 0; v < KeysProcessor::padsPerPage && target < 0; ++v)
-        {
-            const int s = offset + v;
-            if (processor.chordPad(s).notes.empty() && ! processor.chordPad(s).locked)
-                target = s;
-        }
-        if (target < 0)
-        {
-            const int after = slot + 1 < offset + KeysProcessor::padsPerPage ? slot + 1 : offset;
-            target = processor.chordPad(after).locked ? -1 : after;
-        }
-    }
+    // preview). A pick lands in the first free pad on the page rather than replacing
+    // the chord you asked about, and *only* ever in a free one: with the page full it used to
+    // fall through to the slot right after this one, and writeChord replaces what is there, so
+    // the one path left that could lose a chord you had was this one. A full page greys the
+    // row instead - the same answer Fill gives when it has nowhere to write.
+    //
+    // Free means empty, lock or no lock. That is the one definition in the generator
+    // (`emptyPadsOnPage`, which Fill uses): a lock protects a chord, and a blank slot has no
+    // chord to protect. The search here used to demand empty *and* unlocked, which disagreed
+    // with the helper next to it about the same page.
+    const auto blanks = emptyPadsOnPage();
+    const int target = filled && ! blanks.empty() ? blanks.front() : -1;
+    // One row, four families inside it. The families were four rows of their own with a
+    // section header over them until 2026-07-30, which is five rows for a path that is
+    // explored occasionally and never in a hurry - and rows were what the menu had run out of.
+    // The suggestions are the one thing here three levels deep, and they are the right thing
+    // to spend that on: the extra hover buys back four rows for the items that are used
+    // constantly. Kept as a greyed row rather than dropped when there is nothing to suggest,
+    // so the menu is the same shape on every card.
+    juce::PopupMenu next;
     if (filled && target >= 0)
     {
         // A generated pad already knows what it is; a hand-captured one gets worked out here.
@@ -548,7 +581,6 @@ void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
                                             : suggest::analyse(pad.notes);
         const auto suggestions = suggest::all(rootPc, type, octaveOf(pad.notes, currentOptions().octave));
 
-        menu.addSectionHeader("Next: could follow");
         const char* categories[] = { "Neo-Riemannian", "Circle of Fifths", "Diatonic", "Chromatic" };
         int id = idSuggestBase;
         for (const char* cat : categories)
@@ -567,34 +599,37 @@ void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
                                                                   }));
                 lastSuggestions.push_back(s);
             }
-            menu.addSubMenu(cat, sub);
+            next.addSubMenu(cat, sub);
         }
     }
+    menu.addSubMenu("Next: could follow", next, filled && target >= 0);
     lastSuggestTarget = target;
+}
 
+// The page group at the foot of the same menu. Called straight after addPadMenuItems, which
+// is what rebuilds `lastSettings` - the settings added here append to that table, so calling
+// this one on its own would build ids nothing can resolve.
+void ChordGenMenu::addPageMenuItems(juce::PopupMenu& menu)
+{
     // Clear page, beside the settings. It was a chip on the Pads bar until 2026-07-30 and had
     // no business being one: it empties every unlocked pad on the page, Keys has no undo of
     // any kind, and it rode 4 px from Regen and a few more from the page buttons - the two
     // things on that bar that get clicked constantly. A menu costs a right-click and a read,
     // which is the right price for sixteen pads. Greyed out when there is nothing to take,
     // so it never looks like it did something it didn't.
-    bool anyToClear = false;
-    for (int v = 0; v < KeysProcessor::padsPerPage && ! anyToClear; ++v)
-    {
-        const auto& p = processor.chordPad(offset + v);
-        anyToClear = ! p.locked && ! p.notes.empty();
-    }
+    menu.addItem(idClearPage, "Clear page", ! regeneratablePadsOnPage().empty());
 
-    menu.addSeparator();
-    menu.addSectionHeader("This page");
-    menu.addItem(idClearPage, "Clear page", anyToClear);
-
-    // And the settings, flat. They used to sit behind a "Generator settings" submenu, which
-    // made every one of them a three-level diagonal hover; see the class comment. The headers
-    // and rules above are what pays for the length that costs.
-    menu.addSeparator();
-    menu.addSectionHeader("Generator settings");
-    addSettingsItems(menu);
+    // And the settings, behind one wrapper again. They were flattened onto the top level
+    // earlier on 2026-07-30 to save a leg of hover, and that was a mistake twice over: it took
+    // the menu to 23 rows and roughly 820 px, past what fits above a pad near the bottom of
+    // the window, and it was aimed at a problem that had already been solved in the same
+    // session - Key, Mode and Scale Compliance became combo boxes on the Pads bar, and those
+    // are the three anybody reaches for while auditioning a page. What is left behind this
+    // wrapper is the tail: Source, Octave, Notes, Inversions, Lock Influence and the chains.
+    // One extra hover, once in a while, to keep the menu on the screen.
+    juce::PopupMenu settings;
+    addSettingsItems(settings);
+    menu.addSubMenu("Generator settings", settings);
 }
 
 // The other half: what to do with a choice from those items. The menu is shown and

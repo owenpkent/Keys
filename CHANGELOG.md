@@ -5,6 +5,146 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: Next voicing on a chord played with two hands
+
+Two hands on the keybed produce a doubled note - the root at the bottom and again an octave
+up is the usual one - and the voicing walk could not read that chord back. It stacked the
+repeat an octave higher instead of collapsing it, so C major played as C E G C came back as a
+chord in the *wrong* register, and **Next voicing** answered by writing the whole thing an
+octave up. Press it again and it climbed again, until the chord ran off the top of the
+keyboard and the item greyed out for good with no way back to root position. The same fault
+from the other side put the same MIDI note on a pad twice, which spends two voices of the
+polyphony cap and makes a four-note chord name itself as though it had four different notes.
+
+A repeated note now collapses on the first press: a chord's voicings are arrangements of its
+*pitch classes*, and there is no arrangement of a doubled note that survives the walk (the
+last inversion of a doubled root is literally root position an octave up, which is where the
+drift came from). The cost is that doubled note, once. What it buys is a cycle that closes in
+one register however the chord was built, and no arrangement that can ever play a pitch
+twice.
+
+### Fixed: Octave and Next voicing on the card you are editing
+
+**Octave down**, **Octave up** and **Next voicing** are greyed while that card is the one
+linked to the keyboard for editing. They write the pad's stored chord and cannot reach the
+keybed, so the card moved and the keys did not - and then the next note you latched wrote the
+old octave straight back over the shift, through the capture path, which also throws away the
+generator metadata that lets **New chord** know which degree the card was. **Done editing** is
+the row above them on the same menu.
+
+### Fixed: a card that was both ringing and feeding the arp fired twice
+
+With **Exclusive** on, moving such a card's chord (an octave shift or a new voicing) played
+it, choked it, and played it again: both halves of putting the card back call the same
+choke-everything path, so each undid the other, and the card ended up holding the arp while
+silent - neither of the states it started in. Exclusive means one chord source at a time, so
+there is one state to put back now, and it is the arp hold: the arp goes on playing off a held
+chord until something replaces it, where a pad still ringing is only what Sustain left behind.
+With Exclusive off both come back, as before.
+
+### Fixed: picking a suggestion could overwrite a chord
+
+**Next: could follow** places its pick in the first empty pad on the page. With the page full
+it used to fall through to the pad right after the one you asked about and replace what was
+there, which is the last path in the generator that could lose a chord you already had. It
+greys out instead, the same answer **Fill** gives when it has nowhere to write. "Empty" here
+means empty, locked or not: that is the definition `emptyPadsOnPage()` and Fill already use,
+because a lock protects a chord and a blank slot has none to protect.
+
+### Fixed: the pad card menu fits on the screen again
+
+The menu had grown to 23 top-level rows plus four section headers. At the mouse-only item
+height of 34 px that is about 820 px of menu, and it hangs off a pad near the *bottom* of a
+699 px window, so it grew upwards past the top of the screen. JUCE answers a menu taller than
+the space it has by splitting it into columns or turning it into a hover-scrolling one, and a
+scrolling popup cannot be used with a single mouse at all: hovering the arrow scrolls the
+list, and moving to click scrolls the item you wanted away. That is the "isn't working, too
+overwhelming" report, and it was both things at once.
+
+It is **eleven rows and three rules, 429 px**, and it now fits above a pad at the bottom of
+the window on a 1080p screen with room to spare, in one column, with nothing to scroll:
+
+```
+Edit on keyboard / Clear pad / Lock
+Octave down / Octave up / Next voicing
+New chord / Next: could follow > / Send to arp slot >
+Clear page / Generator settings >
+```
+
+Three things paid for it. The section headers went, because a rule says the same thing at
+half the height - and a JUCE section header is not even a row, it is an item and a half
+(51 px), which is what the last of them, **This pad**, was costing to name the card you had
+just right-clicked. The four **Next** families went behind a single **Next: could follow** row,
+which is the one thing on the menu three levels deep and the right place to spend that: it is
+the exploratory path, not the one you take twenty times an hour. And **the settings went back
+behind their Generator settings wrapper**, undoing the flattening from earlier the same day.
+That flattening was aimed at saving a leg of hover, and it was aimed at a problem that had
+already been solved in the same session: **Key**, **Mode** and **Scale Compliance** are combo
+boxes on the Pads bar now, and those are the three anybody reaches for while auditioning a
+page. They are still inside the wrapper as well, so the menu stays the complete path.
+
+### Fixed: Fill no longer overwrites chords you already have
+
+**Fill** wrote to every unlocked pad on the page, which made the one constructive button on
+the bar the fastest way to lose sixteen chords, with no undo anywhere in Keys behind it. It
+writes to the **empty** pads now and never replaces a chord that is already there, locked or
+not: a blank needs no protection.
+
+**Regen** keeps its job and is the only destructive one: it rerolls the pads that already
+carry a chord and skips the locked ones. That is what "regenerate" means, and the lock is
+what says "not this one". The two used to be one function with a flag, which is exactly how
+the safe button ended up being the dangerous one, so they are two functions now.
+
+Each chip also **greys out when it would do nothing** - Fill with no blanks left on the page,
+Regen with nothing unlocked to reroll - so which of the two is which is readable from the bar
+without a tooltip. The tooltips say it too.
+
+### Added: the lock on a chord card is a click target, and looks like one
+
+The card has painted a lock since the pad strip existed and has never been able to set it:
+the toggle lived on the chord generator's own copy of these same pads, so a state you could
+read from the keyboard needed another view to change, and after that view went away it needed
+a right-click. The **top-right corner of a filled card is a lock chip** now. One left click
+toggles it; it never fires the chord, never starts a drag and never hands the card to the
+arp, and it works in both the normal and the Big card arrangements.
+
+The chip is **24 px docked** and the full **34 px on a Big card**, sized to the card rather
+than fixed at the mouse-only floor. A flat 34 px square is 27% of a docked card at the
+default window width and 34% at the 820 px minimum, taking most of the height across the
+whole right-hand end - a third of the card that no longer plays the chord - and the only mark
+in it was a 5 px dot, so a click well below that dot silently toggled the lock. 24 px is the
+size of every control on a section bar, which is what an accelerator is allowed to be beside
+a full-size path, and the full-size path is **Lock** on the card menu.
+
+It is painted at the size of the target, on every filled card and not only locked ones: an
+unlit chip with the shackle open while the chord is open to generation, lit with the shackle
+closed once it is protected. You cannot hit it without seeing what you hit. **Lock** on the
+card menu stays as the accelerator, and it is the way to reach the lock on a card that is
+currently linked to the keyboard for editing, where the tick that ends the edit owns that
+same corner and the chip is not drawn at all. Empty pads have nothing to lock and get no
+target.
+
+### Added: Octave down, Octave up and Next voicing on a pad's card menu
+
+Three items acting on the one card's stored chord:
+
+- **Octave down** / **Octave up** move every note of the chord by an octave. They grey out
+  rather than wrap when a note would fall off the ends of MIDI: a chord that cannot move in
+  one piece does not move at all.
+- **Next voicing** cycles the same pitch classes through different arrangements - root
+  position, one inversion per note above the root, then a spread that opens the chord out with
+  the root left in the bass, then round to root again. The item says which arrangement the
+  card is in now. The inversions are the generator's own (`genInv0..genInv3`), not a second
+  vocabulary; the spread is the one addition, because it is the voicing those four cannot
+  express.
+
+Nothing is remembered on the card for the cycle to work: the arrangement is read back off the
+notes by shape, so a chord captured from the keyboard picks up the cycle wherever it happens
+to be sitting. If the card is ringing, or is the one held into the arpeggiator, it changes to
+the new notes where it stands - both go through the existing stop-then-press paths, so no
+note-on is left without its release. **All three work on a locked card**, deliberately: a lock
+protects a chord from being *generated over*, and moving a card by name is not generation.
+
 ### Added: the arp rate can free-run in Hz
 
 The rate list stays exactly as it was, eleven tempo-synced divisions from "16 bars" to
@@ -153,36 +293,32 @@ and it reaches the cards two ways, neither of which costs the window a pixel:
   without being opened. The pool's settings grey out while the Markov source is up, as they did
   on the panel.
 
-**Clear page** is on that menu as well, under a **This page** heading, and deliberately not a
-third chip. It empties every unlocked pad on the page, Keys has no undo of any kind, and as a
-chip it sat 4 px from **Regen** and a few more from the page buttons, the two things on that
-bar that get clicked constantly. Fill and Regen are constructive; a destructive bulk action is
-worth the extra click of a menu. `clearPage()` itself is unchanged, only what reaches it, and
-the item greys out when the page holds nothing to take.
+**Clear page** is on that menu as well, at the foot of it, and deliberately not a third chip.
+It empties every unlocked pad on the page, Keys has no undo of any kind, and as a chip it sat
+4 px from **Regen** and a few more from the page buttons, the two things on that bar that get
+clicked constantly. A destructive bulk action is worth the extra click of a menu.
+`clearPage()` itself is unchanged, only what reaches it, and the item greys out when the page
+holds nothing to take.
 
 **Big**, on the Pads bar, is what the generator's grid used to be: four rows of four with the
 full chord card on each, the chord's notes with octave numbers and a mini keyboard of the
 shape under your hand. It works whatever else is on screen now, rather than only under Chords.
 
-### Changed: the generator's settings are two levels deep, and three of them are on the bar
+### Changed: three generator settings are on the Pads bar
 
-Two complementary answers to the same complaint: reaching a generator setting cost too much
-pointer travel.
+An answer to the complaint that reaching a generator setting cost too much pointer travel.
+**Key**, **Mode** and **Scale Compliance** are combo boxes on the Pads bar (see below), so the
+three you change while auditioning a page are one click to open and one to pick, with no menu
+in it at all.
 
-**The card menu is flat.** A setting used to be right-click, hover **Generator settings**,
-hover the setting, click the value: three legs of diagonal hover, and hover travel is the
-expensive part with one mouse. The wrapper submenu is gone and every setting hangs directly
-off the pad menu, so it is right-click, hover, click. Each keeps its ticked value and the
-live value repeated in its own parent item, so the menu still reads as a state display.
-
-The menu is longer for it, so it is grouped: **This pad** (Edit on keyboard, Clear pad, Lock,
-Send to arp slot, New chord, Next: could follow), **This page** (Clear page), then **Generator
-settings** (Source, Key, Octave, Mode, Notes, Inversions, Scale Compliance, Lock Influence),
-with a rule between each. **Markov chains** is the one group that keeps a level of its own:
-Chain, Mood, Start, Temperature and Length are five settings that do nothing at all until
-Source is Markov, which is not the default, and flattening them too would have pushed the menu
-off the bottom of a 1080p screen. The submenu opens whatever Source says, so the values can
-still be read and set before switching over.
+The other half of that answer, flattening the settings out of their **Generator settings**
+wrapper and onto the pad menu itself, was tried the same day and taken back out: it took the
+menu to 23 rows and roughly 820 px, which is more menu than fits above the pad it hangs off,
+and JUCE turns a menu that tall into a hover-scrolling one that a single mouse cannot work.
+See "the pad card menu fits on the screen again" at the top of this release. Each setting
+still keeps its ticked value and repeats the live one in its own parent item, so the menu
+reads as a state display either way, and **Markov chains** stays a group of its own, since
+Chain, Mood, Start, Temperature and Length do nothing at all until Source is Markov.
 
 **Key, Mode and Scale Compliance are combo boxes on the Pads bar**, beside Fill and Regen.
 Those are the three you change while auditioning a page, and on the bar each is one click to

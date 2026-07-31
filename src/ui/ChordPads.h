@@ -13,11 +13,12 @@ namespace keys
 //   * Drag the card onto a pad to capture the chord there (auto-labelled).
 //   * Drag a filled pad onto the card to recall its chord for editing (onRecall).
 //   * Click a filled pad to play/stop its chord (Exclusive makes a new pad choke the old).
+//   * Click the lock chip in a filled card's top-right corner to protect it from generation.
 //   * Drag a pad onto another to move it, or off the row to clear it.
 //   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad to the
-//     piano; every latch change writes back live), Clear, Lock, Send to arp slot, and the
-//     whole chord generator - New chord, what could follow this one, and its settings. Part
-//     of the owner-directed right-click exception in CLAUDE.md.
+//     piano; every latch change writes back live), Clear, Lock, Octave down/up, Next voicing,
+//     Send to arp slot, and the chord generator - New chord, what could follow this one, and
+//     its settings. Part of the owner-directed right-click exception in CLAUDE.md.
 //
 // Sixteen pads per page, as two rows of eight or (Big) four rows of four with the full chord
 // card on each: its notes with octave numbers and a mini keyboard of the shape under your
@@ -59,8 +60,16 @@ public:
     // Extra items for a pad's right-click menu, from whoever can service them - today the
     // chord generator, which has no surface of its own and reaches the cards through here.
     // Ids 200 and up belong to the supplier; everything below is this class's own.
+    //
+    // Two hooks, not one, because the supplier's items land in two different groups of the
+    // menu and this class owns the skeleton between them: `onExtraMenuItems` closes the
+    // **this pad** group (New chord, Next: could follow), `onExtraPageItems` is the **this
+    // page** group at the foot (Clear page, Generator settings). Both are answered by the one
+    // `onExtraMenuChoice`, and this class always calls them in that order, which is the
+    // contract the generator's own id tables rely on.
     static constexpr int extraMenuIdBase = 200;
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
+    std::function<void(juce::PopupMenu&)> onExtraPageItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
 private:
@@ -72,9 +81,29 @@ private:
     // a corner chip, because the mouse-only floor is 34 px and a corner badge that size
     // would sit exactly where the chord name is. Static: it is pure geometry.
     static juce::Rectangle<float> saveBadgeBounds(juce::Rectangle<float> pad);
+
+    // The lock chip: a square in the top-right corner of a filled card, sized to the card
+    // rather than fixed at the 34 px mouse-only floor. 34 was a third of a docked card's area
+    // and most of its height, all of it dead to play, drag and the arp, and the only mark in it
+    // was a 5 px dot. It comes out 24 px docked (a section-bar control, which is what an
+    // accelerator is allowed to be beside the menu's own Lock item) and the full 34 on a Big
+    // card. Whatever it comes out, the chip is painted at that size: mark and target are the
+    // same rectangle now. Static: pure geometry, like saveBadgeBounds.
+    static juce::Rectangle<float> lockBadgeBounds(juce::Rectangle<float> pad);
+
     int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;
     void showPadMenu(int slot);
+
+    // The two chord-shaping actions on that menu, both acting on the *stored* chord of one
+    // pad. Menu-only by Owen's call: they are edits, not performance, and the cards have no
+    // room for three more targets.
+    void shiftPadOctave(int slot, int semitones);
+    void nextPadVoicing(int slot);
+    // and what both go through, so a chord that is sounding or held into the arp moves with
+    // its card instead of being stranded. See the definition.
+    void rewritePadChord(int slot, const std::vector<int>& notes);
+    int padRootPc(int slot) const; // the root a pad's chord is built on, generated or analysed
 
     KeysProcessor& processor;
     // Whether a click on a chord card feeds the arpeggiator instead of playing the chord

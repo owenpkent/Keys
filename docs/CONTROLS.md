@@ -237,45 +237,60 @@ work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ### A pad's card menu
 
-Right-click any pad. Everything that can act on that card is here, in three groups, each
-under a heading and separated by a rule. Nothing on it is more than one submenu deep.
-
-**This pad**
+Right-click any pad. Everything that can act on that card is here: eleven rows in four
+groups, separated by rules.
 
 | Item | What it does |
 |------|--------------|
 | **Edit on keyboard** / **Done editing** | Step 7 above |
 | **Clear pad** | Empty this one card. Greyed on an empty or locked pad |
-| **Lock** / **Unlock** | Keep this chord through a Fill or a Regen. The card has always painted the lock dot; this is what sets it |
-| **Send to arp slot** | Park a copy of this chord in one of the twelve arp slots, to launch later. The one *menu item* in Keys with no left-click twin |
+| **Lock** / **Unlock** | Keep this chord through a Regen. Same as clicking the lock chip in the card's top-right corner |
+| **Octave down** / **Octave up** | Move the whole chord an octave. Greyed when a note would fall off the ends of the keyboard (it never wraps one round to the other end), and while this card is the one linked to the keyboard for editing |
+| **Next voicing** | The same chord arranged differently: root position, first inversion, second, (third, on a four-note chord), then a spread with the root left in the bass, then round to root again. The item says which one the card is in now. Greyed while the card is linked to the keyboard, like Octave |
 | **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
 | **Next: could follow** | Four submenus of chords that could follow this one, described below. On a filled pad only, since there has to be a chord to follow |
-
-**This page**
-
-| Item | What it does |
-|------|--------------|
+| **Send to arp slot** | Park a copy of this chord in one of the twelve arp slots, to launch later. The one *menu item* in Keys with no left-click twin |
 | **Clear page** | Empty every unlocked pad on this page. Greyed when there is nothing to take |
+| **Generator settings** | Every setting the chord generator has, one submenu each, described below |
 
-**Generator settings** — every setting the chord generator has, one submenu each, described
-below.
+**Octave** and **Next voicing** work on a locked pad too. A lock protects a chord from being
+*generated over*; it is not a lock against you, and moving a card you locked on purpose is
+something you asked for by name. If that card is ringing, or is the one held into the
+arpeggiator, it changes to the new notes where it stands rather than being cut off. They do
+*not* work on the card currently linked to the keyboard: they write the card and the keyboard
+would write it straight back. **Done editing**, at the top of the same menu, frees them.
+
+**Next voicing** on a chord you played with two hands drops the doubled note on the first
+press. A voicing is an arrangement of the chord's notes, and a note played twice has no
+arrangement of its own: keeping it is what used to send the chord climbing an octave on every
+press until it ran off the keyboard.
+
+**The menu is kept short on purpose.** It hangs off a pad near the bottom of the window and
+every row is 34 px measured *upwards* from there, so a long menu runs off the top of the
+screen and turns into one you have to scroll by hovering, which is unusable with one mouse.
+Eleven rows is the budget. That is why the four **Next** families sit behind one row, and why
+the settings are behind one **Generator settings** row rather than spread out on the menu
+itself: **Key**, **Mode** and **Scale Compliance**, the three you actually change while
+auditioning a page, are combo boxes on the Pads bar where they need no menu at all.
 
 **Clear page** is on this menu and not a chip on the Pads bar, where it used to be. It
 empties sixteen pads, Keys has no undo of any kind, and on the bar it sat a few pixels from
 **Regen** and the page buttons, which are the two things there you click constantly. A
-right-click and a read is the right price for sixteen pads. **Fill** and **Regen** stayed on
-the bar because they are constructive.
+right-click and a read is the right price for sixteen pads.
 
 ## Chord generator
 
 The generator has no panel and no view of its own. It is **two chips, three combo boxes and a
 card menu**:
 
-- **Fill** and **Regen**, at the right-hand end of the **Pads bar**. Fill writes a chord to
-  every unlocked pad on the page; Regen gives a new chord to the unlocked pads that already
-  have one. Both stay clickable when the Pads section is folded away, because they are the
-  only left-click path into generation and folding the strip must not take the feature with
-  it. Unfold and the page is written.
+- **Fill** and **Regen**, at the right-hand end of the **Pads bar**. **Fill is the safe one**:
+  it writes a chord to the *empty* pads and never touches one that already has a chord, so you
+  can lean on it. **Regen is the one that overwrites**: it gives new chords to the pads that
+  already have one, skipping the locked ones, which is what a lock is for. Each greys out when
+  it would do nothing - Fill with no blanks left on the page, Regen with nothing unlocked to
+  reroll - so the buttons tell you which is which without a hover. Both stay clickable when
+  the Pads section is folded away, because they are the only left-click path into generation
+  and folding the strip must not take the feature with it. Unfold and the page is written.
 - **Key**, **Mode** and **Scale Compliance**, combo boxes on the same bar just left of the
   chips. These are the three you change while you are auditioning a page, so they are on the
   bar rather than behind a right-click: one click opens the list, one picks. They stay put
@@ -298,17 +313,19 @@ you those large cards where the pads actually are.)
    **Natural Minor** there. These two are the generator's
    own, separate from the **Root** and **Scale** that drive Scale Lock, so move those to
    match if you want Scale Lock to agree with the chords you're about to get.
-2. **Fill.** One click on the chip. Every unlocked pad gets a chord: the seven that belong
+2. **Fill.** One click on the chip. Every *empty* pad gets a chord: the seven that belong
    to the key come first, in order, then the remaining pads get something richer from it.
+   Anything already on the page stays exactly as it is, so filling a half-finished page is
+   safe. To replace what is there, use **Regen** instead, and lock the cards you want kept.
 3. **Play them.** Press a pad to hear it. Turn **Big** on if you want to read the notes of
-   each chord while you work.
+   each chord while you work. **Octave** and **Next voicing** on a pad's right-click menu move
+   one card around without changing what chord it is.
 
 ### Generator settings
 
-All of these live at the bottom of a pad's right-click menu, under the **Generator settings**
-heading. Each one opens a short list of values with the current one ticked, so a setting is a
-hover and a click and never a drag. There is no wrapper submenu around them: that cost a
-third leg of hover for every setting, and hover travel is the expensive part with one mouse.
+All of these live behind the **Generator settings** row at the foot of a pad's right-click
+menu. Each one opens a short list of values with the current one ticked, so a setting is a
+hover and a click and never a drag.
 
 **Key**, **Mode** and **Scale Compliance** are also combo boxes on the Pads bar, which is the
 fast way to reach the three you change most. The five Markov rows are together under a single
@@ -359,8 +376,9 @@ answer, one submenu each:
 
 Every suggestion row has a **play** button that auditions it for a moment without
 closing the menu, so you can shop by ear. Clicking the row itself takes it: your pick
-goes into the next empty pad on the page, so you can build a progression left
-to right by asking for one chord at a time.
+goes into the first empty pad on the page, so you can build a progression left
+to right by asking for one chord at a time. It only ever writes to an empty pad, so
+**Next: could follow** greys out on a full page rather than replacing a chord you have.
 
 **New chord** on a Markov pad steps the chain again from the pad to its left, avoiding the
 chord it replaces. Locked pads are never overwritten, same as the algorithmic source.

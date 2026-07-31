@@ -406,19 +406,51 @@ to switch to. Everything moved onto the pad's own right-click menu, which is whe
 it applies to already is:
 
 - **Lock**, **New chord** and **Next** are items, through `addPadMenuItems` /
-  `handlePadMenuChoice`. They are now offered on **every pad on every page, always**: the
-  panel used to gate them on being alive, so the generator's own actions were unreachable
-  from a pad whenever the view was folded or another one was up. Making the generator a plain
-  member is precisely what eliminated that gate, and the test that asserted it went with it.
-- Every **setting** is a submenu of that same menu, hanging **directly** off it: source, key
-  and mode, octave, note counts, inversions, Scale Compliance, Lock Influence, then one
-  **Markov chains** submenu for the five that are inert unless the source is Markov. It was a
-  **Generator settings** wrapper until 2026-07-30; that made every setting a three-level
-  diagonal hover, and hover travel is the expensive thing with one mouse. Two levels is the
-  ceiling, the groups are separated by section headers and rules, and the Markov five keep a
-  level of their own only because flattening them too would run the menu off a 1080p screen. A
-  submenu shows its live value in its own caption, so nothing needs a panel to read the state
-  back.
+  `addPageMenuItems` / `handlePadMenuChoice`. They are now offered on **every pad on every
+  page, always**: the panel used to gate them on being alive, so the generator's own actions
+  were unreachable from a pad whenever the view was folded or another one was up. Making the
+  generator a plain member is precisely what eliminated that gate, and the test that asserted
+  it went with it.
+- Every **setting** is a submenu of a single **Generator settings** wrapper: source, key and
+  mode, octave, note counts, inversions, Scale Compliance, Lock Influence, then one **Markov
+  chains** submenu for the five that are inert unless the source is Markov. A submenu shows
+  its live value in its own caption, so nothing needs a panel to read the state back.
+- **The menu has a hard budget, and it is rows.** It is anchored to a pad near the bottom of
+  a 699 px window and shown at `withStandardItemHeight(okstudio::ui::minHitPx)`, so each row
+  costs 34 px of screen measured *upwards* from there, and a separator 17. The settings were
+  flattened onto the top level for part of 2026-07-30 to save a leg of hover; that took the
+  menu to 23 rows plus four section headers, about 820 px, and JUCE answers a menu taller than
+  the space it has by splitting it into columns (`insertColumnBreaks`) or making it
+  hover-scroll. A scrolling popup cannot be operated with one mouse at all: hovering the arrow
+  scrolls and moving to click scrolls the item away. It is **11 top-level rows and three
+  separators, 429 px** (34 each, 17 each, plus JUCE's 2 px border top and bottom), and it
+  stays that way. The section headers went - a rule says the same thing at half the height,
+  and a JUCE section header is not a row but an item and a half, 51 px here, since
+  `HeaderItemComponent` asks the LookAndFeel for an item size and then adds half of it again.
+  The four suggestion families went behind one **Next: could
+  follow** row, and the settings went back behind their wrapper - which cost nothing in the
+  end, because **Key**, **Mode** and **Scale Compliance** had become combo boxes on the Pads
+  bar in the same session and those are the three anybody reaches for mid-audition.
+- **Octave down / Octave up / Next voicing** act on one pad's stored chord (menu-only, Owen's
+  call). `chordgen::rootPosition` / `applyVoicing` / `voicingOf` in `ChordGen.h` are the
+  voicing cycle: root position, one inversion per note above the root (the same inversions
+  `genInv0..genInv3` name), then a spread, then round again. Nothing is remembered on the
+  card - `voicingOf` reads the arrangement back off the notes by shape, which is what keeps
+  the cycle right for a chord captured from the keyboard. `rootPosition` **collapses a
+  repeated pitch class**, which two hands on the keybed produce constantly: keeping it read
+  the chord back in the wrong register (so every press climbed an octave until the chord left
+  the keyboard) and let an inversion stack one copy onto the other, which is the same MIDI
+  note twice on one pad. No arrangement of a doubled note survives the walk - the last
+  inversion of a doubled root *is* root position an octave up - so the double goes once, on
+  the first press. `ChordPads::rewritePadChord` is the one way any of them writes: it goes
+  through `holdArpChordFromPad` for a chord held into the arp and `pressChordPad` for one left
+  ringing, so every note-on gives its reference back before the new one takes it. In that
+  order, and with **Exclusive** on only the hold is restored: both calls choke every chord
+  source, so doing both meant firing, killing and firing again, two strum rolls apart, and
+  ending in neither state. A locked pad accepts all three, deliberately: a lock protects a
+  chord from *generation*, not from its owner. The **card being edited** does not: all three
+  grey out while `slot == editingSlot`, because they write the stored chord and cannot reach
+  the keybed, and the edit link would write the un-shifted set back on the next latched note.
 - **Fill** and **Regen** are the left-click bulk path, two 24 px chips at the **right end of
   the Pads bar**, and **Key**, **Mode** and **Scale Compliance** are three 24 px combo boxes
   beside them: the settings that get changed while a page is being auditioned, one click to
@@ -431,6 +463,28 @@ it applies to already is:
 - **Clear page** is an item on the pad menu and deliberately *not* a chip. It wipes every
   unlocked pad on the page, there is no `juce::UndoManager` anywhere in Keys, and a bulk
   destructive action with no undo does not belong 4 px from Regen.
+- **Fill never overwrites** (2026-07-30, Owen: "new generations shouldn't overwrite
+  existing"). `fillPage()` writes the *empty* pads and only those, locked or not - a blank
+  needs no protection. `regeneratePage()` is the destructive one and the only one: it rerolls
+  the pads that already carry a chord and skips the locked ones, which is what "regenerate"
+  means and what the lock is for. They were one function with an `onlyUnlocked` flag, and the
+  split is the point rather than a tidy-up: a flag on a shared path is exactly how the safe
+  button ended up being the one that could lose sixteen chords. Each chip greys itself out
+  when its list of targets is empty (`pageHasEmptyPads` / `pageHasRegeneratablePads`, polled
+  from the editor's timer), so which of the two is which is readable from the bar.
+- **The lock chip is a target**, not only an indicator (2026-07-30), and it is painted at the
+  size of that target. `ChordPads::lockBadgeBounds` is a square in the top-right of a filled
+  card, `jmin(34, round(h * 0.55), round(w * 0.30))`: 24 px docked at both the default and the
+  minimum window width, which is a section-bar control and the size an accelerator is allowed
+  to be beside the menu's own Lock item, and the full 34 on a Big card. It was a flat 34,
+  which is 27% of a docked card's area at 980 px and 34% at the 820 px floor - most of the
+  height across the whole right-hand end - with a 5 px dot as its only mark, so a click 30 px
+  below the dot toggled the lock with nothing on screen to say why. `drawLockBadge` fills that
+  rectangle: an inset chip with an open shackle while the chord is open to generation, lit and
+  closed once it is set. The click is tested before every play/drag branch in `mouseDown`, so
+  it never fires the chord, arms a drag or feeds the arp; neither chip nor branch exists on the
+  card being edited, where the tick that ends the edit owns that end. Lock on the card menu
+  remains the accelerator.
 
 Auditioning a chord reuses `pressChordPad` / `releaseChordPad`. It always did, and now there
 is one card doing it rather than two.
