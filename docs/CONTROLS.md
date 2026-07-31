@@ -2,11 +2,15 @@
 
 Every control is operated with a single left-click, a drag, or the scroll wheel.
 Nothing needs the keyboard, a double-click, or a modifier key. The right-click gestures
-below are accelerators, and the work each of them does has a left-click path too, bar two
+below are accelerators, and the work each of them does has a left-click path too, bar three
 exceptions Owen signed off:
 
 - **Send to arp slot**, in a chord pad's menu, because binding a chord to one particular
   slot needs a target picker.
+- **Lock**, in the same menu. It had a clickable chip in the card's corner for a few hours on
+  2026-07-30 and lost it at Owen's request: the chip took roughly a quarter of the card away
+  from playing it, dragging it and feeding the arp. A locked card still *shows* a corner dot,
+  so the state reads without opening the menu; the dot is a marking and not a target.
 - **Releasing one note out of a chord the Sustain pedal is holding.** Under Sustain a left
   click on a ringing key strikes it again, by design, so the second click cannot also be the
   release. Right-click is the only way to take that one note out. Under **Latch** the left
@@ -75,7 +79,7 @@ the window reads at a glance, before you have read a single caption.
 | Section | Bar | Folds away |
 |---------|-----|-----------|
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Humanize, Velocity, Strum, Dir, BPM, and the eight knobs in the row beneath them. **Knobs**, at the left end of this bar, folds just that knob row; the theme swatch at the right end stays put whatever you fold. |
-| **Arp** | below the controls | The arpeggiator. Its **On** toggle, the **Hold off** chip and **Detach** ride on the bar, so the arp can be switched on, made to let go of a chord, and detached with the panel folded shut. Folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
+| **Arp** | below the controls | The arpeggiator. Its **On** toggle and the **Hold off** chip ride on the bar and stay there folded, so the arp can be switched on and made to let go of a chord with the panel shut. **Detach** rides on it too, but goes with the fold like every other section's. Folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
 | **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons and the **Big** card-size switch ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips and its **Key**, **Mode** and **Scale Compliance** combo boxes ride at the right and never do. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
@@ -108,16 +112,17 @@ alongside Re-dock, because those belong to the keybed rather than to the editor.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
 arp's **On** toggle and **Hold off** chip, the pad page buttons and **Big**, the generator's
-**Fill**, **Regen** and **Generator** chips, the **Knobs** chip, and the theme swatch. All of
-them keep working while the section they name is off in a window.
+**Fill**, **Regen** and **Generator** chips with the **Key**, **Mode** and **Scale Compliance**
+combo boxes beside them, the **Knobs** chip, and the theme swatch. All of them keep working
+while the section they name is off in a window.
 
 Folding is the other case, and a stricter one: a folded bar keeps only what still means
 something with the section gone. That is the arp's **On** and **Hold off** (so the
 arpeggiator runs on behind a closed panel, and can still be made to let go of a chord),
-**Fill**, **Regen** and **Generator** (the whole left-click path into the chord generator -
-generating into a folded strip is a fine thing to mean, and the settings must not fold away
-with the cards), and the theme swatch (it colours the whole plugin). Everything else goes with
-the section, Detach included.
+**Fill**, **Regen**, **Generator** and the three combos with them (the whole left-click path
+into the chord generator - generating into a folded strip is a fine thing to mean, and the
+settings must not fold away with the cards), and the theme swatch (it colours the whole
+plugin). Everything else goes with the section, Detach included.
 
 ## Playing surface
 
@@ -328,8 +333,10 @@ you those large cards where the pads actually are.)
    **Natural Minor** there; the window has the room for the full names. These two are the
    generator's own, separate from the **Root** and **Scale** that drive Scale Lock, so move
    those to match if you want Scale Lock to agree with the chords you're about to get.
-2. **Fill.** One click on the chip. Every *empty* pad gets a chord: the seven that belong
-   to the key come first, in order, then the remaining pads get something richer from it.
+2. **Fill.** One click on the chip. Every *empty* pad gets a chord: the ones that belong
+   to the key come first, in order (seven for a seven-note mode, but six for Blues and five
+   for the pentatonics, since a mode seeds one per degree it has), then the remaining pads get
+   something richer from it.
    Anything already on the page stays exactly as it is, so filling a half-finished page is
    safe. To replace what is there, use **Regen** instead, and lock the cards you want kept.
 3. **Play them.** Press a pad to hear it. Turn **Big** on if you want to read the notes of
@@ -360,13 +367,16 @@ fast way to reach the three you change most. Both places drive the same setting.
 | **Chain** | Markov only: Major, Minor or Modal chain tables |
 | **Mood** | Markov only: learn only from progressions tagged with this mood |
 | **Start** | Markov only: force the first chord (I, i, IV, V, vi, …) or let it pick |
-| **Temperature** | Markov only, 0.40 to 2.00. Low sticks to the most common moves; high flattens toward anything the corpus has ever done |
+| **Temperature** | Markov only, 0.30 to 2.00. Low sticks to the most common moves; high flattens toward anything the corpus has ever done |
 | **Length** | Markov only: how many unique chords are generated (4 to 16) before the sequence loops to fill the page |
 
-Everything from **Mode** down to **Lock Influence** belongs to the weighted pool, so it
-greys out while Markov is the source rather than staying clickable and being silently
-ignored (which is what Octavium did). The Markov controls are only shown under **Markov**, and
-the **Mood** list follows whichever chain is up. **Mood** and **Start** are choices about the
+**Mode**, **Notes**, **Inversions**, **Scale Compliance** and **Lock Influence** all belong to
+the weighted pool, and under **Markov** not one of them is left clickable and silently ignored
+(which is what Octavium did). Mode is on the first row, where nothing else wants the space, so
+it simply greys; the four on the second row are the ones the Markov controls take the place of,
+so under Markov they are not on screen at all. **Mode** and **Scale Compliance** on the Pads bar
+grey with their twins here, and **Key** stays live, because the chains do transpose to it. The
+**Mood** list follows whichever chain is up. **Mood** and **Start** are choices about the
 progression you are generating right now rather than session settings, so they are not saved -
 but they do survive closing and reopening the window.
 
@@ -409,10 +419,10 @@ sounding (keyboard, a held note, a chord pad) and plays it one note at a time. T
 pads sit directly below it, so a chord is always one click away, and the knobs stay on
 screen above.
 
-**On**, **Hold off** and **Detach** live on the Arp bar rather than inside the panel, so
-folding the panel away leaves the arpeggiator running, still switchable, and still able to
-let go of a chord. The section starts folded, so those three are usually all of it you can
-see.
+**On** and **Hold off** live on the Arp bar rather than inside the panel, so folding the
+panel away leaves the arpeggiator running, still switchable, and still able to let go of a
+chord. **Detach** is on that bar too, but it hides with the fold the way every other
+section's does. The section starts folded, so those two are usually all of it you can see.
 
 **Hold off** releases the chord being held into the arp and stops the **Chain** if it is
 running. The arp itself keeps running and goes back to arpeggiating whatever you play. It is
@@ -437,7 +447,9 @@ cannot land between two, and the readout under it says "1/8" or "4 bars". In Hz 
 frequency and the readout says "4.00 Hz". The `<` and `>` beside it are the click-only path
 to every value in both units: in Sync a click is one division, in Hz it is a quarter of an
 octave, so four clicks halve or double the rate, which is the same jump one entry of the Sync
-list makes.
+list makes. In Hz nothing is following a transport, so a beat is a second there: the two
+settings counted in beats, **Retrigger**'s clock windows and the Ramp's **Time**, are counted
+in seconds instead.
 
 | Control | Group | What it does |
 |---------|-------|--------------|

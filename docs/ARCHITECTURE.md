@@ -18,7 +18,8 @@ src/
 ├── ChordMarkov.h             # pure Markov progression source, unit-tested
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
-│                             # reader in Keys (docs/ARP_DESIGN.md)
+│                             # reader in Keys, and only while its rate is in Sync
+│                             # (docs/ARP_DESIGN.md)
 ├── ui/
 │   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
 │   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
@@ -35,6 +36,8 @@ src/
 │   │                         # plus the control band and twelve launchable slots
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
+│   ├── StepComboBox.h        # a combo that reports every pick, including one already
+│   │                         # showing (the Pads bar's Scale Compliance steps)
 │   ├── DetachedWindow.h      # a section popped out into its own resizable window (any
 │   │                         # of them since 2026-07-27; also the generator's window)
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
@@ -301,9 +304,10 @@ into a folded arp needs a way out that is still on screen (see `docs/ARP_DESIGN.
 
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
-chord) was also the one place you could not reach a chord. Their page buttons ride on the
-Pads bar, and so do the generator's **Fill**, **Regen** and **Generator** chips, at the right
-end. What a
+chord) was also the one place you could not reach a chord. Their page buttons and the **Big**
+switch ride on the Pads bar from the left, and the generator's **Fill**, **Regen** and
+**Generator** chips and its **Key** / **Mode** / **Scale Compliance** combos come off the
+right end (the pages hide with the strip, that whole right-hand group never does). What a
 card click *means* is the arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp
 running, a click hands that chord over and leaves it there instead of playing it while the
 button is down, and a click on the card *already* feeding the arp retriggers it.
@@ -365,10 +369,14 @@ nothing, so `~KeysEditor` tears every one of them down explicitly before anythin
 
 `KeysEditor::sections` is the table that makes this generic: one `Section` per bar, holding
 its holder, its Detach button, the window it is currently in, the two `LayoutState` flags it
-reads (open, detached) and the frame it remembers. `sectionHeight()`, `idealHeight()`,
-`resized()` and `syncSectionControls()` all loop over it, so a detached section contributes
-no height to the main window and a folded one hides its window instead of its slot — one
-control means one thing wherever the section happens to be.
+reads (open, detached) and the frame it remembers. `idealHeight()` and
+`syncSectionControls()` walk it rather than naming sections, so a detached section
+contributes no height to the main window and a folded one hides its window instead of its
+slot: one control means one thing wherever the section happens to be. The two that do not
+walk it are the two where each section genuinely costs something different, and they read
+the table instead. `sectionHeight()` is a switch (Controls adds the knob row when it is
+unfolded, Pads answers Big or not, the arp asks its panel), and `resized()` lays each bar
+out in a block of its own, because what rides each bar differs.
 
 The keybed was the first to do this and keeps two extras. Detached, `PianoKeyboard`'s 185 px
 key-height cap comes off: dragging that window is meant to resize the keys, which is the whole
@@ -378,9 +386,11 @@ the editor's. Every detached window carries the button that undoes the detach on
 the top, so the control that re-docks a section is never in the window you are not looking at.
 
 Controls that belong to the *editor* rather than to the content stay behind on the bar: the
-arp's **On** and **Hold off**, the pads' page buttons and the generator's **Fill** / **Regen**
-/ **Generator** chips, the Controls bar's **Knobs** chip and theme swatch. A bar whose section is away says
-so, in the space its own controls did not use.
+arp's **On** and **Hold off**, the pads' page buttons and **Big** switch, the generator's
+**Fill** / **Regen** / **Generator** chips and its three combos, the Controls bar's **Knobs**
+chip and theme swatch. Paging a strip that is off in a window of its own is one click either
+way, so the pages are no more the content's than the swatch is. A bar whose section is away
+says so, in the space its own controls did not use.
 
 All of it (folds, detached window bounds) is in `KeysProcessor::LayoutState` rather than the
 editor, so it survives the window closing, and it is saved in the session tree rather than as
@@ -423,10 +433,11 @@ coming back:
   loses nothing and reopening it shows the same state.
 - **New chord** and **Next: could follow** stay on a pad's card menu, through
   `addPadMenuItems` / `handlePadMenuChoice`. They are questions about the card under the
-  mouse, and they are offered on **every pad on every page, always**. The panel used to gate
-  them on being alive, so the generator's own actions vanished from a card whenever its view
-  was closed - that is the bug the brain/view split exists to prevent, and it is why the window
-  must never own `ChordGenMenu`.
+  mouse, and they are offered on **every pad on every page, always** (New chord greys on a
+  locked card, which is the lock doing its one job and not the window doing anything). The
+  panel used to gate them on being alive, so the generator's own actions vanished from a card
+  whenever its view was closed - that is the bug the brain/view split exists to prevent, and it
+  is why the window must never own `ChordGenMenu`.
 - **The window is not a `Section`.** It never docks, so it has no bar, no fold, no caption and
   no Detach button, and every one of those is something `KeysEditor::sections` walks. What it
   does share is `DetachedWindow` (the skinned 38 px title bar with mouse-only-sized buttons,
@@ -537,33 +548,57 @@ toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`fade
 CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
 `markovLength`.
 
-The arp's own set is `arpOn`, `arpRate` / `arpDot` / `arpTrip` / `arpAnchor`,
-`arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves` (Repeats) + `arpDistance`,
-`arpOffset`, `arpSwing`, `arpLatch`, `arpRetrigger` + `arpRetrigBars`, `arpGate`,
-`arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`, and `arpLinkLanes`. The six
-after `arpChance` arrived on 2026-07-30 and are appended, like everything else that round:
-a choice parameter's list and an int's range are both load-bearing for sessions, so nothing
-before them moved.
+The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
+`arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`
+(Repeats) + `arpDistance`, `arpOffset`, `arpSwing`, `arpLatch`, `arpRetrigger` +
+`arpRetrigBars`, `arpGate`, `arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`, and
+`arpLinkLanes`. The six after `arpChance` arrived on 2026-07-30 and are appended; the
+rate's two arrived the same day and sit beside `arpRate` instead, which costs nothing,
+because what a session and an automation lane follow is a parameter's string id and not its
+position (JUCE hashes that id for VST3). What is load-bearing is what lives *inside* a
+parameter (a choice's list of values, an int's range), and `arpRate`'s eleven divisions are
+byte-identical, so nothing about it moved.
+
+**The rate has two units.** `arpRateFree` picks between them and `arpRateHz` holds the
+second: 0.03125 to 32 Hz, mapped exponentially rather than skewed, which is exactly what the
+eleven divisions span at 120 bpm. In Hz the engine pins its own clock to 60 bpm, so one step
+is one period and every quantity measured as a fraction of a step keeps its meaning with no
+second code path; it reads nothing from the playhead there, and Dot, Trip and Anchor mean
+nothing without a beat to subdivide or a bar to anchor to (the panel greys all three). See
+`docs/ARP_DESIGN.md`.
+
+Neither parameter exists in a session saved before that day, and **an absent parameter is
+not a reset**: APVTS creates the child on the spot and flushes whatever the live instance is
+currently holding into it, so loading an old preset while the dial was in Hz left the arp
+free-running under a panel showing a division. `migrateRateMode` reads the incoming tree,
+spots the absence, and writes both defaults explicitly, which brings such a session back in
+Sync. `migrateStrumRange` repairs the same shape for the strum band.
 
 Two pieces of arp state are deliberately **not** parameters. Lane data and the twelve slots
-live in the `arp` ValueTree beside the chord pads (they are arrays, not knobs). And the
-chain's running state is transient: it starts stopped, because a session that reopens
-already playing a progression is a session that surprises you.
+live in the `arp` ValueTree beside the chord pads (they are arrays, not knobs); a slot
+carries its chord, its shape and its rate, and since the rate gained a unit it carries that
+and the Hz value too, or launching one would drop you into Sync at whatever division it
+happened to hold. And the chain's running state is transient: it starts stopped, because a
+session that reopens already playing a progression is a session that surprises you.
 
-`bpm` (40..240, default 120) is the newest, and is registered last on purpose: appending
-leaves every existing parameter's automation index where the session left it. It is the
-tempo anything timed in beats runs at when there is no transport to follow, which is every
+`bpm` (40..240, default 120) is registered last, though it stopped being the newest when the
+rate's two arrived. Last is tidiness and not compatibility: JUCE derives a VST3 parameter's
+id by hashing its string id, so saved state and existing automation follow that id rather
+than the position, and all a position still decides is the order a host's generic list comes
+out in. `chordStrumMax` inserts mid-list regardless. It is the tempo anything timed in beats
+runs at when there is no transport to follow, which is every
 moment in the standalone and every stopped transport in a DAW; a host that is *playing*
-still wins. It replaced the arp's last-known-host-tempo fallback, which nothing in the
-standalone could ever reach and nobody anywhere could change.
+still wins, and the arp in Hz follows neither. It replaced the arp's last-known-host-tempo
+fallback, which nothing in the standalone could ever reach and nobody anywhere could change.
 
 A growing set is **registered but no longer read**, kept only so a session (and any host
 automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,
 `xyCCX` / `xyCCY` from the old five-tab arrangement, and `velocity`, `curve`,
 `humanizeTime` from the controls this branch retired. Adding to that list is the standing
-convention here — removing a parameter outright would shift automation in projects that
-already exist. `latch` came back off it in 2026-07-30, which is the other reason to keep
-dead parameters registered: a retired control is sometimes only resting.
+convention here: an id nothing registers is an id nothing can load, so removing a parameter
+outright orphans whatever a project already automated onto it and drops the value out of
+every session that held one. `latch` came back off the list on 2026-07-30, which is the
+other reason to keep dead parameters registered: a retired control is sometimes only resting.
 
 The folding layout (which of the four sections are open, whether the knobs and the wheels
 are, whether the pad cards are Big, and where each detached window was left) and the

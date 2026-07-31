@@ -9,10 +9,21 @@
 #   ... -InvokeButtons "Arp section"     # unfold a section first (UIA Invoke by name)
 #   ... -KeepOpen                        # leave the app running (repeat captures)
 #   ... -WindowTitle "Keys Host"         # REQUIRED for Keys Host: see the note by $hwnd
+#   ... -InvokeButtons "Chord generator window" -WindowTitle "Keys Chord Generator"
 #
 # A section bar is a juce::Button named "<caption> section", so "Controls section",
 # "Arp section", "Pads section" and "Keyboard section" each fold or unfold that section.
+# Those four are all there are: Centre and Transcribe were deleted on 2026-07-30.
 # The arp starts folded, so most arp shots begin by invoking "Arp section".
+#
+# The Detach buttons are named per section, because four buttons reading "Detach" are four
+# identical accessible names: "Detach Controls", "Detach Arp", "Detach Pads" and
+# "Detach Keyboard", each flipping to "Re-dock ..." once the section is out. The button
+# says Arp where the window says "Keys Arpeggiator"; invoke the one, shoot the other.
+#
+# The chord generator is not a section, it is a window, so it has no bar and no Detach. The
+# chip that opens it rides the Pads bar and is named "Chord generator window"; invoking it
+# a second time only raises the window, it never closes it.
 param(
     # Not mandatory: with -ProcessId you are reusing a running instance and there is
     # nothing to launch. -SetValues runs *before* -InvokeButtons, so reaching a control
@@ -22,6 +33,11 @@ param(
     [Parameter(Mandatory = $true)] [string]$OutPath,
     [int]$SettleMs = 2500,
     [string[]]$InvokeButtons = @(),
+    # Two combos can collide: the match is on the text a box is showing, and Shape and the strum
+    # Dir both read "Up", so it takes the first one and the other has to be set out of the way
+    # first. A rotary is not reachable this way at all, which since 2026-07-30 includes the arp
+    # rate - drive that with -InvokeButtons "Slower rate" / "Faster rate", and flip its units
+    # with "Arp rate mode".
     [string[]]$SetValues = @(),   # ComboBox "CurrentText=NewText" pairs (matched by current value)
     [int]$AfterInvokeMs = 900,
     [switch]$KeepOpen,
@@ -154,7 +170,9 @@ try {
     # process, so a capture aimed at "the main window" comes back as a picture of somebody
     # else's synth. Pass -WindowTitle to name the one you actually want. The detached
     # sections have the same problem, and the same answer: "Keys Controls", "Keys Arpeggiator",
-    # "Keys Chord Pads", "Keys Keyboard". Those four are the whole list.
+    # "Keys Chord Pads", "Keys Keyboard". Those four are every detached section there is, and
+    # the chord generator is a fifth window on top of them, "Keys Chord Generator", up whenever
+    # the Pads bar's Generator chip is lit.
     $hwnd = $proc.MainWindowHandle
     if ($WindowTitle) {
         $match = [IntPtr]::Zero

@@ -82,10 +82,40 @@ math was adversarially refuted as a pattern to copy. Requirements:
   affixed to the host bar cycle (position may jump on rate change), free = no jump,
   may drift off the bar.
 - **The rate is a dial with two units** (2026-07-30). `arpRateFree` picks between the
-  division list and `arpRateHz`, a free-running 0.031 to 32 Hz, and the panel swaps which
+  division list and `arpRateHz`, a free-running 0.03125 to 32 Hz, and the panel swaps which
   of the two the dial is attached to rather than formatting anything itself: the parameter
   brings the range, the detents (eleven, one per division, in Sync), the skew and the
-  readout text with it. See "The rate dial" below.
+  readout text with it. See "The rate dial" below. **The range is not a round number by
+  choice.** It is exactly what the eleven divisions span at 120 bpm - "1/64" is 32 steps a
+  second and "16 bars" is one step per 32 seconds - so Hz reaches everything the list beside
+  it reaches and nothing less. `ArpEngine::minRateHz`/`maxRateHz` hold the two numbers, so
+  the engine's clamp and the dial's ends cannot drift apart.
+- **Hz is a second timebase, not a relabelling, and there is still one scheduler.** In Hz
+  `process()` pins the tempo to 60 bpm, so one "beat" of everything downstream is one second
+  and the step is simply the period, `1 / rateHz`. Every quantity measured as a *fraction of
+  a step* - swing, gate, ratchet spacing, the Late lane - therefore keeps its meaning with no
+  second code path. The two measured in beats outright, **Retrigger Every** and the velocity
+  ramp's **Ramp Time**, read as seconds instead, which is the honest reading: there is no bar
+  to restart on when nothing is following a transport. The playhead is not read for step
+  timing at all, since the bar-affixed branch is taken only on `clock.playing && clock.hasPpq
+  && p.anchored && ! p.rateFree` - so Hz sounds the same whether the transport rolls, is
+  stopped, or was never there, and Dot, Trip and Anchor are all skipped for the one reason
+  that there is no beat and no bar grid to apply them to.
+- **A change of unit is handled as a transport jump.** Seconds and beats are different
+  timelines, so the phase carried across means nothing on the far side and the step in flight
+  belongs to a timeline that no longer exists. `process()` watches `rateFree` change, flushes
+  everything owed at offset 0, and restarts the clock from zero (`freePhaseBeats`, `stepBase`,
+  `havePrevPpq`), so no note-on is left stranded without its off.
+- **The Hz clamp is load-bearing for liveness, not only for range.** `stepLengthBeats()`
+  returns `1.0 / jlimit(minRateHz, maxRateHz, p.rateHz)`, on the audio thread. At a rate of 0
+  the period is +inf, the Late lane's `stepBeats * lane` term goes NaN, every comparison
+  against it is false, the computed offset is INT_MIN on every pass and the step loop's
+  `offset >= numSamples` break never trips. Mutation-tested on 2026-07-30 by deleting the
+  `jlimit`: the test binary hung and had to be killed. A negative rate is harmless by
+  comparison, since `stepBeats > 0.0` catches it and simply fires nothing. So the clamp stays
+  in the engine rather than being delegated to the parameter's range - the engine takes
+  whatever a session, a host automation lane or an MCP client hands it. Nine cases in
+  `tests/ArpTests.cpp` pin the timebase, including this one.
 - **Transport stopped / standalone:** fall back to an internal clock so the arp keeps
   sounding while auditioning. Cthulhu goes silent with the transport stopped and that is a
   known annoyance. (Decided by Owen, 2026-07-19.) The fallback is the **BPM** parameter
@@ -318,9 +348,10 @@ Originally 8 lettered patterns (A-H) per session. **Twelve launchable slots sinc
 2026-07-25**, at Owen's request, after a reference layout where the pattern memories are
 cards you fire rather than letters you recall.
 
-A slot carries its lane data *and* a chord, a shape and a rate. Launching it (one left
-click, anywhere on the card) installs the pattern, moves the Shape and Rate parameters
-through the host the way the combo boxes do, and holds the chord into the arp. Clicking the
+A slot carries its lane data *and* a chord, a shape and a rate - the rate meaning the
+division, the unit it was captured in and, when that unit was Hz, the frequency. Launching it
+(one left click, anywhere on the card) installs the pattern, moves the Shape, Rate and rate-mode
+parameters through the host the way the combo boxes do, and holds the chord into the arp. Clicking the
 launched slot again releases it (`ArpPanel::launchSlot` still toggles per slot, which is what
 makes a slot card a launcher rather than a pad). **Stop** does the same without reaching for
 All Off, and it goes through `releaseArpHold()`, so it also stops the Chain: it is the same
@@ -458,8 +489,11 @@ Concrete remaps:
 The arp is a foldable **section**, between the Controls section and the chord pads, with its
 **On** toggle, a **Hold off** chip and a **Detach** button on its own bar. Folding the
 section destroys the editor, never the arpeggiator, which is why On lives on the bar rather
-than inside the panel, and why On and Hold off are two of the three things in the editor that
-stay put when their section folds (the theme swatch is the third). Detach hides with it.
+than inside the panel, and why On and Hold off stay put when their section folds. They are
+not alone in that any more: the theme swatch on the Controls bar, and Fill, Regen, Generator,
+Key, Mode and Compliance on the Pads bar, all outlive their fold for the same kind of reason.
+What hides with a fold is what would be a control with nothing behind it - the pad pages, Big,
+Knobs, Wheels. Detach hides with it too.
 Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with every
 other section since 2026-07-27); a detached section takes no height in the main window, and
 the Re-dock button travels into the window with it.
@@ -511,12 +545,12 @@ throw the step editor open under you.
 
 ### The rate dial
 
-Rate stopped being a combo box on 2026-07-30, when the Hz mode arrived: 0.031 to 32 Hz is a
+Rate stopped being a combo box on 2026-07-30, when the Hz mode arrived: 0.03125 to 32 Hz is a
 continuum, and a list of it would be either a menu of guesses or a number to type. It is the
 kit's rotary (`okstudio/RotaryKnob.h`, the same one `KnobBank` uses), in a knob column that
 spans both rows of the PATTERN group, and it costs the panel no height at all.
 
-Four things carry it:
+What carries it:
 
 - **Two attachments, one alive.** `refreshRateMode()` destroys one and builds the other on a
   mode change, so the dial follows `arpRate` in Sync and `arpRateHz` in Hz. That is what makes
@@ -545,7 +579,7 @@ Four things carry it:
   parameter's two conversion functions, so each of the ten octaves gets a tenth of the travel
   and one degree of the dial is the same *ratio* at either end. `setSkewForCentre(1.0f)` was
   tried first and is a power law, which is a different curve: its exponent works out at ~0.198
-  on these ends, which spent 25.3% of the dial between 0.031 and 0.062 Hz against 12.9%
+  on these ends, which spent 25.3% of the dial between 0.03125 and 0.0625 Hz against 12.9%
   between 16 and 32. 1 Hz still lands at the centre, now as a consequence.
 - **Swapping the two attachments waits out a drag.** `SliderParameterAttachment` opens a
   parameter gesture on `sliderDragStarted` and closes it on `sliderDragEnded`, and its
@@ -553,6 +587,22 @@ Four things carry it:
   Chain launching slots on bar lines (or a host, or an MCP client) could otherwise destroy the
   live attachment mid-drag and strand a begin with no end. The panel holds the swap while
   `rateKnob` is down and `onDragEnd` applies it on the mouse-up.
+- **A slot carries the unit, not just the number.** `ArpPattern` stores `rateFree` and
+  `rateHz` beside `rate`, or launching a slot captured in Hz would silently drop you back into
+  Sync. Only a slot captured in Hz writes its Hz value on the way out: `arpFromTree`
+  synthesises 8.0 for every slot in a session saved before the mode existed, so writing it
+  unconditionally meant opening an old session, dialling 0.5 Hz and clicking any slot at all
+  reset the rate to a fabricated 8. A Sync slot leaves the Hz control exactly where it found
+  it.
+- **`migrateRateMode()` brings an old session back to Sync.** An absent parameter is not a
+  reset: APVTS creates the adapter's child on the spot and flushes the *current* value into
+  it, which is the default on a fresh instance and whatever you were last playing with on a
+  live one. So recalling a pre-Hz preset while the dial sat in Hz restored and displayed
+  `arpRate` while the engine carried on free-running at the Hz value from before the load.
+  The tell is the absence and the repair is to write the missing parameter's
+  `getDefaultValue()` explicitly - the same shape as `migrateStrumRange`, and checked for each
+  of the two independently, since a tree carrying one and not the other is malformed rather
+  than old.
 
 The dial column takes 72 px off the group's two rows, and `groupWeights` hands about 37 of
 them back (36/42/22 became 40/42/18). All of that 4 points is STEPS' - it had about 50 px

@@ -42,8 +42,10 @@ once with the flag off:
 cmake -B build -DOKSTUDIO_KIT_BASICPITCH=OFF
 ```
 
-A fresh tree needs nothing: the kit's own default is `OFF`. Deleting `build/` is the other
-way out, and it costs what it used to again.
+`run.py` will not clear it for you. It configures only a *cold* tree, on the grounds that
+the Visual Studio generator re-runs CMake by itself whenever `CMakeLists.txt` changes, and a
+stale cache entry is not a `CMakeLists.txt` change. A fresh tree needs nothing: the kit's own
+default is `OFF`. Deleting `build/` is the other way out, and it costs what it used to again.
 
 ## Testing a change (run.py)
 
@@ -85,11 +87,11 @@ real signed payload under `site-packages/cmake/data/bin`, an MSI install, and on
 PATH, taking the first that actually launches and saying which it picked when that is not
 the one on PATH. If none starts, it names each one that was blocked instead of a traceback.
 
-Keys Host can own a top-level window per detached section on top of its own and the hosted
-instrument's GUI (six in all, if you pull all four sections out), and Windows picks
-`MainWindowHandle` between them heuristically, so the close is aimed at the window titled
-after the product (closing the instrument window only hides it, which would cost you a
-force-kill and the loaded synth).
+Keys Host can own a top-level window per detached section on top of its own, the hosted
+instrument's GUI and the chord generator's window (seven in all, if you pull all four
+sections out and open the generator), and Windows picks `MainWindowHandle` between them
+heuristically, so the close is aimed at the window titled after the product (closing the
+instrument window only hides it, which would cost you a force-kill and the loaded synth).
 
 ## Smart App Control
 
@@ -180,14 +182,18 @@ Artifacts:
 ## Tests
 
 Unit tests (JUCE UnitTest) cover the UI-free logic: note resolution, chord detection, the
-scale modes, chord generation and suggestion, the Markov progression model, and the
-arpeggiator engine's scheduling. They build as a separate console target, so normal plugin
-builds stay fast:
+scale modes, chord generation, the voicing cycle, chord suggestion, the Markov progression
+model, and the arpeggiator engine's scheduling in both rate modes (tempo-synced divisions
+and free Hz). They build as a separate console target, so normal plugin builds stay fast:
 
 ```powershell
 cmake --build build --config Release --target Keys_tests
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+The target is a plain console exe at `build/Release/Keys_tests.exe`; run it directly and it
+prints any failures and then the totals, since "all tests passed" alone cannot tell a full
+suite from one that silently stopped registering itself.
 
 CI builds and runs them on every push to `main` and on every pull request, except for
 changes that only touch Markdown, `docs/` or `assets/` (`paths-ignore`). The line's

@@ -5,18 +5,17 @@ standalone app). Keys makes no sound of its own: you click the on-screen piano a
 it sends MIDI to whatever instrument sits downstream, in your DAW or over a virtual
 port. Built for creators who work entirely with a mouse, including users with motor
 disabilities: every control is a single click, a drag, or a scroll. No keyboard and no
-modifier keys. Right-click is only ever an accelerator, with two exceptions Owen asked for:
-**Send to arp slot**, in a chord card's menu, and releasing one note out of a chord the
-**Sustain** pedal is holding. Neither has a left-click twin.
+modifier keys. Right-click is only ever an accelerator, with three exceptions Owen asked for:
+**Send to arp slot** and **Lock**, both in a chord card's menu, and releasing one note out of a
+chord the **Sustain** pedal is holding. None of the three has a left-click twin.
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain and latch, the Humanize settings, the
 arpeggiator down to its step lanes and its twelve slots, which sections you
 had folded away and which you had pulled out into windows of their own (down to where each
-window sat), this instance's colour, the
-eight knob CC assignments, and
-your captured chord pads all save into the DAW project and come back when you reopen
-it. And it drops straight onto a track, with no loopMIDI to configure.
+window sat, the chord generator's included), this instance's colour, the eight knob CC
+assignments, and your captured chord pads all save into the DAW project and come back when you
+reopen it. And it drops straight onto a track, with no loopMIDI to configure.
 
 Built with **JUCE 8** and **CMake**, on the shared
 [`okstudio-juce-kit`](../okstudio-juce-kit).
@@ -63,8 +62,8 @@ flat and dim, so the shape of the window reads before you have read a caption.
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
 toggle, not a modifier key, on purpose. Right-click opens the card menus on the chord pads
-and the arp slots, and toggles a hold on a key; only **Send to arp slot** and releasing a
-pedal-held note live nowhere else.
+and the arp slots, and toggles a hold on a key; only **Send to arp slot**, **Lock** and
+releasing a pedal-held note live nowhere else.
 
 ## Controls
 
@@ -84,8 +83,9 @@ pedal-held note live nowhere else.
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu. They are the bottom row of the Controls section, and the **Knobs** chip on that bar folds just that row |
 | **Chord pads** | Their own section, and the only chord cards in Keys. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page, and **Big** swaps the two rows of eight for four rows of four, each card showing the chord's notes and a mini keyboard |
 | **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
-| **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins |
-| **Arp** | Its own section too. The bar carries an **On** toggle and a **Hold off** chip, so the arpeggiator can be switched on and made to let go of a chord with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern and a chord that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
+| **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins, and an arp rate set in Hz follows neither |
+| **Arp** | Its own section too, folded when you first open the plugin because it is the tall one. The bar carries an **On** toggle and a **Hold off** chip, so the arpeggiator can be switched on and made to let go of a chord with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern, a chord and a rate that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
+| **Rate** | A dial in the arp's control band, with a **Sync** / **Hz** switch beside it. Sync detents through eleven tempo-synced divisions, 16 bars down to 1/64; Hz free-runs from 0.031 to 32 Hz, which is exactly the span those divisions cover at 120 bpm, and never reads the transport. **Dot**, **Trip** and **Anchor** grey out in Hz, since there is no beat left to subdivide or bar to pin to. A pair of steppers beside the dial walks every value one at a time, so nothing here needs a drag |
 | **Hold off** | On the Arp bar. Lets go of the chord being held into the arp and stops the Chain. Greyed out when there is nothing to let go of. Clicking the lit pad restrikes the chord instead, so this is the way to stop a hold outright |
 | **Fill** / **Regen** / **Generator** | The chord generator, at the right of the Pads bar, with **Key**, **Mode** and **Scale Compliance** as combo boxes beside them. **Generator** opens a window holding every setting it has, plus Clear Page. See below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
@@ -129,11 +129,21 @@ Two items stay on a **pad's right-click menu**, because they are about one card:
 | **New chord** | A different chord for that pad's place in the scale (or, for a Markov chord, the next step of the chain) |
 | **Next: could follow** | Chords that could follow this one, in four families: smooth voice-leading moves, circle-of-fifths, diatonic degrees, jazz substitutions. Every row has a play button to audition it before it drops into the next free pad |
 
-That same menu is where you **Lock** a card, which is what keeps it through a Regen. A locked
-card shows a small dot in its top-right corner; the dot is a marking, not a button. It is also
-where **Octave down / up** and **Next voicing** move one card around without changing what
-chord it is, all three of which work on a locked card too, since a lock protects a chord from
-the generator and not from you.
+That same menu is where you **Lock** a card, and a lock is what stops a chord being replaced or
+thrown away: Regen skips it, Clear Page spares it, Clear pad greys out, and dragging it off the
+strip no longer wipes it. A locked card shows a small dot in its top-right corner, and that dot
+is a marking rather than a button. Setting the lock is right-click only. A clickable padlock
+did sit in that corner for a few hours and came straight back off at Owen's request: on a small
+card it was a quarter of the surface, taken away from playing, dragging and feeding the arp, to
+save one click on a thing you set once.
+
+The menu is also where **Octave down / up** and **Next voicing** move one card around without
+changing what chord it is. Voicing walks root position, then each inversion, then a spread that
+opens upward, and reads where it currently is off the notes rather than storing it, so it is
+the same chord sitting differently under your hand. All three work on a locked card, since a
+lock protects a chord from the generator and not from you; all three grey out while that card
+is the one being edited on the keyboard, because the keybed would write the unshifted notes
+straight back over the move.
 
 The settings in the window: **Key** and **Mode** (12 modes, with the character the current one
 carries spelled out beside the title, so Dorian reads "Jazzy, Sophisticated, Chill"),

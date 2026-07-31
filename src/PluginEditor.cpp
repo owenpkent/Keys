@@ -419,12 +419,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // without these the only way to fill a page would be sixteen New chords one card at a
     // time. On the bar they cost no height at all, which is the trade that let the panel go.
     //
-    // Two of them, not three. **Clear** was here and is on a pad's card menu now: it empties
-    // every unlocked pad on the page, there is no undo anywhere in Keys, and it was sitting
-    // 4 px from Regen and a few px from the page buttons - the two things on this bar a user
-    // clicks constantly. Fill and Regen stay because they are constructive and they are the
-    // only left-click path into generation; a destructive bulk action is worth the extra
-    // click of a menu. `ChordGenMenu::clearPage()` is unchanged, only what reaches it.
+    // Two of them, not three. **Clear** was here and is in the generator's window now: it
+    // empties every unlocked pad on the page, there is no undo anywhere in Keys, and it was
+    // sitting 4 px from Regen and a few px from the page buttons - the two things on this bar
+    // a user clicks constantly. Fill and Regen stay because they are constructive and they are
+    // the only left-click path into generation; a destructive bulk action is worth the extra
+    // click of opening a window. It spent a few hours on the card menu in between, which is
+    // where the older comments about it put it. `ChordGenMenu::clearPage()` is unchanged
+    // throughout, only what reaches it.
     //
     // Each carries a setTitle: "Fill" and "Regen" are unique today, but an accessible name is
     // what the capture script drives (`scripts/capture-window.ps1 -InvokeButtons`) and UI
@@ -1400,9 +1402,9 @@ void KeysEditor::timerCallback()
     arpHoldOffButton.setEnabled(! processor.arpHeldNotes().empty() || processor.chainRunning());
 
     // Mode and Scale Compliance are the generator's, and the Markov brain reads neither: it
-    // walks a table of transitions instead of a scale. The pad menu already greys them under
-    // Source: Markov, so the bar copies that or the same setting is live in one place and dead
-    // in the other. A control that accepts the click and changes nothing reads as broken, which
+    // walks a table of transitions instead of a scale. The generator's window already hides
+    // them under Source: Markov, so the bar greys them or the same setting is live in one
+    // place and dead in the other. A control that accepts the click and changes nothing reads as broken, which
     // is the Octavium behaviour this generator was written not to repeat. Key stays live, since
     // the chains do transpose to it.
     const bool scaleDriven = chordGen.readsScaleSettings();
@@ -1640,7 +1642,7 @@ void KeysEditor::resized()
         bar.removeFromRight(6);
         chordGenButton.setBounds(bar.removeFromRight(90).withSizeKeepingCentre(88, 24));
         // Key, Mode and Compliance, left of the three chips and reading in that order, which is
-        // the order the card menu lists them in. Same end of the bar and the same
+        // the order the generator's window lists them in. Same end of the bar and the same
         // unconditional placement as Fill and Regen, for the same two reasons: they outlive
         // the fold, and the left end is where the hole appears when the pages and Big go.
         //

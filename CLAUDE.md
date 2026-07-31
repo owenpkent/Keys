@@ -106,6 +106,18 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   rebuilds it whole; there is no choke point for slot writes, so **its call sites are the
   contract** (set, clear, copy, whole-slot write, session load). Miss one and a lane plays a
   stale chord.
+  **The rate is a dial with two clocks** (2026-07-30). `arpRate` is untouched - the same eleven
+  divisions, the same order, the same default - and a Sync / Hz switch beside the dial adds
+  `arpRateFree` and `arpRateHz`, 0.03125 to 32 Hz mapped exponentially, which is exactly what
+  those divisions span at 120 bpm. In Hz the engine pins its clock to 60 bpm, so a step is
+  simply the period, the playhead is not read at all, and Dot, Trip and Anchor grey out: a
+  subdivision of a beat means nothing where there is no beat. The `<` `>` steppers beside the
+  dial are load-bearing rather than a convenience, since a dial is a *drag* target and they are
+  the click-only path to every value it can hold in either mode. A slot stores the mode and the
+  Hz value alongside the division, and `migrateRateMode()` puts a session saved before any of
+  this back into Sync - an absent parameter keeps the live instance's current value rather than
+  resetting it, so without that a Hz session would reopen in Sync at whatever division it
+  happened to hold, silently.
 - **The chord pads and the arpeggiator are each a section of their own**, stacked above the
   keyboard, so a chord card is on screen whatever else is open. **There is no centre view**
   (2026-07-30): the arp stopped being one on 2026-07-25, Chords went the day the generator lost
@@ -146,9 +158,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   protects a chord from *generation*, never from the user. Anything
   that wants to show a chord card should use the pads, not build a second grid. Controls that
   belong to a section but must cost no height ride its bar: it is 34 px that already exists.
-  Fill, Regen and Generator stay live with the Pads section folded, for the same reason arp On
-  does - the other route to the generator is a right-click on a card, and the cards fold away
-  with the strip. See `docs/ARP_DESIGN.md`.
+  Fill, Regen, Generator and the three combos beside them stay live with the Pads section
+  folded, for the same reason arp On does - the other route to the generator is a right-click
+  on a card, and the cards fold away with the strip. See `docs/ARP_DESIGN.md`.
 - **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
   table of four `Section`s (Controls, Arp, Pads, Keyboard); each owns a `Holder` its content
   is parented into, a Detach button, and the `DetachedWindow` it is
@@ -168,10 +180,13 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   rectangle but not the gaps around it, so a click aimed a few pixels off Detach used to hide
   the section it was reaching into. This **reverses the 2026-07-27 removal** of the same
   override; any doc still saying the whole bar is the target is describing that three-day
-  window. **Detach hides with its section**: the exceptions that stay on a folded bar are arp
-  On, the arp's Hold off, the generator's Fill and Regen, and the theme swatch, each for a
-  stated reason. Open and folded bars are painted at different weights on purpose;
-  `captionWidth()` and `paintButton()` must use the one `captionFont()`,
+  window. **Detach hides with its section**, and so does every control that would be reaching
+  into content that is not on screen: the pad pages, Big, Knobs, Wheels. What stays on a folded
+  bar is what you reach for while playing or generating - arp On and Hold off, the Pads bar's
+  Fill / Regen / Generator and its Key / Mode / Scale Compliance combos, the Keyboard bar's
+  Exclusive / Sustain / Latch / All Off - plus the theme swatch, which belongs to the plugin
+  rather than to any one section. Open and folded bars are painted at different weights on
+  purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
   or the caption ellipsises and the controls beside it shift as a section folds.
 - **The knob bank is the bottom row of the Controls section**, not a band of its own:
   `knobRowH` is 110, which gives 60 px knobs. The Knobs chip that folds just that row rides
@@ -229,10 +244,15 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   so it works with both buttons off).
   **Owner-directed exceptions, and they are a closed list.** Each one is Owen's call on a
   stated date, not something that drifted in:
-  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30). Edit on
-     keyboard / Clear pad / Lock, the two chord-shaping edits (Octave down/up, Next voicing),
-     **Send to arp slot**, and the generator's two per-card actions (New chord, Next). Most of
-     these are accelerators with a left-click twin elsewhere; the two below are not.
+  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30). Nine rows:
+     Edit on keyboard / Clear pad / Lock, the two chord-shaping edits (Octave down/up, Next
+     voicing), the generator's two per-card actions (New chord, Next: could follow), and
+     **Send to arp slot**. Some of it is an accelerator - Clear pad is also a drag off the
+     strip, and Fill and Regen on the bar are New chord in bulk - but the per-card edits are
+     reached from this menu and nowhere else, because a card is all playing surface and there
+     is nowhere left on it to put a button. Ending an edit is the exception that proves it: the
+     tick on the card being edited is a left click. The three paths below are the ones Owen
+     ruled on one at a time.
   2. ***Send to arp slot* has no left-click twin** (2026-07-25). Binding a chord to one
      particular slot needs a target picker. A left click on a card with the arp **On** is the
      left-click way to get a chord *into* the arp, which is what keeps this to one item.
@@ -332,6 +352,6 @@ structural fix is worth landing in the kit's `docs/USAGE.md` too, not only here.
 stream from the host `ppqPosition` and schedule note on/off at sample offsets. Do not
 copy Keys' `processBlock` into a generator; copy Contour's. **One deliberate
 exception:** the arpeggiator stage (`ArpEngine.h`, after the collector drain) reads
-the playhead for tempo-synced scheduling, Contour-style, and free-runs on an internal
-clock when the transport is stopped. It is the only playhead consumer in Keys; see
-`docs/ARP_DESIGN.md`.
+the playhead for tempo-synced scheduling, Contour-style, free-runs on an internal
+clock when the transport is stopped, and does not read the playhead at all with the rate
+in Hz. It is the only playhead consumer in Keys; see `docs/ARP_DESIGN.md`.
