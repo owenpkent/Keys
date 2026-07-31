@@ -5,7 +5,6 @@
 #include "../ScaleModes.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
-#include <okstudio/Scales.h>
 
 namespace keys
 {
@@ -88,6 +87,17 @@ int ChordGenMenu::chainMode() const
     return juce::jlimit(0, 2, (int) processor.apvts.getRawParameterValue("markovMode")->load());
 }
 
+// The Mood tags belong to the chain that is up: one picked under another chain would filter the
+// corpus down to nothing and the page would come back empty. Checked where the mood is *used*
+// rather than where it is set, because the chain can move underneath it - host automation, a
+// session load, or simply the window being shut while the combo box was showing a stale tag.
+// An empty string is the "Any" sentinel everywhere, and `contains` says false for it, so an
+// unset mood falls through this unchanged.
+juce::String ChordGenMenu::moodForChain() const
+{
+    return markov::moodsFor(chainMode()).contains(mood) ? mood : juce::String();
+}
+
 int ChordGenMenu::genRoot() const
 {
     return (int) processor.apvts.getRawParameterValue("genRoot")->load();
@@ -99,184 +109,9 @@ int ChordGenMenu::genMode() const
 }
 
 // ---------------------------------------------------------------------------------------
-// The settings menu. Every control the generator's panel used to carry lives here as a
-// submenu of discrete values: a PopupMenu cannot hold a slider, and a mouse-only plugin has
-// no business asking for a drag inside a menu anyway.
-// ---------------------------------------------------------------------------------------
-
-ChordGenMenu::Ladder ChordGenMenu::ladder(std::initializer_list<float> values,
-                                          const juce::String& suffix, int decimals)
-{
-    Ladder l;
-    for (const float v : values)
-    {
-        l.values.push_back(v);
-        l.labels.add(juce::String(v, decimals) + suffix);
-    }
-    return l;
-}
-
-ChordGenMenu::Ladder ChordGenMenu::indexed(const juce::StringArray& names)
-{
-    Ladder l;
-    l.labels = names;
-    for (int i = 0; i < names.size(); ++i)
-        l.values.push_back((float) i);
-    return l;
-}
-
-ChordGenMenu::Ladder ChordGenMenu::modeLadder()
-{
-    // Each mode carries the character it plays in, which the panel showed for the current
-    // mode only. In a list it does better work: it is there while you are choosing.
-    Ladder l;
-    for (int i = 0; i < modes::count(); ++i)
-    {
-        l.values.push_back((float) i);
-        l.labels.add(juce::String(modes::get(i).name) + "   " + modes::get(i).emotion);
-    }
-    return l;
-}
-
-int ChordGenMenu::addSetting(Setting s)
-{
-    lastSettings.push_back(std::move(s));
-    return idSettingsBase + (int) lastSettings.size() - 1;
-}
-
-void ChordGenMenu::setParam(const char* param, float value)
-{
-    if (auto* p = processor.apvts.getParameter(param))
-        p->setValueNotifyingHost(p->convertTo0to1(value));
-}
-
-void ChordGenMenu::applySetting(const Setting& s)
-{
-    if (s.text != nullptr)
-    {
-        *s.text = s.textValue;
-        return;
-    }
-    if (s.param == nullptr)
-        return;
-    setParam(s.param, s.toggle ? (processor.apvts.getRawParameterValue(s.param)->load() > 0.5f ? 0.0f : 1.0f)
-                               : s.value);
-}
-
-void ChordGenMenu::addChoice(juce::PopupMenu& parent, const juce::String& name, const char* param,
-                             const Ladder& l, bool enabled, const juce::StringArray& shortLabels)
-{
-    // The nearest value, not the equal one: these are a handful of steps out of a continuous
-    // parameter, and host automation can leave it anywhere between two of them. Nearest means
-    // exactly one item is always ticked, so the menu can be read as a display.
-    const float now = processor.apvts.getRawParameterValue(param)->load();
-    int live = 0;
-    for (int i = 1; i < (int) l.values.size(); ++i)
-        if (std::abs(l.values[(size_t) i] - now) < std::abs(l.values[(size_t) live] - now))
-            live = i;
-
-    juce::PopupMenu sub;
-    for (int i = 0; i < l.labels.size(); ++i)
-    {
-        Setting s;
-        s.param = param;
-        s.value = l.values[(size_t) i];
-        sub.addItem(addSetting(s), l.labels[i], enabled, i == live);
-    }
-
-    const auto& shown = shortLabels.isEmpty() ? l.labels : shortLabels;
-    parent.addSubMenu(name + ":  " + shown[live], sub, enabled);
-}
-
-void ChordGenMenu::addToggles(juce::PopupMenu& parent, const juce::String& name,
-                              const std::vector<const char*>& params, const juce::StringArray& labels,
-                              const juce::String& fallback, bool enabled)
-{
-    juce::PopupMenu sub;
-    juce::StringArray on;
-    for (int i = 0; i < labels.size(); ++i)
-    {
-        const bool lit = processor.apvts.getRawParameterValue(params[(size_t) i])->load() > 0.5f;
-        if (lit)
-            on.add(labels[i]);
-        Setting s;
-        s.param = params[(size_t) i];
-        s.toggle = true;
-        sub.addItem(addSetting(s), labels[i], enabled, lit);
-    }
-    // Untick everything and generation still has to make something; currentOptions() falls
-    // back, and the parent item says what it falls back to rather than reading "none".
-    parent.addSubMenu(name + ":  " + (on.isEmpty() ? fallback : on.joinIntoString(", ")), sub, enabled);
-}
-
-void ChordGenMenu::addTextChoice(juce::PopupMenu& parent, const juce::String& name, juce::String& target,
-                                 const juce::StringArray& choices, bool enabled)
-{
-    juce::StringArray items { "Any" };
-    items.addArray(choices);
-
-    juce::PopupMenu sub;
-    for (const auto& c : items)
-    {
-        Setting s;
-        s.text = &target;
-        s.textValue = c == "Any" ? juce::String() : c; // empty is the "Any" sentinel everywhere
-        const bool ticked = s.textValue == target;
-        sub.addItem(addSetting(s), c, enabled, ticked);
-    }
-    parent.addSubMenu(name + ":  " + (target.isEmpty() ? "Any" : target), sub, enabled);
-}
-
-void ChordGenMenu::addSettingsItems(juce::PopupMenu& m)
-{
-    const bool markov = markovActive();
-
-    // The Mood tags belong to the chain that is up: one picked under another chain would
-    // filter the corpus down to nothing. The combo box used to rebuild its list on every
-    // chain change; there is no list to keep now, only this.
-    const auto moods = markov::moodsFor(chainMode());
-    if (mood.isNotEmpty() && ! moods.contains(mood))
-        mood.clear();
-
-    juce::StringArray starts;
-    for (const char* token : markov::startTokens())
-        starts.add(token);
-
-    addChoice(m, "Source", "genSource", indexed({ "Algorithmic", "Markov" }), true);
-
-    // Key and Octave feed both brains. Everything under them is the weighted pool's, so it is
-    // greyed while the chains are up rather than left clickable and silently ignored (which is
-    // what Octavium did).
-    //
-    // Key, Mode and Scale Compliance are also combo boxes on the Pads bar. They are here as
-    // well and not only there: the bar is the fast path, this is the complete one, and both
-    // are attachments on the same parameter so a change in either shows in the other.
-    addChoice(m, "Key", "genRoot", indexed(okstudio::scales::noteNames()), true);
-    addChoice(m, "Octave", "genOctave", ladder({ 2, 3, 4, 5, 6 }), true);
-    addChoice(m, "Mode", "genMode", modeLadder(), ! markov, modes::names());
-    addToggles(m, "Notes", { "genTriads", "genSevenths", "genNinths" }, { "3", "4", "5" }, "3", ! markov);
-    addToggles(m, "Inversions", { "genInv0", "genInv1", "genInv2", "genInv3" },
-               { "Root", "1st", "2nd", "3rd" }, "Root", ! markov);
-    addChoice(m, "Scale Compliance", "genCompliance", ladder({ 0, 25, 50, 75, 100 }, " %"), ! markov);
-    addChoice(m, "Lock Influence", "genLockInfluence", ladder({ 0, 25, 50, 75, 100 }, " %"), ! markov);
-
-    // The one group that keeps a level of its own. Flattening these five onto the pad menu too
-    // would push it past the bottom of a 1080p screen, and they are the least-reached settings
-    // in the plugin: every one of them is inert until Source is Markov, which is not the
-    // default. The parent stays clickable whatever Source says, so the values can still be read
-    // and set up before switching over - it is the items inside that grey, exactly as before.
-    juce::PopupMenu chains;
-    addChoice(chains, "Chain", "markovMode", indexed({ "Major", "Minor", "Modal" }), markov);
-    addTextChoice(chains, "Mood", mood, moods, markov);
-    addTextChoice(chains, "Start", start, starts, markov);
-    addChoice(chains, "Temperature", "markovTemp", ladder({ 0.4f, 0.7f, 1.0f, 1.4f, 2.0f }, {}, 1), markov);
-    addChoice(chains, "Length", "markovLength", ladder({ 4, 6, 8, 12, 16 }), markov);
-    m.addSubMenu("Markov chains", chains);
-}
-
-// ---------------------------------------------------------------------------------------
-// The brain. Unchanged by the panel going away: it always read the parameters rather than
-// the controls, which is why the controls could become a menu.
+// The brain. It reads the parameters rather than any control, which is why its surface has
+// been a full-screen overlay, an inline band, a menu and now a window without a line of this
+// half changing.
 // ---------------------------------------------------------------------------------------
 
 chordgen::Options ChordGenMenu::currentOptions() const
@@ -375,7 +210,7 @@ void ChordGenMenu::fillPageMarkov()
     const auto generated = markov::generate(chainMode(), genRoot(), currentOptions().octave,
                                             (int) processor.apvts.getRawParameterValue("markovLength")->load(),
                                             processor.apvts.getRawParameterValue("markovTemp")->load(),
-                                            mood, start, (int) targets.size(), rng);
+                                            moodForChain(), start, (int) targets.size(), rng);
     for (int i = 0; i < (int) targets.size() && i < (int) generated.size(); ++i)
     {
         const auto& c = generated[(size_t) i];
@@ -401,7 +236,7 @@ void ChordGenMenu::regeneratePadMarkov(int slot)
     const auto c = markov::regenerateSingle(chainMode(), genRoot(), currentOptions().octave,
                                             predecessor, processor.chordPad(slot).numeral,
                                             processor.apvts.getRawParameterValue("markovTemp")->load(),
-                                            mood, rng);
+                                            moodForChain(), rng);
     KeysProcessor::ChordPad pad;
     pad.notes = c.notes;
     pad.name = chords::detect(c.notes);
@@ -530,16 +365,17 @@ void ChordGenMenu::newChordFor(int slot)
 }
 
 // The generator's half of a pad's card menu, added to the menu the pad strip is already
-// building. Two calls, because its items land in two different groups of that menu and
-// ChordPads owns the rules between them: this one closes the **this pad** group (ChordPads
-// opened it with Edit, Clear pad, Lock, and the octave and voicing items), addPageMenuItems
-// below is the **this page** group at the foot. ChordPads calls them in that order, which is
-// what lets this one own the rebuild of both id tables.
+// building. It closes the **this pad** group, which ChordPads opened with Edit, Clear pad,
+// Lock, and the octave and voicing items.
 //
-// Lock is not here: it needs nothing from the generator and belongs to the card itself, so
-// ChordPads offers it either way. Everything else the generator has is reachable from here,
-// on every pad on every page, because there is no longer a view whose absence could take it
-// away.
+// Only the two per-card actions are here. Everything about the *page* or the settings is in
+// the generator's window (ChordGenPanel), and this is the reason these two are not: New chord
+// and the suggestions are questions about the card under the mouse, so they belong on the menu
+// that card already opens. They are offered on every pad on every page whatever the window is
+// doing, because this object outlives it.
+//
+// Lock is not here either: it needs nothing from the generator and belongs to the card itself,
+// so ChordPads offers it.
 void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
 {
     const auto& pad = processor.chordPad(slot);
@@ -548,7 +384,6 @@ void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
 
     lastSuggestions.clear();
     lastSuggestTarget = -1;
-    lastSettings.clear();
 
     menu.addItem(idNewChord, "New chord", ! pad.locked);
 
@@ -606,54 +441,16 @@ void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
     lastSuggestTarget = target;
 }
 
-// The page group at the foot of the same menu. Called straight after addPadMenuItems, which
-// is what rebuilds `lastSettings` - the settings added here append to that table, so calling
-// this one on its own would build ids nothing can resolve.
-void ChordGenMenu::addPageMenuItems(juce::PopupMenu& menu)
-{
-    // Clear page, beside the settings. It was a chip on the Pads bar until 2026-07-30 and had
-    // no business being one: it empties every unlocked pad on the page, Keys has no undo of
-    // any kind, and it rode 4 px from Regen and a few more from the page buttons - the two
-    // things on that bar that get clicked constantly. A menu costs a right-click and a read,
-    // which is the right price for sixteen pads. Greyed out when there is nothing to take,
-    // so it never looks like it did something it didn't.
-    menu.addItem(idClearPage, "Clear page", ! regeneratablePadsOnPage().empty());
-
-    // And the settings, behind one wrapper again. They were flattened onto the top level
-    // earlier on 2026-07-30 to save a leg of hover, and that was a mistake twice over: it took
-    // the menu to 23 rows and roughly 820 px, past what fits above a pad near the bottom of
-    // the window, and it was aimed at a problem that had already been solved in the same
-    // session - Key, Mode and Scale Compliance became combo boxes on the Pads bar, and those
-    // are the three anybody reaches for while auditioning a page. What is left behind this
-    // wrapper is the tail: Source, Octave, Notes, Inversions, Lock Influence and the chains.
-    // One extra hover, once in a while, to keep the menu on the screen.
-    juce::PopupMenu settings;
-    addSettingsItems(settings);
-    menu.addSubMenu("Generator settings", settings);
-}
-
-// The other half: what to do with a choice from those items. The menu is shown and
-// dismissed by ChordPads, which knows nothing about suggestions or settings, so both lists
-// built above are held here between the two calls - both happen on the message thread, one
-// after the other, and a second menu rebuilds them before either can be read.
+// The other half: what to do with a choice from those items. The menu is shown and dismissed
+// by ChordPads, which knows nothing about suggestions, so the list built above is held here
+// between the two calls - both happen on the message thread, one after the other, and a second
+// menu rebuilds it before it can be read.
 void ChordGenMenu::handlePadMenuChoice(int slot, int id)
 {
     stopPreview(); // don't let the last audition ring past the menu
     if (id == idNewChord)
     {
         newChordFor(slot);
-        return;
-    }
-    if (id == idClearPage)
-    {
-        clearPage();
-        return;
-    }
-    if (id >= idSettingsBase)
-    {
-        const int index = id - idSettingsBase;
-        if (index < (int) lastSettings.size())
-            applySetting(lastSettings[(size_t) index]);
         return;
     }
     const int index = id - idSuggestBase;

@@ -293,6 +293,12 @@ public:
         // pads; it belongs to the pads now, so it is available whatever else is on screen.
         bool padsBig = false;
 
+        // The chord generator's window (2026-07-30, Owen's call). Not a section: it is never
+        // docked, has no bar and no fold, and opens from a button on the Pads bar. It is in
+        // here all the same because it is the same question - where did Owen leave a window,
+        // and was it open - and the answer has to survive the editor closing.
+        bool chordGen = false;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.
@@ -300,6 +306,7 @@ public:
         juce::Rectangle<int> arpDetachedBounds {};
         juce::Rectangle<int> padsDetachedBounds {};
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
+        juce::Rectangle<int> chordGenBounds {};     // the generator's window
     };
     LayoutState layout;
 

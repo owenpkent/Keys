@@ -57,45 +57,6 @@ namespace
         return out;
     }
 
-    // The lock chip in a filled card's top-right corner: the target `lockBadgeBounds` hands
-    // back, painted at whatever size that target came out. Until 2026-07-30 the mark here was a
-    // 5 px dot at alpha 0.28 inside a 34 px hit area, which on a docked card is 79% of the
-    // card's height: a click half a card *below* the dot silently toggled the lock, and nothing
-    // on screen said the corner was a control at all. A chip cannot be hit without being seen.
-    //
-    // Drawn as paths rather than a font glyph, like the edit tick, so it scales with the card
-    // and never depends on a character existing. Unlocked is an inset well with the shackle
-    // lifted clear and leaning open; locked lights the whole chip and closes the shackle onto
-    // the body.
-    void drawLockBadge(juce::Graphics& g, juce::Rectangle<float> r, bool locked, juce::Colour ink)
-    {
-        const auto chip = r.reduced(3.0f);
-        if (chip.getWidth() < 8.0f || chip.getHeight() < 8.0f)
-            return;
-
-        g.setColour(locked ? ink.withAlpha(0.30f) : juce::Colours::black.withAlpha(0.22f));
-        g.fillRoundedRectangle(chip, 4.0f);
-        g.setColour(ink.withAlpha(locked ? 0.85f : 0.38f));
-        g.drawRoundedRectangle(chip.reduced(0.5f), 4.0f, 1.0f);
-
-        const float s = juce::jmin(chip.getWidth(), chip.getHeight());
-        const auto body = juce::Rectangle<float>(s * 0.50f, s * 0.34f)
-                              .withCentre({ chip.getCentreX(), chip.getCentreY() + s * 0.08f });
-        const float rad = body.getWidth() * 0.32f;
-
-        juce::Path shackle;
-        shackle.addCentredArc(locked ? body.getCentreX() : body.getCentreX() + rad * 0.55f,
-                              body.getY() - (locked ? 0.0f : s * 0.08f), rad, rad, 0.0f,
-                              -juce::MathConstants<float>::halfPi,
-                              juce::MathConstants<float>::halfPi, true);
-
-        g.setColour(ink.withAlpha(locked ? 0.95f : 0.50f));
-        g.strokePath(shackle, juce::PathStrokeType(juce::jmax(1.2f, s * 0.09f),
-                                                   juce::PathStrokeType::curved,
-                                                   juce::PathStrokeType::rounded));
-        g.fillRoundedRectangle(body, s * 0.06f);
-    }
-
     // Two octaves (three when the chord spills over) from the low note's C, held keys lit.
     // Purely informative, never a target.
     void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes,
@@ -171,25 +132,6 @@ juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 juce::Rectangle<float> ChordPads::saveBadgeBounds(juce::Rectangle<float> pad)
 {
     return pad.removeFromRight(kSaveW).reduced(3.0f); // `pad` is a copy; this trims that copy
-}
-
-juce::Rectangle<float> ChordPads::lockBadgeBounds(juce::Rectangle<float> pad)
-{
-    // Scaled to the card, not fixed at the mouse-only floor. A flat 34 px square was 27% of a
-    // docked card at the default width and 34% at the 820 px minimum - and 79% of its height,
-    // across the whole right-hand end - which is a third of the card that no longer plays the
-    // chord, no longer arms a drag and (this branch being tested first) no longer feeds the arp.
-    //
-    // 0.30 of the width rather than 0.28: it puts the chip on exactly 24 px at both the default
-    // and the minimum width, which is the size of every control on every section bar. That is
-    // the convention for an accelerator beside a full-size primary path, and the primary path
-    // here is the card menu's Lock item. Big cards have the room for the full 34.
-    // `pad` is a copy; this trims that copy.
-    const float s = (float) juce::jmin(okstudio::ui::minHitPx,
-                                       juce::roundToInt(pad.getHeight() * 0.55f),
-                                       juce::roundToInt(pad.getWidth() * 0.30f));
-    return pad.removeFromTop(juce::jmin(s, pad.getHeight()))
-        .removeFromRight(juce::jmin(s, pad.getWidth()));
 }
 
 int ChordPads::cellAt(juce::Point<float> pos) const
@@ -347,17 +289,25 @@ void ChordPads::paint(juce::Graphics& g)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot, 0.8f);
         }
 
-        // The lock, on every filled card: an unlit chip while the chord is open to generation,
-        // lit once it is protected from it. It used to be painted only when set, and it was an
-        // indicator and nothing else - the toggle lived on the generator's own copy of these
-        // pads, so a state you could read from the keyboard needed another view to change.
-        // Both halves of that are fixed here: the corner is a target (`lockBadgeBounds`), and
-        // it is painted at the size of that target rather than as a 5 px dot floating in it.
+        // Locked pads carry a corner dot, and only locked ones. It is an indicator and nothing
+        // else: the toggle is Lock on this pad's own card menu, where it can be a full-size
+        // item (Owen, 2026-07-30 - "I don't want the lock button to be visible. I only want it
+        // to be in right click"). A clickable chip lived here for a few hours earlier the same
+        // day; it took a quarter of the card away from playing, dragging and feeding the arp,
+        // which is the whole point of the card. A dot costs the surface nothing.
         //
-        // Not on the card being edited: there the tick that ends the edit owns that end of the
-        // card and mouseDown gives it the click, so a lock chip drawn over it would be a lie.
-        if (filled && i != editingSlot)
-            drawLockBadge(g, lockBadgeBounds(b), pad.locked, active ? inkOnAccent : theme::good);
+        // Not on the card being edited: the tick that ends the edit is a full-height strip at
+        // that same right-hand end, and the dot would sit inside it.
+        if (filled && pad.locked && i != editingSlot)
+        {
+            const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
+                                 .withCentre({ b.getRight() - 8.0f, b.getY() + 8.0f });
+            const auto c = active ? inkOnAccent : theme::good;
+            g.setColour(c.withAlpha(0.4f));
+            g.fillEllipse(dot.expanded(2.0f));
+            g.setColour(c);
+            g.fillEllipse(dot);
+        }
 
         if (dropHere)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
@@ -394,17 +344,36 @@ void ChordPads::paint(juce::Graphics& g)
     }
 
     // Drag ghost following the cursor.
+    //
+    // A locked card is dragged like any other - moveChordPad swaps two slots and destroys
+    // nothing, so rearranging a page is not what a lock is protecting against - but dropping
+    // one *off* the strip no longer clears it (see mouseUp). The ghost says so on the way:
+    // it carries the same corner dot the card does, and it fades once the pointer is over
+    // nothing, which is the spot where an unlocked card would be wiped and this one will not.
     if (dragging && sourceIsDraggable())
     {
+        const bool locked = dragSource >= 0 && processor.chordPad(dragSource).locked;
+        const float dim = (locked && hovered == -1) ? 0.45f : 1.0f;
         const juce::String label = dragSource == -2 ? currentName : processor.chordPad(dragSource).name;
         auto ghost = juce::Rectangle<float>(0.0f, 0.0f, 84.0f, 26.0f).withCentre(dragPos);
-        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.setColour(juce::Colours::black.withAlpha(0.35f * dim));
         g.fillRoundedRectangle(ghost.translated(0.0f, 2.0f), kRadius);
-        g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, ghost.getY(), skin::accentOf(*this).base, 0.0f, ghost.getBottom(), false });
+        g.setGradientFill({ skin::accentOf(*this).hot.withMultipliedAlpha(dim), 0.0f, ghost.getY(),
+                            skin::accentOf(*this).base.withMultipliedAlpha(dim), 0.0f, ghost.getBottom(), false });
         g.fillRoundedRectangle(ghost, kRadius);
-        g.setColour(inkOnAccent);
+        g.setColour(inkOnAccent.withMultipliedAlpha(dim));
         g.setFont(skin::uiSemi(12.0f));
         g.drawText(label, ghost, juce::Justification::centred);
+
+        if (locked)
+        {
+            const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
+                                 .withCentre({ ghost.getRight() - 8.0f, ghost.getY() + 8.0f });
+            g.setColour(inkOnAccent.withAlpha(0.4f * dim));
+            g.fillEllipse(dot.expanded(2.0f));
+            g.setColour(inkOnAccent.withMultipliedAlpha(dim));
+            g.fillEllipse(dot);
+        }
     }
 }
 
@@ -421,24 +390,23 @@ bool ChordPads::toArp() const
     return processor.cardsFeedArp();
 }
 
-// A pad's card menu. Eleven rows and three rules, which is the shape it has to hold: it is
-// anchored to a pad near the bottom of the window and shown at the 34 px mouse-only item
-// height, so every row costs 34 px of screen upwards from there. It ran to 23 rows plus four
-// section headers on 2026-07-30 - about 820 px, taller than the space above the pad it hangs
-// off - and JUCE answers that by splitting the menu into columns or turning it into a
-// hover-scrolling one, and a scrolling popup is unusable with a single mouse: hovering the
-// arrow scrolls, and moving to click scrolls the item away. Four groups, no headers, nothing
-// three levels deep except the suggestion families:
+// A pad's card menu. Nine rows and two separators, which at the 34 px mouse-only item height
+// (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) is 9 * 34 + 2 * 17 =
+// 340 px. That budget is the reason this list is short: the menu hangs off a pad near the
+// bottom of a 699 px window and grows *upwards*, and JUCE answers one taller than the space it
+// has by splitting it into columns or making it hover-scroll. A scrolling popup cannot be used
+// with one mouse at all - hovering the arrow scrolls, and moving to click scrolls the item
+// away. It ran to 23 rows and roughly 820 px earlier on 2026-07-30. Three groups, no headers,
+// nothing three levels deep except the suggestion families:
 //
 //   Edit on keyboard / Clear pad / Lock
 //   Octave down / Octave up / Next voicing
 //   New chord / Next: could follow > / Send to arp slot >
-//   Clear page / Generator settings >
 //
-// The separators do the work the section headers used to, at half the height and without
-// naming what is already obvious from the items under them. The last header to go was "This
-// pad", and it went for the same reason: a JUCE section header is an item and a half tall
-// (51 px here), which is one and a half rows spent saying what the rule below it already says.
+// The fourth group went with the generator's settings, into the window that now holds them
+// (ChordGenPanel): Clear page sits in there beside Fill and Regen, where the other page-wide
+// actions are. The separators do the work section headers used to, at half the height and
+// without naming what is already obvious from the items under them.
 void ChordPads::showPadMenu(int slot)
 {
     const auto& pad = processor.chordPad(slot);
@@ -448,9 +416,11 @@ void ChordPads::showPadMenu(int slot)
     juce::PopupMenu menu;
     menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");
     menu.addItem(2, "Clear pad", filled && ! pad.locked);
-    // Lock is the full-size path; the chip in the card's top-right corner is the 24 px
-    // accelerator. Both routes, because the chip is smaller than the mouse-only floor on a
-    // docked card and a named item also says which way it is about to go.
+    // The only way to set a lock (Owen, 2026-07-30). It is the one item in the plugin whose
+    // left-click twin was deliberately taken away rather than never built: a chip in the card's
+    // corner did the job for a few hours and cost the card a quarter of its surface. The card
+    // still *shows* a lock as a corner dot, so the state is readable without opening this menu.
+    // Recorded as an owner-directed right-click-only path in CLAUDE.md.
     menu.addItem(3, pad.locked ? "Unlock" : "Lock", filled);
 
     // Octave and voicing: the two ways to move a chord without changing what it is. Both act
@@ -486,8 +456,10 @@ void ChordPads::showPadMenu(int slot)
                      && sortedCopy(revoiced) != sortedCopy(pad.notes));
 
     // Whatever else can act on this pad right now: the generator adds New chord and the
-    // suggestion families. It has no panel and no view of its own since 2026-07-30, so a card
-    // menu is where all of it is, on every pad and every page.
+    // suggestion families. Both are per-card actions, so they belong on a card's own menu
+    // however the generator's settings are reached; they are offered on every pad and every
+    // page whether or not the generator's window is open, which is what ChordGenMenu outliving
+    // that window is for.
     menu.addSeparator();
     if (onExtraMenuItems)
         onExtraMenuItems(slot, menu);
@@ -505,13 +477,6 @@ void ChordPads::showPadMenu(int slot)
         slots.addItem(100 + s, label, filled);
     }
     menu.addSubMenu("Send to arp slot", slots, filled);
-
-    // And the page group at the foot: Clear page and everything the generator can be set to.
-    if (onExtraPageItems)
-    {
-        menu.addSeparator();
-        onExtraPageItems(menu);
-    }
 
     const auto area = localAreaToGlobal(padBounds(slot - processor.padPageOffset()).toNearestInt());
     juce::Component::SafePointer<ChordPads> safe(this);
@@ -658,29 +623,11 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         }
     }
 
-    // The lock chip, on a filled card: a click there sets the lock and does nothing else.
-    // Checked ahead of every branch below, so it never fires the chord, never hands it to the
-    // arp and never arms a drag - nothing is set up for a press or a drag, so the mouseDrag
-    // and mouseUp that follow have nothing to act on. It works in both card arrangements
-    // because it is derived from padBounds, which already knows which one is up, and it is
-    // exactly the rectangle drawLockBadge paints: this branch is the reason the chip has to be
-    // painted at the size of the target rather than as a dot inside it.
-    //
-    // Not offered on the card being edited: the tick that ends the edit is a full-height strip
-    // at that same right-hand end, is tested above, and wins. Lock on the card menu still
-    // reaches it there, and the chip is not drawn on that card.
-    const int lockCell = cellAt(e.position);
-    if (lockCell >= 0 && lockCell != editingSlot && ! processor.chordPad(lockCell).notes.empty()
-        && lockBadgeBounds(padBounds(lockCell - processor.padPageOffset())).contains(e.position))
-    {
-        dragging = false;
-        dragSource = -1;
-        playing = -1;
-        processor.setChordPadLocked(lockCell, ! processor.chordPad(lockCell).locked);
-        repaint();
-        return;
-    }
-
+    // Nothing else on a card is a target. The lock had a clickable chip in the top-right
+    // corner for a few hours on 2026-07-30 and Owen asked for it back off: it stole a quarter
+    // of the card from playing, dragging and feeding the arp, and every one of those is a
+    // gesture the whole surface is supposed to answer. Lock is a right-click item now, and only
+    // that; the card paints a dot when it is set, which is a mark and not a target.
     downPos = e.position;
     dragPos = e.position;
     dragging = false;
@@ -806,9 +753,16 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
                     onRecall(processor.chordPad(dragSource).notes);
             }
             else if (target >= 0 && target != dragSource)
-                processor.moveChordPad(dragSource, target); // rearrange
-            else if (target == -1)
-                processor.clearChordPad(dragSource);         // dragged off the row = clear
+                processor.moveChordPad(dragSource, target); // rearrange, locked or not
+            else if (target == -1 && ! processor.chordPad(dragSource).locked)
+                processor.clearChordPad(dragSource); // dragged off the row = clear
+            // A locked card dropped off the strip does nothing at all. The lock is the thing
+            // that stops a chord being destroyed (Owen, 2026-07-30), and "Clear pad" on the
+            // card menu has always greyed for a locked pad - this path was the hole in that,
+            // and a wider gesture than the menu item it was quietly overriding. The drag
+            // itself stays allowed, because moveChordPad only swaps two slots and a locked
+            // card still has to be arrangeable; the ghost fades over the refusal so the card
+            // says which of the two it is doing.
         }
     }
     dragging = false;

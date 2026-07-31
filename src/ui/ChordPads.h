@@ -13,12 +13,17 @@ namespace keys
 //   * Drag the card onto a pad to capture the chord there (auto-labelled).
 //   * Drag a filled pad onto the card to recall its chord for editing (onRecall).
 //   * Click a filled pad to play/stop its chord (Exclusive makes a new pad choke the old).
-//   * Click the lock chip in a filled card's top-right corner to protect it from generation.
 //   * Drag a pad onto another to move it, or off the row to clear it.
 //   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad to the
-//     piano; every latch change writes back live), Clear, Lock, Octave down/up, Next voicing,
-//     Send to arp slot, and the chord generator - New chord, what could follow this one, and
-//     its settings. Part of the owner-directed right-click exception in CLAUDE.md.
+//     piano; every latch change writes back live), Clear pad, Lock, Octave down/up, Next
+//     voicing, New chord, what could follow this one, and Send to arp slot. Part of the
+//     owner-directed right-click exception in CLAUDE.md.
+//
+// The card surface itself is *entirely* play, drag and feed-the-arp: there is no corner that
+// means something else. A lock chip sat in the top-right for a few hours on 2026-07-30 and
+// came straight back out at Owen's request; a locked card wears a dot, which is a mark and not
+// a target, and Lock is set from the card menu alone. The generator's own settings left this
+// menu at the same time and live in a window of their own (ChordGenPanel).
 //
 // Sixteen pads per page, as two rows of eight or (Big) four rows of four with the full chord
 // card on each: its notes with octave numbers and a mini keyboard of the shape under your
@@ -58,18 +63,16 @@ public:
     static int rowsFor(bool big) { return big ? 4 : 2; }
 
     // Extra items for a pad's right-click menu, from whoever can service them - today the
-    // chord generator, which has no surface of its own and reaches the cards through here.
-    // Ids 200 and up belong to the supplier; everything below is this class's own.
+    // chord generator, whose per-card actions (New chord, Next: could follow) reach the cards
+    // through here. Ids 200 and up belong to the supplier; everything below is this class's own.
     //
-    // Two hooks, not one, because the supplier's items land in two different groups of the
-    // menu and this class owns the skeleton between them: `onExtraMenuItems` closes the
-    // **this pad** group (New chord, Next: could follow), `onExtraPageItems` is the **this
-    // page** group at the foot (Clear page, Generator settings). Both are answered by the one
-    // `onExtraMenuChoice`, and this class always calls them in that order, which is the
-    // contract the generator's own id tables rely on.
+    // One hook, not the two there were until 2026-07-30. The second, `onExtraPageItems`, added
+    // a **this page** group at the foot of the menu - Clear page and a Generator settings
+    // submenu holding every setting the generator has. All of that moved into the generator's
+    // own window that day (Owen: "the chord generator should just pop out a new window instead
+    // of being in the right click menu"), which left the hook with nothing to add.
     static constexpr int extraMenuIdBase = 200;
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
-    std::function<void(juce::PopupMenu&)> onExtraPageItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
 private:
@@ -81,15 +84,6 @@ private:
     // a corner chip, because the mouse-only floor is 34 px and a corner badge that size
     // would sit exactly where the chord name is. Static: it is pure geometry.
     static juce::Rectangle<float> saveBadgeBounds(juce::Rectangle<float> pad);
-
-    // The lock chip: a square in the top-right corner of a filled card, sized to the card
-    // rather than fixed at the 34 px mouse-only floor. 34 was a third of a docked card's area
-    // and most of its height, all of it dead to play, drag and the arp, and the only mark in it
-    // was a 5 px dot. It comes out 24 px docked (a section-bar control, which is what an
-    // accelerator is allowed to be beside the menu's own Lock item) and the full 34 on a Big
-    // card. Whatever it comes out, the chip is painted at that size: mark and target are the
-    // same rectangle now. Static: pure geometry, like saveBadgeBounds.
-    static juce::Rectangle<float> lockBadgeBounds(juce::Rectangle<float> pad);
 
     int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;

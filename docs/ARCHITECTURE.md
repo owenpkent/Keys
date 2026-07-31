@@ -27,14 +27,16 @@ src/
 │   │                         # Controls section
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-│   ├── ChordGenMenu.{h,cpp}  # the chord generator (algorithmic + Markov). No panel:
-│   │                         # two chips on the Pads bar and items on the pad menu
+│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain (algorithmic + Markov). Draws
+│   │                         # nothing; a member of the editor, so it outlives every view
+│   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
+│   │                         # when that window opens, destroyed when it closes
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
-│   ├── DetachedWindow.h      # a section popped out into its own resizable window
-│   │                         # (any of them since 2026-07-27; was KeyboardWindow.h)
+│   ├── DetachedWindow.h      # a section popped out into its own resizable window (any
+│   │                         # of them since 2026-07-27; also the generator's window)
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
 ├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
 │   ├── KeysHostProcessor.{h,cpp} # KeysProcessor + one hosted instrument VST3
@@ -300,7 +302,8 @@ into a folded arp needs a way out that is still on screen (see `docs/ARP_DESIGN.
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
 chord) was also the one place you could not reach a chord. Their page buttons ride on the
-Pads bar, and so do the generator's **Fill** and **Regen** chips, at the right end. What a
+Pads bar, and so do the generator's **Fill**, **Regen** and **Generator** chips, at the right
+end. What a
 card click *means* is the arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp
 running, a click hands that chord over and leaves it there instead of playing it while the
 button is down, and a click on the card *already* feeding the arp retriggers it.
@@ -376,7 +379,7 @@ the top, so the control that re-docks a section is never in the window you are n
 
 Controls that belong to the *editor* rather than to the content stay behind on the bar: the
 arp's **On** and **Hold off**, the pads' page buttons and the generator's **Fill** / **Regen**
-chips, the Controls bar's **Knobs** chip and theme swatch. A bar whose section is away says
+/ **Generator** chips, the Controls bar's **Knobs** chip and theme swatch. A bar whose section is away says
 so, in the space its own controls did not use.
 
 All of it (folds, detached window bounds) is in `KeysProcessor::LayoutState` rather than the
@@ -384,12 +387,12 @@ editor, so it survives the window closing, and it is saved in the session tree r
 parameters: none of it changes a note, and exposing it to host automation would only add ways
 to break a session.
 
-## The chord generator has no panel
+## The chord generator: one brain, three surfaces
 
-`ChordGenMenu` is a plain value member of `KeysEditor` (`chordGen`), not a view and never a
-dialog: a plugin editor has no business opening OS windows, and there is nothing left for a
-panel to draw. It works on the **current page**, so the four pages can hold four different
-keys.
+`ChordGenMenu` is a plain value member of `KeysEditor` (`chordGen`) and draws nothing at all.
+Its controls are on the Pads bar, in a window of their own (`ChordGenPanel`), and on a pad's
+card menu, and **none of those owns it**. It works on the **current page**, so the four pages
+can hold four different keys.
 
 **It lost its cards first** (2026-07-30). `ChordGenPanel` drew a 4x4 grid of the sixteen pads
 on the current page (the same pads, through the same `setChordPad`), because it was written
@@ -400,37 +403,51 @@ tall arrangement became the Pads section's **Big** switch (`layout.padsBig`, fou
 four), so the large card (chord name, its notes with octave numbers, a mini keyboard of what
 is held) is available whatever else is open.
 
-**Then it lost the panel too**, in the same round that removed the centre view. With the
-cards gone, what was left was sliders and combo boxes for settings, sitting in a view you had
-to switch to. Everything moved onto the pad's own right-click menu, which is where the chord
-it applies to already is:
+**Then it lost the panel too**, in the same round that removed the centre view, and **got it
+back as a window a few hours later** (Owen: "I think the chord generator should just pop out a
+new window instead of being in the right click menu"). The intermediate arrangement put every
+setting on a pad's right-click menu as a submenu of ticked discrete values, because a
+`PopupMenu` cannot hold a slider; that reached 23 rows and roughly 820 px, which is more menu
+than fits above a pad near the bottom of the window. What the round through the menu settled
+for good is the **split between the brain and its surfaces**, and that survived the window
+coming back:
 
-- **Lock**, **New chord** and **Next** are items, through `addPadMenuItems` /
-  `addPageMenuItems` / `handlePadMenuChoice`. They are now offered on **every pad on every
-  page, always**: the panel used to gate them on being alive, so the generator's own actions
-  were unreachable from a pad whenever the view was folded or another one was up. Making the
-  generator a plain member is precisely what eliminated that gate, and the test that asserted
-  it went with it.
-- Every **setting** is a submenu of a single **Generator settings** wrapper: source, key and
-  mode, octave, note counts, inversions, Scale Compliance, Lock Influence, then one **Markov
-  chains** submenu for the five that are inert unless the source is Markov. A submenu shows
-  its live value in its own caption, so nothing needs a panel to read the state back.
-- **The menu has a hard budget, and it is rows.** It is anchored to a pad near the bottom of
-  a 699 px window and shown at `withStandardItemHeight(okstudio::ui::minHitPx)`, so each row
-  costs 34 px of screen measured *upwards* from there, and a separator 17. The settings were
-  flattened onto the top level for part of 2026-07-30 to save a leg of hover; that took the
-  menu to 23 rows plus four section headers, about 820 px, and JUCE answers a menu taller than
-  the space it has by splitting it into columns (`insertColumnBreaks`) or making it
-  hover-scroll. A scrolling popup cannot be operated with one mouse at all: hovering the arrow
-  scrolls and moving to click scrolls the item away. It is **11 top-level rows and three
-  separators, 429 px** (34 each, 17 each, plus JUCE's 2 px border top and bottom), and it
-  stays that way. The section headers went - a rule says the same thing at half the height,
-  and a JUCE section header is not a row but an item and a half, 51 px here, since
-  `HeaderItemComponent` asks the LookAndFeel for an item size and then adds half of it again.
-  The four suggestion families went behind one **Next: could
-  follow** row, and the settings went back behind their wrapper - which cost nothing in the
-  end, because **Key**, **Mode** and **Scale Compliance** had become combo boxes on the Pads
-  bar in the same session and those are the three anybody reaches for mid-audition.
+- `ChordGenMenu` is the brain. It is a plain value member of `KeysEditor`, alive for the
+  editor's whole life, and it draws nothing. It never was the panel's, which is why the panel
+  could be a full-screen overlay, an inline band, a menu and now a window without the
+  generation half changing a line.
+- `ChordGenPanel` is a **view onto it**, built when its window opens and destroyed when it
+  closes. It holds a 15 Hz display timer and nothing else: no note, no preview, no device.
+  Every control is an `AudioProcessorValueTreeState` attachment, and the two picks that are not
+  parameters (Markov **Mood** and **Start**) live on `ChordGenMenu`, so closing the window
+  loses nothing and reopening it shows the same state.
+- **New chord** and **Next: could follow** stay on a pad's card menu, through
+  `addPadMenuItems` / `handlePadMenuChoice`. They are questions about the card under the
+  mouse, and they are offered on **every pad on every page, always**. The panel used to gate
+  them on being alive, so the generator's own actions vanished from a card whenever its view
+  was closed - that is the bug the brain/view split exists to prevent, and it is why the window
+  must never own `ChordGenMenu`.
+- **The window is not a `Section`.** It never docks, so it has no bar, no fold, no caption and
+  no Detach button, and every one of those is something `KeysEditor::sections` walks. What it
+  does share is `DetachedWindow` (the skinned 38 px title bar with mouse-only-sized buttons,
+  resize limits, the frame remembered as it is dragged, and `ensureWindowReachable`) and the
+  remember-where-it-was-left contract: `LayoutState::chordGen` and `chordGenBounds` sit beside
+  the sections' own flags and frames and persist with the session. Its minimum size is
+  **derived** - `ChordGenPanel::contentSize()` adds up the same row widths and heights
+  `resized()` lays out, and `minWindowSize()` adds the title bar and border.
+- **It closes two ways and tears down once.** The panel's Close button and the title bar's X
+  both run `KeysEditor::setChordGenWindowOpen(false)`, deferred one message-loop turn because
+  each of them is inside the object that call destroys.
+- **The card menu keeps its budget, and it is rows.** It is anchored to a pad near the bottom
+  of a 699 px window and shown at `withStandardItemHeight(okstudio::ui::minHitPx)`, so each row
+  costs 34 px of screen measured *upwards* from there, and a separator 17. JUCE answers a menu
+  taller than the space it has by splitting it into columns (`insertColumnBreaks`) or making it
+  hover-scroll, and a scrolling popup cannot be operated with one mouse at all: hovering the
+  arrow scrolls and moving to click scrolls the item away. It is **9 rows and 2 separators,
+  340 px**, down from the 23 rows the settings had taken it to. Section headers are not used at
+  all - a rule says the same thing at half the height, and a JUCE section header is not a row
+  but an item and a half, 51 px here, since `HeaderItemComponent` asks the LookAndFeel for an
+  item size and then adds half of it again.
 - **Octave down / Octave up / Next voicing** act on one pad's stored chord (menu-only, Owen's
   call). `chordgen::rootPosition` / `applyVoicing` / `voicingOf` in `ChordGen.h` are the
   voicing cycle: root position, one inversion per note above the root (the same inversions
@@ -451,18 +468,29 @@ it applies to already is:
   chord from *generation*, not from its owner. The **card being edited** does not: all three
   grey out while `slot == editingSlot`, because they write the stored chord and cannot reach
   the keybed, and the edit link would write the un-shifted set back on the next latched note.
-- **Fill** and **Regen** are the left-click bulk path, two 24 px chips at the **right end of
-  the Pads bar**, and **Key**, **Mode** and **Scale Compliance** are three 24 px combo boxes
-  beside them: the settings that get changed while a page is being auditioned, one click to
-  open and one to pick. They are `ComboBoxAttachment`s on the same parameters the menu writes,
-  so neither place has to know the other exists; Compliance is five steps of a continuous
-  0-100 parameter, which an attachment maps exactly. All five controls stay live with the Pads
-  section folded, so folding the strip cannot take the right-click menu and the bar together,
-  which would be the whole generator. They cost the window no height and 302 px of bar, which
-  is what moved `minWidthForView()` back to a single 1010 floor.
-- **Clear page** is an item on the pad menu and deliberately *not* a chip. It wipes every
-  unlocked pad on the page, there is no `juce::UndoManager` anywhere in Keys, and a bulk
-  destructive action with no undo does not belong 4 px from Regen.
+- **Fill**, **Regen** and **Generator** are three 24 px chips at the **right end of the Pads
+  bar**, and **Key**, **Mode** and **Scale Compliance** are three 24 px combo boxes beside
+  them: the bulk actions and the settings that get changed while a page is being auditioned,
+  one click to open and one to pick. **The bar is the fast path and the window is the complete
+  one**, and there is one parameter under each pair, so neither place has to know the other
+  exists. Key and Mode are `ComboBoxAttachment`s and hold the same set of values in both
+  places. **Compliance is the one that reads differently in the two, on purpose**: the
+  parameter is a continuous 0-100, the window's slider steps by 1, and the bar offers five
+  steps - so **the bar shows the step nearest the value**, and at 60 it reads "50 %". That
+  rounding is why this one box is *not* an attachment. A `ComboBoxAttachment` finishes through
+  `ComboBox::setSelectedId`, which returns early when the id has not moved, so picking the step
+  already showing wrote nothing and 50 was unreachable from the bar - a dead click on a lit
+  control. It is a `keys::StepComboBox` instead, which overrides the virtual `showPopup()` and
+  reports every pick; a plain `juce::ParameterAttachment` reads the parameter back onto it, and
+  `setValueAsCompleteGesture` writes it as one begin/set/end so no pick can leave a host
+  gesture open. All six controls stay live with the Pads section folded, so folding the strip
+  cannot take the card menu and the bar together, which would be the whole generator. They cost
+  the window no height and 502 px of bar (540 with the gaps between them), which is what moved
+  `minWidthForView()` from 1010 to 1070 - a number Keys Host now asks for rather than copying.
+- **Clear page** is a button in the generator's window and deliberately *not* a chip. It wipes
+  every unlocked pad on the page, there is no `juce::UndoManager` anywhere in Keys, and a bulk
+  destructive action with no undo does not belong 4 px from Regen. It was briefly an item on
+  the pad menu for the same reason, and moved with the rest of the page-wide actions.
 - **Fill never overwrites** (2026-07-30, Owen: "new generations shouldn't overwrite
   existing"). `fillPage()` writes the *empty* pads and only those, locked or not - a blank
   needs no protection. `regeneratePage()` is the destructive one and the only one: it rerolls
@@ -471,20 +499,28 @@ it applies to already is:
   split is the point rather than a tidy-up: a flag on a shared path is exactly how the safe
   button ended up being the one that could lose sixteen chords. Each chip greys itself out
   when its list of targets is empty (`pageHasEmptyPads` / `pageHasRegeneratablePads`, polled
-  from the editor's timer), so which of the two is which is readable from the bar.
-- **The lock chip is a target**, not only an indicator (2026-07-30), and it is painted at the
-  size of that target. `ChordPads::lockBadgeBounds` is a square in the top-right of a filled
-  card, `jmin(34, round(h * 0.55), round(w * 0.30))`: 24 px docked at both the default and the
-  minimum window width, which is a section-bar control and the size an accelerator is allowed
-  to be beside the menu's own Lock item, and the full 34 on a Big card. It was a flat 34,
-  which is 27% of a docked card's area at 980 px and 34% at the 820 px floor - most of the
-  height across the whole right-hand end - with a 5 px dot as its only mark, so a click 30 px
-  below the dot toggled the lock with nothing on screen to say why. `drawLockBadge` fills that
-  rectangle: an inset chip with an open shackle while the chord is open to generation, lit and
-  closed once it is set. The click is tested before every play/drag branch in `mouseDown`, so
-  it never fires the chord, arms a drag or feeds the arp; neither chip nor branch exists on the
-  card being edited, where the tick that ends the edit owns that end. Lock on the card menu
-  remains the accelerator.
+  from the editor's timer and from the panel's), so which of the two is which is readable
+  without a tooltip. Clear page greys on the second of the two: it takes exactly what Regen
+  would.
+- **The lock is an indicator on the card and an item on the menu, and nothing else**
+  (2026-07-30, Owen: "I don't want the lock button to be visible. I only want it to be in right
+  click"). A filled, locked card paints a 5 px dot in its top-right corner; an unlocked one
+  paints nothing, and the card being edited paints nothing either, since the tick that ends the
+  edit owns that end. A **clickable chip** occupied that corner for a few hours earlier the same
+  day - `lockBadgeBounds` sized it to the card and `drawLockBadge` filled it - and it was
+  removed at Owen's request: it took roughly a quarter of a docked card, and the click was
+  tested ahead of every other branch in `mouseDown`, so that quarter answered neither play nor
+  drag nor feed-the-arp. The whole card surface means the card again. This is a **closed
+  owner-directed decision**; see the right-click exceptions in `CLAUDE.md` before reinstating a
+  target there.
+- **The lock stops every path that destroys a chord, not just the menu item.** "Clear pad" has
+  always greyed on a locked card; **dragging one off the strip** cleared it anyway until
+  2026-07-30, which is a wider gesture quietly overriding the item it sits beside. It now does
+  nothing. The **drag itself is still allowed**, because `moveChordPad` swaps two slots and
+  destroys nothing: a locked card still has to be arrangeable, and rearranging a page is not
+  what a lock protects against. The card says which of the two it is doing - the drag ghost
+  carries the same corner dot the card does, and fades to 45% once the pointer is over nothing,
+  the spot where an unlocked card would be wiped.
 
 Auditioning a chord reuses `pressChordPad` / `releaseChordPad`. It always did, and now there
 is one card doing it rather than two.

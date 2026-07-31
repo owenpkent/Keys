@@ -3,12 +3,14 @@
 #include "PluginProcessor.h"
 #include "ui/ArpPanel.h"
 #include "ui/ChordGenMenu.h"
+#include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
 #include "ui/DetachedWindow.h"
 #include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
+#include "ui/StepComboBox.h"
 #include <okstudio/Updater.h>
 #include <array>
 #include <memory>
@@ -40,6 +42,12 @@ public:
     // step editor needs far more room than the player, so a parent that ignores this clips
     // the keybed off the bottom. Keys Host grows itself to fit.
     std::function<void(int)> onIdealHeightChanged;
+
+    // The narrowest this editor can be laid out at, which is the Pads bar's own arithmetic
+    // (see the definition). Public because Keys Host embeds one of these and has to set its
+    // window's floor from it - it held a copy of the number until 2026-07-30, and the copy
+    // went stale the first time a control joined that bar.
+    int minWidthForView() const;
 
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -75,11 +83,18 @@ private:
     int  arpHeight() const;            // height the arp section asks for, 0 if folded
     int  sectionHeight(SectionId) const; // 0 when the section is folded or in its own window
     int  idealHeight() const;          // total height with the current folds
-    int  minWidthForView() const;      // the arp carries more controls than the player
     void applyLayout();                // resize to fit the folds (unless embedded), then resized()
 
     void setSectionDetached(SectionId, bool); // move a section in or out of its own window
     void rememberSectionBounds(SectionId);
+
+    // The chord generator's window. Not a section - it never docks, so it has no bar, no fold
+    // and no entry in `sections` - but it reuses the same DetachedWindow and the same
+    // remember-where-it-was-left contract, and its flag and frame live beside the sections' in
+    // KeysProcessor::LayoutState. Opening builds the panel, closing destroys it, so nothing of
+    // it exists while it is shut.
+    void setChordGenWindowOpen(bool);
+    void rememberChordGenBounds();
     // Places a section's Detach button, plus anything travelling with it, at the right-hand
     // end of `row`, and hands back what is left for that section's own controls. `onBar` says
     // which of the two rows this is - the section bar, or the strip a detached window carries
@@ -189,12 +204,19 @@ private:
     // holder since 2026-07-30: it is the bottom row of that band, not a section of its own.
     KnobBank knobBank;
     ChordPads chordPads;
-    // The chord generator. A plain object with no panel of its own since 2026-07-30, and a
-    // member rather than a unique_ptr for exactly that reason: it is reached from a pad's
-    // card menu and from the two chips on the Pads bar, neither of which can be allowed to go
-    // looking for it and find nothing. It used to live and die with the Chords view, which
-    // is what made "New chord" come and go from the menu.
+    // The chord generator's brain. A plain object and a member, not a unique_ptr and not
+    // something a window owns: it is reached from a pad's card menu and from the chips on the
+    // Pads bar, and neither can be allowed to go looking for it and find nothing. It used to
+    // live and die with the Chords view, which is what made "New chord" come and go from the
+    // menu, and the window below must not be able to reintroduce that.
     ChordGenMenu chordGen;
+    // Its window, and the panel inside it. Both are built when the window opens and torn down
+    // when it closes, in that order reversed - DetachedWindow holds the content non-owned, so
+    // the window has to go first. The panel is a view and holds no state of its own: every
+    // control is an APVTS attachment and the two transient picks (Mood, Start) live on
+    // chordGen, so shutting this loses nothing.
+    std::unique_ptr<ChordGenPanel> chordGenPanel;
+    std::unique_ptr<DetachedWindow> chordGenWindow;
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
@@ -225,41 +247,52 @@ private:
     // is on screen.
     juce::TextButton padsBigButton { "Big" };
 
-    // The generator's two bulk actions, riding the Pads bar. They are the whole left-click
-    // path into generation (everything else it owns is on a pad's card menu), and they are on
-    // a bar because a bar is 34 px that already exists: a control on one costs the window no
-    // height, which is what let the generator lose its band without losing its reach.
+    // The generator's two bulk actions, riding the Pads bar. They are the fast path into
+    // generation, and they are on a bar because a bar is 34 px that already exists: a control
+    // on one costs the window no height, which is what let the generator lose its band without
+    // losing its reach.
     //
-    // They are also the only two controls on this bar that do *not* hide when the section
-    // folds, for exactly the reason the arp's On does not: the other route to the generator
-    // is a right-click on a pad card, and that folds away with the strip, so hiding these
-    // took the whole generator off the screen along with the cards.
+    // They do *not* hide when the section folds, for exactly the reason the arp's On does not:
+    // the other route to a card is a right-click on it, and that folds away with the strip.
     //
-    // Clear used to be the third. It emptied every unlocked pad on the page with one click,
-    // there is no undo anywhere in Keys, and it sat between Regen and the page buttons. It is
-    // an item on a pad's card menu now (`ChordGenMenu::addPadMenuItems`); clearPage() itself
-    // is untouched.
+    // Clear is not a third one here. It empties every unlocked pad on the page with one click,
+    // there is no undo anywhere in Keys, and it sat between Regen and the page buttons. It is a
+    // button in the generator's window now, beside these two; `clearPage()` itself is untouched.
     juce::TextButton fillButton { "Fill" }, regenButton { "Regen" };
 
+    // And the way into everything else the generator has: its own window (2026-07-30, Owen's
+    // call). It rides the same bar and never hides, for the same reason those two do not -
+    // fold the pads away and this is the only thing left on screen that can reach the
+    // generator. The window is where Octave, Source, Notes, Inversions, Lock Influence, the
+    // Markov chains and Clear page live; they were submenus of a pad's card menu for a few
+    // hours earlier that day, which took the menu to 23 rows and 820 px.
+    juce::TextButton chordGenButton { "Generator" };
+
     // The three generator settings that get reached for constantly, as combo boxes on the same
-    // bar (2026-07-30, Owen's ask). Everything the generator owns is on a pad's card menu, and
-    // a menu costs a right-click and then a hover per level; for the settings you change while
-    // you are auditioning a page - what key, what mode, how far outside it may wander - that is
-    // the wrong price. On the bar each is one click to open and one to pick, and it costs the
-    // window no height, same trade as Fill and Regen.
+    // bar (2026-07-30, Owen's ask). Every setting the generator has is also in its window, and
+    // opening a window to change the key while auditioning a page is the wrong price for the
+    // two or three you touch constantly. On the bar each is one click to open and one to pick,
+    // and it costs the window no height, same trade as Fill and Regen.
     //
-    // They never hide, for the same reason those two do not: the card menu folds away with the
-    // strip, so hiding these would take the settings off the screen entirely. Laid out from the
-    // right end, again like those two, so they do not float in the hole the page buttons leave.
+    // They never hide, for the same reason those two do not. Laid out from the right end, again
+    // like those two, so they do not float in the hole the page buttons leave.
     //
-    // Attachments, not hand-syncing: the same three settings are still on the card menu, which
-    // writes the parameter directly, so both places read the one source and neither has to know
-    // the other exists. Compliance is a continuous 0-100 parameter and this is five discrete
-    // steps of it - a ComboBoxAttachment maps item i of n onto i/(n-1) of the parameter's
-    // range, which lands exactly on 0/25/50/75/100 and picks the nearest step back, the same
-    // arithmetic ChordGenMenu::addChoice does for the ticked item.
-    juce::ComboBox genRootBox, genModeBox, genComplianceBox;
-    std::unique_ptr<ComboAtt> genRootAtt, genModeAtt, genComplianceAtt;
+    // Attachments, not hand-syncing: the window's own Key, Mode and Scale Compliance are
+    // attachments on these same three parameters, so both places read one source and neither
+    // has to know the other exists - which is what makes "the bar is the fast path, the window
+    // is the complete one" true rather than a promise.
+    //
+    // Key and Mode are choice parameters, so a bar combo and the window's combo hold the same
+    // set of values and cannot read differently. **Compliance can**, and by design: the
+    // parameter is a continuous 0-100, the window's slider steps by 1, and the bar offers five
+    // steps of it - so the bar shows the *nearest* step and reads "50 %" at 60. That is a
+    // display rounding and not a disagreement about the value, and it is the reason this one
+    // box is a StepComboBox driven by an explicit write rather than a ComboBoxAttachment: an
+    // attachment made picking the step already showing a dead click (see StepComboBox.h).
+    juce::ComboBox genRootBox, genModeBox;
+    StepComboBox genComplianceBox;
+    std::unique_ptr<ComboAtt> genRootAtt, genModeAtt;
+    std::unique_ptr<juce::ParameterAttachment> genComplianceAtt;
 
     // Alive whenever the arp section is open, wherever that section currently is.
     std::unique_ptr<ArpPanel> arpPanel;

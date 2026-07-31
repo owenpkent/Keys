@@ -411,10 +411,14 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     host.addChangeListener(this);
 
     setResizable(true, true);
-    setResizeLimits(1010, barHeight + absMinKeysHeight, 2600, 1700);
-    // Owen resizes to the minimum every time anyway — open there. (keysHeight is what
-    // the chord-generator overlay grows the embedded editor to when opened.)
-    setSize(1010, barHeight + minKeysHeight);
+    // Asked, not copied. This was a literal 1010 until 2026-07-30, when a Generator button
+    // joined Fill and Regen on the Pads bar and moved the editor's own floor to 1070 - and a
+    // host window narrower than the editor it embeds carves controls off the right-hand end of
+    // that bar with nothing to say so.
+    const int keysMinWidth = keysEditor.minWidthForView();
+    setResizeLimits(keysMinWidth, barHeight + absMinKeysHeight, 2600, 1700);
+    // Owen resizes to the minimum every time anyway - open there.
+    setSize(keysMinWidth, barHeight + minKeysHeight);
     juce::ignoreUnused(keysHeight);
     openInstrumentEditor(); // reflects "no instrument" too (label + bar state)
 }

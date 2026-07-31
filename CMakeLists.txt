@@ -36,6 +36,7 @@ set(KEYS_SOURCES
     src/ui/KnobBank.cpp
     src/ui/ChordPads.cpp
     src/ui/ChordGenMenu.cpp
+    src/ui/ChordGenPanel.cpp
     src/ui/ArpPanel.cpp)
 
 # Sources, compile defs and links are identical for the instrument and the MIDI-effect

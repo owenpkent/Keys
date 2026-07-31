@@ -76,7 +76,7 @@ the window reads at a glance, before you have read a single caption.
 |---------|-----|-----------|
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Humanize, Velocity, Strum, Dir, BPM, and the eight knobs in the row beneath them. **Knobs**, at the left end of this bar, folds just that knob row; the theme swatch at the right end stays put whatever you fold. |
 | **Arp** | below the controls | The arpeggiator. Its **On** toggle, the **Hold off** chip and **Detach** ride on the bar, so the arp can be switched on, made to let go of a chord, and detached with the panel folded shut. Folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
-| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons and the **Big** card-size switch ride at the left of the bar and fold with the strip; the generator's **Fill** and **Regen** chips ride at the right and never do. |
+| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons and the **Big** card-size switch ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips and its **Key**, **Mode** and **Scale Compliance** combo boxes ride at the right and never do. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
 A bar is a real button, not a painted strip, so it carries an accessible name for screen
@@ -108,15 +108,16 @@ alongside Re-dock, because those belong to the keybed rather than to the editor.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
 arp's **On** toggle and **Hold off** chip, the pad page buttons and **Big**, the generator's
-**Fill** and **Regen** chips, the **Knobs** chip, and the theme swatch. All of them keep
-working while the section they name is off in a window.
+**Fill**, **Regen** and **Generator** chips, the **Knobs** chip, and the theme swatch. All of
+them keep working while the section they name is off in a window.
 
 Folding is the other case, and a stricter one: a folded bar keeps only what still means
 something with the section gone. That is the arp's **On** and **Hold off** (so the
 arpeggiator runs on behind a closed panel, and can still be made to let go of a chord),
-**Fill** and **Regen** (the only left-click path into the chord generator, and generating
-into a folded strip is a fine thing to mean), and the theme swatch (it colours the whole
-plugin). Everything else goes with the section, Detach included.
+**Fill**, **Regen** and **Generator** (the whole left-click path into the chord generator -
+generating into a folded strip is a fine thing to mean, and the settings must not fold away
+with the cards), and the theme swatch (it colours the whole plugin). Everything else goes with
+the section, Detach included.
 
 ## Playing surface
 
@@ -212,7 +213,10 @@ audition here is what you play.
    so a new pad chokes the previous chord.
 5. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
    the rows to empty it, or drag a pad onto the live card to bring its notes back onto
-   the keyboard (held) for editing — capture in reverse.
+   the keyboard (held) for editing — capture in reverse. **A locked pad can still be moved
+   and still cannot be emptied**: dropping one off the rows does nothing, the same answer
+   the greyed-out **Clear pad** on its menu gives. The ghost fades as you leave the rows to
+   say so before you let go.
 6. **Make the cards bigger.** **Big**, on the Pads bar, swaps the two rows of eight for four
    rows of four, each card showing the chord's notes with octave numbers and a mini keyboard
    of the shape under your hand. It is the arrangement the chord generator used to draw over
@@ -237,26 +241,32 @@ work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ### A pad's card menu
 
-Right-click any pad. Everything that can act on that card is here: eleven rows in four
-groups, separated by rules.
+Right-click any pad. Everything that can act on that card is here: nine rows in three groups,
+separated by rules.
 
 | Item | What it does |
 |------|--------------|
 | **Edit on keyboard** / **Done editing** | Step 7 above |
 | **Clear pad** | Empty this one card. Greyed on an empty or locked pad |
-| **Lock** / **Unlock** | Keep this chord through a Regen. Same as clicking the lock chip in the card's top-right corner |
+| **Lock** / **Unlock** | Keep this chord through a Regen. **This is the only way to set a lock.** A locked card shows a small dot in its top-right corner, so the state is readable without opening the menu; the dot is a marking and not a button |
 | **Octave down** / **Octave up** | Move the whole chord an octave. Greyed when a note would fall off the ends of the keyboard (it never wraps one round to the other end), and while this card is the one linked to the keyboard for editing |
 | **Next voicing** | The same chord arranged differently: root position, first inversion, second, (third, on a four-note chord), then a spread with the root left in the bass, then round to root again. The item says which one the card is in now. Greyed while the card is linked to the keyboard, like Octave |
 | **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
 | **Next: could follow** | Four submenus of chords that could follow this one, described below. On a filled pad only, since there has to be a chord to follow |
-| **Send to arp slot** | Park a copy of this chord in one of the twelve arp slots, to launch later. The one *menu item* in Keys with no left-click twin |
-| **Clear page** | Empty every unlocked pad on this page. Greyed when there is nothing to take |
-| **Generator settings** | Every setting the chord generator has, one submenu each, described below |
+| **Send to arp slot** | Park a copy of this chord in one of the twelve arp slots, to launch later |
+
+**Two of these have no left-click twin**, and both are deliberate: **Send to arp slot**, since
+binding a chord to one particular slot needs a target picker, and **Lock**, which had a
+clickable chip in the card's corner for a few hours and lost it at Owen's request. The chip
+took roughly a quarter of the card, and every bit of that quarter had stopped playing the
+chord, starting a drag or feeding the arpeggiator. The whole card is the card again.
 
 **Octave** and **Next voicing** work on a locked pad too. A lock protects a chord from being
-*generated over*; it is not a lock against you, and moving a card you locked on purpose is
-something you asked for by name. If that card is ringing, or is the one held into the
-arpeggiator, it changes to the new notes where it stands rather than being cut off. They do
+*replaced or thrown away* — **Regen**, **Clear page**, **Clear pad** and dropping the card off
+the rows all leave it alone. It is not a lock against editing: changing a chord you locked, or
+moving the card to another slot, is something you asked for by name. If that card is ringing,
+or is the one held into the arpeggiator, it changes to the new notes where it stands rather
+than being cut off. They do
 *not* work on the card currently linked to the keyboard: they write the card and the keyboard
 would write it straight back. **Done editing**, at the top of the same menu, frees them.
 
@@ -268,35 +278,40 @@ press until it ran off the keyboard.
 **The menu is kept short on purpose.** It hangs off a pad near the bottom of the window and
 every row is 34 px measured *upwards* from there, so a long menu runs off the top of the
 screen and turns into one you have to scroll by hovering, which is unusable with one mouse.
-Eleven rows is the budget. That is why the four **Next** families sit behind one row, and why
-the settings are behind one **Generator settings** row rather than spread out on the menu
-itself: **Key**, **Mode** and **Scale Compliance**, the three you actually change while
-auditioning a page, are combo boxes on the Pads bar where they need no menu at all.
-
-**Clear page** is on this menu and not a chip on the Pads bar, where it used to be. It
-empties sixteen pads, Keys has no undo of any kind, and on the bar it sat a few pixels from
-**Regen** and the page buttons, which are the two things there you click constantly. A
-right-click and a read is the right price for sixteen pads.
+Nine rows is the budget. That is why the four **Next** families sit behind one row, and it is
+why the generator's settings are not on this menu at all: they were, for a few hours, and they
+took it to 23 rows.
 
 ## Chord generator
 
-The generator has no panel and no view of its own. It is **two chips, three combo boxes and a
-card menu**:
+The generator is **three chips, three combo boxes, a window, and two items on a card menu**:
 
 - **Fill** and **Regen**, at the right-hand end of the **Pads bar**. **Fill is the safe one**:
   it writes a chord to the *empty* pads and never touches one that already has a chord, so you
   can lean on it. **Regen is the one that overwrites**: it gives new chords to the pads that
   already have one, skipping the locked ones, which is what a lock is for. Each greys out when
   it would do nothing - Fill with no blanks left on the page, Regen with nothing unlocked to
-  reroll - so the buttons tell you which is which without a hover. Both stay clickable when
-  the Pads section is folded away, because they are the only left-click path into generation
-  and folding the strip must not take the feature with it. Unfold and the page is written.
+  reroll - so the buttons tell you which is which without a hover.
+- **Generator**, the chip beside them, opens the generator's **own window**: every setting it
+  has, the Markov controls, and Fill, Regen and **Clear page** as full-size buttons. Click it
+  again while the window is up and it comes to the front rather than opening a second one.
+  Close the window with its **Close** button or the X in its title bar; both do the same thing
+  and neither loses a setting. Being a window rather than part of the plugin, it can sit
+  anywhere on the desk and be sized to suit, and it remembers where you left it and whether it
+  was open.
 - **Key**, **Mode** and **Scale Compliance**, combo boxes on the same bar just left of the
   chips. These are the three you change while you are auditioning a page, so they are on the
-  bar rather than behind a right-click: one click opens the list, one picks. They stay put
-  through a fold too, and they are the same settings as the menu items of the same names, so
-  either place shows what the other did.
-- **The pad right-click menu** for everything that acts on one card, and for every setting.
+  bar as well as in the window: one click opens the list, one picks. **The bar is the fast way
+  and the window is the complete one**, and they are the same three settings, so a change in
+  one place shows in the other immediately. Scale Compliance is the one place the two read
+  differently, and it is not a disagreement: **the bar offers five steps, the window is
+  continuous, and the bar shows the step nearest the value**. Set 60 on the window's slider and
+  the bar reads "50 %". Picking that "50 %" from the bar sets it to 50, as it should - the bar
+  always writes exactly the step you picked, even when it is the one already showing.
+- All six of those stay clickable when the Pads section is folded away. Folding the strip must
+  not take the generator with it: unfold and the page is written.
+- **The pad right-click menu** keeps the two things that are about one card: **New chord** and
+  **Next: could follow**. Those work whether the generator's window is open or not.
 
 It works on the page of pads you are looking at, so each page can be a different key. The
 chords it makes *are* the pads: there is exactly one set of chord cards in Keys and this is
@@ -307,12 +322,12 @@ you those large cards where the pads actually are.)
 ### Filling a page
 
 1. **Pick a key.** Set **Key** and **Mode** from the combo boxes on the Pads bar, or from the
-   same two items on a pad's right-click menu, where each mode also shows the character it
+   same two controls in the generator's window, where the mode also shows the character it
    carries (Lydian reads "Dreamy, Ethereal, Magical") so you can choose by feel rather than by
    name. The bar spells the modes without their aliases, so "Natural Minor (Aeolian)" reads
-   **Natural Minor** there. These two are the generator's
-   own, separate from the **Root** and **Scale** that drive Scale Lock, so move those to
-   match if you want Scale Lock to agree with the chords you're about to get.
+   **Natural Minor** there; the window has the room for the full names. These two are the
+   generator's own, separate from the **Root** and **Scale** that drive Scale Lock, so move
+   those to match if you want Scale Lock to agree with the chords you're about to get.
 2. **Fill.** One click on the chip. Every *empty* pad gets a chord: the seven that belong
    to the key come first, in order, then the remaining pads get something richer from it.
    Anything already on the page stays exactly as it is, so filling a half-finished page is
@@ -323,13 +338,14 @@ you those large cards where the pads actually are.)
 
 ### Generator settings
 
-All of these live behind the **Generator settings** row at the foot of a pad's right-click
-menu. Each one opens a short list of values with the current one ticked, so a setting is a
-hover and a click and never a drag.
+All of these live in the generator's window, opened by the **Generator** chip on the Pads bar.
+Two rows of controls: key, mode, octave and source on the first; note counts, inversions and
+the two weighting sliders on the second, which the Markov controls replace when the source is
+**Markov** (those settings mean nothing to a chain walk, so the row shows whichever set is
+live). Underneath are **Fill Page**, **Regen Unlocked** and **Clear Page**.
 
 **Key**, **Mode** and **Scale Compliance** are also combo boxes on the Pads bar, which is the
-fast way to reach the three you change most. The five Markov rows are together under a single
-**Markov chains** submenu, because none of them does anything until the source is Markov.
+fast way to reach the three you change most. Both places drive the same setting.
 
 | Setting | What it does |
 |---------|--------------|
@@ -349,13 +365,16 @@ fast way to reach the three you change most. The five Markov rows are together u
 
 Everything from **Mode** down to **Lock Influence** belongs to the weighted pool, so it
 greys out while Markov is the source rather than staying clickable and being silently
-ignored (which is what Octavium did). The Markov rows grey out the same way under
-Algorithmic, and the **Mood** list follows whichever chain is up.
+ignored (which is what Octavium did). The Markov controls are only shown under **Markov**, and
+the **Mood** list follows whichever chain is up. **Mood** and **Start** are choices about the
+progression you are generating right now rather than session settings, so they are not saved -
+but they do survive closing and reopening the window.
 
 ### Keeping what you like
 
-**Lock** a chord you want to keep, from that pad's menu. **Regen** then gives every other
-pad a new chord and leaves the locked ones alone; **Fill** keeps them too.
+**Lock** a chord you want to keep, from that pad's right-click menu. A locked card shows a dot
+in its top-right corner. **Regen** then gives every other pad a new chord and leaves the locked
+ones alone; **Fill** keeps them too, and so does **Clear Page**.
 
 **Lock Influence** decides how much the locked chords steer the new ones. At a high setting,
 locking three 7th chords biases what you get toward 7ths: it copies the *character* of what

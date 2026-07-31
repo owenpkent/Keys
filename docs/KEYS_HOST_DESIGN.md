@@ -105,8 +105,11 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   section folds. It reports what the current folds add up to through
   `keysEditor.onIdealHeightChanged`, and the host follows it in both directions, resizing
   to `barHeight + wanted` (`KeysHostEditor.cpp:403-408`) inside
-  `setResizeLimits(1010, barHeight + absMinKeysHeight, 2600, 1700)`. It opens at
-  `1010 x (barHeight + minKeysHeight)`: a comfortable default, not a minimum. Detaching any
+  `setResizeLimits(keysEditor.minWidthForView(), barHeight + absMinKeysHeight, 2600, 1700)`,
+  and opens at that same width. **Ask, do not copy**: it was a literal 1010 until 2026-07-30,
+  when a Generator chip joined Fill and Regen on the Pads bar and moved the editor's own floor
+  to 1070 - a host window narrower than the editor it embeds carves controls off the
+  right-hand end of that bar with nothing on screen to say so. Detaching any
   section drops its height out of that number, since a detached section lives in its own
   window.
 - `InstrumentPicker` files instruments into one **collapsible folder per publisher**:
@@ -183,7 +186,9 @@ nothing in the kit assumes one plugin per repo.
   and the Transcribe section was removed the same day, which also took Keys off the static
   MSVC runtime that its ONNX Runtime forced on the whole binary. Every section detaches into
   a window of its own (titled `Keys Controls`, `Keys Arpeggiator`, `Keys Chord Pads`,
-  `Keys Keyboard`), and every fold changes the height Keys Host is asked for. Keys and Keys
+  `Keys Keyboard`), and every fold changes the height Keys Host is asked for. The chord
+  generator opens a window too (`Keys Chord Generator`), but it is not a section and never
+  docks, so it changes no height at all. Keys and Keys
   Host build the piano only; the Harmonic Table and Hex Host moved out to their own repo
   (`../Hex`). `surface`/`uiLayout`/`padChannel`/`xyCC*` stay registered for session
   compatibility but are no longer read by the UI.

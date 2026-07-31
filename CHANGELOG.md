@@ -5,6 +5,94 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the chord generator opens in a window of its own
+
+Owen: "I think the chord generator should just pop out a new window instead of being in the
+right click menu."
+
+A third 24 px chip, **Generator**, joins Fill and Regen at the right-hand end of the Pads bar
+and opens the generator as a window: **Key**, **Mode**, **Octave**, **Source**, note counts,
+inversions, **Scale Compliance**, **Lock Influence**, the five Markov controls, and **Fill
+Page** / **Regen Unlocked** / **Clear Page** as full-size buttons. Clicking the chip while the
+window is already up brings it to the front rather than opening a second one, and it closes
+from its own **Close** button or the X in its title bar - both run the same teardown. It
+remembers where it was left and whether it was open, in the session, exactly the way a
+detached section does.
+
+The panel itself is the one deleted earlier the same day, recovered from git and adapted: a
+layout Owen had used and liked, not a fresh guess at one. It reuses `DetachedWindow` rather
+than adding a second window class, and its minimum size is **derived** from the layout
+(`ChordGenPanel::contentSize()` adds up the same rows `resized()` places) rather than chosen.
+
+**The window is a view, and the generator does not live in it.** `ChordGenMenu`, the brain, is
+still a plain member of the editor with the editor's own lifetime, and the panel is built when
+the window opens and destroyed when it closes. That split is load-bearing: **New chord** and
+**Next: could follow** are items on a pad's card menu, and while the generator *was* a panel
+those items came and went with it. Nothing the window owns may be the only copy of anything -
+even the two transient picks, Markov **Mood** and **Start**, live on the brain, so closing the
+window does not quietly change what the next Fill will generate. Every other control reads and
+writes the same APVTS parameter as its twin on the Pads bar, so **the bar is the fast path and
+the window is the complete one**. Key and Mode hold the same set of values in both places.
+**Scale Compliance shows the nearest of the bar's five steps**: the parameter is a continuous
+0-100 and the window's slider steps by 1, so set 60 there and the bar reads "50 %". Picking a
+step from the bar always writes that step, including the one already showing.
+
+Nothing in the panel plays a note. The one path in the generator that calls `noteOn` with no
+pad behind it is the suggestion audition, released by an 800 ms timer, and it stays on the
+brain, whose destructor stops it - so no close of this window can strand a preview note.
+
+**The settings leave the pad right-click menu**, and so does **Clear page**, which is beside
+Fill and Regen in the window where the other page-wide actions are. That takes the card menu
+from 23 rows back to nine (below).
+
+The docked window is unchanged at **699 px**: everything added here rides a bar that already
+exists, or is in a separate window. The *width* floor moves from 1010 to 1070 to fit the new
+chip, and Keys Host now asks the editor for that number instead of carrying its own copy.
+
+### Fixed: the generator window painted both sets of settings at once
+
+Source = **Markov** replaces the algorithmic settings with the chain controls, in the same band
+of the window. Only the Markov half of that swap was ever wired: the algorithmic set was shown
+unconditionally and merely greyed, so both were painted into the same row. At the window's own
+minimum width the algorithmic set is 804 px against the Markov set's 742, which left 62 px of a
+dead **Lock Influence** slider and its percent box sticking out past **Length**, and a sliver of
+its label showing between **Temperature** and Length. One band is on screen now, whichever the
+source names, and the swap has one owner instead of two half-implementations of it.
+
+Opening the window with Source already on Markov showed the same overlap for a frame, because
+the enable-and-hide logic lived only in the 15 Hz timer. It runs once in the constructor now,
+before anything is painted.
+
+### Fixed: picking the step the Scale Compliance box was already showing did nothing
+
+`genCompliance` is a continuous 0-100 parameter. The generator window's slider steps by 1, so it
+can set 60; the box on the Pads bar has five steps and shows the nearest, so it read "50 %" at
+60. Picking that "50 %" was then **a dead click** - `juce::ComboBox` finishes a pick through
+`setSelectedId`, which returns early when the id has not moved, so the attachment never wrote
+and the value stayed at 60. The only route to 50 from the bar was to pick a different step and
+come back.
+
+The box is a `keys::StepComboBox` now: it overrides the virtual `showPopup()`, builds the same
+menu with the same tick, and reports **every** pick, including the one already showing. The
+parameter is read back onto it by a plain `juce::ParameterAttachment` and written by
+`setValueAsCompleteGesture`, one begin/set/end, so a move on the window's slider still shows on
+the bar and neither side can leave a host automation gesture open.
+
+Four places said the bar and the window could never disagree. They can, harmlessly and by
+design: the bar offers five steps, the window is continuous, the bar shows the nearest step.
+`src/PluginEditor.h`, `docs/ARCHITECTURE.md`, `docs/CONTROLS.md` and this file now say that.
+
+### Fixed: a locked chord card could be wiped by dragging it off the strip
+
+**Clear pad** has always greyed on a locked card. Dragging that same card off the strip cleared
+it anyway - a wider gesture quietly overriding the menu item beside it, and squarely against
+what Owen asked the lock to be. It does nothing now.
+
+The **drag itself is still allowed**: `moveChordPad` swaps two slots and destroys nothing, so a
+locked card stays arrangeable and only the wipe is refused. The ghost says which - it carries
+the same corner dot the card does, and fades once the pointer is over nothing, the spot where an
+unlocked card would be cleared.
+
 ### Fixed: Next voicing on a chord played with two hands
 
 Two hands on the keybed produce a doubled note - the root at the bottom and again an octave
@@ -61,14 +149,13 @@ scrolling popup cannot be used with a single mouse at all: hovering the arrow sc
 list, and moving to click scrolls the item you wanted away. That is the "isn't working, too
 overwhelming" report, and it was both things at once.
 
-It is **eleven rows and three rules, 429 px**, and it now fits above a pad at the bottom of
-the window on a 1080p screen with room to spare, in one column, with nothing to scroll:
+It is **nine rows and two rules, 340 px**, and it fits above a pad at the bottom of the window
+on a 1080p screen with room to spare, in one column, with nothing to scroll:
 
 ```
 Edit on keyboard / Clear pad / Lock
 Octave down / Octave up / Next voicing
 New chord / Next: could follow > / Send to arp slot >
-Clear page / Generator settings >
 ```
 
 Three things paid for it. The section headers went, because a rule says the same thing at
@@ -76,12 +163,9 @@ half the height - and a JUCE section header is not even a row, it is an item and
 (51 px), which is what the last of them, **This pad**, was costing to name the card you had
 just right-clicked. The four **Next** families went behind a single **Next: could follow** row,
 which is the one thing on the menu three levels deep and the right place to spend that: it is
-the exploratory path, not the one you take twenty times an hour. And **the settings went back
-behind their Generator settings wrapper**, undoing the flattening from earlier the same day.
-That flattening was aimed at saving a leg of hover, and it was aimed at a problem that had
-already been solved in the same session: **Key**, **Mode** and **Scale Compliance** are combo
-boxes on the Pads bar now, and those are the three anybody reaches for while auditioning a
-page. They are still inside the wrapper as well, so the menu stays the complete path.
+the exploratory path, not the one you take twenty times an hour. And **the settings left the
+menu altogether**, for a window of their own (below), taking **Clear page** with them. What is
+left is exactly the items that act on the card you right-clicked.
 
 ### Fixed: Fill no longer overwrites chords you already have
 
@@ -99,30 +183,27 @@ Each chip also **greys out when it would do nothing** - Fill with no blanks left
 Regen with nothing unlocked to reroll - so which of the two is which is readable from the bar
 without a tooltip. The tooltips say it too.
 
-### Added: the lock on a chord card is a click target, and looks like one
+### Changed: the lock comes off the card surface, and Lock is a right-click item only
 
-The card has painted a lock since the pad strip existed and has never been able to set it:
-the toggle lived on the chord generator's own copy of these same pads, so a state you could
-read from the keyboard needed another view to change, and after that view went away it needed
-a right-click. The **top-right corner of a filled card is a lock chip** now. One left click
-toggles it; it never fires the chord, never starts a drag and never hands the card to the
-arp, and it works in both the normal and the Big card arrangements.
+Owen: "I don't want the lock button to be visible. I only want it to be in right click."
 
-The chip is **24 px docked** and the full **34 px on a Big card**, sized to the card rather
-than fixed at the mouse-only floor. A flat 34 px square is 27% of a docked card at the
-default window width and 34% at the 820 px minimum, taking most of the height across the
-whole right-hand end - a third of the card that no longer plays the chord - and the only mark
-in it was a 5 px dot, so a click well below that dot silently toggled the lock. 24 px is the
-size of every control on a section bar, which is what an accelerator is allowed to be beside
-a full-size path, and the full-size path is **Lock** on the card menu.
+A clickable lock chip lived in the top-right corner of a filled card for part of the same day.
+It is gone: `lockBadgeBounds`, the chip painter and the `mouseDown` branch that tested it are
+all removed, and **the whole card surface plays, drags and feeds the arpeggiator again with no
+dead corner**. That corner was roughly a quarter of a docked card, and because the lock branch
+had to be tested ahead of every other one, a quarter of the card had stopped answering the
+three gestures a card exists for.
 
-It is painted at the size of the target, on every filled card and not only locked ones: an
-unlit chip with the shackle open while the chord is open to generation, lit with the shackle
-closed once it is protected. You cannot hit it without seeing what you hit. **Lock** on the
-card menu stays as the accelerator, and it is the way to reach the lock on a card that is
-currently linked to the keyboard for editing, where the tick that ends the edit owns that
-same corner and the chip is not drawn at all. Empty pads have nothing to lock and get no
-target.
+**A locked card still says so.** The small corner dot the strip painted before the chip
+existed is back, drawn only when the lock is set and never on an unlocked card - a lock you
+cannot see is worse than one you cannot click. It is a marking and not a target: nothing
+happens if you click it, and the click plays the chord like the rest of the card. The card
+being edited paints no dot, because the tick that ends the edit owns that same corner.
+
+**Lock / Unlock on a pad's right-click menu is now the only way to set it.** That makes it the
+second item in Keys with no left-click twin (after **Send to arp slot**), and the only one
+where a twin was built and then deliberately taken away. It is recorded as an owner-directed
+exception in `CLAUDE.md`, dated, so it does not get "fixed" back.
 
 ### Added: Octave down, Octave up and Next voicing on a pad's card menu
 
@@ -279,26 +360,20 @@ and it reaches the cards two ways, neither of which costs the window a pixel:
   and **Big** are laid out from the left and disappear with the fold, so anything placed after
   them would keep their hole. 24 px tall like the other bar controls that act rather than
   fold; they were 22.
-- **Everything else is on a pad's right-click card menu.** **New chord** and **Next: could
-  follow** are on every pad, on every page, always. They used to appear only while the Chords
-  view was open, because the panel *was* the generator and the menu asked whether it existed;
-  there is nothing left to be closed. **Lock** is there too: the strip has painted a lock dot
-  since the pads existed and never been able to set it, because the toggle lived on the
-  generator's copy of the card, so a state you could see while playing could only be changed
-  from another view. Every generator *setting* is on that menu too: Source, Key, Octave, Mode
-  (each one carrying the character it plays in), Notes, Inversions, Scale Compliance, Lock
-  Influence, and the Markov chain's Chain, Mood, Start, Temperature and Length. A menu cannot
-  hold a slider, so each is a submenu of the handful of values worth having, with the live one
-  ticked and repeated in the parent item: the menu reads as the display the panel used to be
-  without being opened. The pool's settings grey out while the Markov source is up, as they did
-  on the panel.
+- **The per-card actions are on a pad's right-click card menu.** **New chord** and **Next:
+  could follow** are on every pad, on every page, always. They used to appear only while the
+  Chords view was open, because the panel *was* the generator and the menu asked whether it
+  existed; there is nothing left to be closed. **Lock** is there too: the strip has painted a
+  lock dot since the pads existed and never been able to set it, because the toggle lived on
+  the generator's copy of the card, so a state you could see while playing could only be
+  changed from another view.
 
-**Clear page** is on that menu as well, at the foot of it, and deliberately not a third chip.
-It empties every unlocked pad on the page, Keys has no undo of any kind, and as a chip it sat
-4 px from **Regen** and a few more from the page buttons, the two things on that bar that get
-clicked constantly. A destructive bulk action is worth the extra click of a menu.
-`clearPage()` itself is unchanged, only what reaches it, and the item greys out when the page
-holds nothing to take.
+> **Superseded later the same day.** The *settings* were on that menu too for a few hours,
+> each a submenu of ticked discrete values, and so was **Clear page**. All of it is in the
+> generator's own window now - see "the chord generator opens in a window of its own" at the
+> top of this release. What survives from this entry is the part that mattered: the brain is a
+> plain member of the editor, the two per-card actions are always on the card menu, and Fill
+> and Regen are chips on the Pads bar.
 
 **Big**, on the Pads bar, is what the generator's grid used to be: four rows of four with the
 full chord card on each, the chord's notes with octave numbers and a mini keyboard of the
@@ -311,14 +386,11 @@ An answer to the complaint that reaching a generator setting cost too much point
 three you change while auditioning a page are one click to open and one to pick, with no menu
 in it at all.
 
-The other half of that answer, flattening the settings out of their **Generator settings**
-wrapper and onto the pad menu itself, was tried the same day and taken back out: it took the
-menu to 23 rows and roughly 820 px, which is more menu than fits above the pad it hangs off,
-and JUCE turns a menu that tall into a hover-scrolling one that a single mouse cannot work.
-See "the pad card menu fits on the screen again" at the top of this release. Each setting
-still keeps its ticked value and repeats the live one in its own parent item, so the menu
-reads as a state display either way, and **Markov chains** stays a group of its own, since
-Chain, Mood, Start, Temperature and Length do nothing at all until Source is Markov.
+The other half of that answer went through two more rounds the same day: flattening the
+settings onto the pad menu (taken back out, because it made a 23-row, 820 px menu that JUCE
+turns into a hover-scrolling one a single mouse cannot work), then off the menu entirely and
+into the generator's own window. That is where they are - see the top of this release. The
+three named above stay on the bar as well, which is what this entry is really about.
 
 **Key, Mode and Scale Compliance are combo boxes on the Pads bar**, beside Fill and Regen.
 Those are the three you change while auditioning a page, and on the bar each is one click to
@@ -331,14 +403,13 @@ continuous 0-100 parameter and the combo is five steps of it (0 / 25 / 50 / 75 /
 same ladder the menu offers. Mode drops the parenthetical alias to fit the bar, so "Natural
 Minor (Aeolian)" reads **Natural Minor** there and in full on the menu.
 
-**The docked window's minimum width is 1010, and there is only one floor again.** It had
-dropped to 960 when the generator's panel went, with 1010 kept for the arpeggiator alone. The
-Pads bar now spends 834 px of its content area: 548 from the right (Detach 104, 6, Regen 70,
-4, Fill 62, 10, Compliance 74, 6, Mode 148, 6, Key 58) and 286 from the left (four page
-buttons at 46 + 4, 10, Big 62, 14). At 960 that area is 832 px, two short, and the only way to
-buy those two was off the page buttons, which are the most-clicked targets in the section.
-1010 hands it 882 and leaves 48 px of caption zone. Nothing shrank. The knob bank still does
-not raise the floor: it wants 532 px and gets 990.
+**The docked window has one minimum width again, and the Pads bar is what sets it.** It had
+dropped to 960 when the generator's panel went, with 1010 kept for the arpeggiator alone;
+adding these three combo boxes brought the Pads bar up to the same 1010, so the two floors met
+and `minWidthForView()` is a single number. It moved once more the same day, to **1070**, when
+the **Generator** chip joined Fill and Regen - the arithmetic is in that entry at the top of
+this release. Nothing shrank either time. The knob bank still does not raise the floor: it
+wants 532 px and gets the window width less 20.
 
 ### Removed: Transcribe
 

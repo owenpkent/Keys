@@ -112,40 +112,43 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   its panel, Perform went with the Centre section itself, and there are no tabs left to switch.
   **There is exactly one set of chord cards**: the generator draws none of its own, because the
   grid it used to draw was the same sixteen pads of the same page as the strip below it. Its
-  `Big` arrangement became the Pads section's. **The generator has no surface at all**:
-  `ChordGenMenu` is a plain value member the editor holds for its whole life, reached from two
-  24 px chips at the right end of the Pads *bar* (Fill / Regen, the left-click path into
-  generation), from three 24 px combo boxes beside them (Key / Mode / Scale Compliance, APVTS
-  attachments so the bar and the menu are one state), and from a pad's card menu through
-  `addPadMenuItems` / `addPageMenuItems` / `handlePadMenuChoice` - New chord, Next, Clear page,
-  and every setting as a submenu of discrete ticked values behind one **Generator settings**
-  row, since a `PopupMenu` cannot hold a slider. **That menu has a budget and it is rows**: it
-  is anchored to a pad near the bottom of a 699 px window at a 34 px item height, so it grows
-  *upwards* off the screen, and JUCE answers a too-tall menu by splitting it into columns or
-  making it hover-scroll - and a scrolling popup cannot be worked with one mouse. It is **11
-  top-level rows, 429 px** (rows 34, separators 17, a section header 51 because JUCE adds half
-  an item to one), and any new item has to displace one. The settings were flattened
-  onto the top level for part of 2026-07-30 and put back the same day; that is what the budget
-  is for. **Nothing generation does overwrites a chord** (Owen, same day): `fillPage()` writes
+  `Big` arrangement became the Pads section's. **The generator is a brain plus three surfaces,
+  and it owns none of them**: `ChordGenMenu` is a plain value member the editor holds for its
+  whole life, and it is reached from (1) three 24 px chips at the right end of the Pads *bar* -
+  Fill, Regen and **Generator**, which opens the window - plus three 24 px combo boxes beside
+  them (Key / Mode / Scale Compliance, APVTS attachments so bar and window are one state);
+  (2) **its own window** (`ChordGenPanel`, 2026-07-30, Owen's call), which holds every setting,
+  the Markov chain controls, and Fill / Regen / **Clear page**; (3) two items on a pad's card
+  menu, New chord and Next, through `addPadMenuItems` / `handlePadMenuChoice`. **The window is a
+  view, never the owner** - it is built when it opens and destroyed when it closes, so the
+  per-card menu items cannot come and go with it, which is the exact bug that made
+  `ChordGenMenu` a plain member. It is not a `Section`: it never docks, so it has no bar, fold
+  or caption, but it reuses `DetachedWindow` and keeps its frame in `LayoutState`
+  (`chordGen` / `chordGenBounds`) like every detached section. Its minimum size is derived from
+  the layout (`ChordGenPanel::contentSize`), not chosen. **The card menu has a budget and it is
+  rows**: it is anchored to a pad near the bottom of a 699 px window at a 34 px item height, so
+  it grows *upwards* off the screen, and JUCE answers a too-tall menu by splitting it into
+  columns or making it hover-scroll - and a scrolling popup cannot be worked with one mouse. It
+  is **9 rows and 2 separators, 340 px** (rows 34, separators 17); the settings took it to 23
+  rows and about 820 px for part of 2026-07-30, which is what the window fixed.
+  **Nothing generation does overwrites a chord** (Owen, same day): `fillPage()` writes
   only empty pads, a picked suggestion goes to the first empty pad and the row greys when
-  there is none, `regeneratePage()` is the destructive one and skips locks, and each chip greys
-  when it would do nothing. "Empty" means empty, locked or not - one definition,
-  `emptyPadsOnPage()`. Clear page is a menu item and not a third chip because it empties every
-  unlocked pad on the page and there is no undo anywhere in Keys. The **lock chip on a card is
-  a target and is painted as one**: `ChordPads::lockBadgeBounds` scales it to the card
-  (24 px docked, 34 on a Big card) and `drawLockBadge` fills that whole rectangle, with the
-  menu item as its accelerator. Octave down/up and Next voicing are menu-only edits to one
+  there is none, `regeneratePage()` is the destructive one and skips locks, and each button
+  greys when it would do nothing. "Empty" means empty, locked or not - one definition,
+  `emptyPadsOnPage()`. Clear page is in the window and not a chip because it empties every
+  unlocked pad on the page and there is no undo anywhere in Keys. **A card is all playing
+  surface**: the lock is shown as a corner dot when set and is not a target anywhere on the
+  card (a clickable chip lived there for a few hours on 2026-07-30 and Owen had it removed).
+  Octave down/up and Next voicing are menu-only edits to one
   pad's stored chord that go through `rewritePadChord` so a ringing or arp-held card follows
   its notes (hold restored before press, and with Exclusive on only the hold, since both calls
   choke every source); they grey on the card being edited, which the keybed owns. A lock
-  protects a chord from *generation*, never from the user. Those items are unconditional
-  otherwise: the old "is there a panel?" test hid them whenever the Chords view was closed, and
-  there is no view left to close. Anything
+  protects a chord from *generation*, never from the user. Anything
   that wants to show a chord card should use the pads, not build a second grid. Controls that
   belong to a section but must cost no height ride its bar: it is 34 px that already exists.
-  Fill and Regen stay live with the Pads section folded, for the same reason arp On does - the
-  other route to the generator is a right-click on a card, and the cards fold away with the
-  strip. See `docs/ARP_DESIGN.md`.
+  Fill, Regen and Generator stay live with the Pads section folded, for the same reason arp On
+  does - the other route to the generator is a right-click on a card, and the cards fold away
+  with the strip. See `docs/ARP_DESIGN.md`.
 - **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
   table of four `Section`s (Controls, Arp, Pads, Keyboard); each owns a `Holder` its content
   is parented into, a Detach button, and the `DetachedWindow` it is
@@ -227,21 +230,24 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   **Owner-directed exceptions, and they are a closed list.** Each one is Owen's call on a
   stated date, not something that drifted in:
   1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30). Edit on
-     keyboard / Clear pad / Lock, **Send to arp slot** (since 2026-07-25: binding a chord to
-     one particular slot needs a target picker, and a left click on a card with the arp **On**
-     is the left-click way to get a chord into the arp), and the whole chord generator, which
-     restores Octavium's card menu.
-  2. *Most of the generator's settings are right-click only* (2026-07-30, Owen's call when the
-     generator gave up its panel). New chord, Next, Clear page and every setting live on the
-     card menu, each setting a submenu of ticked discrete values one level down. **Fill and
-     Regen survive as 24 px chips on the Pads bar and are the left-click path into
-     generation**, and **Key, Mode and Scale Compliance are 24 px combo boxes beside them**,
-     which is what keeps this an exception rather than a hole: the thing you do most and the
-     three settings you change while auditioning stay one click, the rest became a menu. Those
-     three are on the menu too - the bar is the fast path, the menu is the complete one, and
-     both are the same parameters. Clear page is in the menu on purpose, because it is
-     destructive and Keys has no undo.
-  3. *A right-click release of a pedal-held note has no left-click twin* (2026-07-30, Owen
+     keyboard / Clear pad / Lock, the two chord-shaping edits (Octave down/up, Next voicing),
+     **Send to arp slot**, and the generator's two per-card actions (New chord, Next). Most of
+     these are accelerators with a left-click twin elsewhere; the two below are not.
+  2. ***Send to arp slot* has no left-click twin** (2026-07-25). Binding a chord to one
+     particular slot needs a target picker. A left click on a card with the arp **On** is the
+     left-click way to get a chord *into* the arp, which is what keeps this to one item.
+  3. ***Lock / Unlock has no left-click twin*** (2026-07-30, Owen: "I don't want the lock
+     button to be visible. I only want it to be in right click"). This is the one path where a
+     left-click twin was **built and then deliberately taken away**: a lock chip sat in the
+     top-right corner of a filled card for a few hours the same day, and it cost the card
+     roughly a quarter of its surface - dead to playing, dragging and feeding the arp, which is
+     everything a card is for. A locked card still *shows* its state as a corner dot, so the
+     lock is readable without opening the menu; the dot is a mark and never a target. **Do not
+     "restore" a clickable lock.** The generator's settings were also right-click only for part
+     of that day and are not any more: they are in a window opened by the **Generator** chip on
+     the Pads bar, alongside Fill and Regen, with Key / Mode / Scale Compliance as combo boxes
+     there too.
+  4. *A right-click release of a pedal-held note has no left-click twin* (2026-07-30, Owen
      sanctioned the asymmetry). A right-click on a key **that surface holds** releases it out
      of `latched` or `sustained` and leaves Sustain mode on, so a pedalled chord comes apart a
      note at a time; on any other key it latches. The reason there is no twin is that the left
@@ -280,7 +286,8 @@ Four things will bite otherwise:
   (that GUI is a top-level window of the same process) and on an arbitrary section once any
   are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Arpeggiator` /
   `Keys Chord Pads` / `Keys Keyboard` for the four detached sections (the `wire(...)` calls in
-  `PluginEditor.cpp`). `Keys Centre` and `Keys Transcribe` no longer exist.
+  `PluginEditor.cpp`), plus `Keys Chord Generator`, which is a window but not a section
+  (`KeysEditor::setChordGenWindowOpen`). `Keys Centre` and `Keys Transcribe` no longer exist.
 - **The Detach buttons are named per section**, because four buttons reading "Detach" are
   four identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
   name flips with the button's state.

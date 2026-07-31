@@ -1479,11 +1479,13 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
     tree.setProperty("padsBig", layout.padsBig, nullptr);
+    tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
     tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
     tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
+    tree.setProperty("chordGenBounds", layout.chordGenBounds.toString(), nullptr);
     return tree;
 }
 
@@ -1505,6 +1507,9 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.controlsDetached = flag("controlsDetached", false);
     layout.padsDetached = flag("padsDetached", false);
     layout.padsBig = flag("padsBig", false); // absent before the pads could be tall
+    // Absent before the generator had a window of its own; shut is the right default either
+    // way, since it is a settings window rather than something you play from.
+    layout.chordGen = flag("chordGen", false);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.
@@ -1529,6 +1534,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     frame("arpDetachedBounds", layout.arpDetachedBounds);
     frame("controlsDetachedBounds", layout.controlsDetachedBounds);
     frame("padsDetachedBounds", layout.padsDetachedBounds);
+    frame("chordGenBounds", layout.chordGenBounds);
 }
 
 juce::ValueTree KeysProcessor::arpToTree() const

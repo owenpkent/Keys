@@ -31,10 +31,12 @@ namespace
         return out;
     }
 
-    // Scale Compliance is a continuous 0-100 parameter; on the bar it is these five steps, the
-    // same ladder the card menu offers and labelled the same way (ChordGenMenu::ladder writes
-    // "0 %" .. "100 %"). Five items over that range means a ComboBoxAttachment's i/(n-1)
-    // lands exactly on each of them.
+    // Scale Compliance is a continuous 0-100 parameter; on the bar it is these five steps. The
+    // card menu used to offer the same ladder, out of a ChordGenMenu::ladder helper; both went
+    // when the settings moved into the generator's own window on 2026-07-30, and the window has
+    // the whole range on a slider. So this is the only ladder left, and the bar shows the step
+    // nearest whatever the slider was last set to - see genComplianceBox for why that rounding
+    // costs the bar its ComboBoxAttachment.
     juce::StringArray complianceItems() { return { "0 %", "25 %", "50 %", "75 %", "100 %" }; }
 
     // Fixed heights of the editor's bands, shared by idealHeight() and resized() so the
@@ -446,10 +448,25 @@ KeysEditor::KeysEditor(KeysProcessor& p)
             "Replace the chords on this page with new ones, except on locked pads. This is the "
             "one that overwrites; lock a card to keep it.",
             [this] { chordGen.regeneratePage(); });
+    // The third chip is the door to everything else: Octave, Source, note counts, inversions,
+    // Lock Influence, the Markov chains and Clear page, in a window of their own. A second
+    // click while it is already up raises it rather than building another - there is exactly
+    // one of these, and a window you cannot find is worse than one that is shut.
+    genChip(chordGenButton, "Chord generator window",
+            "Open the chord generator: every setting it has, plus Fill, Regen and Clear page. "
+            "It is a window of its own, so it can sit beside the plugin while you audition.",
+            [this]
+            {
+                if (chordGenWindow != nullptr)
+                    chordGenWindow->toFront(true);
+                else
+                    setChordGenWindowOpen(true);
+            });
 
     // The three settings that get changed while you are auditioning a page, on the bar beside
-    // the two chips (see the member declarations for why these three and why attachments). The
-    // accessible names all say "Generator" or "Scale compliance": the Controls section already
+    // the two chips (see the member declarations for why these three, and why Compliance is the
+    // one that does not take a ComboBoxAttachment). The accessible names all say "Generator" or
+    // "Scale compliance": the Controls section already
     // has combos titled "Root" and "Scale", both alive at the same time as these, and UI
     // Automation takes the first match.
     const auto genCombo = [this](juce::ComboBox& box, const juce::String& name, const juce::String& tip,
@@ -470,10 +487,37 @@ KeysEditor::KeysEditor(KeysProcessor& p)
              "The mode the chord generator writes in, which decides the quality of every "
              "degree. Also on a pad's right-click menu, where each mode carries its character.",
              barModeNames(), "genMode", genModeAtt);
-    genCombo(genComplianceBox, "Scale compliance",
-             "How far outside the key the generator may wander: 100 % is diatonic only, and "
-             "each step down lets in borrowed chords, secondary dominants, then chromatic ones.",
-             complianceItems(), "genCompliance", genComplianceAtt);
+    // Compliance is the odd one out on this bar and takes no ComboBoxAttachment. Its parameter
+    // is a continuous 0-100 while this box is five steps of it, so the box shows the nearest
+    // step: at 60, set from the window's slider, it reads "50 %". An attachment then made
+    // picking "50 %" do nothing at all - juce::ComboBox swallows a pick of the item already
+    // showing, so the write never happened and 50 was unreachable from the bar (see
+    // StepComboBox.h). So the two directions are wired separately: a plain ParameterAttachment
+    // reads the parameter back onto the box, and onPick writes it. setValueAsCompleteGesture is
+    // one begin/set/end, so no pick can leave a host automation gesture open, and a move on the
+    // window's slider still lands here through the attachment.
+    genComplianceBox.addItemList(complianceItems(), 1);
+    genComplianceBox.setTitle("Scale compliance");
+    genComplianceBox.setTooltip("How far outside the key the generator may wander: 100 % is "
+                                "diatonic only, and each step down lets in borrowed chords, "
+                                "secondary dominants, then chromatic ones. Five steps of a "
+                                "continuous setting: the generator window has the fine control, "
+                                "and this shows the step nearest to it.");
+    addAndMakeVisible(genComplianceBox);
+    if (auto* complianceParam = processor.apvts.getParameter("genCompliance"))
+    {
+        const float steps = (float) (complianceItems().size() - 1);
+        genComplianceAtt = std::make_unique<juce::ParameterAttachment>(
+            *complianceParam,
+            [this, steps](float v)
+            {
+                const int i = juce::jlimit(0, (int) steps, juce::roundToInt(v / 100.0f * steps));
+                genComplianceBox.setSelectedItemIndex(i, juce::dontSendNotification);
+            });
+        genComplianceBox.onPick = [this, steps](int id)
+        { genComplianceAtt->setValueAsCompleteGesture(100.0f * (float) (id - 1) / steps); };
+        genComplianceAtt->sendInitialUpdate();
+    }
 
     // On rides on the Arp *bar*, not inside the section, so folding the editor away does not
     // take the arp's power switch with it. Same reasoning as Sustain and All Off living on
@@ -538,12 +582,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // latch change writes straight back to the pad, name re-detected live.
     chordPads.onEditToggle = [this](int slot) { toggleEditPad(slot); };
 
-    // The generator's half of a pad's card menu - New chord, what could follow it, and every
-    // setting it has. Unconditional: the generator is a member with no panel and no view to
-    // be closed, so these items are on every pad on every page. They used to be offered only
-    // while the Chords view was up, which is the test that had to go with it.
+    // The generator's half of a pad's card menu - New chord and what could follow it, the two
+    // things that are about one card. Unconditional, and it has to stay that way: `chordGen` is
+    // a member, so there is no window whose absence could take these items off the menu. They
+    // were offered only while the Chords view was up once, and that is the exact bug this
+    // arrangement exists to prevent. Everything about the page or the settings is in the
+    // generator's window instead (chordGenButton, above).
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
-    chordPads.onExtraPageItems = [this](juce::PopupMenu& m) { chordGen.addPageMenuItems(m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
@@ -590,6 +635,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     for (int i = 0; i < numSections; ++i)
         if (*sections[(size_t) i].detached)
             setSectionDetached((SectionId) i, true);
+    // And the generator's window, if the session was saved with it up. After the sections, so
+    // it opens in front of them.
+    if (lay.chordGen)
+        setChordGenWindowOpen(true);
 
     startTimerHz(30);
 }
@@ -608,6 +657,11 @@ KeysEditor::~KeysEditor()
             s.window.reset();
         }
     }
+    // Same rule for the generator's window, and the same order: the window holds the panel as
+    // non-owned content, so it has to unwind first.
+    rememberChordGenBounds();
+    chordGenWindow.reset();
+    chordGenPanel.reset();
     if (styledWindow != nullptr)
         styledWindow->setLookAndFeel(nullptr);
     modWheel.setLookAndFeel(nullptr);
@@ -786,6 +840,8 @@ void KeysEditor::applyAccent(int index)
     for (auto& s : sections)
         if (s.window != nullptr)
             s.window->sendLookAndFeelChange();
+    if (chordGenWindow != nullptr)
+        chordGenWindow->sendLookAndFeelChange(); // its own tree too, sharing the same lnf
 
     syncSectionControls();
     repaint();
@@ -848,15 +904,17 @@ void KeysEditor::syncSectionControls()
         b.setVisible(lay.pads); // pointless without pads
     padsBigButton.setVisible(lay.pads);
     padsBigButton.setToggleState(lay.padsBig, juce::dontSendNotification);
-    // Fill, Regen and the three generator combos beside them are deliberately *not* in the
-    // list above, and are never hidden: they are the arp On of this bar. Fill and Regen used
-    // to hide with the strip, on the reasoning that generating into cards you cannot see is
-    // not a thing anyone means to do - but the only other way into the generator is a
+    // Fill, Regen, the Generator button and the three combos beside them are deliberately
+    // *not* in the list above, and are never hidden: they are the arp On of this bar. Fill and
+    // Regen used to hide with the strip, on the reasoning that generating into cards you cannot
+    // see is not a thing anyone means to do - but the other way into the generator was a
     // right-click on a pad card, which is gone with the same fold, so folding Pads away made
-    // the whole generator unreachable. Before the panel went it lived in the centre section
-    // and survived this. Generating into a folded strip is a fine thing to mean: you unfold
-    // and the page is written. Losing the feature is not. Key, Mode and Compliance inherit
-    // exactly that: they are the only settings on screen once the cards are folded away.
+    // the whole generator unreachable. Generating into a folded strip is a fine thing to mean:
+    // you unfold and the page is written. Losing the feature is not. The Generator button
+    // inherits exactly that and needs it most: it is the only door to the settings.
+    //
+    // It carries a lit state rather than a fold, and nothing here owns that - setChordGenWindowOpen
+    // does, because the window can also be closed from its own title bar.
 
     wheelsButton.setVisible(lay.keyboard);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
@@ -920,19 +978,23 @@ int KeysEditor::minWidthForView() const
     //
     // The arithmetic, at the bar's own contentArea() (the window less 20 of margin, less the
     // 92 px fold zone and the 8 px each side of it):
-    //     right   Detach 104, 6, Regen 70, 4, Fill 62, 10, Compliance 74, 6,
-    //             Mode 148, 6, Key 58                                          = 548
+    //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 10,
+    //             Compliance 74, 6, Mode 148, 6, Key 58                        = 644
     //     left    four pages at 46 + 4, 10, Big 62, 14                         = 286
-    //                                                                    total = 834
-    // 960 hands it 832, which is two pixels short, so nothing on that bar could be made to fit
-    // without taking width off the page buttons - the most-clicked targets in the section.
-    // 1010 hands it 882 and leaves 48 px of caption zone, which is what paint() writes "IN ITS
-    // OWN WINDOW" into (it needs 90, and gets Detach's 104 back the moment the section is out).
+    //                                                                    total = 930
+    // 1070 hands it 942, so the bar fits with 12 px of caption zone left over when the section
+    // is docked. Nothing is drawn in that zone while it is: paint() only writes "IN ITS OWN
+    // WINDOW" there, needs 90 px for it, and gets Detach's 104 back the moment the section
+    // leaves - which is 116 and fits.
+    //
+    // It was 1010 until 2026-07-30, and moved when the Generator button joined Fill and Regen
+    // on this bar. The floor is worth spending on that: everything on this end of the bar
+    // survives folding the pads away, so it is the whole generator's reach.
     //
     // The knob bank does not raise it. It wants 532 px (eight columns of 64, so each knob
     // clears the kit's 48 px rotary floor after the column's own 16 px of inset), and the
-    // Controls holder is the full window width less 20, so this hands it 990.
-    return 1010;
+    // Controls holder is the full window width less 20, so this hands it 1050.
+    return 1070;
 }
 
 void KeysEditor::applyLayout()
@@ -1046,6 +1108,67 @@ void KeysEditor::rememberSectionBounds(SectionId id)
     auto& s = section(id);
     if (s.window != nullptr)
         *s.bounds = s.window->getBounds();
+}
+
+void KeysEditor::rememberChordGenBounds()
+{
+    if (chordGenWindow != nullptr)
+        processor.layout.chordGenBounds = chordGenWindow->getBounds();
+}
+
+// The chord generator's window. It reuses DetachedWindow rather than adding a second window
+// class: everything that window does is wanted here too - the skinned 38 px title bar with
+// mouse-only-sized buttons, resize limits, remembering its frame as it is dragged, and the
+// off-screen clamp that stops a session saved on another display coming back somewhere Owen
+// can never reach with a mouse.
+//
+// It is not a section, and deliberately not in `sections`: it never docks, so it has no bar,
+// no fold, no caption and no Detach button, and every one of those is something the table
+// walks. What it shares with the sections is the contract, not the plumbing.
+//
+// The panel is built here and destroyed here, which is the whole lifetime. It holds a 15 Hz
+// timer for its own display and nothing else - no note, no preview, no audio device - so the
+// only thing a close has to unwind is the timer, and ~ChordGenPanel does that. The suggestion
+// audition, which is the one path in the generator that calls noteOn with no pad behind it,
+// belongs to `chordGen` and is stopped by its 800 ms timer or its destructor; `chordGen`
+// outlives every window, so no close can strand a preview note.
+void KeysEditor::setChordGenWindowOpen(bool open)
+{
+    processor.layout.chordGen = open;
+    if (open == (chordGenWindow != nullptr))
+        return; // already in the asked-for state
+
+    if (open)
+    {
+        chordGenPanel = std::make_unique<ChordGenPanel>(processor, chordGen);
+        // Both ways out run this same call: the panel's Close button and the title bar's X.
+        // Deferred a message-loop turn because both of them are *inside* what it destroys -
+        // a Button's click callback returns to the button, and the window's own
+        // closeButtonPressed returns to the window.
+        juce::Component::SafePointer<KeysEditor> safe(this);
+        const auto close = [safe]
+        {
+            juce::MessageManager::callAsync([safe]
+            {
+                if (auto* e = safe.getComponent())
+                    e->setChordGenWindowOpen(false);
+            });
+        };
+        chordGenPanel->onClose = close;
+        chordGenWindow = std::make_unique<DetachedWindow>(
+            "Keys Chord Generator", lnf, *chordGenPanel, processor.layout.chordGenBounds,
+            ChordGenPanel::minWindowSize(), ChordGenPanel::defaultWindowSize(),
+            close, [this] { rememberChordGenBounds(); });
+        chordGenPanel->sendLookAndFeelChange(); // built before it was ever parented
+    }
+    else
+    {
+        rememberChordGenBounds();
+        chordGenWindow.reset(); // clears its content first, so the panel is unparented
+        chordGenPanel.reset();
+    }
+
+    chordGenButton.setToggleState(open, juce::dontSendNotification);
 }
 
 juce::Rectangle<int> KeysEditor::layoutDetachRow(SectionId id, juce::Rectangle<int> row, bool onBar)
@@ -1499,24 +1622,32 @@ void KeysEditor::resized()
     padsBar.setBounds(area.removeFromTop(SectionBar::height));
     {
         auto bar = layoutDetachRow(secPads, padsBar.contentArea(), true);
-        // The generator - two chips, three combos and a card menu (2026-07-30) - comes off the
-        // *right*, which is where every control that outlives its section's fold sits: On and
-        // Hold off on the arp bar, the theme swatch on the Controls bar. It has to be that
-        // end. The pages and Big are laid out from the left and hide when the strip folds, so
-        // anything placed after them would keep a couple of hundred px of hole where they
-        // were. 24 px like the other bar controls that act rather than fold; these two were 22.
+        // The generator - three chips, three combos and two items on a card menu (2026-07-30)
+        // - comes off the *right*, which is where every control that outlives its section's
+        // fold sits: On and Hold off on the arp bar, the theme swatch on the Controls bar. It
+        // has to be that end. The pages and Big are laid out from the left and hide when the
+        // strip folds, so anything placed after them would keep a couple of hundred px of hole
+        // where they were. 24 px like the other bar controls that act rather than fold.
         bar.removeFromRight(6);
         regenButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
         bar.removeFromRight(4);
         fillButton.setBounds(bar.removeFromRight(62).withSizeKeepingCentre(60, 24));
-        // Key, Mode and Compliance, left of the two chips and reading in that order, which is
+        // The generator's window, left of the two actions that do not need it. Same end of the
+        // bar, same 24 px, same unconditional placement: it never hides either, and for the
+        // sharper version of the same reason - with the pads folded and this gone, the only
+        // things left that could reach the generator would be Fill and Regen, and every setting
+        // behind them would be off the screen.
+        bar.removeFromRight(6);
+        chordGenButton.setBounds(bar.removeFromRight(90).withSizeKeepingCentre(88, 24));
+        // Key, Mode and Compliance, left of the three chips and reading in that order, which is
         // the order the card menu lists them in. Same end of the bar and the same
         // unconditional placement as Fill and Regen, for the same two reasons: they outlive
         // the fold, and the left end is where the hole appears when the pages and Big go.
         //
         // 24 px like everything on a bar that acts rather than folds, so the whole group is
         // one height. What the bar spends, at its floor and above, is worked out in
-        // minWidthForView() - these three are why that floor moved to 1010.
+        // minWidthForView() - these three, and the Generator chip above them, are why that
+        // floor moved from 1010 to 1070.
         bar.removeFromRight(10);
         genComplianceBox.setBounds(bar.removeFromRight(74).withSizeKeepingCentre(72, 24));
         bar.removeFromRight(6);
