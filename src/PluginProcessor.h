@@ -64,8 +64,15 @@ public:
     // scheduleNoteOn here, and src/mcp/KeysMcp.cpp).
     // channelOverride 1..16 sends on that channel instead of the global param (0 = global);
     // the Pad Grid surface uses it so drums land on their own channel.
-    void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0);
-    void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0);
+    //
+    // `dest` says which stream the note is queued into: 0 is the track output, 1..numArpLines
+    // is that arp line's own input, which only its engine ever sees. Routing has to be decided
+    // here, at the source, because the audio thread cannot recover who asked for a note from
+    // the MidiMessage that arrives - see the note beside `lines` for why the obvious
+    // alternative (a per-pitch ownership mask read on the audio thread) races and strands notes.
+    void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0,
+                int dest = 0);
+    void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0, int dest = 0);
     void allNotesOff();
 
     // What is sounding, for display only. Every note this processor emits is counted
@@ -149,38 +156,73 @@ public:
     // globals live in the APVTS ("arpOn", "arpRate", "arpDot", "arpTrip",
     // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
     // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
-    ArpEngine arp;
+    //
+    // Three of them since 2026-08-01, so Keys can hold a polyrhythm: three independent
+    // arpeggiators at three rates, each with its own twelve slots, its own chord and its own
+    // chain. Line 0 is the arpeggiator that has always been here, down to its parameter IDs,
+    // and with lines 1 and 2 off nothing about it is different.
+    static constexpr int numArpLines = 3;
+    ArpEngine& arpLine(int line);
+    const ArpEngine& arpLine(int line) const;
+
+    // A line's parameter IDs. Line 0 keeps the bare names every saved session already carries
+    // ("arpRate"); lines 1 and 2 are "arp2Rate" / "arp3Rate". That is the whole
+    // session-compatibility story, so nothing may renumber it - and as ever with the choice
+    // parameters behind these names (arpRate, arpDirection), append, never insert.
+    static juce::String arpParamId(int line, juce::StringRef suffix);
+    // Shorthand for the commonest read of all: is this line switched on.
+    bool arpLineOn(int line) const;
+
+    // Every per-line parameter, in one list. It exists so the audio thread never has to build
+    // an id: a juce::String per parameter per line per block would be twenty-odd allocations
+    // a block, on the one thread that may not allocate at all. Each line caches the raw
+    // pointers once (see ArpLine::param) and reads through them.
+    //
+    // The UI uses it too, to name the parameter an attachment binds to when the current line
+    // changes. Order here is free - it is an array index, never serialized - but the *suffix*
+    // strings are the ids and must not change.
+    enum ArpParam { apOn = 0, apRate, apRateFree, apRateHz, apDot, apTrip, apAnchor,
+                    apDirection, apPattern, apLinkLanes, apOctaves, apSwing, apLatch,
+                    apRetrigger, apGate, apChance, apDistance, apOffset, apRetrigBars,
+                    apVelRamp, apRampBeats, apHumanize, apKeys, apChannel, numArpParams };
+    static const char* arpParamSuffix(int which);
+    // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
+    static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
+    float arpParam(int line, ArpParam which) const;
+
     // Twelve, not the original eight: the slots stopped being lettered pattern memories and
     // became launchable cards carrying a chord as well as a pattern, and twelve of them fit
     // a bar of the strip. Slots 9-12 come up empty in a session saved with eight.
+    // Twelve *per line* since the lines arrived: a slot card is one line's launchable card,
+    // which is what lets the one row on screen read as whichever line the tabs have selected.
     static constexpr int numArpPatterns = 12;
-    int arpActivePattern() const { return activeArpPattern; }
-    void storeActiveArpPattern();          // lanes -> snapshot slot (call before switching)
-    void recallArpPattern(int index);      // snapshot slot -> lanes, becomes active
-    void copyArpPattern(int from, int to); // whole-pattern copy (the no-modifier answer)
-    void randomizeActiveArpPattern();
+    int arpActivePattern(int line = 0) const;
+    void storeActiveArpPattern(int line = 0);          // lanes -> snapshot slot (call before switching)
+    void recallArpPattern(int index, int line = 0);    // snapshot slot -> lanes, becomes active
+    void copyArpPattern(int from, int to, int line = 0); // whole-pattern copy (the no-modifier answer)
+    void randomizeActiveArpPattern(int line = 0);
 
     // Launch a slot: recall its pattern, apply the shape and rate it remembers, and hold
     // its chord into the arp. That is the whole "pass a card into the arpeggiator" gesture
     // in one click. A slot with no chord launches the pattern alone and arpeggiates
     // whatever is already sounding.
-    void launchArpSlot(int index);
-    void stopArpSlot();                  // release the launched chord; the pattern stays
-    int arpLaunchedSlot() const { return launchedSlot; }
-    void setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name);
-    void clearArpSlotChord(int index);
+    void launchArpSlot(int index, int line = 0);
+    void stopArpSlot(int line = 0);      // release the launched chord; the pattern stays
+    int arpLaunchedSlot(int line = 0) const;
+    void setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name, int line = 0);
+    void clearArpSlotChord(int index, int line = 0);
 
     // Progression mode: walk the slots that hold a chord, giving each one its own number of
     // bars, and launch each in turn. One click plays a twelve-chord song, which is what the
     // slot row has looked like it should do since it stopped being eight lettered buttons.
     // Bars are counted on the audio thread (the only place with a tempo) and the launch is
     // done on the message thread, because launching moves host parameters and fires notes.
-    void startChain();
-    void stopChain();
-    bool chainRunning() const { return chainOn; }
-    int chainSlot() const { return chainOn ? chainIndex : -1; }
-    void setArpSlotBars(int index, int bars);
-    int arpSlotBars(int index) const;
+    void startChain(int line = 0);
+    void stopChain(int line = 0);
+    bool chainRunning(int line = 0) const;
+    int chainSlot(int line = 0) const;
+    void setArpSlotBars(int index, int bars, int line = 0);
+    int arpSlotBars(int index, int line = 0) const;
 
     // Hold a chord into the arp without going through a slot: a click on a chord card with
     // the arp On sends it here. Held means exactly that - the note-ons are emitted and no
@@ -188,8 +230,8 @@ public:
     // its own Latch is on. With the arp bypassed the chord simply sustains, which is honest.
     // Clicking the same card again retriggers the hold rather than ending it, so the way out
     // is releaseArpHold: the Hold off chip on the arp bar, or the panel's Stop button.
-    void holdArpChord(const std::vector<int>& notes, const juce::String& name);
-    void releaseArpChord();
+    void holdArpChord(const std::vector<int>& notes, const juce::String& name, int line = 0);
+    void releaseArpChord(int line = 0);
 
     // What "let go of the held chord" means to a *user*, and the only thing the UI should
     // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
@@ -201,12 +243,19 @@ public:
 
     // Empty when nothing is held. Hold off reads this - together with chainRunning(), since a
     // chain about to fire the next chord is something to let go of too - to grey itself out.
-    const std::vector<int>& arpHeldNotes() const { return arpChordOn; }
+    const std::vector<int>& arpHeldNotes(int line = 0) const;
+    const juce::String& arpHeldName(int line = 0) const;
+    // Is *any* line holding something, or chaining? Hold off is one button for all three, so
+    // it asks one question. Same reason allNotesOff has to forget all three.
+    bool anyArpHold() const;
 
     // Hold a chord pad's chord into the arp, remembering which pad it came from so the
     // strip can light it. Same one-at-a-time rule as a slot: a second call swaps.
-    void holdArpChordFromPad(int padSlot);
-    int arpHeldPad() const { return arpPadSlot; }
+    void holdArpChordFromPad(int padSlot, int line = 0);
+    int arpHeldPad(int line = 0) const;
+    // Which line is holding this pad, or -1. The strip paints a held card in its line's
+    // colour, so it asks by pad rather than by line.
+    int arpLineHoldingPad(int padSlot) const;
 
     // True when a left-click on a chord card should hand that chord to the arpeggiator and
     // leave it there, rather than play it beat-pad style for as long as the button is down.
@@ -215,7 +264,18 @@ public:
     // doing nothing whenever the arp happened to be off. Every surface that shows a chord
     // card asks here rather than caching a mode of its own, which is what keeps the answer
     // the same wherever a card is drawn.
-    bool cardsFeedArp() const { return apvts.getRawParameterValue("arpOn")->load() > 0.5f; }
+    // With three lines the question is "is any line on", and the answer to "which one gets
+    // the chord" is the current line (below) rather than a second mode.
+    bool cardsFeedArp() const;
+
+    // The current line: which one the arp panel edits, and which one a click on a chord card
+    // hands its chord to. One piece of state behind three surfaces - the A/B/C tabs on the
+    // slot row, the letter chip on the Pads bar, and the corner mark a card wears once it has
+    // been sent somewhere. It lives with the layout because it is the same kind of thing: not
+    // a parameter (it changes no note by itself), message thread only, and Owen should get it
+    // back where he left it.
+    int arpCurrentLine() const;
+    void setArpCurrentLine(int line);
 
     // A stored pattern slot (A-H), independent of whichever pattern is currently
     // active/live. Public so the MCP bridge can read or write an arbitrary slot
@@ -261,8 +321,8 @@ public:
         float rateHz = 8.0f;
         int bars = 1;    // how long the chain holds this slot before moving on
     };
-    const ArpPattern& arpPatternSlot(int index) const;
-    void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
+    const ArpPattern& arpPatternSlot(int index, int line = 0) const;
+    void setArpPatternSlot(int index, const ArpPattern& pattern, int line = 0); // refreshes live lanes too if index == active
 
     // How the editor is folded up. Deliberately not parameters: none of it changes a
     // note, and exposing five booleans to host automation would only add ways to break
@@ -294,6 +354,9 @@ public:
         // and was it open - and the answer has to survive the editor closing.
         bool chordGen = false;
 
+        // Which arp line the panel is editing and a chord card feeds. See arpCurrentLine().
+        int  arpLine = 0;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.
@@ -320,6 +383,11 @@ protected:
 
     juce::ValueTree arpToTree() const;              // all patterns + the live lanes
     void arpFromTree(const juce::ValueTree& root);
+    // One line's twelve slots and which of them is live, under whichever node it lives in.
+    // Line 0's sit directly on the "arp" node, exactly where they always have; B and C get a
+    // "line" child each. See arpToTree for why that shape.
+    void arpLineToTree(juce::ValueTree& dest, int line) const;
+    void arpLineFromTree(const juce::ValueTree& src, int line, int savedShapeBase);
     // Chord-pad state as a "chordPads" ValueTree, shared with subclasses (Keys Host
     // nests it next to its own hosted-instrument tree under the same "KEYS" root, so
     // sessions stay interchangeable between Keys and Keys Host).
@@ -328,23 +396,25 @@ protected:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+    // One arp line's parameters, called once per line by createLayout. See its definition.
+    static void addArpLineParams(juce::AudioProcessorValueTreeState::ParameterLayout&, int line);
 
     void stopChordPad(int i);
 
     // Shared by the pads and the live card: cap, order, strum-schedule a chord. Returns
     // the notes actually fired (post polyphony cap), for the caller to remember.
-    std::vector<int> fireChord(const std::vector<int>& notes, int tag);
+    std::vector<int> fireChord(const std::vector<int>& notes, int tag, int dest = 0);
     // Scheduling tags. Pads use their own slot (>= 0); everything else is negative, and
     // cancelScheduledNotes must compare against the exact tag, never `< 0` - see the comment
     // there for the stuck-note this caused.
     static constexpr int panicTag = -1;     // cancelScheduledNotes only: cancel *everything*
     static constexpr int liveChordTag = -2; // the live "current chord" card
-    static constexpr int arpChordTag = -3;  // the chord held into the arp
+    // One tag per arp line: -3, -4, -5. Separate tags rather than one, because each line's
+    // hold is released independently and cancelScheduledNotes matches the exact tag - sharing
+    // one would have letting go of line B drop line A's un-fired strum notes.
+    static constexpr int arpChordTag = -3;
+    static constexpr int arpChordTagFor(int line) { return arpChordTag - line; }
     std::vector<int> liveChordOn;
-    std::vector<int> arpChordOn;   // notes currently held into the arp (empty = none)
-    juce::String arpChordName;
-    int launchedSlot = -1;         // arp slot whose chord is held, or -1
-    int arpPadSlot = -1;           // chord pad whose chord is held, or -1
 
     // Hold a note-on and emit it `delayMs` from now, on the message thread.
     //
@@ -356,14 +426,14 @@ private:
     //
     // Message thread only, same approach as the MCP bridge's deferred notes. The timer
     // runs only while something is pending, so an idle plugin costs nothing.
-    void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot);
+    void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot, int dest = 0);
     // Drops this tag's un-fired notes (panicTag drops everything) and returns the pitches it
     // dropped, so a caller releasing the chord can tell which of its notes never sounded.
     std::vector<int> cancelScheduledNotes(int padSlot);
     // Cancel `tag`'s queued note-ons, release the notes that did sound, and empty `sounding`.
     // Every chord source releases through here; see the definition for why the two halves
     // cannot be done independently.
-    void releaseNotes(std::vector<int>& sounding, int tag);
+    void releaseNotes(std::vector<int>& sounding, int tag, int dest = 0);
     void timerCallback() override;
 
     struct DeferredNote
@@ -373,16 +443,29 @@ private:
         int channel;
         double atMs;
         int padSlot; // so stopping one pad drops only its own un-fired notes
+        int dest;    // which stream it fires into; see noteOn
     };
     std::vector<DeferredNote> deferred; // sorted by atMs; message thread only
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread
 
-    // Display-only refcount of what is sounding, per MIDI note (see isNoteSounding).
+    // Where a queued message goes: `collector` for the track output, or the line's own
+    // collector for an arp line. One place, so noteOn/noteOff/allNotesOff cannot disagree.
+    juce::MidiMessageCollector& collectorFor(int dest);
+
+    // Refcount of what is sounding, per destination stream and per MIDI note.
     // Atomic because the emitting side is the message thread while readers are paint
     // and timer callbacks; nothing here reaches the audio thread.
-    std::array<std::atomic<int>, 128> noteRefs {};
+    //
+    // Per *destination*, which is the one thing the arp lines changed about the old rule.
+    // "One note-on per sounding pitch" is a statement about a stream: the reason it exists is
+    // that downstream, one note-off ends a pitch for everybody. An arp line's input is a
+    // different stream with a different consumer (its engine, which counts owners itself in
+    // ArpEngine::Held::ons), so a pitch held into line B must not suppress the same pitch
+    // being played on the keybed - with one shared counter it did, and the note vanished from
+    // the output while the key lit up.
+    std::array<std::array<std::atomic<int>, 128>, 1 + numArpLines> noteRefs {};
     std::atomic<juce::uint32> soundingGen { 0 };
 
     // Notes seen arriving on the MIDI input (see inputNotes). Written on the audio thread,
@@ -391,12 +474,55 @@ private:
     void watchInputNotes(const juce::MidiBuffer&); // audio thread, before anything consumes it
     void clearInputNotes();
 
-    std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
-    // The slot chords, mirrored into atomics for the Chord lane to read on the audio thread.
-    // Rebuilt whole by syncArpChordTable() from every message-thread path that can change a
-    // slot's chord - there is no single choke point, so the call sites are the contract.
-    ArpEngine::ChordTable arpChordTable;
-    void syncArpChordTable();
+    // Everything one arpeggiator line owns. Three of these; every arp entry point above takes
+    // the index that picks one, and line 0 is the arpeggiator Keys has always had.
+    //
+    // The collector is what makes routing work. A chord handed to line B is fired through the
+    // ordinary note path - so it lights the keybed, honours Exclusive and the Voices cap, and
+    // sustains honestly when the line is off - but queued *here* rather than into the track
+    // output, and only this line's engine ever drains it. The alternative was a per-pitch
+    // ownership mask the audio thread consults to decide who a note in the merged stream
+    // belongs to, and it races: the message thread can clear a pitch's owner before the
+    // matching note-off has been drained, which leaves that note in an engine's held set with
+    // nothing left that can release it.
+    struct ArpLine
+    {
+        ArpEngine engine;
+        juce::MidiMessageCollector collector; // this line's input queue (message -> audio)
+        juce::MidiBuffer in, out;             // audio thread; sized in prepareToPlay
+        // This line's parameters, resolved once in the constructor. See ArpParam.
+        std::array<std::atomic<float>*, numArpParams> param {};
+
+        std::array<ArpPattern, numArpPatterns> patterns; // message thread only
+        int activePattern = 0;                           // message thread only
+        // The slot chords, mirrored into atomics for the Chord lane to read on the audio
+        // thread. Rebuilt whole by syncArpChordTable() from every message-thread path that
+        // can change a slot's chord - there is no single choke point, so the call sites are
+        // the contract.
+        ArpEngine::ChordTable chordTable;
+
+        std::vector<int> chordOn;   // notes currently held into this line (empty = none)
+        juce::String chordName;
+        int launchedSlot = -1;      // arp slot whose chord is held, or -1
+        int padSlot = -1;           // chord pad whose chord is held, or -1
+
+        bool chainOn = false;       // message thread
+        int chainIndex = -1;        // message thread: the slot currently playing
+        bool lastOnHeartbeat = false;
+        std::atomic<bool> chainActive { false };   // message -> audio: count bars at all
+        std::atomic<bool> chainAdvance { false };  // audio -> message: this slot's bars are up
+        std::atomic<int> chainEpoch { 0 };         // message -> audio: restart the count
+        std::atomic<double> chainTargetBeats { 4.0 };
+        double chainBeatsPlayed = 0.0; // audio thread only
+        int chainSeenEpoch = 0;        // audio thread only
+        bool lastOn = false;           // audio thread; to flush cleanly on bypass
+        // The channel override this line ran under last block. A change is a change of where
+        // the notes are going, so what is still ringing has to be closed on the old channel
+        // first - the same guard ArpEngine::process keeps for the rate mode.
+        int lastChannel = 0;           // audio thread; 0 = the global channel
+    };
+    std::array<ArpLine, numArpLines> lines;
+    void syncArpChordTable(int line);
 
     // --- Progression mode ---------------------------------------------------------------
     // The heartbeat is a second timer, separate from the strum scheduler above (which stops
@@ -413,20 +539,15 @@ private:
     Heartbeat heartbeat;
     void heartbeatTick();
 
-    bool chainOn = false;       // message thread
-    int chainIndex = -1;        // message thread: the slot currently playing
-    bool lastArpOnHeartbeat = false;
-    std::atomic<bool> chainActive { false };   // message -> audio: count bars at all
-    std::atomic<bool> chainAdvance { false };  // audio -> message: this slot's bars are up
-    std::atomic<int> chainEpoch { 0 };         // message -> audio: restart the count
-    std::atomic<double> chainTargetBeats { 4.0 };
-    double chainBeatsPlayed = 0.0; // audio thread only
-    int chainSeenEpoch = 0;        // audio thread only
+    // The whole arp stage: split the merged stream, run the three lines, merge them back.
+    // Audio thread; see the definition for the routing rules.
+    void runArpLines(juce::MidiBuffer& midi, int numSamples);
     void advanceChainClock(int numSamples); // audio thread; raises chainAdvance, never launches
-    int nextChainSlot(int from) const; // the next slot holding a chord, wrapping; -1 if none
-    int activeArpPattern = 0;                            // message thread only
-    juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
-    bool lastArpOn = false;        // audio thread; to flush cleanly on bypass
+    int nextChainSlot(int from, int line) const; // the next slot holding a chord, wrapping; -1 if none
+    // The keybed's notes, lifted out of the merged stream so every listening line can have a
+    // copy, and what was left behind when they were. Audio thread; sized in prepareToPlay
+    // with the rest. juce::MidiBuffer cannot erase, so a split is two buffers and a swap.
+    juce::MidiBuffer keyNotes, streamRest;
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

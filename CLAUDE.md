@@ -102,6 +102,31 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   sessions saved before this still open on the right brain: APVTS stores a choice parameter's
   plain index, not a normalised fraction. Reordering would silently move every saved session's
   source, and there is no migration hook for it the way `migrateRateMode` covers the arp's clock.
+- **Three arpeggiator lines, A B C** (2026-08-01, Owen: "three arpeggiators so we can get
+  polyrhythms and keep keeping what we currently have ... and then being able to feed cards into
+  different lines"). Three `ArpEngine`s, each with its own rate, shape, step lanes, twelve slots,
+  chord and chain. **`ArpEngine.h` did not change**: it never knew how many of it there were, so
+  three of them cost a routing layer and no engine work. **Line 0 keeps every parameter id it has
+  ever had** (`arpRate`, `arpSwing`, ...); B and C are `arp2*` / `arp3*`, appended, defaulting to
+  off, so a session saved before this opens sounding identical. Two ids do appear on line A,
+  `arpKeys` and `arpChannel`, both defaulting to the old behaviour.
+  **Routing is a queue per line, never a pitch mask.** Each line has its own
+  `MidiMessageCollector`; a chord handed to it is fired through the ordinary note path (so
+  Exclusive, the Voices cap, Strum and the keybed lights all still apply) but queued there, and
+  only that engine drains it. `runArpLines` lifts the keybed's notes out of the merged stream for
+  the lines with **Keys** on, runs each enabled line into its own buffer, and merges them back;
+  a *disabled* line's input passes straight through, so a chord held to it sustains. A per-pitch
+  ownership mask races - the message thread can clear an owner before the matching note-off is
+  drained, stranding that note in an engine's held set forever - and that is why it is queues.
+  **`noteRefs` is per destination stream** for the same reason: "one note-on per sounding pitch"
+  is a statement about one stream, and a pitch held into line B must not suppress the same pitch
+  played to the output. On screen: **A/B/C on the arp bar** (one per line's On, and Hold off is
+  still one button that releases all three), **three tabs at the left of the slot row** choosing
+  which line the panel edits (34 px inside a row already 58 tall, so the panel's height is
+  unchanged; a tab change rebuilds every APVTS attachment against the new ids, the same move
+  `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** saying which
+  line a chord-card click feeds. **Dragging a chord card onto an arp slot binds it there**, or
+  onto a tab to hand it over now - the left-click twin *Send to arp slot* never had.
 - **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
   chord, a shape and a rate; launching one installs all of it and holds the chord into the
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card

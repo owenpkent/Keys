@@ -429,6 +429,15 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Lock Influence, the Markov chains and the audition tray, in a window of their own. A second
     // click while it is already up raises it rather than building another - there is exactly
     // one of these, and a window you cannot find is worse than one that is shut.
+    // Where a clicked chord card goes. Not a combo: three values, and a chip that cycles is
+    // one click where a combo is a click, a travel and a second click - the same argument the
+    // < > steppers beside Shape are made of.
+    genChip(arpTargetButton, "Arp target line",
+            "Which arpeggiator line a click on a chord card feeds. Click to cycle A, B, C. "
+            "The same choice as the A/B/C tabs in the arp panel, kept here so it is reachable "
+            "with the arp folded away.",
+            [this] { cycleArpTargetLine(); });
+    refreshArpTargetButton();
     genChip(chordGenButton, "Chord generator window",
             "Open the chord generator: every setting it has, plus a tray of chords to audition. "
             "It is a window of its own, so it can sit beside the plugin while you audition.",
@@ -499,11 +508,25 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // On rides on the Arp *bar*, not inside the section, so folding the editor away does not
     // take the arp's power switch with it. Same reasoning as Sustain and All Off living on
     // the Keyboard bar.
-    arpOnButton.setTooltip("Arpeggiate whatever is sounding. Lit, clicking a chord card hands "
-                           "that chord to the arp and holds it there; clicking the same card "
-                           "again strikes it afresh. Hold off, beside this, lets it go.");
-    addAndMakeVisible(arpOnButton);
-    arpOnAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpOn", arpOnButton);
+    // One chip per line, so bringing a line in or out of a polyrhythm is a single click on a
+    // bar that is still there with the section folded. A is the switch that has always been
+    // here, under the same parameter; B and C are new and start off, which is what makes a
+    // session saved before them sound identical.
+    for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+    {
+        const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
+        auto& b = arpOnButtons[(size_t) n];
+        b.setButtonText(letter);
+        // Distinct accessible names: three buttons reading "On" are three identical names to
+        // UI Automation, which takes the first match (see the Detach buttons for the same rule).
+        b.setTitle("Arp line " + letter);
+        b.setTooltip("Arpeggiator line " + letter + ". Lit, it arpeggiates what you play and "
+                     "whatever chord card you send it. Three lines at three rates is the "
+                     "polyrhythm; Hold off, at the end of this bar, lets all three go.");
+        addAndMakeVisible(b);
+        arpOnAtts[(size_t) n] = std::make_unique<ButtonAtt>(
+            processor.apvts, KeysProcessor::arpParamId(n, KeysProcessor::apOn), b);
+    }
 
     // Hold off rides the same bar, for the same reason (see the member declaration). It is
     // the only exit from a held chord that is on screen in the default layout, so it cannot
@@ -569,10 +592,43 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // open. Guarded on the panel existing rather than wired and unwired as it opens: the strip
     // outlives every window, and a hook that had to be taken back down on close is a hook that
     // gets left dangling one day.
+    // ...and to the arp panel, which is the left-click twin "Send to arp slot" never had: a
+    // drag is a target picker, which is the whole reason that menu item was allowed to be
+    // right-click-only. Drop on a slot to bind the chord there; drop on a line tab to hand it
+    // to that line now. Both live here rather than in either surface because the editor is the
+    // one object that holds both, and either can be in a window of its own.
     chordPads.onDragOutside = [this](juce::Point<int> p)
-    { if (chordGenPanel) chordGenPanel->showReferenceDropTarget(p); };
+    {
+        if (chordGenPanel)
+            chordGenPanel->showReferenceDropTarget(p);
+        if (arpPanel)
+            arpPanel->setExternalDropTarget(arpPanel->externalDropSlotAt(p),
+                                            arpPanel->externalDropLineAt(p));
+    };
     chordPads.onDropOutside = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
-    { return chordGenPanel != nullptr && chordGenPanel->offerReferenceDrop(p, pad); };
+    {
+        if (arpPanel != nullptr)
+        {
+            arpPanel->setExternalDropTarget(-1, -1);
+            const int line = arpPanel->externalDropLineAt(p);
+            if (line >= 0 && ! pad.notes.empty())
+            {
+                // Straight into that line, and it becomes the current one: you aimed at it, so
+                // the next card click should follow the same aim.
+                processor.holdArpChordFromPad(chordPads.draggedSlot(), line);
+                arpPanel->setEditLine(line);
+                refreshArpTargetButton();
+                return true; // suppresses the strip's drag-off-to-clear
+            }
+            if (const int slot = arpPanel->externalDropSlotAt(p); slot >= 0 && ! pad.notes.empty())
+            {
+                processor.setArpSlotChord(slot, pad.notes, pad.name, arpPanel->editLine());
+                arpPanel->repaint();
+                return true;
+            }
+        }
+        return chordGenPanel != nullptr && chordGenPanel->offerReferenceDrop(p, pad);
+    };
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
@@ -767,6 +823,25 @@ void KeysEditor::refreshSectionPanels()
     refreshArpPanel();
 }
 
+void KeysEditor::cycleArpTargetLine()
+{
+    const int next = (processor.arpCurrentLine() + 1) % KeysProcessor::numArpLines;
+    processor.setArpCurrentLine(next);
+    // Through the panel when it is open, so its tabs, its attachments and its step lanes all
+    // move with the chip. setEditLine writes the processor too, which is harmlessly the value
+    // it already holds.
+    if (arpPanel != nullptr)
+        arpPanel->setEditLine(next);
+    refreshArpTargetButton();
+    chordPads.repaint(); // the corner marks say which line each card was last sent to
+}
+
+void KeysEditor::refreshArpTargetButton()
+{
+    const int line = processor.arpCurrentLine();
+    arpTargetButton.setButtonText(juce::String::charToString((juce::juce_wchar) ('A' + line)));
+}
+
 void KeysEditor::refreshArpPanel()
 {
     // The panel is the *view* of the arp, not the arp: destroying it folds the editor away
@@ -782,6 +857,9 @@ void KeysEditor::refreshArpPanel()
 
     arpPanel = std::make_unique<ArpPanel>(processor);
     arpPanel->setInlineMode(true);
+    // The tabs and the Pads-bar chip are one state behind two surfaces, so each has to move
+    // the other. This is the tabs' half; cycleArpTargetLine is the chip's.
+    arpPanel->onEditLineChanged = [this] { refreshArpTargetButton(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -1410,8 +1488,14 @@ void KeysEditor::timerCallback()
     // pattern and no chord lights its ring with nothing sounding and no chain running, and
     // releaseArpChord() is what clears it, so the click has work to do and the chip was
     // greying itself out in front of it.
-    arpHoldOffButton.setEnabled(processor.arpLaunchedSlot() >= 0
-                                || ! processor.arpHeldNotes().empty() || processor.chainRunning());
+    // Across all three lines, because the button releases all three. One line holding is
+    // enough for there to be something to let go of.
+    {
+        bool anyHold = processor.anyArpHold();
+        for (int n = 0; n < KeysProcessor::numArpLines && ! anyHold; ++n)
+            anyHold = processor.arpLaunchedSlot(n) >= 0;
+        arpHoldOffButton.setEnabled(anyHold);
+    }
 
     // Mode and Scale Compliance are the generator's, and the Markov brain reads neither: it
     // walks a table of transitions instead of a scale. The generator's window already hides
@@ -1620,7 +1704,14 @@ void KeysEditor::resized()
         // their section - the pad pages, Knobs - are still 22 (reduced(1, 2)).
         auto bar = layoutDetachRow(secArp, arpBar.contentArea(), true);
         bar.removeFromRight(6);
-        arpOnButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
+        // Three line switches where one On used to be, C rightmost so they read A B C left to
+        // right. 40 px each rather than the old 68: a letter needs no more, and three of them
+        // plus Hold off is already most of what this end of the bar can hold.
+        for (int n = KeysProcessor::numArpLines - 1; n >= 0; --n)
+        {
+            arpOnButtons[(size_t) n].setBounds(bar.removeFromRight(42).withSizeKeepingCentre(40, 24));
+            bar.removeFromRight(2);
+        }
         bar.removeFromRight(6);
         arpHoldOffButton.setBounds(bar.removeFromRight(88).withSizeKeepingCentre(86, 24));
         section(secArp).caption = bar;
@@ -1653,6 +1744,11 @@ void KeysEditor::resized()
         // behind them would be off the screen.
         bar.removeFromRight(6);
         chordGenButton.setBounds(bar.removeFromRight(90).withSizeKeepingCentre(88, 24));
+        // The target line, left of the generator's three: it belongs to what a card *click*
+        // does rather than to what generation does, and putting it at the far end would leave
+        // the two groups indistinguishable.
+        bar.removeFromRight(8);
+        arpTargetButton.setBounds(bar.removeFromRight(38).withSizeKeepingCentre(36, 24));
         // Key, Mode and Compliance, left of the three chips and reading in that order, which is
         // the order the generator's window lists them in. Same end of the bar and the same
         // unconditional placement as Fill and Regen, for the same two reasons: they outlive

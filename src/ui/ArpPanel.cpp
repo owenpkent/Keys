@@ -24,8 +24,8 @@ namespace
 // ---------------------------------------------------------------------------
 // LaneGrid
 
-ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, ArpEngine::Lane l, int lo, int hi)
-    : processor(p), lane(l), loVal(lo), hiVal(hi)
+ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, const ArpPanel& o, ArpEngine::Lane l, int lo, int hi)
+    : processor(p), owner(o), lane(l), loVal(lo), hiVal(hi)
 {
     okstudio::ui::makeMouseOnly(*this);
 }
@@ -33,7 +33,7 @@ ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, ArpEngine::Lane l, int lo, int hi
 int ArpPanel::LaneGrid::currentLength() const
 {
     return juce::jlimit(1, ArpEngine::maxSteps,
-                        processor.arp.lanes.length[(size_t) lane].load(std::memory_order_relaxed));
+                        processor.arpLine(owner.editLine()).lanes.length[(size_t) lane].load(std::memory_order_relaxed));
 }
 
 int ArpPanel::LaneGrid::stepAtX(float x) const
@@ -56,7 +56,7 @@ void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e)
 {
     const int step = stepAtX(e.position.x);
     const int value = valueAtY(e.position.y);
-    processor.arp.lanes.value[(size_t) lane][(size_t) step].store(value, std::memory_order_relaxed);
+    processor.arpLine(owner.editLine()).lanes.value[(size_t) lane][(size_t) step].store(value, std::memory_order_relaxed);
     cursorPos = e.position;
     cursorValue = value;
     repaint();
@@ -112,7 +112,7 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
     for (int i = 0; i < length; ++i)
     {
         const int value = juce::jlimit(loVal, hiVal,
-                                       processor.arp.lanes.value[(size_t) lane][(size_t) i].load(std::memory_order_relaxed));
+                                       processor.arpLine(owner.editLine()).lanes.value[(size_t) lane][(size_t) i].load(std::memory_order_relaxed));
         auto cell = juce::Rectangle<float>(b.getX() + cellW * (float) i, b.getY(), cellW, b.getHeight());
 
         g.setColour(juce::Colours::white.withAlpha(0.045f));
@@ -173,7 +173,7 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
 // ---------------------------------------------------------------------------
 // MuteRow
 
-ArpPanel::MuteRow::MuteRow(KeysProcessor& p) : processor(p)
+ArpPanel::MuteRow::MuteRow(KeysProcessor& p, const ArpPanel& o) : processor(p), owner(o)
 {
     okstudio::ui::makeMouseOnly(*this);
 }
@@ -181,7 +181,7 @@ ArpPanel::MuteRow::MuteRow(KeysProcessor& p) : processor(p)
 int ArpPanel::MuteRow::currentLength() const
 {
     return juce::jlimit(1, ArpEngine::maxSteps,
-                        processor.arp.lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+                        processor.arpLine(owner.editLine()).lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
 }
 
 int ArpPanel::MuteRow::stepAtX(float x) const
@@ -196,14 +196,14 @@ int ArpPanel::MuteRow::stepAtX(float x) const
 void ArpPanel::MuteRow::applyAtX(float x)
 {
     const int step = stepAtX(x);
-    processor.arp.lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].store(paintValue, std::memory_order_relaxed);
+    processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].store(paintValue, std::memory_order_relaxed);
     repaint();
 }
 
 void ArpPanel::MuteRow::mouseDown(const juce::MouseEvent& e)
 {
     const int step = stepAtX(e.position.x);
-    const int current = processor.arp.lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].load(std::memory_order_relaxed);
+    const int current = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].load(std::memory_order_relaxed);
     paintValue = (current == -1) ? 0 : -1; // toggle, then paint every step the drag crosses to match
     dragging = true;
     applyAtX(e.position.x);
@@ -224,7 +224,7 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
 
     for (int i = 0; i < length; ++i)
     {
-        const int value = processor.arp.lanes.value[(size_t) ArpEngine::laneNote][(size_t) i].load(std::memory_order_relaxed);
+        const int value = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) i].load(std::memory_order_relaxed);
         const bool muted = value == -1;
         auto cell = juce::Rectangle<float>(b.getX() + cellW * (float) i, b.getY(), cellW, b.getHeight()).reduced(2.0f);
 
@@ -256,7 +256,7 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
 // ---------------------------------------------------------------------------
 // ArpPanel
 
-ArpPanel::ArpPanel(KeysProcessor& p) : processor(p)
+ArpPanel::ArpPanel(KeysProcessor& p) : processor(p), editedLine(p.arpCurrentLine())
 {
     okstudio::ui::makeMouseOnly(*this);
     buildControls();
@@ -274,13 +274,90 @@ ArpPanel::~ArpPanel()
     stopTimer();
 }
 
+int ArpPanel::editLine() const
+{
+    return juce::jlimit(0, KeysProcessor::numArpLines - 1, editedLine);
+}
+
+// A chord card dragged out of the pad strip, in screen coordinates. Mouse capture keeps the
+// whole gesture on the strip - JUCE never tells these cards a drag is over them - and the two
+// surfaces can be in different top-level windows, so the editor that owns both hit-tests here
+// by screen position. Desktop::findComponentAt is what makes another window sitting over the
+// row read as "not over a slot", which is the answer you want.
+// Walking up from whatever the desktop says is under the point, rather than testing bounds,
+// is what makes another window over the row read as "not over a slot" - and it answers the
+// folded and detached cases for free, since a panel that is not on screen is never hit. Same
+// shape as ChordPads::externalDropSlotAt, deliberately.
+int ArpPanel::externalDropSlotAt(juce::Point<int> screenPos) const
+{
+    auto* hit = juce::Desktop::getInstance().findComponentAt(screenPos);
+    for (auto* c = hit; c != nullptr; c = c->getParentComponent())
+        for (int i = 0; i < (int) slotCards.size(); ++i)
+            if (c == slotCards[(size_t) i].get())
+                return i;
+    return -1;
+}
+
+int ArpPanel::externalDropLineAt(juce::Point<int> screenPos) const
+{
+    auto* hit = juce::Desktop::getInstance().findComponentAt(screenPos);
+    for (auto* c = hit; c != nullptr; c = c->getParentComponent())
+        for (int n = 0; n < (int) lineTabs.size(); ++n)
+            if (c == lineTabs[(size_t) n].get())
+                return n;
+    return -1;
+}
+
+void ArpPanel::setExternalDropTarget(int slot, int lineTab)
+{
+    for (int i = 0; i < (int) slotCards.size(); ++i)
+        if (slotCards[(size_t) i] != nullptr)
+            slotCards[(size_t) i]->setDropTarget(i == slot);
+    for (int n = 0; n < (int) lineTabs.size(); ++n)
+        if (lineTabs[(size_t) n] != nullptr)
+            lineTabs[(size_t) n]->setDropTarget(n == lineTab);
+}
+
+juce::String ArpPanel::paramId(KeysProcessor::ArpParam which) const
+{
+    return KeysProcessor::arpParamId(editLine(), which);
+}
+
+// A tab click. Everything on the panel is bound to one line's parameters, so changing it means
+// tearing every attachment down and building it again against the new ids - which is what an
+// attachment is: a binding to one named parameter for its whole life. The rate dial has done
+// this dance for its two units since the Hz mode landed; this is the same move over all of
+// them, and it reuses refreshRateMode's guard so a swap never happens under an open drag.
+void ArpPanel::setEditLine(int line)
+{
+    line = juce::jlimit(0, KeysProcessor::numArpLines - 1, line);
+    if (line == editedLine)
+        return;
+    editedLine = line;
+    processor.setArpCurrentLine(line);
+
+    buildAttachments();
+    refreshRateMode();  // the dial's own two, and which unit is live on the new line
+    refreshShape();     // Shape and the step editor, which are not attachments
+    refreshRetrig();
+    refreshLaneReadouts();
+    refreshPatternButtons();
+    for (auto& tab : lineTabs)
+        if (tab != nullptr)
+            tab->repaint();
+    if (onEditLineChanged)
+        onEditLineChanged();
+    resized();  // Shape may have changed the panel's height with the line
+    repaint();
+}
+
 void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::String& name, int loVal, int hiVal)
 {
     row.tab.setButtonText(name);
     row.tab.onClick = [this, lane] { selectLane((int) lane); };
     addAndMakeVisible(row.tab);
 
-    row.grid = std::make_unique<LaneGrid>(processor, lane, loVal, hiVal);
+    row.grid = std::make_unique<LaneGrid>(processor, *this, lane, loVal, hiVal);
     addChildComponent(*row.grid); // only the selected lane's grid is ever visible
 }
 
@@ -303,40 +380,40 @@ void ArpPanel::selectLane(int lane)
 // different lengths drift against each other. Cthulhu ships the same switch.
 void ArpPanel::nudgeLength(int delta)
 {
-    const bool linked = processor.apvts.getRawParameterValue("arpLinkLanes")->load() > 0.5f;
+    const bool linked = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apLinkLanes))->load() > 0.5f;
     const int from = linked ? 0 : selectedLane;
     const int to = linked ? ArpEngine::numLanes - 1 : selectedLane;
     const int target = juce::jlimit(1, ArpEngine::maxSteps,
-                                    processor.arp.lanes.length[(size_t) selectedLane]
+                                    processor.arpLine(editedLine).lanes.length[(size_t) selectedLane]
                                             .load(std::memory_order_relaxed) + delta);
     for (int i = from; i <= to; ++i)
-        processor.arp.lanes.length[(size_t) i].store(target, std::memory_order_relaxed);
+        processor.arpLine(editedLine).lanes.length[(size_t) i].store(target, std::memory_order_relaxed);
     refreshLaneReadouts();
 }
 
 void ArpPanel::cycleClockDiv()
 {
-    const bool linked = processor.apvts.getRawParameterValue("arpLinkLanes")->load() > 0.5f;
-    const int next = (processor.arp.lanes.clockDiv[(size_t) selectedLane].load(std::memory_order_relaxed) + 1) % 3;
+    const bool linked = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apLinkLanes))->load() > 0.5f;
+    const int next = (processor.arpLine(editedLine).lanes.clockDiv[(size_t) selectedLane].load(std::memory_order_relaxed) + 1) % 3;
     const int from = linked ? 0 : selectedLane;
     const int to = linked ? ArpEngine::numLanes - 1 : selectedLane;
     for (int i = from; i <= to; ++i)
-        processor.arp.lanes.clockDiv[(size_t) i].store(next, std::memory_order_relaxed);
+        processor.arpLine(editedLine).lanes.clockDiv[(size_t) i].store(next, std::memory_order_relaxed);
     refreshLaneReadouts();
 }
 
 void ArpPanel::refreshLaneReadouts()
 {
     const auto li = (size_t) selectedLane;
-    const int len = processor.arp.lanes.length[li].load(std::memory_order_relaxed);
+    const int len = processor.arpLine(editedLine).lanes.length[li].load(std::memory_order_relaxed);
     stepsReadout.setText(juce::String(len), juce::dontSendNotification);
-    const int div = juce::jlimit(0, 2, processor.arp.lanes.clockDiv[li].load(std::memory_order_relaxed));
+    const int div = juce::jlimit(0, 2, processor.arpLine(editedLine).lanes.clockDiv[li].load(std::memory_order_relaxed));
     speedButton.setButtonText(clockDivNames[div]);
 }
 
 bool ArpPanel::patternMode() const
 {
-    return processor.apvts.getRawParameterValue("arpPattern")->load() > 0.5f;
+    return processor.apvts.getRawParameterValue(paramId(KeysProcessor::apPattern))->load() > 0.5f;
 }
 
 void ArpPanel::applyShapeChoice()
@@ -346,14 +423,14 @@ void ArpPanel::applyShapeChoice()
     // Gestures by hand. Every other control here is an APVTS attachment and gets its
     // begin/end for free; Shape spans two parameters so it cannot be one, and without
     // the brackets a host in touch or latch never arms on a Shape change.
-    if (auto* pat = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpPattern")))
+    if (auto* pat = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter(paramId(KeysProcessor::apPattern))))
     {
         pat->beginChangeGesture();
         *pat = chosen >= ArpEngine::numDirections;
         pat->endChangeGesture();
     }
     if (chosen >= 0 && chosen < ArpEngine::numDirections)
-        if (auto* dir = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpDirection")))
+        if (auto* dir = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(paramId(KeysProcessor::apDirection))))
         {
             dir->beginChangeGesture();
             *dir = chosen; // "Pattern" leaves the direction alone; lanes can still follow it
@@ -370,13 +447,13 @@ void ArpPanel::applyRetrigChoice()
 {
     const int chosen = retrigBox.getSelectedItemIndex();
     auto& apvts = processor.apvts;
-    if (auto* on = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpRetrigger")))
+    if (auto* on = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter(paramId(KeysProcessor::apRetrigger))))
     {
         on->beginChangeGesture();
         *on = chosen == 1;
         on->endChangeGesture();
     }
-    if (auto* bars = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpRetrigBars")))
+    if (auto* bars = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(paramId(KeysProcessor::apRetrigBars))))
     {
         bars->beginChangeGesture();
         *bars = chosen >= 2 ? chosen - 1 : 0;
@@ -386,8 +463,8 @@ void ArpPanel::applyRetrigChoice()
 
 void ArpPanel::refreshRetrig()
 {
-    const int bars = (int) processor.apvts.getRawParameterValue("arpRetrigBars")->load();
-    const bool onNote = processor.apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
+    const int bars = (int) processor.apvts.getRawParameterValue(paramId(KeysProcessor::apRetrigBars))->load();
+    const bool onNote = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apRetrigger))->load() > 0.5f;
     const int wanted = bars > 0 ? bars + 1 : (onNote ? 1 : 0);
     if (retrigBox.getSelectedItemIndex() != wanted)
         retrigBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
@@ -398,7 +475,7 @@ void ArpPanel::refreshRetrig()
 void ArpPanel::refreshShape()
 {
     const bool pattern = patternMode();
-    const int dir = (int) processor.apvts.getRawParameterValue("arpDirection")->load();
+    const int dir = (int) processor.apvts.getRawParameterValue(paramId(KeysProcessor::apDirection))->load();
     const int wanted = pattern ? ArpEngine::numDirections : juce::jlimit(0, ArpEngine::numDirections - 1, dir);
     if (shapeBox.getSelectedItemIndex() != wanted)
         shapeBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
@@ -459,9 +536,9 @@ void ArpPanel::stepRate(int delta)
 {
     auto& apvts = processor.apvts;
 
-    if (apvts.getRawParameterValue("arpRateFree")->load() > 0.5f)
+    if (apvts.getRawParameterValue(paramId(KeysProcessor::apRateFree))->load() > 0.5f)
     {
-        auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("arpRateHz"));
+        auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(paramId(KeysProcessor::apRateHz)));
         if (hz == nullptr)
             return;
         // A click is a quarter of an octave, so four of them halve or double the rate - which
@@ -487,7 +564,7 @@ void ArpPanel::stepRate(int delta)
         return;
     }
 
-    if (auto* rate = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("arpRate")))
+    if (auto* rate = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(paramId(KeysProcessor::apRate))))
     {
         const int next = juce::jlimit(0, rate->choices.size() - 1, rate->getIndex() + delta);
         if (next != rate->getIndex())
@@ -505,7 +582,7 @@ void ArpPanel::stepRate(int delta)
 // off the timer as well as off the button.
 void ArpPanel::refreshRateMode()
 {
-    const bool free = processor.apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
+    const bool free = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apRateFree))->load() > 0.5f;
     if (lastRateFree == (int) free)
         return;
 
@@ -532,9 +609,9 @@ void ArpPanel::refreshRateMode()
     rateHzAtt.reset();
     rateSyncAtt.reset();
     if (free)
-        rateHzAtt = std::make_unique<SliderAtt>(processor.apvts, "arpRateHz", rateKnob);
+        rateHzAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apRateHz), rateKnob);
     else
-        rateSyncAtt = std::make_unique<SliderAtt>(processor.apvts, "arpRate", rateKnob);
+        rateSyncAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apRate), rateKnob);
 
     rateModeButton.setButtonText(free ? "Hz" : "Sync"); // the live unit, not the one a click would pick
     rateModeButton.setTooltip(free ? "Rate is free-running in Hz: no tempo, no bar grid, and it "
@@ -585,10 +662,10 @@ void ArpPanel::recallOrCopy(int index)
     {
         case armCopy:
             if (index != copyFromIndex)
-                processor.copyArpPattern(copyFromIndex, index);
+                processor.copyArpPattern(copyFromIndex, index, editLine());
             break;
         case armClear:
-            processor.clearArpSlotChord(index);
+            processor.clearArpSlotChord(index, editLine());
             break;
         case armNone:
             launchSlot(index);
@@ -602,23 +679,23 @@ void ArpPanel::launchSlot(int index)
 {
     // Clicking the slot that is already holding its chord releases it, so one control both
     // starts and stops a slot; anything else needs the Stop button to undo a launch.
-    if (processor.arpLaunchedSlot() == index)
+    if (processor.arpLaunchedSlot(editLine()) == index)
     {
         processor.stopArpSlot();
         return;
     }
-    processor.launchArpSlot(index);
+    processor.launchArpSlot(index, editLine());
     refreshShape(); // the slot may have moved Shape, and that decides what is on screen
 }
 
 void ArpPanel::showSlotMenu(int index)
 {
     juce::PopupMenu m;
-    const auto& slot = processor.arpPatternSlot(index);
+    const auto& slot = processor.arpPatternSlot(index, editLine());
     const bool hasChord = ! slot.chordNotes.empty();
 
     m.addSectionHeader("Slot " + juce::String(index + 1));
-    m.addItem(1, "Launch", true, processor.arpLaunchedSlot() == index);
+    m.addItem(1, "Launch", true, processor.arpLaunchedSlot(editLine()) == index);
     m.addItem(2, "Clear chord", hasChord);
     m.addSeparator();
     m.addItem(3, "Copy this pattern to" + juce::String::fromUTF8("\xe2\x80\xa6"));
@@ -637,7 +714,7 @@ void ArpPanel::showSlotMenu(int index)
         if (r == 1)
             self->launchSlot(index);
         else if (r == 2)
-            self->processor.clearArpSlotChord(index);
+            self->processor.clearArpSlotChord(index, self->editLine());
         else if (r == 3)
         {
             // Same arm-then-pick gesture the Copy button uses, seeded from this slot: the
@@ -646,8 +723,8 @@ void ArpPanel::showSlotMenu(int index)
         }
         else if (r == 4)
         {
-            self->processor.recallArpPattern(index);
-            self->processor.randomizeActiveArpPattern();
+            self->processor.recallArpPattern(index, self->editLine());
+            self->processor.randomizeActiveArpPattern(self->editLine());
         }
         self->refreshPatternButtons();
     });
@@ -677,15 +754,15 @@ void ArpPanel::refreshPatternButtons()
     // two - an Exclusive pad press clears launchedSlot and the held chord while chainOn stays
     // set - so without it Stop greyed out at the exact moment the bar chip lit, leaving the
     // panel's own way out of a running chain disabled while the chain ran.
-    stopButton.setEnabled(processor.arpLaunchedSlot() >= 0 || ! processor.arpHeldNotes().empty()
-                          || processor.chainRunning());
+    stopButton.setEnabled(processor.arpLaunchedSlot(editLine()) >= 0 || ! processor.arpHeldNotes(editLine()).empty()
+                          || processor.chainRunning(editLine()));
 
     // Chain lights while it runs, and says so: the row is playing itself, which is a state
     // worth being able to read from across the room.
-    const bool chaining = processor.chainRunning();
+    const bool chaining = processor.chainRunning(editLine());
     chainButton.setToggleState(chaining, juce::dontSendNotification);
     chainButton.setButtonText(chaining ? "Chaining" : "Chain");
-    const int activeBars = processor.arpSlotBars(processor.arpActivePattern());
+    const int activeBars = processor.arpSlotBars(processor.arpActivePattern(editLine()), editLine());
     barsReadout.setText(juce::String(activeBars) + (activeBars == 1 ? " bar" : " bars"),
                         juce::dontSendNotification);
 }
@@ -693,11 +770,19 @@ void ArpPanel::refreshPatternButtons()
 // ---------------------------------------------------------------------------
 // SlotCard
 
-ArpPanel::SlotCard::SlotCard(KeysProcessor& p, int i)
-    : juce::Button("Arp slot " + juce::String(i + 1)), processor(p), index(i)
+ArpPanel::SlotCard::SlotCard(KeysProcessor& p, const ArpPanel& o, int i)
+    : juce::Button("Arp slot " + juce::String(i + 1)), processor(p), owner(o), index(i)
 {
     okstudio::ui::makeMouseOnly(*this);
     setTitle("Arp slot " + juce::String(i + 1)); // accessible name for the capture script
+}
+
+void ArpPanel::SlotCard::setDropTarget(bool b)
+{
+    if (dropTarget == b)
+        return;
+    dropTarget = b;
+    repaint();
 }
 
 void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
@@ -711,28 +796,88 @@ void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
     juce::Button::mouseDown(e);
 }
 
+// ---------------------------------------------------------------------------
+// LineTab
+
+ArpPanel::LineTab::LineTab(KeysProcessor& p, const ArpPanel& o, int n)
+    : juce::Button("Arp line " + juce::String::charToString((juce::juce_wchar) ('A' + n))),
+      processor(p), owner(o), line(n)
+{
+    okstudio::ui::makeMouseOnly(*this);
+    // Named for the capture script, and distinct from the A/B/C chips on the section bar:
+    // those switch a line on, this one selects which line the panel is editing.
+    setTitle("Arp line " + juce::String::charToString((juce::juce_wchar) ('A' + n)) + " tab");
+}
+
+void ArpPanel::LineTab::setDropTarget(bool b)
+{
+    if (dropTarget == b)
+        return;
+    dropTarget = b;
+    repaint();
+}
+
+void ArpPanel::LineTab::paintButton(juce::Graphics& g, bool over, bool down)
+{
+    const auto b = getLocalBounds().toFloat().reduced(1.0f);
+    const auto accent = skin::accentOf(*this).base;
+    const bool selected = owner.editLine() == line;
+    const bool on = processor.arpLineOn(line);
+
+    skin::raisedFill(g, b, skin::radius,
+                     on ? accent.withAlpha(0.30f) : skin::control.withAlpha(down ? 0.7f : 1.0f),
+                     on ? accent.withAlpha(0.18f) : skin::controlBot);
+    if (over || dropTarget)
+    {
+        g.setColour(juce::Colours::white.withAlpha(dropTarget ? 0.14f : 0.06f));
+        g.fillRoundedRectangle(b, skin::radius);
+    }
+    // Selected = the panel is showing this line. On = it is running. Two different things, and
+    // both have to be readable at once: you edit a line that is off all the time.
+    if (selected || dropTarget)
+    {
+        g.setColour(dropTarget ? accent : accent.withAlpha(0.75f));
+        g.drawRoundedRectangle(b.reduced(0.75f), skin::radius, dropTarget ? 2.0f : 1.4f);
+    }
+
+    auto area = b.reduced(5.0f, 4.0f);
+    g.setColour(selected ? skin::text : skin::textFaint);
+    g.setFont(skin::uiSemi(15.0f));
+    g.drawText(juce::String::charToString((juce::juce_wchar) ('A' + line)),
+               area.removeFromTop(17.0f), juce::Justification::centred, false);
+
+    // What this line is holding, so three tabs read as three arpeggiators rather than three
+    // letters. Faint and small: it is a status line, not the card's own name.
+    g.setColour(on ? accent.withAlpha(0.85f) : skin::textFaint);
+    g.setFont(skin::micro(9.0f));
+    const auto& name = processor.arpHeldName(line);
+    g.drawText(name.isNotEmpty() ? name : juce::String(on ? "on" : "off"),
+               area, juce::Justification::centredTop, false);
+}
+
 void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
 {
     const auto b = getLocalBounds().toFloat().reduced(1.0f);
     const auto accent = skin::accentOf(*this).base;
-    const auto& slot = processor.arpPatternSlot(index);
-    const bool active = processor.arpActivePattern() == index;   // its lanes are the live ones
-    const bool launched = processor.arpLaunchedSlot() == index;  // its chord is sounding
+    const auto& slot = processor.arpPatternSlot(index, owner.editLine());
+    const bool active = processor.arpActivePattern(owner.editLine()) == index;   // its lanes are the live ones
+    const bool launched = processor.arpLaunchedSlot(owner.editLine()) == index;  // its chord is sounding
 
     skin::raisedFill(g, b, skin::radius,
                      launched ? accent.withAlpha(0.34f) : skin::control.withAlpha(down ? 0.7f : 1.0f),
                      launched ? accent.withAlpha(0.20f) : skin::controlBot);
-    if (over)
+    if (over || dropTarget)
     {
-        g.setColour(juce::Colours::white.withAlpha(0.06f));
+        g.setColour(juce::Colours::white.withAlpha(dropTarget ? 0.14f : 0.06f));
         g.fillRoundedRectangle(b, skin::radius);
     }
     // Active = these are the lanes the step editor is editing. Launched = its chord is
     // what the arp is chewing on. They are different things and both need to be visible.
-    if (active || launched)
+    if (active || launched || dropTarget)
     {
-        g.setColour(launched ? accent : accent.withAlpha(0.55f));
-        g.drawRoundedRectangle(b.reduced(0.75f), skin::radius, launched ? 1.6f : 1.0f);
+        g.setColour(dropTarget ? accent : (launched ? accent : accent.withAlpha(0.55f)));
+        g.drawRoundedRectangle(b.reduced(0.75f), skin::radius,
+                               dropTarget ? 2.0f : (launched ? 1.6f : 1.0f));
     }
 
     auto area = b.reduced(5.0f, 4.0f);
@@ -744,7 +889,7 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
     // How many bars the chain holds this slot for, opposite the number. Only when it is not
     // the default: twelve cards each saying "x1" would be twelve pieces of noise for the one
     // case where the answer does not matter.
-    if (const int bars = processor.arpSlotBars(index); bars > 1)
+    if (const int bars = processor.arpSlotBars(index, owner.editLine()); bars > 1)
         g.drawText("x" + juce::String(bars), top, juce::Justification::topRight);
 
     // The chord it will play, which is the whole reason a slot is a card and not a letter.
@@ -795,6 +940,28 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
     g.fillPath(p);
 }
 
+// Every attachment on the panel, bound to the current line. Split out of buildControls so
+// setEditLine can tear them down and build them again against another line's ids; the rate
+// dial's two are not here because refreshRateMode owns which of them exists (see there).
+void ArpPanel::buildAttachments()
+{
+    rateModeAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apRateFree), rateModeButton);
+    dotAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apDot), dotButton);
+    tripAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apTrip), tripButton);
+    anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apAnchor), anchorButton);
+    octavesAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apOctaves), octavesSlider);
+    distanceAtt = std::make_unique<ComboAtt>(processor.apvts, paramId(KeysProcessor::apDistance), distanceBox);
+    offsetAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apOffset), offsetSlider);
+    rampAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apVelRamp), rampSlider);
+    rampTimeAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apRampBeats), rampTimeSlider);
+    humanAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apHumanize), humanSlider);
+    swingAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apSwing), swingSlider);
+    gateAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apGate), gateSlider);
+    chanceAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apChance), chanceSlider);
+    latchAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apLatch), latchButton);
+    linkAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apLinkLanes), linkButton);
+}
+
 void ArpPanel::buildControls()
 {
     // No title, On or Close here: the Arp section bar above the panel carries all three
@@ -840,13 +1007,9 @@ void ArpPanel::buildControls()
     rateModeButton.setTitle("Arp rate mode");
     rateModeButton.onClick = [this] { refreshRateMode(); }; // attached, so the parameter is already set
     addAndMakeVisible(rateModeButton);
-    rateModeAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpRateFree", rateModeButton);
 
     for (auto* b : { &dotButton, &tripButton, &anchorButton })
         addAndMakeVisible(*b);
-    dotAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpDot", dotButton);
-    tripAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpTrip", tripButton);
-    anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpAnchor", anchorButton);
     // Anchor's tooltip is written by refreshRateMode(), beside its enablement: it says
     // something different in Hz, where there is no bar grid to anchor to.
 
@@ -895,7 +1058,6 @@ void ArpPanel::buildControls()
     octavesSlider.setRange(1, 4, 1);
     octavesSlider.setTooltip("How many times the chord repeats, each one Distance further up.");
     addAndMakeVisible(octavesSlider);
-    octavesAtt = std::make_unique<SliderAtt>(processor.apvts, "arpOctaves", octavesSlider);
 
     styleLabel(distanceLabel, "Distance");
     addAndMakeVisible(distanceLabel);
@@ -904,7 +1066,6 @@ void ArpPanel::buildControls()
     distanceBox.setTooltip("How far each repeat of the chord goes up. The Scale entries count "
                            "degrees of Root and Scale, so a third stays a third of this key.");
     addAndMakeVisible(distanceBox);
-    distanceAtt = std::make_unique<ComboAtt>(processor.apvts, "arpDistance", distanceBox);
 
     styleLabel(offsetLabel, "Offset");
     addAndMakeVisible(offsetLabel);
@@ -913,7 +1074,6 @@ void ArpPanel::buildControls()
     offsetSlider.setRange(0, 31, 1);
     offsetSlider.setTooltip("Start the run further in: rotates the step lanes and the walk together.");
     addAndMakeVisible(offsetSlider);
-    offsetAtt = std::make_unique<SliderAtt>(processor.apvts, "arpOffset", offsetSlider);
 
     // FEEL's three. Horizontal, because this row is one row tall (see resized), and with the
     // value on the right where a knob would have put it underneath.
@@ -932,13 +1092,10 @@ void ArpPanel::buildControls()
     bar(rampSlider, rampLabel, "Ramp", -100.0, 100.0, "%",
         "Velocity change over Time, from the moment a chord starts. Left fades a held chord "
         "out, right swells it, centre is flat.");
-    rampAtt = std::make_unique<SliderAtt>(processor.apvts, "arpVelRamp", rampSlider);
     bar(rampTimeSlider, rampTimeLabel, "Time", 1.0, 32.0, " beats", "How long the Ramp takes.");
-    rampTimeAtt = std::make_unique<SliderAtt>(processor.apvts, "arpRampBeats", rampTimeSlider);
     bar(humanSlider, humanLabel, "Human", 0.0, 100.0, "%",
         "Nudges each hit a little late and a little quieter, by a different amount every time. "
         "The arp is dead on the grid at 0.");
-    humanAtt = std::make_unique<SliderAtt>(processor.apvts, "arpHumanize", humanSlider);
 
     // Swing, Gate and Chance as knobs with the value in the middle: three continuous
     // controls side by side, where three labelled horizontal sliders would have eaten the
@@ -960,20 +1117,16 @@ void ArpPanel::buildControls()
     knob(swingSlider, swingLabel, "Swing", -0.75, 0.75, 0.01,
          "Shift the offbeat steps, as a fraction of a step. Right delays them for a shuffle, "
          "left pulls them early to rush the beat, centre is straight.");
-    swingAtt = std::make_unique<SliderAtt>(processor.apvts, "arpSwing", swingSlider);
 
     knob(gateSlider, gateLabel, "Gate", 5.0, 200.0, 1.0,
          "How much of each step the note sounds for. Over 100% ties into the next step. "
          "Multiplies the Gate lane, so it works on any shape.");
-    gateAtt = std::make_unique<SliderAtt>(processor.apvts, "arpGate", gateSlider);
 
     knob(chanceSlider, chanceLabel, "Chance", 0.0, 100.0, 1.0,
          "How likely each step is to fire. Multiplies the Probability lane, so it thins a "
          "run out on any shape.");
-    chanceAtt = std::make_unique<SliderAtt>(processor.apvts, "arpChance", chanceSlider);
 
     addAndMakeVisible(latchButton);
-    latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpLatch", latchButton);
     latchButton.setTooltip("Ignore note-offs until a new chord arrives.");
     // Accessible name only; the button still reads "Latch". The keybed's Latch is on the
     // Keyboard bar in the same window, and UI Automation takes the first name that matches.
@@ -1005,7 +1158,7 @@ void ArpPanel::buildControls()
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);
-    muteRow = std::make_unique<MuteRow>(processor);
+    muteRow = std::make_unique<MuteRow>(processor, *this);
     addAndMakeVisible(*muteRow);
 
     // One length and one speed control, for whichever lane is showing, finally with
@@ -1032,14 +1185,13 @@ void ArpPanel::buildControls()
 
     linkButton.setTooltip("On: every lane shares one length and speed. Off: each lane keeps its own (polymeter).");
     addAndMakeVisible(linkButton);
-    linkAtt = std::make_unique<ButtonAtt>(processor.apvts, "arpLinkLanes", linkButton);
 
     // Twelve launchable slots. Left-click launches (or, while Copy is armed, is the copy
     // target); right-click opens the slot menu, which is an accelerator for the buttons
     // beside the row.
     for (int i = 0; i < (int) slotCards.size(); ++i)
     {
-        auto card = std::make_unique<SlotCard>(processor, i);
+        auto card = std::make_unique<SlotCard>(processor, *this, i);
         card->onClick = [this, i] { recallOrCopy(i); };
         card->onRightClick = [this, i] { showSlotMenu(i); };
         card->setTooltip("Launch slot " + juce::String(i + 1) + ": its pattern, its shape and "
@@ -1060,7 +1212,7 @@ void ArpPanel::buildControls()
 
     copyButton.onClick = [this]
     {
-        setArmed(armed == armCopy ? armNone : armCopy, processor.arpActivePattern());
+        setArmed(armed == armCopy ? armNone : armCopy, processor.arpActivePattern(editLine()));
     };
     copyButton.setTooltip("Copy the live pattern, then click the slot to copy it into.");
     addAndMakeVisible(copyButton);
@@ -1075,7 +1227,7 @@ void ArpPanel::buildControls()
     addAndMakeVisible(cancelButton);
     cancelButton.setVisible(false);
 
-    randomizeButton.onClick = [this] { processor.randomizeActiveArpPattern(); };
+    randomizeButton.onClick = [this] { processor.randomizeActiveArpPattern(editLine()); };
     addAndMakeVisible(randomizeButton);
 
     // Chain: one click plays the row as a progression. It starts at the lowest slot holding
@@ -1083,10 +1235,10 @@ void ArpPanel::buildControls()
     // twelve cards is a twelve-chord song and not just twelve things to click.
     chainButton.onClick = [this]
     {
-        if (processor.chainRunning())
-            processor.stopChain();
+        if (processor.chainRunning(editLine()))
+            processor.stopChain(editLine());
         else
-            processor.startChain();
+            processor.startChain(editLine());
         refreshPatternButtons();
     };
     chainButton.setTooltip("Play the slots that hold a chord, one after another, each for the "
@@ -1106,12 +1258,29 @@ void ArpPanel::buildControls()
                       "select it.");
         addAndMakeVisible(*b);
     }
+
+    // The three line tabs, at the left of the slot row. Clicking one moves the whole panel to
+    // that line - band, step lanes, the twelve slots, Bars and Chain - which is what keeps one
+    // row of controls in front of three arpeggiators without the panel growing at all.
+    for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+    {
+        auto tab = std::make_unique<LineTab>(processor, *this, n);
+        tab->onClick = [this, n] { setEditLine(n); };
+        const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
+        tab->setTooltip("Arpeggiator line " + letter + ". Click to edit it here, and to send it "
+                        "the next chord card you click. Each line has its own rate, shape, "
+                        "pattern and twelve slots, so three of them make a polyrhythm.");
+        addAndMakeVisible(*tab);
+        lineTabs[(size_t) n] = std::move(tab);
+    }
+
+    buildAttachments();
 }
 
 void ArpPanel::nudgeBars(int delta)
 {
-    const int slot = processor.arpActivePattern();
-    processor.setArpSlotBars(slot, processor.arpSlotBars(slot) + delta);
+    const int slot = processor.arpActivePattern(editLine());
+    processor.setArpSlotBars(slot, processor.arpSlotBars(slot, editLine()) + delta, editLine());
     refreshPatternButtons();
     for (auto& c : slotCards)
         if (c != nullptr)
@@ -1429,9 +1598,19 @@ void ArpPanel::resized()
     auto slotRow = area.removeFromBottom(arpSlotsH);
     area.removeFromBottom(12);
     {
-        const int n = (int) slotCards.size();
+        // The three line tabs first, at the left end of the row. They take a cell each out of
+        // the same width the slots share, which is what makes them cost no height at all: the
+        // row is already arpSlotsH tall and a tab is the mouse-only 34 centred in it.
+        const int n = (int) slotCards.size() + (int) lineTabs.size();
         const int gap = 4;
         const int w = juce::jmax(46, (slotRow.getWidth() - gap * (n - 1)) / n);
+        for (auto& t : lineTabs)
+        {
+            if (t != nullptr)
+                t->setBounds(slotRow.removeFromLeft(w).withSizeKeepingCentre(w, 34));
+            slotRow.removeFromLeft(gap);
+        }
+        slotRow.removeFromLeft(6); // a breath between the tabs and the slots they select
         for (auto& c : slotCards)
         {
             if (c != nullptr)

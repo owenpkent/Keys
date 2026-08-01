@@ -1312,6 +1312,95 @@ public:
             expect(onsetsOf(odd, stopped, block, 8, steady) == still, "fallbackBpm is not read");
             expect(onsetsOf(odd, slowHost, block, 8, steady) == still, "and neither is the host's bpm");
         }
+
+        // --- Three lines ------------------------------------------------------------------
+        // The engine has never known how many of it there are, which is why three of them cost
+        // nothing to build. What these check is that being three of them changes none of it:
+        // independent clocks, independent held sets, independent lanes.
+        beginTest("three engines at three rates hold a polyrhythm");
+        {
+            // Two bars, one 6000-sample block at a time. 1/4 against 1/8 against a 1/8 triplet
+            // is 8 against 16 against 24 hits - three against two against six per beat.
+            ArpEngine a, b, c;
+            a.prepare(sr);
+            b.prepare(sr);
+            c.prepare(sr);
+
+            auto pa = p;
+            pa.rateIndex = 6; // 1/4
+            auto pb = p;
+            pb.rateIndex = 7; // 1/8
+            auto pc = p;
+            pc.rateIndex = 7;
+            pc.triplet = true; // 1/8 triplet
+
+            int onsA = 0, onsB = 0, onsC = 0;
+            auto held = chordOn({ 60, 64, 67 });
+            for (int i = 0; i < 8; ++i) // 8 blocks of 6000 = 2 bars at 120 bpm
+            {
+                clock.ppq = 0.25 * i;
+                const juce::MidiBuffer in = i == 0 ? held : juce::MidiBuffer {};
+                juce::MidiBuffer oa, ob, oc;
+                a.process(pa, clock, block, in, oa);
+                b.process(pb, clock, block, in, ob);
+                c.process(pc, clock, block, in, oc);
+                for (const auto& e : collect(oa)) onsA += e.on ? 1 : 0;
+                for (const auto& e : collect(ob)) onsB += e.on ? 1 : 0;
+                for (const auto& e : collect(oc)) onsC += e.on ? 1 : 0;
+            }
+            expectEquals(onsA, 2, "1/4 fires twice a bar");
+            expectEquals(onsB, 4, "1/8 fires four times a bar");
+            expectEquals(onsC, 6, "and a 1/8 triplet six times - three against two");
+        }
+
+        beginTest("a note handed to one line never reaches another");
+        {
+            // The routing rule, stated at the level the engine can see it: an engine's held set
+            // is built from the buffer it was given and nothing else. The processor's job is to
+            // give each line its own buffer (see KeysProcessor::runArpLines); this is the half
+            // that says a shared engine would have been wrong.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            juce::MidiBuffer oa, ob;
+            clock.ppq = 0.0;
+            a.process(p, clock, block, chordOn({ 60, 64, 67 }), oa);
+            b.process(p, clock, block, {}, ob);
+            expectEquals(a.heldNoteCount(), 3, "the line that was handed the chord holds it");
+            expectEquals(b.heldNoteCount(), 0, "the one that was not, holds nothing");
+            expect(collect(ob).empty(), "and plays nothing");
+
+            // Releasing on one line leaves the other's held set alone, which is the failure a
+            // pitch-ownership mask would have produced: one note-off, two engines, both let go.
+            juce::MidiBuffer offB;
+            offB.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+            juce::MidiBuffer oa2, ob2;
+            clock.ppq = 0.25;
+            b.process(p, clock, block, offB, ob2);
+            a.process(p, clock, block, {}, oa2);
+            expectEquals(a.heldNoteCount(), 3, "a note-off on B does not unhold A");
+        }
+
+        beginTest("each line's lanes are its own");
+        {
+            // Lanes live on the engine, so three engines is three patterns with no extra work.
+            // Worth a check all the same: the panel writes lanes through whichever line its
+            // tabs have selected, and one shared Lanes would have made every tab draw the same.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            a.lanes.value[ArpEngine::laneNote][0].store(-1); // A mutes its first step
+            b.lanes.value[ArpEngine::laneNote][0].store(0);
+
+            auto pat = p;
+            pat.usePattern = true;
+            juce::MidiBuffer oa, ob;
+            clock.ppq = 0.0;
+            a.process(pat, clock, block, chordOn({ 60 }), oa);
+            b.process(pat, clock, block, chordOn({ 60 }), ob);
+            expect(collect(oa).empty(), "A's first step is muted");
+            expect(! collect(ob).empty(), "B's is not");
+        }
     }
 };
 

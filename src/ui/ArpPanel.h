@@ -56,6 +56,28 @@ public:
     int preferredHeight() const;
     std::function<void()> onPreferredHeightChanged;
 
+    // Which of the three arpeggiator lines everything on this panel is editing: the band, the
+    // step lanes, the twelve slots, Bars and Chain. One row of controls, three lines behind
+    // it, chosen by the A/B/C tabs at the left of the slot row. It is the processor's state
+    // rather than the panel's, because a click on a chord card feeds the same line and the
+    // Pads bar has to be able to say so with this panel folded away.
+    int editLine() const;
+    void setEditLine(int line);
+    // Told when a tab is clicked, so the editor can move the Pads bar's letter chip with it.
+    std::function<void()> onEditLineChanged;
+
+    // A drop target for a chord card dragged out of the pad strip, in screen coordinates:
+    // the slot card under `screenPos`, or -1. Mirrors ChordPads::externalDropSlotAt, and for
+    // the same reason - the two surfaces can be in different top-level windows, so the editor
+    // that holds both passes screen positions between them.
+    int externalDropSlotAt(juce::Point<int> screenPos) const;
+    // Same, for the line tabs: the line under `screenPos`, or -1. A card dropped on a tab is
+    // handed to that line there and then, without going through a slot.
+    int externalDropLineAt(juce::Point<int> screenPos) const;
+    // Paint the slot or tab a drag is currently over (-1 = none). Set by the editor while a
+    // card is being dragged, so the target lights up before the mouse is released.
+    void setExternalDropTarget(int slot, int lineTab);
+
     // LaneGrid and MuteRow are implementation detail, but public: their member
     // functions are defined out-of-line in ArpPanel.cpp, which needs to name them,
     // and a private nested class cannot be named outside ArpPanel's own members.
@@ -68,7 +90,10 @@ public:
     class LaneGrid : public juce::Component
     {
     public:
-        LaneGrid(KeysProcessor&, ArpEngine::Lane, int loVal, int hiVal);
+        // `owner` is asked which line is being edited on every read and write, rather than
+        // being handed an index: the tabs change it under these grids, and a copy taken at
+        // construction would leave them drawing whichever line was up when the panel opened.
+        LaneGrid(KeysProcessor&, const ArpPanel& owner, ArpEngine::Lane, int loVal, int hiVal);
 
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
@@ -83,6 +108,7 @@ public:
         juce::String cellText(int value) const;
 
         KeysProcessor& processor;
+        const ArpPanel& owner;
         ArpEngine::Lane lane;
         int loVal, hiVal;
         bool dragging = false;
@@ -98,7 +124,7 @@ public:
     class MuteRow : public juce::Component
     {
     public:
-        explicit MuteRow(KeysProcessor&);
+        MuteRow(KeysProcessor&, const ArpPanel& owner); // `owner` names the line; see LaneGrid
 
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
@@ -110,6 +136,7 @@ public:
         void applyAtX(float x);
 
         KeysProcessor& processor;
+        const ArpPanel& owner;
         bool dragging = false;
         int paintValue = 0; // the value (-1 or 0) this drag is painting
 
@@ -124,18 +151,45 @@ public:
     class SlotCard : public juce::Button
     {
     public:
-        SlotCard(KeysProcessor&, int index);
+        SlotCard(KeysProcessor&, const ArpPanel& owner, int index);
 
         void paintButton(juce::Graphics&, bool over, bool down) override;
         void mouseDown(const juce::MouseEvent&) override;
 
         std::function<void()> onRightClick;
+        // Lit while a chord card dragged out of the pad strip is over this slot. The drop
+        // itself is the editor's to deliver: the drag never leaves the strip's mouse capture,
+        // so this card is never told about it by JUCE.
+        void setDropTarget(bool);
 
     private:
         KeysProcessor& processor;
+        const ArpPanel& owner;
         int index;
+        bool dropTarget = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SlotCard)
+    };
+
+    // One of the three A/B/C tabs at the left of the slot row. It selects the line the whole
+    // panel edits, and says what that line is doing: lit when the line is on, and carrying the
+    // name of the chord it is holding, so three tabs read as three arpeggiators at a glance.
+    // A chord card can also be dropped straight onto one.
+    class LineTab : public juce::Button
+    {
+    public:
+        LineTab(KeysProcessor&, const ArpPanel& owner, int line);
+
+        void paintButton(juce::Graphics&, bool over, bool down) override;
+        void setDropTarget(bool);
+
+    private:
+        KeysProcessor& processor;
+        const ArpPanel& owner;
+        int line;
+        bool dropTarget = false;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LineTab)
     };
 
 private:
@@ -155,6 +209,14 @@ private:
 
     void timerCallback() override;
     void buildControls();
+    // Every APVTS attachment on the panel, bound to the current line's parameter ids. Called
+    // once from the constructor and again whenever a tab changes the line: an attachment names
+    // one parameter for its whole life, so switching lines means building new ones. The rate
+    // dial has done exactly this for its two units since the Hz mode landed (refreshRateMode),
+    // including the guard against swapping one out from under an open drag.
+    void buildAttachments();
+    // This line's id for a parameter, e.g. "arpRate" on A and "arp2Rate" on B.
+    juce::String paramId(KeysProcessor::ArpParam) const;
     void buildLaneRow(LaneRow&, ArpEngine::Lane, const juce::String& name, int loVal, int hiVal);
     void selectLane(int lane);
     void nudgeLength(int delta); // selected lane, or every lane while Link is on
@@ -198,6 +260,9 @@ private:
     juce::Rectangle<int> cardBounds() const;
 
     bool inlineMode = false;
+    // The line every control on this panel is bound to. Seeded from the processor, which is
+    // where it lives (the panel is destroyed every time the section folds).
+    int editedLine = 0;
     int lastPatternMode = -1; // -1 = not yet laid out; else the last bool seen
     int lastRateFree = -1;    // same trick for the rate mode: -1 = no attachment installed yet
     // Is the rate dial being dragged right now? A drag is an open parameter gesture, and the
@@ -255,6 +320,9 @@ private:
     // Twelve slot cards, alive in both shapes: launching a chord is as useful on a plain
     // "Up" as it is on an edited pattern, so unlike the lane editor these never hide.
     std::array<std::unique_ptr<SlotCard>, KeysProcessor::numArpPatterns> slotCards;
+    // The three line tabs, at the left of that same row. They cost no height: the slot row is
+    // 58 px and a tab is the mouse-only 34, centred in it.
+    std::array<std::unique_ptr<LineTab>, KeysProcessor::numArpLines> lineTabs;
     juce::TextButton copyButton { "Copy" };
     juce::TextButton clearButton { "Clear" };
     juce::TextButton cancelButton { "Cancel" };

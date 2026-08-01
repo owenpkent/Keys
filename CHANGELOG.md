@@ -5,6 +5,56 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: three arpeggiators, so Keys can hold a polyrhythm
+
+Owen: "I had the idea of having three arpeggiators so we can get polyrhythms and keep keeping
+what we currently have, but having three of them, and then being able to feed cards into
+different lines so we can really get some interesting things."
+
+Keys now runs **three independent arpeggiator lines, A, B and C**. Each has its own rate, shape,
+step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet against 1/4 is three
+chips and two dials rather than three instances of the plugin.
+
+- **The arp bar carries A, B and C** where a single On used to be. Each is that line's power
+  switch, and it stays on the bar so a line can be brought in or out with the section folded.
+  **Hold off is still one button** and still means "let go": it releases every line and stops
+  every chain, because a hold you cannot see is a hold you cannot find.
+- **Three tabs at the left of the slot row pick the line the panel edits.** The band, the step
+  lanes, the twelve slot cards, Bars and Chain all follow the tab. **The panel is exactly as
+  tall as it was** - a tab is 34 px inside a row that was already 58.
+- **Cards go where you aim them.** A click on a chord card feeds the *current* line, shown as a
+  letter chip on the Pads bar next to Fill and Regen (click to cycle A, B, C) and mirrored by
+  the tabs. A card that is feeding a line wears that line's letter in its ring.
+- **Drag a chord card onto an arp slot to bind it there**, or onto a line tab to hand it over
+  now. This is the left-click twin *Send to arp slot* has never had - that menu item was an
+  owner-sanctioned exception because binding to one slot needs a target picker, and a drag is
+  one. The menu item stays, as the accelerator it always was.
+- **Keys**, per line: whether that line arpeggiates what you play, or only the chords you hand
+  it. On by default for all three, so switching a line on and playing does something.
+- **Channel**, per line: Global, or 1-16, for driving three different sounds in a multitimbral
+  rack. It buys nothing in Keys Host until the hosted instrument is itself multitimbral.
+
+**Nothing about the arpeggiator you already have has changed.** Line A registers under exactly
+the parameter ids it always has - `arpRate`, `arpSwing`, `arpDirection` - so every saved session,
+every automation lane and every MCP script still lands on the arp it was written for. B and C are
+`arp2*` / `arp3*`, appended, and both start switched off: a session saved before this opens
+sounding identical. Its twelve slots still sit exactly where they did in the saved tree, with B
+and C's hanging off child nodes an older build simply ignores.
+
+**Two parameters do appear on line A**: `arpKeys` and `arpChannel`. Both default to what Keys did
+before there were lines (listen to the keys; use the global channel), so an older session is
+unaffected either way.
+
+`ArpEngine.h` is untouched. It never knew how many of it there were, which is why three of them
+cost a routing layer and no engine work. That layer is per-line MIDI queues rather than a
+per-pitch ownership mask: a mask lets the message thread clear a pitch's owner before the
+matching note-off has been drained, which strands that note in an engine's held set with nothing
+left that can release it. The `noteRefs` refcount is now per destination stream for the same
+reason - a pitch held into line B must not suppress the same pitch played to the track output.
+
+MCP: `get_arp_pattern`, `set_arp_pattern`, `recall_arp_pattern` and `store_arp_pattern` take an
+optional `line` (0-2), defaulting to 0, and `get_state` reports all three.
+
 ### Added: the chord generator opens with sixteen chords you can hear before you keep one
 
 Owen: "when you open the chord generator page, it should open up. I have four by four pad where

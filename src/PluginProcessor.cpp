@@ -174,11 +174,49 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "uiLayout", 1 }, "Layout",
                                                       StringArray { "Classic", "Performer" }, 0));
 
-    // Arpeggiator globals (docs/ARP_DESIGN.md). Dot/Trip are separate toggles rather
-    // than entries in the rate list so automating the rate stays on even divisions
-    // (Serum's documented rationale); Anchor picks bar-affixed vs free-running.
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpOn", 1 }, "Arp", false));
-    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRate", 1 }, "Arp Rate",
+    // Arpeggiator globals, three lines' worth (docs/ARP_DESIGN.md). See addArpLineParams.
+    for (int line = 0; line < numArpLines; ++line)
+        addArpLineParams(layout, line);
+
+    // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
+    // A host that is *playing* always wins: this is what Keys runs at when there is no
+    // transport to follow, which is every moment in the standalone and every stopped
+    // transport in a DAW.
+    //
+    // Appended rather than slotted in beside the arp's other controls, to keep the shuffling
+    // of this layout to a minimum. It is only a tidiness argument: Keys ships VST3 and
+    // Standalone, and JUCE derives a VST3 parameter's id by hashing its string id, so saved
+    // state and existing automation follow the id and not the position. What position still
+    // decides is the order a host's generic parameter list shows - and chordStrumMax above
+    // does insert mid-list, so this branch moves that order regardless.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
+
+    return layout;
+}
+
+// One arpeggiator line's parameters. Dot/Trip are separate toggles rather than entries in the
+// rate list so automating the rate stays on even divisions (Serum's documented rationale);
+// Anchor picks bar-affixed vs free-running.
+//
+// Called three times (2026-08-01, the polyrhythm lines). Line 0 registers under exactly the
+// ids and names it always has - "arpRate", "Arp Rate" - so every saved session, every
+// automation lane and every MCP script still lands on the arpeggiator it was written for; B
+// and C are this same list again under "arp2Rate" / "arp3Rate", named "Arp B" / "Arp C".
+//
+// One function rather than three copies, so a control cannot exist on one line and not
+// another and the ranges and defaults are provably identical. Order inside it matters as much
+// as it ever did: these are appended, never inserted, and the choice parameters among them
+// (Rate, Direction, Distance, Retrigger Every) store a plain index.
+void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::ParameterLayout& layout, int line)
+{
+    using namespace juce;
+
+    const auto id = [line](const char* suffix) { return arpParamId(line, suffix); };
+    const String nm = line == 0 ? String("Arp")
+                                : "Arp " + String::charToString((juce_wchar) ('A' + line));
+
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("On"), 1 }, nm, false));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Rate"), 1 }, nm + " Rate",
                                                       StringArray { "16 bars", "8 bars", "4 bars", "2 bars", "1 bar",
                                                                     "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" }, 8));
     // The same rate as a free-running frequency, and a switch between the two. Both added
@@ -204,7 +242,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     //
     // Default 8 Hz = 1/16 at 120 bpm, matching arpRate's own default, so flipping the switch
     // at a default tempo changes the sound not at all - only what the rate is tied to.
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpRateFree", 1 }, "Arp Rate Free", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("RateFree"), 1 }, nm + " Rate Free", false));
     {
         // JUCE clamps the proportion going in and the result coming out, so these two only
         // have to guard the log against a value at or below zero.
@@ -214,7 +252,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
             [](float lo, float hi, float v) { return std::log(jlimit(lo, hi, v) / lo) / std::log(hi / lo); }
         };
         layout.add(std::make_unique<AudioParameterFloat>(
-            ParameterID { "arpRateHz", 1 }, "Arp Rate Hz", hzRange, 8.0f,
+            ParameterID { id("RateHz"), 1 }, nm + " Rate Hz", hzRange, 8.0f,
             AudioParameterFloatAttributes()
                 // No .withLabel("Hz"): the suffix is already in the text below, and a host
                 // that renders value-plus-unit printed "8.00 Hz Hz". The in-plugin readout is
@@ -227,14 +265,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
                 })
                 .withValueFromStringFunction([](const String& s) { return s.getFloatValue(); })));
     }
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpDot", 1 }, "Arp Dotted", false));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrip", 1 }, "Arp Triplet", false));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpAnchor", 1 }, "Arp Anchor", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Dot"), 1 }, nm + " Dotted", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Trip"), 1 }, nm + " Triplet", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Anchor"), 1 }, nm + " Anchor", true));
     // The four shapes after "Reversed" were appended in 2026-07-30 and had to go on the end:
     // this is a choice parameter, and inserting anywhere else renumbers what every saved
     // session and automation lane already holds. The Shape combo lists them in this order and
     // puts "Pattern" last, which is a display decision the panel makes, not this list.
-    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDirection", 1 }, "Arp Direction",
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Direction"), 1 }, nm + " Direction",
                                                       StringArray { "Up", "Down", "Up-Down", "Down-Up",
                                                                     "Up & Down", "Down & Up", "As Played", "Reversed",
                                                                     "Random", "Random Other", "Random Once", "Chord" }, 0));
@@ -244,23 +282,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // that had per-step lane edits now plays as a plain shape until Shape is set back
     // to "Pattern". That is deliberate (the step grid was the confusing part) and is
     // called out in the changelog.
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpPattern", 1 }, "Arp Pattern", false));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLinkLanes", 1 }, "Arp Link Lanes", true));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOctaves", 1 }, "Arp Octaves", 1, 4, 1));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Pattern"), 1 }, nm + " Pattern", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("LinkLanes"), 1 }, nm + " Link Lanes", true));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Octaves"), 1 }, nm + " Octaves", 1, 4, 1));
     // Swing goes both ways from a centred zero (2026-07-27, Owen's ask). Positive delays the
     // offbeats, the shuffle everyone means by "swing"; negative pulls them early, which is
     // the rushed, on-top-of-the-beat feel you cannot get by delaying anything. The stored
     // value is absolute, not normalised, so a session saved on the old 0..0.75 range keeps
     // exactly the swing it had.
-    layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "arpSwing", 1 }, "Arp Swing",
+    layout.add(std::make_unique<AudioParameterFloat>(ParameterID { id("Swing"), 1 }, nm + " Swing",
                                                      NormalisableRange<float>(-0.75f, 0.75f, 0.01f), 0.0f));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpLatch", 1 }, "Arp Latch", false));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpRetrigger", 1 }, "Arp Retrigger", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Latch"), 1 }, nm + " Latch", false));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Retrigger"), 1 }, nm + " Retrigger", true));
     // Gate and Chance as globals as well as step lanes: the lanes only exist while Shape is
     // "Pattern", so on a plain shape there was no way to shorten the notes or thin the run
     // out. They multiply the lane value, so the defaults leave an edited pattern untouched.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpGate", 1 }, "Arp Gate", 5, 200, 100));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpChance", 1 }, "Arp Chance", 0, 100, 100));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Gate"), 1 }, nm + " Gate", 5, 200, 100));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Chance"), 1 }, nm + " Chance", 0, 100, 100));
 
     // The 2026-07-30 expansion, all appended and all defaulting to what the arp did before
     // them, so an older session sounds identical until one of them is moved.
@@ -269,39 +307,107 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // keyboard, Distance says how far each repeat goes. It defaulted to an octave forever
     // because that was hardcoded. The scale-relative entries are the ones no stock arp has -
     // "a third" that follows Root and Scale rather than a fixed three or four semitones.
-    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDistance", 1 }, "Arp Distance",
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Distance"), 1 }, nm + " Distance",
                                                       StringArray { "Octave", "5th", "4th", "Maj 3rd", "min 3rd",
                                                                     "Scale 2nd", "Scale 3rd", "Scale 5th", "Scale 7th" }, 0));
     // Where the pattern starts. Rotates the lane reads and the direction walk together, so
     // "the same run, heard from its third note" is one control rather than a re-drawn lane.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOffset", 1 }, "Arp Offset", 0, 31, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Offset"), 1 }, nm + " Offset", 0, 31, 0));
     // Retrigger's other half, after Ableton: the toggle restarts on a new chord, this
     // restarts on the clock, so a 5-step lane can still land on the bar.
-    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRetrigBars", 1 }, "Arp Retrigger Every",
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("RetrigBars"), 1 }, nm + " Retrigger Every",
                                                       StringArray { "Off", "1 Beat", "2 Beats", "1 Bar", "2 Bars", "4 Bars" }, 0));
     // Velocity ramp: over Ramp Time from the moment a chord starts, velocity scales toward
     // (100 + Ramp)%. Negative fades a held chord out, positive swells it.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpVelRamp", 1 }, "Arp Velocity Ramp", -100, 100, 0));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpRampBeats", 1 }, "Arp Ramp Time", 1, 32, 8));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelRamp"), 1 }, nm + " Velocity Ramp", -100, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("RampBeats"), 1 }, nm + " Ramp Time", 1, 32, 8));
     // One knob of "played, not programmed": nudges each hit late and takes a little off its
     // velocity. The arp has never been humanized - Humanize proper lives in noteOn, which the
     // arp's own notes never pass through - so this is the first thing that touches its feel.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpHumanize", 1 }, "Arp Humanize", 0, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Humanize"), 1 }, nm + " Humanize", 0, 100, 0));
 
-    // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
-    // A host that is *playing* always wins: this is what Keys runs at when there is no
-    // transport to follow, which is every moment in the standalone and every stopped
-    // transport in a DAW.
+    // The two the lines brought with them, and the only parameters an older session sees
+    // appear on line 0. Both default to what Keys did before there were lines, so a session
+    // saved without them opens sounding the same.
     //
-    // Appended rather than slotted in beside the arp's other controls, to keep the shuffling
-    // of this layout to a minimum. It is only a tidiness argument: Keys ships VST3 and
-    // Standalone, and JUCE derives a VST3 parameter's id by hashing its string id, so saved
-    // state and existing automation follow the id and not the position. What position still
-    // decides is the order a host's generic parameter list shows - and chordStrumMax above
-    // does insert mid-list, so this branch moves that order regardless.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
+    // Keys: does this line arpeggiate what you play, or only the chords you hand it? On for
+    // all three, because a line you have just switched on doing nothing until you find a
+    // second toggle is a line that reads as broken. Turn it off and that line becomes a
+    // card player, which is what makes a chord card on B independent of the keybed on A.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Keys"), 1 }, nm + " Keys", true));
+    // Where this line's notes go. Global is the old behaviour and the one to keep for a
+    // single instrument downstream; naming a channel is for a multitimbral rack, where the
+    // three lines can drive three different sounds. Note this buys nothing in Keys Host until
+    // the hosted instrument is itself multitimbral - it is for the DAW case.
+    {
+        StringArray channels { "Global" };
+        for (int ch = 1; ch <= 16; ++ch)
+            channels.add(String(ch));
+        layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Channel"), 1 },
+                                                          nm + " Channel", channels, 0));
+    }
+}
 
-    return layout;
+// The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
+// the UI's attachments and createLayout's registrations cannot drift apart. These strings are
+// the parameter ids: renaming one loses that setting out of every saved session.
+const char* KeysProcessor::arpParamSuffix(int which)
+{
+    static const char* const suffixes[numArpParams] = {
+        "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
+        "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
+        "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel"
+    };
+    return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
+}
+
+float KeysProcessor::arpParam(int line, ArpParam which) const
+{
+    const auto* p = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].param[(size_t) which];
+    return p != nullptr ? p->load() : 0.0f;
+}
+
+// Line 0 is the arpeggiator Keys has always had, so its ids are the bare ones every saved
+// session already carries. B and C take a digit after "arp" - "arp2Rate" - which is a name no
+// earlier version ever wrote, so nothing collides and nothing has to be migrated.
+juce::String KeysProcessor::arpParamId(int line, juce::StringRef suffix)
+{
+    const int n = juce::jlimit(0, numArpLines - 1, line);
+    return n == 0 ? "arp" + juce::String(suffix)
+                  : "arp" + juce::String(n + 1) + juce::String(suffix);
+}
+
+ArpEngine& KeysProcessor::arpLine(int line)
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine;
+}
+
+const ArpEngine& KeysProcessor::arpLine(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine;
+}
+
+bool KeysProcessor::arpLineOn(int line) const
+{
+    return apvts.getRawParameterValue(arpParamId(line, "On"))->load() > 0.5f;
+}
+
+bool KeysProcessor::cardsFeedArp() const
+{
+    for (int n = 0; n < numArpLines; ++n)
+        if (arpLineOn(n))
+            return true;
+    return false;
+}
+
+int KeysProcessor::arpCurrentLine() const
+{
+    return juce::jlimit(0, numArpLines - 1, layout.arpLine);
+}
+
+void KeysProcessor::setArpCurrentLine(int line)
+{
+    layout.arpLine = juce::jlimit(0, numArpLines - 1, line);
 }
 
 KeysProcessor::KeysProcessor()
@@ -313,6 +419,15 @@ KeysProcessor::KeysProcessor()
    #endif
       apvts(*this, nullptr, "PARAMS", createLayout())
 {
+    // Resolve every line's parameters once. The audio thread reads through these pointers and
+    // therefore never builds an id string or hashes one; see ArpParam.
+    for (int n = 0; n < numArpLines; ++n)
+        for (int p = 0; p < numArpParams; ++p)
+        {
+            lines[(size_t) n].param[(size_t) p] = apvts.getRawParameterValue(arpParamId(n, arpParamSuffix(p)));
+            jassert(lines[(size_t) n].param[(size_t) p] != nullptr); // a suffix with no parameter behind it
+        }
+
     // 50 Hz. It only ever notices things, so the rate is about how late a chord change is
     // allowed to be: 20 ms is comfortably inside a 1/16 step at any tempo anyone plays at,
     // and the arp itself stays anchored to the bar grid regardless.
@@ -401,8 +516,9 @@ void KeysProcessor::clearChordPad(int i)
     // rang on with no owner: the strip only draws the "feeding the arp" ring on a *filled*
     // pad, and only a filled pad accepts the click that releases it, so the chord became
     // unreachable except through All Off.
-    if (i == arpPadSlot)
-        releaseArpChord();
+    // Whichever line is holding it; a card can only be feeding one at a time.
+    if (const int line = arpLineHoldingPad(i); line >= 0)
+        releaseArpChord(line);
     chordPads[(size_t) i] = {};
 }
 
@@ -421,10 +537,14 @@ void KeysProcessor::moveChordPad(int from, int to)
     stopChordPad(to);
     std::swap(chordPads[(size_t) from], chordPads[(size_t) to]);
     // The "feeding the arp" ring belongs to the card, not to the slot it happens to sit in.
-    if (arpPadSlot == from)
-        arpPadSlot = to;
-    else if (arpPadSlot == to)
-        arpPadSlot = from;
+    // Both directions on every line: two lines can be holding the two cards being swapped.
+    for (auto& ln : lines)
+    {
+        if (ln.padSlot == from)
+            ln.padSlot = to;
+        else if (ln.padSlot == to)
+            ln.padSlot = from;
+    }
 }
 
 void KeysProcessor::stopChordPad(int i)
@@ -434,7 +554,7 @@ void KeysProcessor::stopChordPad(int i)
     releaseNotes(chordPadOn[(size_t) i], i);
 }
 
-void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag)
+void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag, int dest)
 {
     // Drop what this source still has queued, and release the rest — but *only* the rest.
     //
@@ -456,7 +576,7 @@ void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag)
         if (it != cancelled.end())
             cancelled.erase(it); // never fired; there is no reference here to give back
         else
-            noteOff(n);
+            noteOff(n, 0, 0.0, dest); // the stream its note-on went into, or the reference leaks
     }
     sounding.clear();
 }
@@ -470,7 +590,8 @@ void KeysProcessor::stopAllChordPads()
     // chord held into the arp as well, or a lit Exclusive quietly does nothing in one
     // direction and the chords pile up.
     releaseLiveChord(true);
-    releaseArpChord();
+    for (int n = 0; n < numArpLines; ++n)
+        releaseArpChord(n);
 }
 
 void KeysProcessor::pressChordPad(int i)
@@ -492,7 +613,7 @@ void KeysProcessor::pressChordPad(int i)
     chordPadOn[(size_t) i] = fireChord(chordPads[(size_t) i].notes, i);
 }
 
-std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int tag)
+std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int tag, int dest)
 {
     // Honour the Voices cap. The keyboard steals oldest-first across its own notes; a chord
     // fires as one gesture, so there is no "oldest" within it — drop the highest notes and
@@ -531,7 +652,7 @@ std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int ta
         const double delayMs = (count > 1 && strumMs > 0.0)
                                    ? strumMs * (double) k / (double) (count - 1)
                                    : 0.0;
-        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, tag); // noteOn adds Humanize per note
+        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, tag, dest); // noteOn adds Humanize per note
     }
     return notes;
 }
@@ -556,16 +677,17 @@ void KeysProcessor::releaseLiveChord(bool force)
     releaseNotes(liveChordOn, liveChordTag);
 }
 
-void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot)
+void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot,
+                                   int dest)
 {
     if (delayMs <= 0.0)
     {
-        noteOn(note, vel01, 0.0, channel);
+        noteOn(note, vel01, 0.0, channel, dest);
         return;
     }
 
     const double at = juce::Time::getMillisecondCounterHiRes() + delayMs;
-    const DeferredNote d { note, vel01, channel, at, padSlot };
+    const DeferredNote d { note, vel01, channel, at, padSlot, dest };
     // Keep sorted by due time, so timerCallback only ever inspects the front.
     deferred.insert(std::upper_bound(deferred.begin(), deferred.end(), at,
                                      [](double t, const DeferredNote& n) { return t < n.atMs; }),
@@ -613,7 +735,7 @@ void KeysProcessor::timerCallback()
         const std::vector<DeferredNote> firing(deferred.begin(), deferred.begin() + (long) due);
         deferred.erase(deferred.begin(), deferred.begin() + (long) due);
         for (const auto& n : firing)
-            noteOn(n.note, n.vel01, 0.0, n.channel);
+            noteOn(n.note, n.vel01, 0.0, n.channel, n.dest);
     }
 
     if (deferred.empty())
@@ -629,10 +751,19 @@ void KeysProcessor::releaseChordPad(int i)
     stopChordPad(i);
 }
 
-void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, int channelOverride)
+juce::MidiMessageCollector& KeysProcessor::collectorFor(int dest)
+{
+    if (dest >= 1 && dest <= numArpLines)
+        return lines[(size_t) (dest - 1)].collector;
+    return collector;
+}
+
+void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, int channelOverride,
+                           int dest)
 {
     if (midiNote < 0 || midiNote > 127)
         return;
+    dest = juce::jlimit(0, numArpLines, dest);
     const int channel = (channelOverride >= 1 && channelOverride <= 16) ? channelOverride : midiChannel();
 
     // Humanize (Octavium logic): pick a uniform-random velocity within the [min, max]
@@ -669,34 +800,39 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     // global channel - and the MCP bridge is the only caller that passes one (see
     // KeysMcp.cpp). Anything that gives a surface a channel of its own has to make noteRefs
     // per channel first, or it will silently eat the second source's notes.
-    const bool alreadySounding = noteRefs[(size_t) midiNote].fetch_add(1) > 0;
+    //
+    // The count is per *destination* since the arp lines arrived: the rule is about one
+    // stream, and a pitch held into line B has nothing to say about the same pitch being
+    // played to the track output. See the declaration of noteRefs.
+    const bool alreadySounding = noteRefs[(size_t) dest][(size_t) midiNote].fetch_add(1) > 0;
     if (! alreadySounding)
     {
         auto m = juce::MidiMessage::noteOn(channel, midiNote, juce::jlimit(0.04f, 1.0f, velocity01));
         m.setTimeStamp(when);
-        collector.addMessageToQueue(m);
+        collectorFor(dest).addMessageToQueue(m);
     }
     soundingGen.fetch_add(1);
 }
 
-void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySeconds)
+void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySeconds, int dest)
 {
     if (midiNote < 0 || midiNote > 127)
         return;
+    dest = juce::jlimit(0, numArpLines, dest);
     const int channel = (channelOverride >= 1 && channelOverride <= 16) ? channelOverride : midiChannel();
 
     // The other half of the ownership rule in noteOn: the pitch ends when the LAST owner
     // lets go, not the first. Clamp at zero, because a note-off with no matching note-on
     // (panic, a pad released twice) must not push the count negative and leave the key lit
     // forever - and must not emit a stray note-off either.
-    auto& ref = noteRefs[(size_t) midiNote];
+    auto& ref = noteRefs[(size_t) dest][(size_t) midiNote];
     int cur = ref.load();
     while (cur > 0 && ! ref.compare_exchange_weak(cur, cur - 1)) {}
     if (cur == 1) // this owner was the last one
     {
         auto m = juce::MidiMessage::noteOff(channel, midiNote);
         m.setTimeStamp(nowSeconds() + delaySeconds);
-        collector.addMessageToQueue(m);
+        collectorFor(dest).addMessageToQueue(m);
     }
     soundingGen.fetch_add(1);
 }
@@ -708,7 +844,15 @@ bool KeysProcessor::isNoteSounding(int midiNote) const
     // Notes arriving on the input count as sounding for display: Keys passes them through
     // to the same instrument its own notes go to, so on screen they *are* sounding, and the
     // keybed lights them through exactly the path a chord pad's notes already take.
-    return noteRefs[(size_t) midiNote].load() > 0 || inputNoteOn[(size_t) midiNote].load();
+    //
+    // Any destination, not only the track output: a chord held into an arp line is being
+    // played, and the card that holds it and the keybed under it both have to say so. It is
+    // the arp's own notes that are not counted here, and never have been - they never pass
+    // through noteOn at all.
+    for (const auto& dest : noteRefs)
+        if (dest[(size_t) midiNote].load() > 0)
+            return true;
+    return inputNoteOn[(size_t) midiNote].load();
 }
 
 void KeysProcessor::watchInputNotes(const juce::MidiBuffer& midi)
@@ -769,21 +913,30 @@ void KeysProcessor::allNotesOff()
     // is deliberately gone.
     cancelScheduledNotes(panicTag); // nothing queued may fire after a panic
     const double t = nowSeconds();
-    for (int ch = 1; ch <= 16; ++ch)
+    // Every stream, not only the track output. An arp line's input queue can be holding a
+    // chord this panic is meant to end, and its engine only lets go when a note-off reaches
+    // it - so a panic that skipped the line collectors would silence the output while three
+    // engines carried on arpeggiating chords nothing could release.
+    for (int dest = 0; dest <= numArpLines; ++dest)
     {
-        for (int note = 0; note < 128; ++note)
+        auto& queue = collectorFor(dest);
+        for (int ch = 1; ch <= 16; ++ch)
         {
-            auto off = juce::MidiMessage::noteOff(ch, note);
-            off.setTimeStamp(t);
-            collector.addMessageToQueue(off);
+            for (int note = 0; note < 128; ++note)
+            {
+                auto off = juce::MidiMessage::noteOff(ch, note);
+                off.setTimeStamp(t);
+                queue.addMessageToQueue(off);
+            }
+            auto m = juce::MidiMessage::allNotesOff(ch);
+            m.setTimeStamp(t);
+            queue.addMessageToQueue(m);
         }
-        auto m = juce::MidiMessage::allNotesOff(ch);
-        m.setTimeStamp(t);
-        collector.addMessageToQueue(m);
     }
 
-    for (auto& ref : noteRefs)
-        ref.store(0);
+    for (auto& dest : noteRefs)
+        for (auto& ref : dest)
+            ref.store(0);
     soundingGen.fetch_add(1);
 
     // All Off clears the input lights too. Keys cannot make someone's physical keyboard let
@@ -794,17 +947,23 @@ void KeysProcessor::allNotesOff()
     // The chord held into the arp is the one thing here that outlives a note-off, so a
     // panic has to forget it too - otherwise All Off silences it while the launched slot
     // still paints as playing and the next launch tries to release notes already gone.
-    arpChordOn.clear();
-    arpChordName = {};
-    launchedSlot = -1;
-    arpPadSlot = -1;
+    // All three lines: a panic that left B holding is a panic that did not happen.
+    for (auto& l : lines)
+    {
+        l.chordOn.clear();
+        l.chordName = {};
+        l.launchedSlot = -1;
+        l.padSlot = -1;
+    }
 
     // And the Chain, for the same reason releaseArpHold() stops it: forgetting the chord is
     // only true until the next bar line, when heartbeatTick() launches the following slot and
     // the progression comes back out of a button whose whole job is silence. Last, not first,
-    // so the clears above have already emptied arpChordOn: stopChain() ends in releaseArpChord(),
-    // which would otherwise emit note-offs for references the panic loop has just zeroed.
-    stopChain();
+    // so the clears above have already emptied every chordOn: stopChain() ends in
+    // releaseArpChord(), which would otherwise emit note-offs for references the panic loop
+    // has just zeroed.
+    for (int n = 0; n < numArpLines; ++n)
+        stopChain(n);
 }
 
 void KeysProcessor::sendCC(int controller, int value)
@@ -824,8 +983,18 @@ void KeysProcessor::sendPitchBend(int value14)
 void KeysProcessor::prepareToPlay(double sampleRate, int)
 {
     collector.reset(sampleRate);
-    arp.prepare(sampleRate);
-    arpScratch.ensureSize(8192);
+    // Every buffer the arp stage touches is sized here and never grown on the audio thread.
+    // Seven of them now rather than one: three inputs, three outputs, and the keybed's notes
+    // lifted out of the merged stream for the lines that listen to it.
+    keyNotes.ensureSize(8192);
+    streamRest.ensureSize(8192);
+    for (auto& l : lines)
+    {
+        l.collector.reset(sampleRate);
+        l.engine.prepare(sampleRate);
+        l.in.ensureSize(8192);
+        l.out.ensureSize(8192);
+    }
 }
 
 bool KeysProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -852,45 +1021,148 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     // track's MIDI (a clip, another device) is left in place and passes through.
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
 
-    // Arp stage: consumes the note stream, emits its own; CCs pass through. The
-    // engine reads the host playhead (the one deliberate exception to Keys' old
-    // never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-runs on an
-    // internal clock at the last-known tempo when the transport is stopped.
-    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
-    if (arpOn != lastArpOn)
+    // Arp stage: three lines, each consuming its own note stream and emitting its own; CCs
+    // pass through. The engines read the host playhead (the one deliberate exception to Keys'
+    // old never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-run on an internal
+    // clock at the last-known tempo when the transport is stopped.
+    runArpLines(midi, buffer.getNumSamples());
+
+    advanceChainClock(buffer.getNumSamples());
+}
+
+namespace
+{
+// Merge one arp line's notes into the outgoing stream, on the channel that line names. The
+// restamp covers the *whole* buffer rather than the note-ons alone: a note that ends on a
+// channel it never started on is a note that never ends, since the instrument downstream is
+// matching pitch and channel. Channel 0 means "leave it alone", which is the global channel
+// the notes already carry and by far the common case, so it costs a branch and no copy.
+void mergeArpOut(juce::MidiBuffer& dest, const juce::MidiBuffer& src, int channel)
+{
+    if (channel <= 0)
     {
-        lastArpOn = arpOn;
-        if (arpOn)
-            arp.hardReset();
-        else
-            arp.flushInto(midi); // nothing may ring after bypassing
+        dest.addEvents(src, 0, -1, 0);
+        return;
     }
-    if (arpOn)
+    for (const auto meta : src)
     {
+        auto m = meta.getMessage();
+        if (m.getChannel() > 0) // 0 = a message with no channel of its own; leave those be
+            m.setChannel(juce::jlimit(1, 16, channel));
+        dest.addEvent(m, meta.samplePosition);
+    }
+}
+} // namespace
+
+// Audio thread. One line's worth of engine parameters, read through the cached pointers so
+// nothing here builds a string or takes a lock.
+void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
+{
+    // Which lines want the keys you play. A line that is off gets nothing: its input still
+    // arrives (a chord held to it sustains, below), but there is no engine running to hand
+    // the keybed to.
+    bool anyListens = false;
+    bool listens[numArpLines] = {};
+    for (int n = 0; n < numArpLines; ++n)
+    {
+        listens[(size_t) n] = arpLineOn(n) && arpParam(n, apKeys) > 0.5f;
+        anyListens = anyListens || listens[(size_t) n];
+    }
+
+    // Each line's own queue first. These are the chords handed to it - by a card, a slot or a
+    // chain - and they belong to that line whether or not it is also listening to the keys.
+    for (auto& l : lines)
+    {
+        l.in.clear();
+        l.collector.removeNextBlockOfMessages(l.in, numSamples);
+    }
+
+    // The keybed, the live card, a pad played straight, a clip on the track: all of it arrives
+    // in the merged stream, and any line that listens gets a copy. Lifting the notes out is
+    // what makes the arp replace them rather than double them, and it is skipped entirely when
+    // nobody is listening - which is exactly the behaviour of the arp being off.
+    if (anyListens)
+    {
+        keyNotes.clear();
+        streamRest.clear();
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            if (m.isNoteOn() || m.isNoteOff())
+                keyNotes.addEvent(m, meta.samplePosition);
+            else
+                streamRest.addEvent(m, meta.samplePosition);
+        }
+        midi.swapWith(streamRest);
+        for (int n = 0; n < numArpLines; ++n)
+            if (listens[(size_t) n])
+                lines[(size_t) n].in.addEvents(keyNotes, 0, numSamples, 0);
+    }
+
+    for (int n = 0; n < numArpLines; ++n)
+    {
+        auto& l = lines[(size_t) n];
+        const bool arpOn = arpLineOn(n);
+        l.out.clear();
+
+        // 0 = the global channel, 1..16 = this line's own. Read once a block, like everything
+        // else here, so a host automating it is seen at the next boundary.
+        const int channel = (int) arpParam(n, apChannel);
+
+        if (arpOn != l.lastOn)
+        {
+            l.lastOn = arpOn;
+            if (arpOn)
+                l.engine.hardReset();
+            else
+                l.engine.flushInto(l.out); // nothing may ring after bypassing
+        }
+        // A change of channel is a change of where the notes are going, so what is still
+        // ringing has to be closed on the channel it started on. Flushed and merged under the
+        // *old* channel before lastChannel moves, because restamping this line's whole output
+        // with the new one would send those note-offs somewhere the notes never sounded.
+        if (channel != l.lastChannel)
+        {
+            l.engine.flushInto(l.out);
+            mergeArpOut(midi, l.out, l.lastChannel);
+            l.out.clear();
+            l.lastChannel = channel;
+        }
+
+        if (! arpOn)
+        {
+            // Off: whatever was handed to this line simply sustains, which is the honest
+            // reading of holding a chord into an arpeggiator that is not running. Its own
+            // queue passes straight through; it never saw the keybed.
+            mergeArpOut(midi, l.in, channel);
+            mergeArpOut(midi, l.out, channel);
+            continue;
+        }
+
         ArpEngine::Params ap;
         ap.enabled = true;
-        ap.rateIndex = (int) apvts.getRawParameterValue("arpRate")->load();
+        ap.rateIndex = (int) arpParam(n, apRate);
         // Free: the rate is a frequency and the engine free-runs at it whatever the transport
         // is doing. Both read every block like every other arp global, so the mode can be
         // automated and the engine sees the change on the next boundary.
-        ap.rateFree = apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
-        ap.rateHz = (double) apvts.getRawParameterValue("arpRateHz")->load();
-        ap.dotted = apvts.getRawParameterValue("arpDot")->load() > 0.5f;
-        ap.triplet = apvts.getRawParameterValue("arpTrip")->load() > 0.5f;
-        ap.anchored = apvts.getRawParameterValue("arpAnchor")->load() > 0.5f;
-        ap.direction = (ArpEngine::Direction) (int) apvts.getRawParameterValue("arpDirection")->load();
-        ap.usePattern = apvts.getRawParameterValue("arpPattern")->load() > 0.5f;
-        ap.octaveRange = (int) apvts.getRawParameterValue("arpOctaves")->load();
-        ap.swing = apvts.getRawParameterValue("arpSwing")->load();
-        ap.latch = apvts.getRawParameterValue("arpLatch")->load() > 0.5f;
-        ap.retrigger = apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
-        ap.gate = (int) apvts.getRawParameterValue("arpGate")->load();
-        ap.chance = (int) apvts.getRawParameterValue("arpChance")->load();
-        ap.offset = (int) apvts.getRawParameterValue("arpOffset")->load();
-        ap.velRamp = (int) apvts.getRawParameterValue("arpVelRamp")->load();
-        ap.rampBeats = (double) (int) apvts.getRawParameterValue("arpRampBeats")->load();
-        ap.humanize = (int) apvts.getRawParameterValue("arpHumanize")->load();
-        ap.chords = &arpChordTable; // what the Chord lane calls up, slot for slot
+        ap.rateFree = arpParam(n, apRateFree) > 0.5f;
+        ap.rateHz = (double) arpParam(n, apRateHz);
+        ap.dotted = arpParam(n, apDot) > 0.5f;
+        ap.triplet = arpParam(n, apTrip) > 0.5f;
+        ap.anchored = arpParam(n, apAnchor) > 0.5f;
+        ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
+        ap.usePattern = arpParam(n, apPattern) > 0.5f;
+        ap.octaveRange = (int) arpParam(n, apOctaves);
+        ap.swing = arpParam(n, apSwing);
+        ap.latch = arpParam(n, apLatch) > 0.5f;
+        ap.retrigger = arpParam(n, apRetrigger) > 0.5f;
+        ap.gate = (int) arpParam(n, apGate);
+        ap.chance = (int) arpParam(n, apChance);
+        ap.offset = (int) arpParam(n, apOffset);
+        ap.velRamp = (int) arpParam(n, apVelRamp);
+        ap.rampBeats = (double) (int) arpParam(n, apRampBeats);
+        ap.humanize = (int) arpParam(n, apHumanize);
+        ap.chords = &l.chordTable; // what the Chord lane calls up, this line's slots
 
         // Distance: what each repeat past the first adds. The list names intervals rather
         // than numbers because "5th" is the thing you want and "+7 semitones" is the way you
@@ -900,7 +1172,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
             static constexpr int dist[]  = { 12, 7, 5, 4, 3, 1, 2, 4, 6 };
             static constexpr bool degs[] = { false, false, false, false, false, true, true, true, true };
             const int di = juce::jlimit(0, (int) std::size(dist) - 1,
-                                        (int) apvts.getRawParameterValue("arpDistance")->load());
+                                        (int) arpParam(n, apDistance));
             ap.spread = dist[di];
             ap.spreadDegrees = degs[di];
         }
@@ -908,7 +1180,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         {
             static constexpr double bars[] = { 0.0, 1.0, 2.0, 4.0, 8.0, 16.0 };
             ap.retrigBeats = bars[juce::jlimit(0, (int) std::size(bars) - 1,
-                                               (int) apvts.getRawParameterValue("arpRetrigBars")->load())];
+                                               (int) arpParam(n, apRetrigBars))];
         }
         // The scale, as a mask of pitch classes, for a Distance counted in scale degrees.
         // Built here rather than in the engine so ArpEngine.h stays free of the scale tables
@@ -941,12 +1213,12 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         // there is no host at all) and unchangeable everywhere.
         ap.fallbackBpm = (double) apvts.getRawParameterValue("bpm")->load();
 
-        arpScratch.clear();
-        arp.process(ap, hc, buffer.getNumSamples(), midi, arpScratch);
-        midi.swapWith(arpScratch);
+        // The engine's input is this line's buffer alone, never the merged stream: that is the
+        // whole of the routing. Its output goes into midi with everything the other lines and
+        // the pass-through left there, so three lines at three rates simply sum.
+        l.engine.process(ap, hc, numSamples, l.in, l.out);
+        mergeArpOut(midi, l.out, channel);
     }
-
-    advanceChainClock(buffer.getNumSamples());
 }
 
 // Audio thread. Counting the chain's bars belongs here because this is the only place with
@@ -956,19 +1228,8 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
 // a flag for the heartbeat to act on.
 void KeysProcessor::advanceChainClock(int numSamples)
 {
-    if (! chainActive.load(std::memory_order_relaxed))
-    {
-        chainBeatsPlayed = 0.0;
-        return;
-    }
-
-    const int epoch = chainEpoch.load(std::memory_order_acquire);
-    if (epoch != chainSeenEpoch)
-    {
-        chainSeenEpoch = epoch;
-        chainBeatsPlayed = 0.0; // a slot was just launched: its bars start now
-    }
-
+    // Tempo and bar length are the same question whichever line is asking, so they are asked
+    // once and the three chains are stepped against the same answer.
     double bpm = (double) apvts.getRawParameterValue("bpm")->load();
     double beatsPerBar = 4.0;
     if (auto* playHead = getPlayHead())
@@ -985,12 +1246,30 @@ void KeysProcessor::advanceChainClock(int numSamples)
         }
 
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
-    chainBeatsPlayed += bpm / 60.0 / sr * numSamples;
-    const double target = chainTargetBeats.load(std::memory_order_relaxed) * beatsPerBar / 4.0;
-    if (chainBeatsPlayed >= target)
+    const double blockBeats = bpm / 60.0 / sr * numSamples;
+
+    for (auto& ln : lines)
     {
-        chainBeatsPlayed = 0.0; // the epoch bump that follows will zero it again, harmlessly
-        chainAdvance.store(true, std::memory_order_release);
+        if (! ln.chainActive.load(std::memory_order_relaxed))
+        {
+            ln.chainBeatsPlayed = 0.0;
+            continue;
+        }
+
+        const int epoch = ln.chainEpoch.load(std::memory_order_acquire);
+        if (epoch != ln.chainSeenEpoch)
+        {
+            ln.chainSeenEpoch = epoch;
+            ln.chainBeatsPlayed = 0.0; // a slot was just launched: its bars start now
+        }
+
+        ln.chainBeatsPlayed += blockBeats;
+        const double target = ln.chainTargetBeats.load(std::memory_order_relaxed) * beatsPerBar / 4.0;
+        if (ln.chainBeatsPlayed >= target)
+        {
+            ln.chainBeatsPlayed = 0.0; // the epoch bump that follows will zero it again, harmlessly
+            ln.chainAdvance.store(true, std::memory_order_release);
+        }
     }
 }
 
@@ -1055,91 +1334,154 @@ void KeysProcessor::chordPadsFromTree(const juce::ValueTree& root)
     }
 }
 
-void KeysProcessor::storeActiveArpPattern()
+// Everything below takes a line index. Line 0 is the arpeggiator Keys has always had, and
+// every one of these defaults to it, so a caller that has not learned about lines yet still
+// drives the same arp it always did.
+
+void KeysProcessor::storeActiveArpPattern(int line)
 {
-    auto& pat = arpPatterns[(size_t) activeArpPattern];
+    auto& ln = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)];
+    auto& pat = ln.patterns[(size_t) ln.activePattern];
     for (int l = 0; l < ArpEngine::numLanes; ++l)
     {
         for (int s = 0; s < ArpEngine::maxSteps; ++s)
-            pat.value[(size_t) l][(size_t) s] = arp.lanes.value[(size_t) l][(size_t) s].load();
-        pat.length[(size_t) l] = arp.lanes.length[(size_t) l].load();
-        pat.clockDiv[(size_t) l] = arp.lanes.clockDiv[(size_t) l].load();
+            pat.value[(size_t) l][(size_t) s] = ln.engine.lanes.value[(size_t) l][(size_t) s].load();
+        pat.length[(size_t) l] = ln.engine.lanes.length[(size_t) l].load();
+        pat.clockDiv[(size_t) l] = ln.engine.lanes.clockDiv[(size_t) l].load();
     }
 }
 
-void KeysProcessor::recallArpPattern(int index)
+int KeysProcessor::arpActivePattern(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].activePattern;
+}
+
+void KeysProcessor::recallArpPattern(int index, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
-    storeActiveArpPattern();
-    activeArpPattern = index;
-    const auto& pat = arpPatterns[(size_t) index];
+    storeActiveArpPattern(line);
+    auto& ln = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)];
+    ln.activePattern = index;
+    const auto& pat = ln.patterns[(size_t) index];
     for (int l = 0; l < ArpEngine::numLanes; ++l)
     {
         for (int s = 0; s < ArpEngine::maxSteps; ++s)
-            arp.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
-        arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
-        arp.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+            ln.engine.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
+        ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
+        ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
     }
 }
 
-void KeysProcessor::holdArpChord(const std::vector<int>& notes, const juce::String& name)
+void KeysProcessor::holdArpChord(const std::vector<int>& notes, const juce::String& name, int line)
 {
-    releaseArpChord();
+    line = juce::jlimit(0, numArpLines - 1, line);
+    releaseArpChord(line);
     if (notes.empty())
         return;
     // Exclusive works in both directions or it does not work: handing a card to the arp has
-    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold.
+    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold. It
+    // chokes the other two lines with it, which is what "one chord at a time, whichever
+    // surface started it" has to mean once there are three surfaces that can hold one.
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
         stopAllChordPads();
-    arpChordName = name;
-    arpChordOn = fireChord(notes, arpChordTag);
+    auto& ln = lines[(size_t) line];
+    ln.chordName = name;
+    // Fired into this line's own queue, not the track output: only its engine sees it. Note
+    // it still goes through fireChord, so the Voices cap, Strum and Humanize all apply and
+    // the keybed lights up for it exactly as before.
+    ln.chordOn = fireChord(notes, arpChordTagFor(line), line + 1);
 }
 
-void KeysProcessor::releaseArpChord()
+void KeysProcessor::releaseArpChord(int line)
 {
+    line = juce::jlimit(0, numArpLines - 1, line);
+    auto& ln = lines[(size_t) line];
     // No Sustain check, unlike a pad: this chord is held on purpose until something
     // replaces it, so the pedal has nothing to say about when it stops.
-    releaseNotes(arpChordOn, arpChordTag);
-    arpChordName = {};
-    launchedSlot = -1;
-    arpPadSlot = -1;
+    releaseNotes(ln.chordOn, arpChordTagFor(line), line + 1);
+    ln.chordName = {};
+    ln.launchedSlot = -1;
+    ln.padSlot = -1;
 }
 
 void KeysProcessor::releaseArpHold()
 {
-    // The chain first, and for the same reason the heartbeat stops it when the arp goes off:
-    // releasing the chord without it only wins until the next bar boundary, when
-    // heartbeatTick() launches the following slot and hands the arp another one. stopChain()
-    // is a no-op when nothing is chaining, and releases the chord it was holding when it is.
-    stopChain();
-    // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
-    releaseArpChord();
+    // Every line, because this is one button and it means "let go". A Hold off that released
+    // only the line the panel happened to be showing would leave the other two droning, with
+    // nothing on a folded bar to stop them.
+    for (int n = 0; n < numArpLines; ++n)
+    {
+        // The chain goes first, and for the same reason the heartbeat stops it when the arp
+        // goes off: releasing the chord without it only wins until the next bar boundary,
+        // when heartbeatTick() launches the following slot and hands the arp another one.
+        // stopChain() is a no-op when nothing is chaining, and releases the chord it was
+        // holding when it is.
+        stopChain(n);
+        // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
+        releaseArpChord(n);
+    }
 }
 
-void KeysProcessor::holdArpChordFromPad(int padSlot)
+const std::vector<int>& KeysProcessor::arpHeldNotes(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].chordOn;
+}
+
+const juce::String& KeysProcessor::arpHeldName(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].chordName;
+}
+
+bool KeysProcessor::anyArpHold() const
+{
+    for (int n = 0; n < numArpLines; ++n)
+        if (! lines[(size_t) n].chordOn.empty() || lines[(size_t) n].chainOn)
+            return true;
+    return false;
+}
+
+void KeysProcessor::holdArpChordFromPad(int padSlot, int line)
 {
     if (padSlot < 0 || padSlot >= numChordPads)
         return;
     const auto& pad = chordPads[(size_t) padSlot];
     if (pad.notes.empty())
         return;
-    holdArpChord(pad.notes, pad.name); // clears any previous holder, slot or pad
-    arpPadSlot = padSlot;
+    line = juce::jlimit(0, numArpLines - 1, line);
+    holdArpChord(pad.notes, pad.name, line); // clears this line's previous holder, slot or pad
+    lines[(size_t) line].padSlot = padSlot;
 }
 
-void KeysProcessor::launchArpSlot(int index)
+int KeysProcessor::arpHeldPad(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].padSlot;
+}
+
+int KeysProcessor::arpLineHoldingPad(int padSlot) const
+{
+    if (padSlot < 0)
+        return -1;
+    for (int n = 0; n < numArpLines; ++n)
+        if (lines[(size_t) n].padSlot == padSlot)
+            return n;
+    return -1;
+}
+
+void KeysProcessor::launchArpSlot(int index, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
+    line = juce::jlimit(0, numArpLines - 1, line);
 
-    recallArpPattern(index); // snapshots the outgoing slot's lanes first
-    const auto& slot = arpPatterns[(size_t) index];
+    recallArpPattern(index, line); // snapshots the outgoing slot's lanes first
+    const auto& slot = lines[(size_t) line].patterns[(size_t) index];
 
     // Shape and Rate are ordinary parameters, so a launch has to move them through the
     // host the way the combo boxes do - otherwise automation and the UI disagree about
     // what is playing. Gestures bracket each one; see ArpPanel::applyShapeChoice.
-    const auto setChoice = [this](const char* id, int value)
+    // They are this *line's* parameters: launching a slot on B must not move A's rate.
+    const auto setChoice = [this](const juce::String& id, int value)
     {
         if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(id)))
         {
@@ -1150,22 +1492,22 @@ void KeysProcessor::launchArpSlot(int index)
     };
     if (slot.shape >= 0)
     {
-        if (auto* pat = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpPattern")))
+        if (auto* pat = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter(arpParamId(line, apPattern))))
         {
             pat->beginChangeGesture();
             *pat = slot.shape >= ArpEngine::numDirections;
             pat->endChangeGesture();
         }
         if (slot.shape < ArpEngine::numDirections)
-            setChoice("arpDirection", slot.shape); // "Pattern" leaves the direction alone
+            setChoice(arpParamId(line, apDirection), slot.shape); // "Pattern" leaves the direction alone
     }
     if (slot.rate >= 0)
     {
-        setChoice("arpRate", slot.rate);
+        setChoice(arpParamId(line, apRate), slot.rate);
         // The mode travels with the rate, and both move through the host for the same reason
         // the choice above does. A slot saved before Hz existed reads back rateFree false, so
         // this writes the mode it already had.
-        if (auto* free = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpRateFree")))
+        if (auto* free = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter(arpParamId(line, apRateFree))))
         {
             free->beginChangeGesture();
             *free = slot.rateFree;
@@ -1178,7 +1520,7 @@ void KeysProcessor::launchArpSlot(int index)
         // slot leaves the Hz control exactly where it found it, which is what the struct
         // comment beside ArpPattern::rateHz already promises.
         if (slot.rateFree)
-            if (auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("arpRateHz")))
+            if (auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(arpParamId(line, apRateHz))))
             {
                 hz->beginChangeGesture();
                 *hz = slot.rateHz;
@@ -1188,75 +1530,98 @@ void KeysProcessor::launchArpSlot(int index)
 
     // Hold last, so the chord starts against the pattern the slot just installed.
     if (! slot.chordNotes.empty())
-        holdArpChord(slot.chordNotes, slot.chordName);
+        holdArpChord(slot.chordNotes, slot.chordName, line);
     else
-        releaseArpChord(); // a pattern-only slot arpeggiates whatever you are already holding
-    launchedSlot = index;
+        releaseArpChord(line); // a pattern-only slot arpeggiates whatever you are already holding
+    lines[(size_t) line].launchedSlot = index;
 }
 
-void KeysProcessor::stopArpSlot()
+void KeysProcessor::stopArpSlot(int line)
 {
-    releaseArpChord(); // clears launchedSlot too
+    releaseArpChord(line); // clears launchedSlot too
 }
 
-int KeysProcessor::nextChainSlot(int from) const
+int KeysProcessor::arpLaunchedSlot(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].launchedSlot;
+}
+
+int KeysProcessor::nextChainSlot(int from, int line) const
 {
     // The chain plays the slots that hold a chord. A pattern-only slot is a place to keep a
     // rhythm, not a step of a progression, and walking through one would leave the previous
     // chord ringing under a pattern that says nothing about it.
+    const auto& pats = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].patterns;
     for (int i = 1; i <= numArpPatterns; ++i)
     {
         const int idx = (from + i) % numArpPatterns;
-        if (! arpPatterns[(size_t) idx].chordNotes.empty())
+        if (! pats[(size_t) idx].chordNotes.empty())
             return idx;
     }
-    return from >= 0 && ! arpPatterns[(size_t) from].chordNotes.empty() ? from : -1;
+    return from >= 0 && ! pats[(size_t) from].chordNotes.empty() ? from : -1;
 }
 
-void KeysProcessor::startChain()
+void KeysProcessor::startChain(int line)
 {
-    const int first = nextChainSlot(numArpPatterns - 1); // wraps to the lowest filled slot
+    line = juce::jlimit(0, numArpLines - 1, line);
+    const int first = nextChainSlot(numArpPatterns - 1, line); // wraps to the lowest filled slot
     if (first < 0)
         return; // nothing to play: the button does not stick on for an empty row
-    chainOn = true;
-    chainIndex = first;
-    launchArpSlot(first);
-    chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) first].bars));
-    chainEpoch.fetch_add(1); // tells the audio thread to count this slot from zero
+    auto& ln = lines[(size_t) line];
+    ln.chainOn = true;
+    ln.chainIndex = first;
+    launchArpSlot(first, line);
+    ln.chainTargetBeats.store(4.0 * juce::jmax(1, ln.patterns[(size_t) first].bars));
+    ln.chainEpoch.fetch_add(1); // tells the audio thread to count this slot from zero
     // Clear the advance flag *before* arming the clock. stopChain() clears it too, but the
     // audio thread can raise it once more in the block that straddles the stop, and nothing
     // consumes it while chainOn is false - so a stale true survived into the next chain and
     // stepped it to its second slot on the first heartbeat. Ordered last but one so there is
     // no window where chainActive is set and the flag is still whatever it was.
-    chainAdvance.store(false);
-    chainActive.store(true);
+    ln.chainAdvance.store(false);
+    ln.chainActive.store(true);
 }
 
-void KeysProcessor::stopChain()
+void KeysProcessor::stopChain(int line)
 {
-    if (! chainOn)
+    line = juce::jlimit(0, numArpLines - 1, line);
+    auto& ln = lines[(size_t) line];
+    if (! ln.chainOn)
         return;
-    chainOn = false;
-    chainIndex = -1;
-    chainActive.store(false);
-    chainAdvance.store(false);
-    stopArpSlot(); // the chord the chain was holding is the chain's to release
+    ln.chainOn = false;
+    ln.chainIndex = -1;
+    ln.chainActive.store(false);
+    ln.chainAdvance.store(false);
+    stopArpSlot(line); // the chord the chain was holding is the chain's to release
 }
 
-void KeysProcessor::setArpSlotBars(int index, int bars)
+bool KeysProcessor::chainRunning(int line) const
+{
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].chainOn;
+}
+
+int KeysProcessor::chainSlot(int line) const
+{
+    const auto& ln = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)];
+    return ln.chainOn ? ln.chainIndex : -1;
+}
+
+void KeysProcessor::setArpSlotBars(int index, int bars, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
-    arpPatterns[(size_t) index].bars = juce::jlimit(1, 16, bars);
-    if (chainOn && index == chainIndex)
-        chainTargetBeats.store(4.0 * arpPatterns[(size_t) index].bars); // takes effect now
+    auto& ln = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)];
+    ln.patterns[(size_t) index].bars = juce::jlimit(1, 16, bars);
+    if (ln.chainOn && index == ln.chainIndex)
+        ln.chainTargetBeats.store(4.0 * ln.patterns[(size_t) index].bars); // takes effect now
 }
 
-int KeysProcessor::arpSlotBars(int index) const
+int KeysProcessor::arpSlotBars(int index, int line) const
 {
     if (index < 0 || index >= numArpPatterns)
         return 1;
-    return juce::jlimit(1, 16, arpPatterns[(size_t) index].bars);
+    return juce::jlimit(1, 16, lines[(size_t) juce::jlimit(0, numArpLines - 1, line)]
+                                   .patterns[(size_t) index].bars);
 }
 
 void KeysProcessor::heartbeatTick()
@@ -1266,140 +1631,156 @@ void KeysProcessor::heartbeatTick()
     // the live card was never released - and with no editor open nothing polled at all, so
     // automation or an MCP client writing arpOn false left it sounding with no way to stop
     // it but All Off. Both edges close here: the processor owns the chord, so the processor
-    // is what should notice.
-    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
-    if (! arpOn && lastArpOnHeartbeat)
+    // is what should notice. Per line, because each line has a switch of its own.
+    for (int n = 0; n < numArpLines; ++n)
     {
-        // The chain goes first: a progression cycling with nothing arpeggiating it is the
-        // same drone-with-no-owner this whole check exists to prevent, and its Chain button
-        // is on the arp panel, so switching the arp off is switching the chain off.
-        stopChain();
-        // What is left is a chord a *card* handed over - a pad, or the live card, which is
-        // the case the editor's version of this missed entirely. A chord an arp *slot*
-        // launched is left alone on purpose: the lit card is still on screen and still
-        // releases it on a click, so it has an owner and this does not have to be one.
-        if (arpLaunchedSlot() < 0 && ! arpHeldNotes().empty())
-            releaseArpChord();
-    }
-    lastArpOnHeartbeat = arpOn;
-
-    if (chainOn && chainAdvance.exchange(false))
-    {
-        const int next = nextChainSlot(chainIndex);
-        if (next < 0)
+        auto& ln = lines[(size_t) n];
+        const bool arpOn = arpLineOn(n);
+        if (! arpOn && ln.lastOnHeartbeat)
         {
-            stopChain(); // every chord was cleared out from under it
-            return;
+            // The chain goes first: a progression cycling with nothing arpeggiating it is the
+            // same drone-with-no-owner this whole check exists to prevent, and its Chain button
+            // is on the arp panel, so switching the arp off is switching the chain off.
+            stopChain(n);
+            // What is left is a chord a *card* handed over - a pad, or the live card, which is
+            // the case the editor's version of this missed entirely. A chord an arp *slot*
+            // launched is left alone on purpose: the lit card is still on screen and still
+            // releases it on a click, so it has an owner and this does not have to be one.
+            if (ln.launchedSlot < 0 && ! ln.chordOn.empty())
+                releaseArpChord(n);
         }
-        chainIndex = next;
-        launchArpSlot(next);
-        chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) next].bars));
-        chainEpoch.fetch_add(1);
+        ln.lastOnHeartbeat = arpOn;
+
+        if (ln.chainOn && ln.chainAdvance.exchange(false))
+        {
+            const int next = nextChainSlot(ln.chainIndex, n);
+            if (next < 0)
+            {
+                stopChain(n); // every chord was cleared out from under it
+                continue;
+            }
+            ln.chainIndex = next;
+            launchArpSlot(next, n);
+            ln.chainTargetBeats.store(4.0 * juce::jmax(1, ln.patterns[(size_t) next].bars));
+            ln.chainEpoch.fetch_add(1);
+        }
     }
 }
 
 // Message thread. The Chord lane reads slot chords on the audio thread, so they live in a
-// mirror of atomics; this rebuilds the whole mirror, which is twelve chords of eight notes
-// and not worth being clever about. Every path that can change a slot's chord ends here.
-void KeysProcessor::syncArpChordTable()
+// mirror of atomics; this rebuilds the whole mirror for one line, which is twelve chords of
+// eight notes and not worth being clever about. Every path that can change a slot's chord
+// ends here, and now has to name the line whose slots it changed - miss one and that line's
+// Chord lane plays a stale chord.
+void KeysProcessor::syncArpChordTable(int line)
 {
     static_assert(ArpEngine::ChordTable::numSlots == numArpPatterns,
                   "the Chord lane addresses slots one for one");
+    auto& ln = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)];
     for (int s = 0; s < ArpEngine::ChordTable::numSlots; ++s)
     {
-        const auto& notes = arpPatterns[(size_t) s].chordNotes;
+        const auto& notes = ln.patterns[(size_t) s].chordNotes;
         const int n = juce::jlimit(0, ArpEngine::ChordTable::maxNotes, (int) notes.size());
         for (int i = 0; i < ArpEngine::ChordTable::maxNotes; ++i)
-            arpChordTable.note[(size_t) s][(size_t) i].store(i < n ? notes[(size_t) i] : 0,
+            ln.chordTable.note[(size_t) s][(size_t) i].store(i < n ? notes[(size_t) i] : 0,
                                                              std::memory_order_relaxed);
         // Count last, and it is what the engine gates on, so a half-written chord is never
         // reachable: the notes are in place before the count that admits them.
-        arpChordTable.count[(size_t) s].store(n, std::memory_order_release);
+        ln.chordTable.count[(size_t) s].store(n, std::memory_order_release);
     }
 }
 
-void KeysProcessor::setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name)
+void KeysProcessor::setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
-    arpPatterns[(size_t) index].chordNotes = notes;
-    arpPatterns[(size_t) index].chordName = name;
-    syncArpChordTable();
+    line = juce::jlimit(0, numArpLines - 1, line);
+    auto& ln = lines[(size_t) line];
+    ln.patterns[(size_t) index].chordNotes = notes;
+    ln.patterns[(size_t) index].chordName = name;
+    syncArpChordTable(line);
     // Capture the shape and rate that are up right now, so launching the slot brings the
     // whole sound back and the card can say what it will play. Nothing else ever wrote
     // these, so every slot painted "--" and a launch left Shape and Rate alone.
-    const bool usePattern = apvts.getRawParameterValue("arpPattern")->load() > 0.5f;
-    arpPatterns[(size_t) index].shape = usePattern
+    const bool usePattern = arpParam(line, apPattern) > 0.5f;
+    ln.patterns[(size_t) index].shape = usePattern
                                             ? ArpEngine::numDirections
-                                            : (int) apvts.getRawParameterValue("arpDirection")->load();
-    arpPatterns[(size_t) index].rate = (int) apvts.getRawParameterValue("arpRate")->load();
+                                            : (int) arpParam(line, apDirection);
+    ln.patterns[(size_t) index].rate = (int) arpParam(line, apRate);
     // ...and the mode it is in, so a slot captured in Hz launches in Hz.
-    arpPatterns[(size_t) index].rateFree = apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
-    arpPatterns[(size_t) index].rateHz = apvts.getRawParameterValue("arpRateHz")->load();
+    ln.patterns[(size_t) index].rateFree = arpParam(line, apRateFree) > 0.5f;
+    ln.patterns[(size_t) index].rateHz = arpParam(line, apRateHz);
 }
 
-void KeysProcessor::clearArpSlotChord(int index)
+void KeysProcessor::clearArpSlotChord(int index, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
-    arpPatterns[(size_t) index].chordNotes.clear();
-    arpPatterns[(size_t) index].chordName = {};
-    syncArpChordTable();
-    if (launchedSlot == index)
-        releaseArpChord();
+    line = juce::jlimit(0, numArpLines - 1, line);
+    auto& ln = lines[(size_t) line];
+    ln.patterns[(size_t) index].chordNotes.clear();
+    ln.patterns[(size_t) index].chordName = {};
+    syncArpChordTable(line);
+    if (ln.launchedSlot == index)
+        releaseArpChord(line);
 }
 
-void KeysProcessor::copyArpPattern(int from, int to)
+void KeysProcessor::copyArpPattern(int from, int to, int line)
 {
     if (from < 0 || from >= numArpPatterns || to < 0 || to >= numArpPatterns || from == to)
         return;
-    storeActiveArpPattern();
-    arpPatterns[(size_t) to] = arpPatterns[(size_t) from];
-    syncArpChordTable();
-    if (to == activeArpPattern)
-        recallArpPattern(to);
+    line = juce::jlimit(0, numArpLines - 1, line);
+    storeActiveArpPattern(line);
+    auto& ln = lines[(size_t) line];
+    ln.patterns[(size_t) to] = ln.patterns[(size_t) from];
+    syncArpChordTable(line);
+    if (to == ln.activePattern)
+        recallArpPattern(to, line);
 }
 
-const KeysProcessor::ArpPattern& KeysProcessor::arpPatternSlot(int index) const
+const KeysProcessor::ArpPattern& KeysProcessor::arpPatternSlot(int index, int line) const
 {
     static const ArpPattern empty {};
     if (index < 0 || index >= numArpPatterns)
         return empty;
-    return arpPatterns[(size_t) index];
+    return lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].patterns[(size_t) index];
 }
 
-void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern)
+void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
-    arpPatterns[(size_t) index] = pattern;
-    syncArpChordTable();
-    if (index != activeArpPattern)
+    line = juce::jlimit(0, numArpLines - 1, line);
+    auto& ln = lines[(size_t) line];
+    ln.patterns[(size_t) index] = pattern;
+    syncArpChordTable(line);
+    if (index != ln.activePattern)
         return;
     // Refresh the live lanes from the slot just written. Not recallArpPattern(index):
-    // that snapshots the live lanes into arpPatterns[activeArpPattern] first, which
+    // that snapshots the live lanes into patterns[activePattern] first, which
     // would clobber the pattern we just wrote before reading it back.
     for (int l = 0; l < ArpEngine::numLanes; ++l)
     {
         for (int s = 0; s < ArpEngine::maxSteps; ++s)
-            arp.lanes.value[(size_t) l][(size_t) s].store(pattern.value[(size_t) l][(size_t) s]);
-        arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pattern.length[(size_t) l]));
-        arp.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pattern.clockDiv[(size_t) l]));
+            ln.engine.lanes.value[(size_t) l][(size_t) s].store(pattern.value[(size_t) l][(size_t) s]);
+        ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pattern.length[(size_t) l]));
+        ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pattern.clockDiv[(size_t) l]));
     }
 }
 
-void KeysProcessor::randomizeActiveArpPattern()
+void KeysProcessor::randomizeActiveArpPattern(int line)
 {
     // Musical randomize, not white noise: mostly direction-following steps, gentle
     // octave jumps, occasional ratchets and rests.
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
     for (int s = 0; s < ArpEngine::maxSteps; ++s)
     {
-        arp.lanes.value[ArpEngine::laneNote][(size_t) s].store(rng.nextInt(10) == 0 ? -1 : 0);
-        arp.lanes.value[ArpEngine::laneOctave][(size_t) s].store(rng.nextInt(5) == 0 ? rng.nextInt(3) - 1 : 0);
-        arp.lanes.value[ArpEngine::laneVelocity][(size_t) s].store(70 + rng.nextInt(60));
-        arp.lanes.value[ArpEngine::laneGate][(size_t) s].store(40 + rng.nextInt(80));
-        arp.lanes.value[ArpEngine::laneRatchet][(size_t) s].store(rng.nextInt(8) == 0 ? 2 : 1);
-        arp.lanes.value[ArpEngine::laneProbability][(size_t) s].store(rng.nextInt(6) == 0 ? 60 : 100);
+        lanes.value[ArpEngine::laneNote][(size_t) s].store(rng.nextInt(10) == 0 ? -1 : 0);
+        lanes.value[ArpEngine::laneOctave][(size_t) s].store(rng.nextInt(5) == 0 ? rng.nextInt(3) - 1 : 0);
+        lanes.value[ArpEngine::laneVelocity][(size_t) s].store(70 + rng.nextInt(60));
+        lanes.value[ArpEngine::laneGate][(size_t) s].store(40 + rng.nextInt(80));
+        lanes.value[ArpEngine::laneRatchet][(size_t) s].store(rng.nextInt(8) == 0 ? 2 : 1);
+        lanes.value[ArpEngine::laneProbability][(size_t) s].store(rng.nextInt(6) == 0 ? 60 : 100);
     }
 }
 
@@ -1484,23 +1865,31 @@ void KeysProcessor::migrateRateMode(const juce::ValueTree& root)
     if (! params.isValid())
         return;
 
-    bool sawFree = false, sawHz = false;
-    for (int i = 0; i < params.getNumChildren(); ++i)
+    // Three lines' worth. B and C's rate parameters are absent from every session saved
+    // before the lines existed, which is the same absence for the same reason, and repaired
+    // the same way - so the loop covers the original case rather than sitting beside it.
+    for (int line = 0; line < numArpLines; ++line)
     {
-        const auto id = params.getChild(i).getProperty("id").toString();
-        sawFree = sawFree || id == "arpRateFree";
-        sawHz = sawHz || id == "arpRateHz";
-    }
+        const auto freeId = arpParamId(line, apRateFree);
+        const auto hzId = arpParamId(line, apRateHz);
+        bool sawFree = false, sawHz = false;
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto id = params.getChild(i).getProperty("id").toString();
+            sawFree = sawFree || id == freeId;
+            sawHz = sawHz || id == hzId;
+        }
 
-    // Independently, though the two shipped together: a tree carrying one and not the other
-    // is malformed rather than old, and there is no reading of it under which the missing one
-    // meant anything but its default.
-    if (! sawFree)
-        if (auto* param = apvts.getParameter("arpRateFree"))
-            param->setValueNotifyingHost(param->getDefaultValue());
-    if (! sawHz)
-        if (auto* param = apvts.getParameter("arpRateHz"))
-            param->setValueNotifyingHost(param->getDefaultValue());
+        // Independently, though the two shipped together: a tree carrying one and not the
+        // other is malformed rather than old, and there is no reading of it under which the
+        // missing one meant anything but its default.
+        if (! sawFree)
+            if (auto* param = apvts.getParameter(freeId))
+                param->setValueNotifyingHost(param->getDefaultValue());
+        if (! sawHz)
+            if (auto* param = apvts.getParameter(hzId))
+                param->setValueNotifyingHost(param->getDefaultValue());
+    }
 }
 
 juce::ValueTree KeysProcessor::layoutToTree() const
@@ -1517,6 +1906,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
     tree.setProperty("chordGen", layout.chordGen, nullptr);
+    tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -1546,6 +1936,9 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // Absent before the generator had a window of its own; shut is the right default either
     // way, since it is a settings window rather than something you play from.
     layout.chordGen = flag("chordGen", false);
+    // Absent before there were three lines, and line A is the right answer for those: it is
+    // the only one a session from then can have anything in.
+    layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.
@@ -1573,20 +1966,13 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     frame("chordGenBounds", layout.chordGenBounds);
 }
 
-juce::ValueTree KeysProcessor::arpToTree() const
+void KeysProcessor::arpLineToTree(juce::ValueTree& dest, int line) const
 {
-    // The live lanes are the active pattern; snapshot them so the tree is current.
-    const_cast<KeysProcessor*>(this)->storeActiveArpPattern();
-    juce::ValueTree tree { "arp" };
-    tree.setProperty("active", activeArpPattern, nullptr);
-    // A slot's `shape` is a direction index, with numDirections itself meaning "Pattern" -
-    // so the number that means Pattern moves every time a shape is added. Writing it down is
-    // what lets a session saved when there were eight shapes still open on twelve; without
-    // it, the four shapes added on 2026-07-30 silently turned every Pattern slot into Random.
-    tree.setProperty("shapeBase", ArpEngine::numDirections, nullptr);
+    const auto& ln = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)];
+    dest.setProperty("active", ln.activePattern, nullptr);
     for (int pIndex = 0; pIndex < numArpPatterns; ++pIndex)
     {
-        const auto& pat = arpPatterns[(size_t) pIndex];
+        const auto& pat = ln.patterns[(size_t) pIndex];
         juce::ValueTree pt { "pattern" };
         pt.setProperty("index", pIndex, nullptr);
         // The chord a slot launches, alongside its lanes. Absent in sessions from before
@@ -1619,28 +2005,54 @@ juce::ValueTree KeysProcessor::arpToTree() const
             lt.setProperty("clockDiv", pat.clockDiv[(size_t) l], nullptr);
             pt.appendChild(lt, nullptr);
         }
-        tree.appendChild(pt, nullptr);
+        dest.appendChild(pt, nullptr);
+    }
+}
+
+juce::ValueTree KeysProcessor::arpToTree() const
+{
+    // The live lanes are the active pattern; snapshot them so the tree is current. All three,
+    // since all three have live lanes of their own.
+    for (int n = 0; n < numArpLines; ++n)
+        const_cast<KeysProcessor*>(this)->storeActiveArpPattern(n);
+
+    juce::ValueTree tree { "arp" };
+    // A slot's `shape` is a direction index, with numDirections itself meaning "Pattern" -
+    // so the number that means Pattern moves every time a shape is added. Writing it down is
+    // what lets a session saved when there were eight shapes still open on twelve; without
+    // it, the four shapes added on 2026-07-30 silently turned every Pattern slot into Random.
+    // One copy for the whole tree: it is a property of the build that wrote it, not of a line.
+    tree.setProperty("shapeBase", ArpEngine::numDirections, nullptr);
+
+    // Line 0's slots sit directly on this node, in exactly the shape and place they have
+    // always occupied, so a session written here still loads into a build that predates the
+    // lines - and, more to the point, every session written *by* those builds loads here with
+    // no migration at all. B and C hang off "line" children, which an older build ignores
+    // because it never asks for them.
+    arpLineToTree(tree, 0);
+    for (int n = 1; n < numArpLines; ++n)
+    {
+        juce::ValueTree lt { "line" };
+        lt.setProperty("index", n, nullptr);
+        arpLineToTree(lt, n);
+        tree.appendChild(lt, nullptr);
     }
     return tree;
 }
 
-void KeysProcessor::arpFromTree(const juce::ValueTree& root)
+void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int savedShapeBase)
 {
-    const auto tree = root.getChildWithName("arp");
-    if (! tree.isValid())
-        return; // sessions from before the arp: defaults stand
-    // What "Pattern" was numbered when this session was written. Absent means it predates
-    // the four shapes added on 2026-07-30, when there were eight directions and Pattern was
-    // eight; every save since says so itself.
-    const int savedShapeBase = juce::jlimit(1, ArpEngine::numDirections,
-                                            (int) tree.getProperty("shapeBase", 8));
-    for (int c = 0; c < tree.getNumChildren(); ++c)
+    line = juce::jlimit(0, numArpLines - 1, line);
+    auto& ln = lines[(size_t) line];
+    for (int c = 0; c < src.getNumChildren(); ++c)
     {
-        const auto pt = tree.getChild(c);
+        const auto pt = src.getChild(c);
+        if (! pt.hasType("pattern"))
+            continue; // a "line" child of the root; that line reads itself
         const int pIndex = (int) pt.getProperty("index", -1);
         if (pIndex < 0 || pIndex >= numArpPatterns)
             continue;
-        auto& pat = arpPatterns[(size_t) pIndex];
+        auto& pat = ln.patterns[(size_t) pIndex];
         pat.chordNotes.clear();
         for (const auto& n : juce::StringArray::fromTokens(pt.getProperty("chord").toString(), ",", ""))
             if (n.isNotEmpty())
@@ -1670,17 +2082,44 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
             pat.clockDiv[(size_t) l] = (int) lt.getProperty("clockDiv", 0);
         }
     }
-    syncArpChordTable(); // the Chord lane's view of the slots, after a whole session lands
+    syncArpChordTable(line); // the Chord lane's view of the slots, after a whole session lands
     // Recall the active pattern by hand (recallArpPattern would first snapshot the
     // live lanes over the data we just loaded).
-    activeArpPattern = juce::jlimit(0, numArpPatterns - 1, (int) tree.getProperty("active", 0));
-    const auto& pat = arpPatterns[(size_t) activeArpPattern];
+    ln.activePattern = juce::jlimit(0, numArpPatterns - 1, (int) src.getProperty("active", 0));
+    const auto& pat = ln.patterns[(size_t) ln.activePattern];
     for (int l = 0; l < ArpEngine::numLanes; ++l)
     {
         for (int s = 0; s < ArpEngine::maxSteps; ++s)
-            arp.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
-        arp.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
-        arp.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+            ln.engine.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
+        ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
+        ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+    }
+}
+
+void KeysProcessor::arpFromTree(const juce::ValueTree& root)
+{
+    const auto tree = root.getChildWithName("arp");
+    if (! tree.isValid())
+        return; // sessions from before the arp: defaults stand
+    // What "Pattern" was numbered when this session was written. Absent means it predates
+    // the four shapes added on 2026-07-30, when there were eight directions and Pattern was
+    // eight; every save since says so itself.
+    const int savedShapeBase = juce::jlimit(1, ArpEngine::numDirections,
+                                            (int) tree.getProperty("shapeBase", 8));
+
+    // Line 0 off the root, where it has always been. This is the whole of the migration: a
+    // session saved before the lines existed has no "line" children at all, so B and C keep
+    // their defaults - twelve empty slots and lanes that have never been drawn - which with
+    // both switched off is precisely the arpeggiator that session was saved from.
+    arpLineFromTree(tree, 0, savedShapeBase);
+    for (int c = 0; c < tree.getNumChildren(); ++c)
+    {
+        const auto lt = tree.getChild(c);
+        if (! lt.hasType("line"))
+            continue;
+        const int n = (int) lt.getProperty("index", -1);
+        if (n >= 1 && n < numArpLines)
+            arpLineFromTree(lt, n, savedShapeBase);
     }
 }
 

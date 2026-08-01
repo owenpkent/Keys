@@ -32,6 +32,77 @@ ppqPosition, isPlaying). Keys historically never reads the playhead; the arp sta
 follows the Contour/Lattice model instead. `CLAUDE.md` carries the amendment: the
 arp is the only playhead consumer in Keys.
 
+## Three lines (2026-08-01)
+
+Owen: *"three arpeggiators so we can get polyrhythms and keep keeping what we currently have,
+but having three of them, and then being able to feed cards into different lines."*
+
+There are three of everything above: three `ArpEngine`s, each with its own rate, shape, step
+lanes, twelve slots, held chord and chain. **`ArpEngine.h` did not change.** It never knew how
+many of it there were - it is handed a buffer, a `Params` and a clock, and it owns nothing
+global - so three of them cost a routing layer above and no engine work at all.
+
+**Line A is the arpeggiator that was already here, down to its parameter ids.** `arpRate`,
+`arpSwing`, `arpDirection` and the rest register unchanged; B and C are the same list again
+under `arp2*` / `arp3*`, appended and defaulting to off. That is the whole story for saved
+sessions: one opens with its arp intact and two silent lines beside it.
+
+### Routing is by queue, not by mask
+
+Each line has its own `juce::MidiMessageCollector`. A chord handed to line B is fired through
+the ordinary note path - so it lights the keybed, honours Exclusive and the Voices cap, and
+sustains honestly when the line is off - but queued into *that line's* collector, and only its
+engine drains it. `KeysProcessor::runArpLines` then:
+
+1. asks which lines have **Keys** on (do they arpeggiate what you play);
+2. if any do, lifts the note on/offs out of the merged stream into `keyNotes` and copies them
+   into each listening line's input, leaving CCs and everything else to pass through. If none
+   do, the stream is untouched - which is exactly the behaviour of the arp being off;
+3. runs each enabled line into its own output buffer and merges them all back, restamping the
+   channel if that line names one;
+4. merges a *disabled* line's input straight through, so a chord held to a line that is off
+   simply sustains.
+
+**The alternative was a per-pitch ownership mask** - publish which line owns which pitch, and
+let the audio thread route the merged stream by looking it up. It races: the message thread can
+clear a pitch's owner before the matching note-off has been drained, and that note is then
+stranded in an engine's held set with nothing left that can release it. A queue cannot get this
+wrong, because the note-off is physically in the same queue its note-on went into.
+
+**`noteRefs` is per destination stream now.** The old rule - one note-on per sounding pitch,
+released by the last owner - is a statement about *one stream*, because downstream one note-off
+ends a pitch for everybody. An arp line's input is a different stream with a different consumer
+(its engine, which counts owners itself in `ArpEngine::Held::ons`), so a pitch held into line B
+must not suppress the same pitch played to the track output. With one shared counter it did, and
+the note vanished from the output while the key lit up.
+
+### Known edge, pre-existing
+
+Switching a line on while a chord is already ringing leaves that chord's note-off to be eaten by
+the engine, so the pitch hangs downstream until All Off. This is not new - the single arp has
+always done it on the off-to-on transition - and the lines make it three times as reachable
+rather than differently wrong. Fixing it needs the destination's currently-held pitches closed
+at the transition, which means the audio thread emitting note-offs for references the message
+thread owns; not attempted here.
+
+### On screen
+
+- **A, B and C on the arp bar**, one per line's `arpOn`. On the bar, like the single On was, so
+  a line can be brought in or out with the section folded. **Hold off stays one button** and
+  releases every line and every chain.
+- **Three tabs at the left of the slot row** select which line the panel edits - band, step
+  lanes, the twelve slots, Bars, Chain. They cost no height: 34 px inside a row already 58 tall.
+  Changing the tab tears down every APVTS attachment and rebuilds it against the new line's ids,
+  which is the same move `refreshRateMode` has always made for the rate dial's two units, guard
+  against swapping under an open drag included.
+- **A letter chip on the Pads bar** says which line a chord-card click feeds, and cycles A-B-C.
+  Same state as the tabs; it is on that bar because it is a fact about the cards, and because it
+  has to be reachable with the arp folded shut.
+- **Drag a chord card onto a slot** to bind it there, **or onto a tab** to hand it over now.
+  Screen-position hit-testing through `Desktop::findComponentAt`, mediated by the editor, for
+  the reason the audition tray needs the same: mouse capture keeps the gesture on the strip and
+  the two surfaces can be in different windows.
+
 ## Engine (build from scratch; JUCE's demo is not a reference)
 
 Verified: the official ArpeggiatorPluginDemo has no tempo sync at all (free-running
