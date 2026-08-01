@@ -426,11 +426,11 @@ KeysEditor::KeysEditor(KeysProcessor& p)
             "one that overwrites; lock a card to keep it.",
             [this] { chordGen.regeneratePage(); });
     // The third chip is the door to everything else: Octave, Source, note counts, inversions,
-    // Lock Influence, the Markov chains and Clear page, in a window of their own. A second
+    // Lock Influence, the Markov chains and the audition tray, in a window of their own. A second
     // click while it is already up raises it rather than building another - there is exactly
     // one of these, and a window you cannot find is worse than one that is shut.
     genChip(chordGenButton, "Chord generator window",
-            "Open the chord generator: every setting it has, plus Fill, Regen and Clear page. "
+            "Open the chord generator: every setting it has, plus a tray of chords to audition. "
             "It is a window of its own, so it can sit beside the plugin while you audition.",
             [this]
             {
@@ -565,6 +565,15 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // were offered only while the Chords view was up once, and that is the exact bug this
     // arrangement exists to prevent. Everything about the page or the settings is in the
     // generator's window instead (chordGenButton, above).
+    // A card leaving the strip is offered to the generator's reference box, when that window is
+    // open. Guarded on the panel existing rather than wired and unwired as it opens: the strip
+    // outlives every window, and a hook that had to be taken back down on close is a hook that
+    // gets left dangling one day.
+    chordPads.onDragOutside = [this](juce::Point<int> p)
+    { if (chordGenPanel) chordGenPanel->showReferenceDropTarget(p); };
+    chordPads.onDropOutside = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
+    { return chordGenPanel != nullptr && chordGenPanel->offerReferenceDrop(p, pad); };
+
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
 
@@ -1134,6 +1143,21 @@ void KeysEditor::setChordGenWindowOpen(bool open)
             });
         };
         chordGenPanel->onClose = close;
+
+        // The audition tray's drag reaches the pad strip through here, and only through here.
+        // The tray is in this window's *sibling*, so JUCE keeps the whole gesture on the tray
+        // and neither component can see the other; the editor is the one object that holds
+        // both, which is what makes it the place the two ends meet. Screen coordinates all the
+        // way across - see ChordTray. ChordPads owns the hit test, the refusals and the paint.
+        chordGenPanel->onCandidateDragOver = [this](juce::Point<int> p)
+        { chordPads.setExternalDropSlot(chordPads.externalDropSlotAt(p)); };
+        chordGenPanel->onCandidateDropped = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
+        { return chordPads.dropExternalChord(p, pad); };
+        chordGenPanel->onCandidateDragEnd = [this] { chordPads.setExternalDropSlot(-1); };
+        // And the same crossing for the card menu's aimless commit.
+        chordGenPanel->onCandidateToFirstEmptyPad = [this](const KeysProcessor::ChordPad& pad)
+        { return chordPads.sendChordToFirstEmptyPad(pad); };
+        chordGenPanel->onPageHasEmptyPad = [this] { return chordPads.firstEmptyPadOnPage() >= 0; };
         chordGenWindow = std::make_unique<DetachedWindow>(
             "Keys Chord Generator", lnf, *chordGenPanel, processor.layout.chordGenBounds,
             ChordGenPanel::minWindowSize(), ChordGenPanel::defaultWindowSize(),
@@ -1145,6 +1169,9 @@ void KeysEditor::setChordGenWindowOpen(bool open)
         rememberChordGenBounds();
         chordGenWindow.reset(); // clears its content first, so the panel is unparented
         chordGenPanel.reset();
+        // Close it mid-drag and the tray never gets to run its own cleanup, so the pad it was
+        // hovering would stay lit with nothing left to drop on it.
+        chordPads.setExternalDropSlot(-1);
     }
 
     chordGenButton.setToggleState(open, juce::dontSendNotification);
@@ -1399,7 +1426,7 @@ void KeysEditor::timerCallback()
     // Each chip says whether it would do anything, which is also the clearest statement of
     // which of the two is which: Fill lights only while there is a blank to fill, Regen only
     // while there is an unlocked chord to replace. Polled here rather than pushed because the
-    // pads change from six places (a drag, a capture, an edit, Clear pad, Clear page, a
+    // pads change from six places (a drag, a capture, an edit, Clear pad, a tray drop, a
     // session load) and none of them owe the editor a callback.
     fillButton.setEnabled(chordGen.pageHasEmptyPads());
     regenButton.setEnabled(chordGen.pageHasRegeneratablePads());

@@ -17,6 +17,10 @@ src/
 ├── ChordSuggest.h            # pure "what could follow this chord", unit-tested
 ├── ChordMarkov.h             # pure Markov progression source, unit-tested
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
+├── ChordSources.h            # circle of fifths, Neo-Riemannian PLR, progression templates,
+│                             # negative harmony, planing, voice-leading as a post-pass
+│                             # (tests/ChordSourceTests.cpp). Not wired to the UI yet - the
+│                             # Source setting still only offers Algorithmic and Markov
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync
 │                             # (docs/ARP_DESIGN.md)
@@ -32,6 +36,10 @@ src/
 │   │                         # nothing; a member of the editor, so it outlives every view
 │   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
 │   │                         # when that window opens, destroyed when it closes
+│   ├── ChordTray.{h,cpp}     # 4x4 grid of candidate chords inside that window (2026-08-01),
+│   │                         # plus ChordRefCard, one seed chord the tray's own actions cannot
+│   │                         # touch; both belong to no pad and are thrown away when the
+│   │                         # window closes
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
@@ -444,6 +452,74 @@ coming back:
   panel used to gate them on being alive, so the generator's own actions vanished from a card
   whenever its view was closed - that is the bug the brain/view split exists to prevent, and it
   is why the window must never own `ChordGenMenu`.
+- **The window grew a 4x4 tray of candidates on 2026-08-01, and it is not the grid that left
+  on 2026-07-30.** That earlier one drew the current *page* - the same sixteen pads, through
+  the same `setChordPad` - so it was the Pads section drawn a second time. `ChordTray` draws
+  sixteen chords that belong to **no pad**: not on any page, not in the session, gone when the
+  window closes (Owen, 2026-08-01: "I have four by four pad where you can audition new chords.
+  We want to be able to try a bunch out"). A click auditions one for 800 ms through
+  `ChordGenMenu::auditionChord`, which forwards to the same `previewChord` the suggestion menu
+  already used, so `ChordTray` and `ChordGenPanel` still never call `noteOn` between them.
+  `previewChord` calls `processor.stopAllChordPads()` before sounding the audition (fixed
+  2026-08-01, same day: Owen found that a ringing pad under Sustain made an audition of the
+  same chord silent, or made an overlapping one sound like it had fewer notes than it listed,
+  because Keys emits a note-on only on the 0->1 transition of `noteRefs`. An audition is a
+  monitor rather than a performance, so it takes the room; the cost is that it stops a
+  deliberately sustained pad and releases a chord held into the arp). A drag onto a pad
+  commits it there, and **a committed card leaves its cell empty** rather than refilling
+  itself - the hole is how you see which candidates you have already taken, and it is what
+  gives **Fill** something to do. **Fill**, **Regen** and **Clear**, on the tray's own header
+  row, replace the **Reroll** button that used to sit there: Fill writes the empty cells only,
+  Regen rerolls the ones that already carry a candidate, Clear empties the tray outright, and
+  none of the three can lose work because a tray card is not state - Fill greys when the tray
+  is full, Regen and Clear grey when it is empty. The tray also rerolls itself whenever a
+  generator setting moves (`ChordTray::refreshForSettings`, polled by the panel's existing
+  15 Hz timer), keyed on the generator's APVTS parameters plus Mood and Start and deliberately
+  *not* on the page's locked chords, which feed Lock Influence and would reroll the whole tray
+  on every commit. `ChordGenMenu::generateCandidates(int count)` is the entry point behind
+  Fill/Regen and the auto-refresh: the one generator call that builds chords and writes them to
+  no pad. Elsewhere "the generator draws no cards of its own" and "there is exactly one set of
+  chord cards" (`docs/CONTROLS.md`, `README.md`) mean one set of **pads** - a tray candidate is
+  not a pad and does not become one without a drag or a menu pick.
+- **`ChordRefCard` is the one chord the tray's own actions cannot touch** (Owen, 2026-08-01:
+  "I think we should have another box for the reference chord where we can drag in something
+  from the main window or one of the other chords. So when you regenerate everything, it
+  doesn't erase your reference chord"). It fills from a **tray card** dropped on it, or from a
+  **pad in the main window** dropped on it - the latter is why `ChordPads` grew `onDragOutside`
+  / `onDropOutside`: a drop on the reference card **copies**, and `onDropOutside` returning
+  true suppresses the ordinary "drag off the strip clears the pad" behaviour, so reaching for
+  the reference box can never delete the chord you were trying to keep. Left-click auditions it
+  the same as a tray card. Beside it, **Similar** and **Could follow** call
+  `ChordGenMenu::similarTo` / `couldFollow` with the reference chord as seed and write a fresh
+  trayful (`similarTo` keeps the root and varies the colour; `couldFollow` reuses
+  `suggest::all`, the same table the pad card menu's own "Next: could follow" offers, rather
+  than inventing a second opinion); **Clear** empties the reference card alone. All three grey
+  when the card is empty.
+- **A tray card's right-click menu** is a new entry on the closed owner-directed list in
+  `CLAUDE.md` (Owen, 2026-08-01: "when you right click on a chord in there, I want you to have
+  a whole bunch of options about trying to find similar ones or what might come next"):
+  `ChordTray::showCardMenu` builds eight items in four groups - Send to first empty pad; Fill
+  tray with similar chords, Fill tray with what could follow; Octave down, Octave up, Next
+  voicing; New chord here, Clear this card. **Opening it makes no sound**, and neither do the
+  three shaping edits - it auditioned the card for a few minutes on the same day and Owen had
+  that taken out, since the left click is already how you hear a card, and right-clicking one
+  you just auditioned (or right-clicking on the way to Clear) played it again for no reason.
+  Send to first empty pad is the drag with the aim taken out (`ChordPads::firstEmptyPadOnPage` /
+  `sendChordToFirstEmptyPad`), and it is the one *placing* item, greyed by `onPageHasEmptyPad`
+  when the current page has no room.
+- **The drag crosses two top-level windows**, which JUCE gives nothing for: a
+  `DragAndDropContainer` only ever sees a drop inside its own window, and the tray lives in
+  the generator's `DetachedWindow` while the pads live in the main editor or a `DetachedWindow`
+  of their own. `ChordGenPanel::onCandidateDragOver` / `onCandidateDropped` /
+  `onCandidateDragEnd` hand the editor a **screen** position - the one space the two windows
+  share - and the editor forwards it to `ChordPads::externalDropSlotAt(screenPos)` /
+  `setExternalDropSlot(slot)` / `dropExternalChord(screenPos, pad)`. The hit test is
+  `juce::Desktop::findComponentAt`, so a generator window sitting over the strip reads as "not
+  over a pad," and a folded Pads section finds nothing at all - occlusion is the target's
+  problem, same as every other drag in Keys. A drop **refuses a locked pad** (the lock that
+  protects a chord from generation protects it from a stray drag too) and calls
+  `clearChordPad` before `setChordPad`, so a sounding or arp-held pad releases its old notes
+  properly instead of having the chord swapped out from under them.
 - **The window is not a `Section`.** It never docks, so it has no bar, no fold, no caption and
   no Detach button, and every one of those is something `KeysEditor::sections` walks. What it
   does share is `DetachedWindow` (the skinned 38 px title bar with mouse-only-sized buttons,
@@ -504,10 +580,15 @@ coming back:
   cannot take the card menu and the bar together, which would be the whole generator. They cost
   the window no height and 502 px of bar (540 with the gaps between them), which is what moved
   `minWidthForView()` from 1010 to 1070 - a number Keys Host now asks for rather than copying.
-- **Clear page** is a button in the generator's window and deliberately *not* a chip. It wipes
-  every unlocked pad on the page, there is no `juce::UndoManager` anywhere in Keys, and a bulk
-  destructive action with no undo does not belong 4 px from Regen. It was briefly an item on
-  the pad menu for the same reason, and moved with the rest of the page-wide actions.
+- **Clear page is removed** (2026-08-01). It had already moved once, from a chip on the Pads
+  bar to a button in the generator's window (2026-07-30), because it wiped every unlocked pad
+  on the page with no `juce::UndoManager` anywhere in Keys to catch a slip. The tray gave the
+  window a destructive action that costs nothing - **Clear**, on the tray's own header - and
+  once that existed, a button that could still erase all sixteen live pads at once had no
+  reason left to be a click away inside the same window. Nothing in Keys now empties a whole
+  page in one gesture: per-pad clearing is still **Clear pad** on that pad's menu or dragging
+  its card off the strip, and the page can still be replaced wholesale, one pad at a time as
+  it decides each, by **Regen** on the Pads bar.
 - **Fill never overwrites** (2026-07-30, Owen: "new generations shouldn't overwrite
   existing"). `fillPage()` writes the *empty* pads and only those, locked or not - a blank
   needs no protection. `regeneratePage()` is the destructive one and the only one: it rerolls
@@ -517,8 +598,7 @@ coming back:
   button ended up being the one that could lose sixteen chords. Each chip greys itself out
   when its list of targets is empty (`pageHasEmptyPads` / `pageHasRegeneratablePads`, polled
   from the editor's timer and from the panel's), so which of the two is which is readable
-  without a tooltip. Clear page greys on the second of the two: it takes exactly what Regen
-  would.
+  without a tooltip.
 - **The lock is an indicator on the card and an item on the menu, and nothing else**
   (2026-07-30, Owen: "I don't want the lock button to be visible. I only want it to be in right
   click"). A filled, locked card paints a 5 px dot in its top-right corner; an unlocked one

@@ -168,6 +168,29 @@ void ChordGenMenu::writeChord(int slot, const chordgen::Chord& c)
 void ChordGenMenu::previewChord(const std::vector<int>& notes)
 {
     stopPreview();
+
+    // Choke every other chord source before sounding this one, and it is not a nicety (Owen,
+    // 2026-08-01: "when I drag a chord from the main window to this window and then click on it,
+    // it doesn't play. And some of the generated chords sound like they're only one note even
+    // though they're saying there's three").
+    //
+    // Both of those were one bug, and it was this rule working exactly as designed. Keys emits
+    // one note-on per *pitch* and only on the 0->1 transition of noteRefs, so that releasing one
+    // owner can never silence another's notes. An audition asking for a pitch some pad is already
+    // holding therefore emits nothing at all. With Sustain on, a pad left ringing made the whole
+    // audition silent when the chords matched, and made it sound like one note when they merely
+    // overlapped: you heard only the pitches the pad did not already own. Nothing was wrong with
+    // the chord, which is why the card could truthfully list three notes and play one.
+    //
+    // An audition is a monitor, not a performance, so it takes the room. This is the same call
+    // Exclusive makes and it reaches the same three places - the pads, the live card, and a chord
+    // held into the arp - because any of them can own a pitch this needs. Unconditional rather
+    // than only-when-they-collide: which pitches overlap is invisible, and a "hear this chord"
+    // button that works or does not depending on an overlap you cannot see is the bug again in a
+    // quieter form. The cost is that auditioning stops a chord you were deliberately sustaining,
+    // which is a click to put back and worth paying for a button that always does what it says.
+    processor.stopAllChordPads();
+
     const float vel = processor.baseVelocity01();
     for (const int n : notes)
         processor.noteOn(n, vel); // Humanize colours the audition like everything else
@@ -248,6 +271,117 @@ void ChordGenMenu::regeneratePadMarkov(int slot)
     processor.setChordPad(slot, pad);
 }
 
+// Candidates for the audition tray: the same two brains, the same settings, and no slot. This
+// is the only generator path that builds a ChordPad it does not hand to the processor, which is
+// why the pad-building is repeated here rather than shared with writeChord - that one preserves
+// the target slot's lock, and a candidate has no target yet.
+std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
+{
+    std::vector<KeysProcessor::ChordPad> out;
+    if (count <= 0)
+        return out;
+    out.reserve((size_t) count);
+
+    if (markovActive())
+    {
+        // One walk of the chain rather than `count` independent first chords, so the tray reads
+        // as a progression you could take in order - which is what a Markov corpus is for, and
+        // what fillPageMarkov already does with the page.
+        const auto generated = markov::generate(chainMode(), genRoot(), currentOptions().octave,
+                                                (int) processor.apvts.getRawParameterValue("markovLength")->load(),
+                                                processor.apvts.getRawParameterValue("markovTemp")->load(),
+                                                moodForChain(), start, count, rng);
+        for (const auto& c : generated)
+        {
+            KeysProcessor::ChordPad pad;
+            pad.notes = c.notes;
+            pad.name = chords::detect(c.notes);
+            pad.rootPc = c.rootPc;
+            pad.type = c.type;
+            pad.numeral = c.numeral;
+            out.push_back(std::move(pad));
+        }
+        return out;
+    }
+
+    for (const auto& c : chordgen::generate(genRoot(), genMode(), count, currentOptions(),
+                                            lockedTypesOnPage(), rng))
+    {
+        KeysProcessor::ChordPad pad;
+        pad.notes = c.notes;
+        pad.name = chords::detect(c.notes);
+        pad.rootPc = c.rootPc;
+        pad.type = c.type;
+        pad.degree = c.degree;
+        out.push_back(std::move(pad));
+    }
+    return out;
+}
+
+// The two seeded answers behind the tray's card menu. Both take the chord you are pointing at
+// and hand back a trayful built from it, and the split between them is the whole reason there
+// are two: "more like this" is a question about *colour* and keeps the root, "what comes next"
+// is a question about *motion* and changes it.
+std::vector<KeysProcessor::ChordPad> ChordGenMenu::similarTo(const std::vector<int>& seed, int count)
+{
+    std::vector<KeysProcessor::ChordPad> out;
+    if (seed.empty() || count <= 0)
+        return out;
+
+    const int rootPc = suggest::analyse(seed).first;
+    const int octave = seed.front() / 12; // the seed's own register, so the family sits with it
+
+    // Same root, every colour chordgen knows: the triad, the sevenths, the sus, the ninths, on
+    // down the type table. Deliberately not `suggest::all` - that table moves the root, which is
+    // exactly what "similar" must not do.
+    const auto& types = chordgen::types();
+    for (int pass = 0; pass < 3 && (int) out.size() < count; ++pass)
+    {
+        // Later passes drop an octave and then climb one, so a request for more variations than
+        // there are chord types answers with the same colours in a different register rather
+        // than running out and leaving the tray half empty.
+        const int oct = octave + (pass == 1 ? -1 : pass == 2 ? 1 : 0);
+        for (int t = 0; t < (int) types.size() && (int) out.size() < count; ++t)
+        {
+            auto notes = chordgen::chordNotes(rootPc, t, oct);
+            if (notes.empty() || notes == seed || notes.back() > 127 || notes.front() < 0)
+                continue; // a chord is not one of its own neighbours, and neither is a silent one
+
+            KeysProcessor::ChordPad pad;
+            pad.name = chords::detect(notes);
+            pad.notes = std::move(notes);
+            pad.rootPc = rootPc;
+            pad.type = t;
+            out.push_back(std::move(pad));
+        }
+    }
+    return out;
+}
+
+std::vector<KeysProcessor::ChordPad> ChordGenMenu::couldFollow(const std::vector<int>& seed, int count)
+{
+    std::vector<KeysProcessor::ChordPad> out;
+    if (seed.empty() || count <= 0)
+        return out;
+
+    // Straight onto `suggest::all`, which is the same eighteen moves the pad card menu offers
+    // under "Next: could follow". One table, one opinion: a second answer to "what comes after
+    // this" that disagreed with the first would be a bug wearing two hats.
+    const auto [rootPc, type] = suggest::analyse(seed);
+    for (const auto& s : suggest::all(rootPc, type, seed.front() / 12))
+    {
+        if ((int) out.size() >= count)
+            break;
+        KeysProcessor::ChordPad pad;
+        pad.notes = s.notes;
+        pad.name = chords::detect(s.notes);
+        pad.rootPc = s.rootPc;
+        pad.type = s.type;
+        out.push_back(std::move(pad));
+    }
+    return out;
+}
+
 std::vector<int> ChordGenMenu::emptyPadsOnPage() const
 {
     std::vector<int> out;
@@ -315,14 +449,6 @@ void ChordGenMenu::regeneratePage()
                                            currentOptions(), lockedTypesOnPage(), rng);
     for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
         writeChord(targets[(size_t) i], chords[(size_t) i]);
-}
-
-void ChordGenMenu::clearPage()
-{
-    const int offset = processor.padPageOffset();
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        if (! processor.chordPad(offset + v).locked) // Clear spares locks too, like Regen
-            processor.clearChordPad(offset + v);
 }
 
 void ChordGenMenu::regeneratePad(int slot)

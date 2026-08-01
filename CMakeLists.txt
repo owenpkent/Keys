@@ -37,6 +37,7 @@ set(KEYS_SOURCES
     src/ui/ChordPads.cpp
     src/ui/ChordGenMenu.cpp
     src/ui/ChordGenPanel.cpp
+    src/ui/ChordTray.cpp
     src/ui/ArpPanel.cpp)
 
 # Sources, compile defs and links are identical for the instrument and the MIDI-effect
@@ -127,7 +128,7 @@ endif()
 # Unit tests (console, JUCE UnitTest). Not built by the plugin targets; build and run
 # with: cmake --build build --target Keys_tests && ctest --test-dir build -C Release
 enable_testing()
-add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp)
+add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp tests/ChordSourceTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
 # juce_audio_basics is for ArpEngine's MidiBuffer/MidiMessage; the kit does not
 # re-export it.

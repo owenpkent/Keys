@@ -202,9 +202,11 @@ Everything here persists with the DAW session.
 ## Chord pads
 
 Two rows of eight pads (sixteen a page) and a live chord card sit between the arpeggiator
-and the playing area. They let you keep a palette of chords a single click away, and they
-are the **only** chord cards in Keys: the generator draws none of its own, so what you
-audition here is what you play. Every card, filled or live, shows its chord's name with the
+and the playing area. They let you keep a palette of chords a single click away, and until
+2026-08-01 they were the only chord cards Keys drew at all. They are still the only ones
+**in the session**: the generator's window added a 4x4 audition tray that day, sixteen
+candidate chords you can click to hear, but a candidate belongs to no page and is thrown away
+when the window closes, so what you keep is still whatever a pad holds. Every card, filled or live, shows its chord's name with the
 notes underneath in octave numbers (for example "C3  E3  G3"), so you can read what a pad
 or the live card holds without pressing it. That used to need a bigger card: **Big**, on the
 Pads bar, swapped the two rows of eight for four rows of four with a full card and a mini
@@ -266,7 +268,7 @@ took roughly a quarter of the card, and every bit of that quarter had stopped pl
 chord, starting a drag or feeding the arpeggiator. The whole card is the card again.
 
 **Octave** and **Next voicing** work on a locked pad too. A lock protects a chord from being
-*replaced or thrown away* — **Regen**, **Clear page**, **Clear pad** and dropping the card off
+*replaced or thrown away* — **Regen**, **Clear pad** and dropping the card off
 the rows all leave it alone. It is not a lock against editing: changing a chord you locked, or
 moving the card to another slot, is something you asked for by name. If that card is ringing,
 or is the one held into the arpeggiator, it changes to the new notes where it stands rather
@@ -288,7 +290,8 @@ took it to 23 rows.
 
 ## Chord generator
 
-The generator is **three chips, three combo boxes, a window, and two items on a card menu**:
+The generator is **three chips, three combo boxes, a window (with its own tray, reference
+card and card menu), and two items on a pad's card menu**:
 
 - **Fill** and **Regen**, at the right-hand end of the **Pads bar**. **Fill is the safe one**:
   it writes a chord to the *empty* pads and never touches one that already has a chord, so you
@@ -297,12 +300,46 @@ The generator is **three chips, three combo boxes, a window, and two items on a 
   it would do nothing - Fill with no blanks left on the page, Regen with nothing unlocked to
   reroll - so the buttons tell you which is which without a hover.
 - **Generator**, the chip beside them, opens the generator's **own window**: every setting it
-  has, the Markov controls, and Fill, Regen and **Clear page** as full-size buttons. Click it
+  has, the Markov controls, and, since 2026-08-01, a 4x4 **audition tray** with a reference
+  card above it. Click the **Generator** chip
   again while the window is up and it comes to the front rather than opening a second one.
   Close the window with its **Close** button or the X in its title bar; both do the same thing
-  and neither loses a setting. Being a window rather than part of the plugin, it can sit
+  and neither loses a setting (a candidate you never dragged out goes with it - the tray was
+  never part of the session). Being a window rather than part of the plugin, it can sit
   anywhere on the desk and be sized to suit, and it remembers where you left it and whether it
   was open.
+- **The tray's own header row carries Fill, Regen and Clear**, and none of them writes a pad
+  any more (changed 2026-08-01, Owen: "when you click on regenerate unlocked, I don't want it
+  to regenerate the ones in the host window, only in the card generator window"). They act on
+  the sixteen candidates instead: **Fill** generates into the empty cells only, **Regen**
+  rerolls the cells that already carry a candidate, **Clear** empties the tray outright. They
+  replace the **Reroll** button the tray opened with, and the same safe/destructive split
+  survives the move - Fill greys when the tray is full, Regen and Clear grey when it is empty,
+  and none of the three can lose a real chord, because a tray card is one drag from a pad if
+  you want it kept and nothing until then. **A committed card now leaves its cell empty**
+  instead of refilling itself: the hole shows which of the sixteen you have already taken, and
+  it is what gives Fill something to do. Click a card to hear it for 800 ms; drag it onto a pad
+  to keep it, written the same way capturing a chord from the live card is - and Send to first
+  empty pad, on the card's own right-click menu (below), is the same commit with the aim taken
+  out. The tray also rerolls itself the instant a generator setting changes, so it never goes
+  stale while you're still picking a key.
+- **The reference card**, above the tray, is one chord that none of the tray's own actions can
+  touch (Owen, 2026-08-01: "so when you regenerate everything, it doesn't erase your reference
+  chord"). Drag a **tray card** onto it, or a **pad from the main window** - dropping a pad
+  here *copies* it rather than clearing the pad, which is the one thing that makes dragging a
+  chord to the reference box safe to try. Left-click auditions it, same as a tray card. Beside
+  it: **Similar** (same root, a different colour - a seventh, a ninth, a sus, an inversion, the
+  parallel major or minor) and **Could follow** (the same four families "Next: could follow"
+  offers on a pad) each fill the tray from that one seed, and **Clear** empties the reference
+  card alone. All three grey out while it is empty.
+- **Right-click a tray card** for a menu of its own, a new entry on the closed right-click
+  list in `CLAUDE.md` (Owen, 2026-08-01: "when you right click on a chord in there, I want you
+  to have a whole bunch of options about trying to find similar ones or what might come
+  next"): Send to first empty pad, Fill tray with similar chords, Fill tray with what could
+  follow, Octave down, Octave up, Next voicing, New chord here, Clear this card. **Opening the
+  menu makes no sound, and neither do the shaping edits** - it auditioned the card for a few
+  minutes on the day it was built and Owen had that taken out, since the left click is already
+  how you hear a card.
 - **Key**, **Mode** and **Scale Compliance**, combo boxes on the same bar just left of the
   chips. These are the three you change while you are auditioning a page, so they are on the
   bar as well as in the window: one click opens the list, one picks. **The bar is the fast way
@@ -317,19 +354,21 @@ The generator is **three chips, three combo boxes, a window, and two items on a 
 - **The pad right-click menu** keeps the two things that are about one card: **New chord** and
   **Next: could follow**. Those work whether the generator's window is open or not.
 
-It works on the page of pads you are looking at, so each page can be a different key. The
-chords it makes *are* the pads: there is exactly one set of chord cards in Keys and this is
-it, so what you audition is what you play. (It used to draw its own full-size copy of the
-same sixteen pads, from back when it covered the whole plugin. That arrangement became the
-Pads section's **Big** switch, and then went altogether on 2026-07-31, once every pad showed
-its own notes without needing to grow.)
+It works on the page of pads you are looking at, so each page can be a different key. There is
+still exactly one set of chord **pads** in Keys - the strip below the arp - and pressing one is
+the only way a generated chord makes sound outside a preview. (It used to draw its own
+full-size copy of the same sixteen pads, from back when it covered the whole plugin. That
+arrangement became the Pads section's **Big** switch, and then went altogether on 2026-07-31,
+once every pad showed its own notes without needing to grow.) The audition tray in the
+generator's window is not that grid come back: its sixteen cards are candidates rather than
+pads, belong to no page and no session, and a click only previews one for 800 ms - hearing a
+candidate costs nothing, keeping one still means dragging it onto a pad or picking Send to
+first empty pad from its right-click menu.
 
 ### Filling a page
 
 1. **Pick a key.** Set **Key** and **Mode** from the combo boxes on the Pads bar, or from the
-   same two controls in the generator's window, where the mode also shows the character it
-   carries (Lydian reads "Dreamy, Ethereal, Magical") so you can choose by feel rather than by
-   name. The bar spells the modes without their aliases, so "Natural Minor (Aeolian)" reads
+   same two controls in the generator's window. The bar spells the modes without their aliases, so "Natural Minor (Aeolian)" reads
    **Natural Minor** there; the window has the room for the full names. These two are the
    generator's own, separate from the **Root** and **Scale** that drive Scale Lock, so move
    those to match if you want Scale Lock to agree with the chords you're about to get.
@@ -343,13 +382,36 @@ its own notes without needing to grow.)
    there is nothing extra to turn on to read them. **Octave** and **Next voicing** on a pad's
    right-click menu move one card around without changing what chord it is.
 
+### Auditioning before you commit
+
+The generator's window carries a 4x4 tray, with a reference card above it: sixteen chords the
+generator has made that belong to no pad yet (added 2026-08-01). **Click** a card to hear it
+for 800 ms - a preview, not a capture, so it costs nothing and never touches a pad. Auditioning
+stops every other chord source first (a ringing pad under Sustain, or one held into the arp),
+so what you hear is always the whole chord rather than whatever pitches happened not to
+collide. **Drag** a card onto a pad to keep it: that pad is written the same way capturing a
+chord from the live card is, a locked pad refuses the drop, and the tray cell you took it from
+is left empty rather than refilling itself - the hole is how you see which of the sixteen you
+have already used. **Fill**, **Regen** and **Clear**, on the tray's own header, act on the
+tray alone: Fill tops up the empty cells, Regen rerolls the filled ones, Clear empties it
+outright, and changing any generator setting rerolls the whole tray the same way, so it never
+shows chords the current settings would no longer make. **Right-click a card** for Send to
+first empty pad, the two Fill-tray-from-this-seed options, the three shaping edits, or New
+chord here / Clear this card - see the chord generator overview above. The **reference card**
+holds one chord none of that can touch, filled by dragging a tray card or a main-window pad
+onto it, with its own Similar / Could follow / Clear. Closing the window loses whatever you
+never dragged onto a pad - the tray (and the reference card) were never part of the session,
+which is what lets you audition a dozen chords for the one you keep.
+
 ### Generator settings
 
 All of these live in the generator's window, opened by the **Generator** chip on the Pads bar.
 Two rows of controls: key, mode, octave and source on the first; note counts, inversions and
 the two weighting sliders on the second, which the Markov controls replace when the source is
 **Markov** (those settings mean nothing to a chain walk, so the row shows whichever set is
-live). Underneath are **Fill Page**, **Regen Unlocked** and **Clear Page**.
+live). Underneath, since 2026-08-01, is the reference card and the 4x4 audition tray, with
+**Fill**, **Regen** and **Clear** on the tray's own header row - none of the three writes a
+pad any more, they act on the tray (see above).
 
 **Key**, **Mode** and **Scale Compliance** are also combo boxes on the Pads bar, which is the
 fast way to reach the three you change most. Both places drive the same setting.
@@ -359,7 +421,7 @@ fast way to reach the three you change most. Both places drive the same setting.
 | **Source** | **Algorithmic** (the weighted pool) or **Markov** (chains learned from real progressions) |
 | **Key** | The tonic the chords are built from. Feeds both sources |
 | **Octave** | Which register the generated chords land in. Feeds both sources |
-| **Mode** | 12 modes, each labelled with the character it carries |
+| **Mode** | 12 modes |
 | **Notes** | Which chord sizes to build: **3** triads, **4** 7ths and 6ths, **5** 9ths and extensions |
 | **Inversions** | **Root** position, and whether **1st** / **2nd** / **3rd** are allowed. An inversion lets a chord sit with its lower notes moved up an octave, so a progression moves less |
 | **Scale Compliance** | How adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows from related modes, then reaches for secondary dominants, then for anything at all |
@@ -384,7 +446,8 @@ but they do survive closing and reopening the window.
 
 **Lock** a chord you want to keep, from that pad's right-click menu. A locked card shows a dot
 in its top-right corner. **Regen** then gives every other pad a new chord and leaves the locked
-ones alone; **Fill** keeps them too, and so does **Clear Page**.
+ones alone; **Fill** keeps them too. There is no page-wide clear left to spare it from - Clear
+page is gone, and per-pad clearing already greys out on a locked card.
 
 **Lock Influence** decides how much the locked chords steer the new ones. At a high setting,
 locking three 7th chords biases what you get toward 7ths: it copies the *character* of what

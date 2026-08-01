@@ -122,11 +122,58 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   keyboard, so a chord card is on screen whatever else is open. **There is no centre view**
   (2026-07-30): the arp stopped being one on 2026-07-25, Chords went the day the generator lost
   its panel, Perform went with the Centre section itself, and there are no tabs left to switch.
-  **There is exactly one set of chord cards**: the generator draws none of its own, because the
-  grid it used to draw was the same sixteen pads of the same page as the strip below it. Its
+  **There is exactly one set of chord *pads***: the generator draws no second view of the page,
+  because the grid it used to draw was the same sixteen pads of the same page as the strip below
+  it, written through the same `setChordPad`. Its
   `Big` arrangement became the Pads section's, and went for good on 2026-07-31: every pad now
   carries its chord's notes under the name on the ordinary two-rows-of-eight card, so there is
-  no separate size left to switch to. **The generator is a brain plus three surfaces,
+  no separate size left to switch to.
+  **The generator window does draw a 4x4 grid again from 2026-08-01, and it is the other kind**
+  (Owen: "I have four by four pad where you can audition new chords. We want to be able to try a
+  bunch out"). `ChordTray` holds sixteen *candidates*: chords that belong to no slot, are not in
+  the session, and die with the window. That is the line to hold when anything else proposes a
+  grid - a view of the page is the removed one under a new name, a tray of uncommitted chords is
+  not. It exists because hearing what the generator would produce used to cost a pad, so
+  comparing eight chords meant filling the page with seven you did not want. Both gestures on a
+  tray card are left-button, so the closed right-click list below is untouched: **click** to
+  audition (through `ChordGenMenu::auditionChord`, so the note path and the 800 ms timer stay on
+  the brain and neither `ChordGenPanel` nor `ChordTray` ever calls `noteOn`), **drag onto a pad**
+  to commit. The drag is the only gesture that can name a slot, which is why it and not a second
+  click is the commit. **It crosses two top-level windows and JUCE gives you nothing for that**:
+  no `DragAndDropContainer` spans them and mouse capture keeps the whole gesture on the tray, so
+  the editor - the one object holding both - passes a *screen* position to
+  `ChordPads::externalDropSlotAt`, which hit-tests with `Desktop::findComponentAt` so that the
+  generator window sitting over the strip means "not over a pad" and a folded Pads section means
+  nothing is found. A drop refuses a **locked** pad and calls `clearChordPad` before
+  `setChordPad`, so a target left ringing by Sustain or feeding the arp gives its old notes up
+  instead of stranding them; a drop that misses keeps the candidate and does nothing, because
+  this gesture is the same shape as the strip's own drag-off-to-clear and must never lose work.
+  `generateCandidates()` is the only generator entry point that hands chords back rather than
+  placing them.
+  **Nothing in the generator window writes a pad** (2026-08-01, Owen: "when you click on
+  regenerate unlocked, I don't want it to regenerate the ones in the host window, only in the
+  card generator window"). Its three buttons act on the tray - **Fill** the empty cells, **Regen**
+  the filled ones, **Clear** the lot - and ride the tray's own header, which is the row that says
+  what they belong to. They keep the safe/destructive split they had; what changed is what they
+  are destructive *to*, and since a tray card is not in the session and is one drag from a pad,
+  none of the three can lose work. **Clear page is gone** with that move: it had one home,
+  deliberately, and this window was it. A committed card **leaves its cell empty**, which is both
+  the record of what you have taken and the thing that gives Fill a job. The Pads bar still
+  carries Fill and Regen for the page, next to the pads they write.
+  **The reference card is the tray's fixed point** (`ChordRefCard`, same files as `ChordTray`;
+  Owen: "another box for the reference chord ... so when you regenerate everything, it doesn't
+  erase your reference chord"). One chord that no tray action touches, filled by dragging a tray
+  card *or* a pad from the main window onto it, with **Similar** and **Could follow** beside it.
+  A pad dropped there is **copied**: dragging a card off the strip normally clears it, so
+  `ChordPads::onDropOutside` returning true is what suppresses that clear, and a gesture that
+  reached for the reference and deleted a chord instead would be the worst bug in the window.
+  **An audition takes the room.** `previewChord` calls `stopAllChordPads()` before it sounds
+  anything. This is not optional politeness: Keys emits one note-on per pitch on the 0→1 refcount
+  transition, so with Sustain on a ringing pad made an audition of the same chord *completely
+  silent* and one that merely overlapped sound like a single note. An audition is a monitor, not
+  a performance. Unconditional rather than only-on-collision, because which pitches overlap is
+  invisible and a Hear-this button that works or does not depending on that is the same bug
+  quieter. The cost, accepted: auditioning stops a deliberately sustained chord and the arp hold. **The generator is a brain plus three surfaces,
   and it owns none of them**: `ChordGenMenu` is a plain value member the editor holds for its
   whole life, and it is reached from (1) three 24 px chips at the right end of the Pads *bar* -
   Fill, Regen and **Generator**, which opens the window - plus three 24 px combo boxes beside
@@ -275,6 +322,19 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      note at a time; on any other key it latches. The reason there is no twin is that the left
      click is already spoken for: under Sustain a second click on a ringing key restrikes it,
      by design, and that is the one behaviour Latch exists to distinguish from.
+  5. *The **audition tray**'s card menu is right-click* (2026-08-01, Owen: "when you right click
+     on a chord in there, I want you to have a whole bunch of options about trying to find
+     similar ones or what might come next"). Eight rows: Send to first empty pad, the two seeded
+     fills (Fill tray with similar chords / with what could follow), the three shaping edits
+     (Octave down/up, Next voicing), New chord here and Clear this card. It earns the exception
+     the way the pad card menu did - a tray card is all playing surface, and there is nowhere on
+     it for eight buttons. Most of it has a left-click twin: Send to first empty pad is the
+     commit drag with the aim taken out, and the two fills are the **Similar** and **Could
+     follow** buttons beside the reference card, seeded from the reference instead of from that
+     card. **Opening this menu makes no sound.** It auditioned the card for a few minutes on the
+     day it was built and came straight back out (Owen: "when you right click, it plays the
+     chord. We don't want it to play") - right-clicking to reach Clear made a noise on the way to
+     throwing the chord away. Hearing a chord is a left click and nothing else, everywhere.
 
   Do not add further right-click-only paths without Owen's explicit say-so.
   The arp slot cards also carry a right-click menu, but it is an ordinary accelerator:

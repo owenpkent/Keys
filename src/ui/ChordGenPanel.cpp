@@ -15,11 +15,30 @@ namespace
     constexpr int kInset = 12;   // margin round everything
     constexpr int kHeaderH = 28; // title, mode character, page, Close
     constexpr int kRowH = 44;    // a labelled control row: 14 px label over a 30 px control
-    constexpr int kActionH = 36; // the page-wide buttons
     constexpr int kGap = 8;      // between cells in a row
     constexpr int kAfterHeader = 10;
     constexpr int kAfterRowA = 6;
     constexpr int kAfterRowB = 8;
+
+    // The audition tray. Its rows are 54 px rather than the 34 px mouse-only floor because a
+    // card carries a chord name over a note list, exactly as a pad card does, and 34 px fits one
+    // of those two. Four rows plus its own header line is what the window grows by.
+    // 38, not the 20 a caption line needs, because Reroll rides this row and a button is a
+    // target: the mouse-only floor is ~34 px and a caption-height strip put it at 18.
+    constexpr int kTrayHeaderH = 38;
+    constexpr int kTrayRowH = 54;
+    constexpr int kTrayGap = 6;
+    constexpr int kTrayH = kTrayHeaderH + 4 * kTrayRowH + 3 * kTrayGap;
+    constexpr int kTrayMinW = 4 * 150 + 3 * kTrayGap; // four readable cards side by side
+
+    // The reference row: a caption, one chord card, and the three buttons that act on it. 56 px
+    // so the card can carry a name over a note list the way every other card in Keys does, and
+    // still leave the buttons their 34 px floor.
+    constexpr int kRefH = 56;
+    constexpr int kAfterRef = 10;
+    constexpr int kRefLabelW = 84;
+    constexpr int kRefCardW = 190;
+    constexpr int kSimilarW = 110, kFollowW = 140, kClearRefW = 90;
 
     // Cell widths, per row. Named because contentSize() adds the same numbers up.
     constexpr int kKeyW = 70, kModeW = 190, kOctaveW = 110, kSourceW = 130;
@@ -52,8 +71,12 @@ juce::Point<int> ChordGenPanel::contentSize()
                                            rowWidth({ kKeyW, kModeW, kOctaveW, kSourceW }),
                                            rowWidth({ kNotesW, kInvW, kComplianceW, kLockInfW })),
                                 juce::jmax(rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
-                                           rowWidth({ kFillW, kRegenW, kClearW })));
-    const int h = kHeaderH + kAfterHeader + kRowH + kAfterRowA + kRowH + kAfterRowB + kActionH;
+                                           kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW })));
+    // No action row of its own since 2026-08-01: the three buttons ride the tray's header, which
+    // is the row that says they belong to it. The reference row is its own though, because what
+    // is on it is a card rather than controls and a card wants the height.
+    const int h = kHeaderH + kAfterHeader + kRowH + kAfterRowA + kRowH + kAfterRowB
+                  + kRefH + kAfterRef + kTrayH;
     return { rows + kInset * 2, h + kInset * 2 };
 }
 
@@ -78,7 +101,8 @@ juce::Point<int> ChordGenPanel::defaultWindowSize()
     return { m.x + 60, m.y + 40 };
 }
 
-ChordGenPanel::ChordGenPanel(KeysProcessor& p, ChordGenMenu& g) : processor(p), gen(g)
+ChordGenPanel::ChordGenPanel(KeysProcessor& p, ChordGenMenu& g)
+    : processor(p), gen(g), tray(p, g), refCard(p, g)
 {
     okstudio::ui::makeMouseOnly(*this);
     buildControls();
@@ -103,10 +127,6 @@ void ChordGenPanel::buildControls()
     title.setFont(skin::uiSemi(16.0f).withExtraKerningFactor(0.04f));
     title.setColour(juce::Label::textColourId, okstudio::theme::text);
     addAndMakeVisible(title);
-
-    modeEmotion.setFont(juce::Font(juce::FontOptions(11.0f)));
-    modeEmotion.setColour(juce::Label::textColourId, okstudio::theme::accentSoft);
-    addAndMakeVisible(modeEmotion);
 
     // The on-screen way out. The title bar's X is the other, and the editor points both at one
     // call, so the two can never tear down differently.
@@ -185,22 +205,34 @@ void ChordGenPanel::buildControls()
     addAndMakeVisible(lockInfluenceSlider);
     lockInfluenceAtt = std::make_unique<SliderAtt>(processor.apvts, "genLockInfluence", lockInfluenceSlider);
 
-    // The page-wide actions, all three straight through to the brain. Fill and Regen are also
-    // chips on the Pads bar; this is the same call, not a second implementation.
-    fillButton.setTitle("Fill chord page (window)");
-    fillButton.setTooltip("Fill the empty pads on this page. Nothing already on the page is "
-                          "touched.");
-    fillButton.onClick = [this] { gen.fillPage(); };
-    regenButton.setTitle("Regenerate unlocked chords (window)");
-    regenButton.setTooltip("Replace the chords on this page with new ones, except on locked "
-                           "pads. Lock a card from its right-click menu to keep it.");
-    regenButton.onClick = [this] { gen.regeneratePage(); };
-    // Clear page lives here and nowhere else. It empties every unlocked pad on the page and
-    // Keys has no undo, so it belongs behind a window you opened on purpose rather than 4 px
-    // from Regen on a bar (which is where it was until 2026-07-30).
-    clearButton.setTitle("Clear chord page");
-    clearButton.setTooltip("Empty every unlocked pad on this page. There is no undo.");
-    clearButton.onClick = [this] { gen.clearPage(); };
+    // The three actions, and every one of them acts on the **tray** rather than on the page
+    // (Owen, 2026-08-01: "when you click on regenerate unlocked, I don't want it to regenerate
+    // the ones in the host window, only in the card generator window"). Nothing in this window
+    // writes a pad now; the only way a chord in here reaches the strip is a drag you made.
+    //
+    // They keep the shape they had - the safe one, the destructive one, the empty one - because
+    // that split is worth keeping, not because the names had to survive. What changed is what
+    // they are destructive *to*, and a tray card is not in the session and is one drag from a
+    // pad if you want it, so none of the three can lose work and Clear needs no lock to respect.
+    //
+    // The Pads bar still carries Fill and Regen for the page itself, next to the pads they
+    // write, which is where a page-wide action belongs. Clear page is gone with this change:
+    // emptying sixteen pads at once with no undo had one home and this window was it.
+    fillButton.setButtonText("Fill");
+    fillButton.setTitle("Fill empty tray cells");
+    fillButton.setTooltip("Generate a candidate into every empty cell of the tray. Nothing "
+                          "already in the tray is touched, and no pad is written.");
+    fillButton.onClick = [this] { tray.fill(); };
+    regenButton.setButtonText("Regen");
+    regenButton.setTitle("Regenerate tray candidates");
+    regenButton.setTooltip("Replace the candidates in the tray with new ones. Your pads are not "
+                           "touched - only a drag onto a pad writes one.");
+    regenButton.onClick = [this] { tray.regen(); };
+    clearButton.setButtonText("Clear");
+    clearButton.setTitle("Clear the tray");
+    clearButton.setTooltip("Empty the tray. Nothing is lost: a candidate is not on a pad until "
+                           "you drag it onto one.");
+    clearButton.onClick = [this] { tray.clear(); };
     for (auto* b : { &fillButton, &regenButton, &clearButton })
         addAndMakeVisible(*b);
 
@@ -262,6 +294,63 @@ void ChordGenPanel::buildControls()
         addChildComponent(*c);
     refreshMoodItems();
 
+    // The audition tray, and the one line that says what a card in it does. The label is worth
+    // its 20 px: a drag is the only way a candidate reaches a pad, and a gesture nothing on
+    // screen mentions is a gesture nobody finds.
+    styleLabel(trayLabel, "Audition - click a chord to hear it, drag it onto a pad to keep it");
+    addAndMakeVisible(trayLabel);
+
+    // The reference chord: one slot the tray's own actions cannot reach. Fill, Regen and Clear
+    // all stop at the tray, so the chord you are working *from* survives every answer you ask
+    // for. Both fills seed from it, which is what makes keeping it worth anything.
+    styleLabel(refLabel, "Reference");
+    addAndMakeVisible(refLabel);
+    addAndMakeVisible(refCard);
+
+    similarButton.setTitle("Fill tray with chords similar to the reference");
+    similarButton.setTooltip("Fill the tray with the reference chord in other colours: sevenths, "
+                             "ninths, sus, the parallel major or minor. Same root throughout.");
+    similarButton.onClick = [this]
+    { tray.setAll(gen.similarTo(refCard.chord().notes, ChordTray::numCells)); };
+    followButton.setTitle("Fill tray with chords that could follow the reference");
+    followButton.setTooltip("Fill the tray with chords that could come after the reference: the "
+                            "same eighteen moves a pad's card menu offers.");
+    followButton.onClick = [this]
+    { tray.setAll(gen.couldFollow(refCard.chord().notes, ChordTray::numCells)); };
+    clearRefButton.setTitle("Clear the reference chord");
+    clearRefButton.setTooltip("Empty the reference slot. The tray is not touched.");
+    clearRefButton.onClick = [this] { refCard.clearChord(); };
+    for (auto* b : { &similarButton, &followButton, &clearRefButton })
+        addAndMakeVisible(*b);
+
+    // Straight through to whoever holds the pad strip. Unwired, the tray still auditions.
+    // A tray drag is offered to the reference card first, because that target is inside this
+    // window and the editor's is not: asking the far end about a point that never left this
+    // window would light a pad under a drag that was always going to land here.
+    tray.onDragOver = [this](juce::Point<int> p)
+    {
+        const bool overRef = refCard.getScreenBounds().contains(p);
+        refCard.setDropHighlight(overRef);
+        if (onCandidateDragOver)
+            onCandidateDragOver(overRef ? juce::Point<int> { -1, -1 } : p);
+    };
+    tray.onDrop = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
+    {
+        if (refCard.getScreenBounds().contains(p))
+        {
+            refCard.setChord(pad);
+            // False, so the tray keeps the card: a reference is a *copy* of a chord you like,
+            // and taking the candidate away as payment for keeping it would be backwards.
+            return false;
+        }
+        return onCandidateDropped ? onCandidateDropped(p, pad) : false;
+    };
+    tray.onDragEnd = [this] { if (onCandidateDragEnd) onCandidateDragEnd(); };
+    tray.onSendToFirstEmpty = [this](const KeysProcessor::ChordPad& pad)
+    { return onCandidateToFirstEmptyPad ? onCandidateToFirstEmptyPad(pad) : false; };
+    tray.onPageHasEmptyPad = [this] { return onPageHasEmptyPad ? onPageHasEmptyPad() : false; };
+    addAndMakeVisible(tray);
+
     pageLabel.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     pageLabel.setColour(juce::Label::textColourId, okstudio::theme::textDim);
     pageLabel.setJustificationType(juce::Justification::centredRight);
@@ -319,25 +408,62 @@ void ChordGenPanel::refreshMoodItems()
     gen.setMoodChoice(moodBox.getSelectedId() <= 1 ? juce::String() : moodBox.getText());
 }
 
+// The reverse crossing: a pad being dragged out of the main window, offered to the reference.
+// Bounds-checked rather than hit-tested through Desktop::findComponentAt, unlike the drop going
+// the other way. That test exists because the *generator window* can cover the pad strip; this
+// direction has the opposite problem and no equivalent, since a drag that has reached this
+// window is over it by definition.
+void ChordGenPanel::showReferenceDropTarget(juce::Point<int> screenPos)
+{
+    refCard.setDropHighlight(refCard.getScreenBounds().contains(screenPos));
+}
+
+bool ChordGenPanel::offerReferenceDrop(juce::Point<int> screenPos, const KeysProcessor::ChordPad& pad)
+{
+    refCard.setDropHighlight(false);
+    if (! refCard.getScreenBounds().contains(screenPos) || pad.notes.empty())
+        return false;
+    refCard.setChord(pad);
+    return true; // and ChordPads reads this as "do not clear the card I just dragged"
+}
+
+void ChordGenPanel::clearReferenceDropTarget()
+{
+    refCard.setDropHighlight(false);
+}
+
 void ChordGenPanel::timerCallback()
 {
-    const int mode = juce::jlimit(0, modes::count() - 1,
-                                  (int) processor.apvts.getRawParameterValue("genMode")->load());
-    modeEmotion.setText(modes::get(mode).emotion, juce::dontSendNotification);
     pageLabel.setText("Page " + juce::String(processor.padPage() + 1) + " of "
                           + juce::String(KeysProcessor::numPadPages),
                       juce::dontSendNotification);
 
-    // Each action greys itself out when it would find nothing to do, the same answers the two
-    // chips on the Pads bar grey on. Clear page takes exactly what Regen would - every unlocked
-    // pad that carries a chord - so it asks the same question.
-    fillButton.setEnabled(gen.pageHasEmptyPads());
-    regenButton.setEnabled(gen.pageHasRegeneratablePads());
-    clearButton.setEnabled(gen.pageHasRegeneratablePads());
+    // Each action greys itself out when it would find nothing to do. These ask the tray now, not
+    // the page: Fill wants a hole to write into, and Regen and Clear both want a candidate that
+    // is actually there. The two chips on the Pads bar still ask the page the same questions
+    // about the pads, which is the pair of answers `gen` still exposes.
+    fillButton.setEnabled(tray.hasEmptyCells());
+    regenButton.setEnabled(tray.hasFilledCells());
+    clearButton.setEnabled(tray.hasFilledCells());
+
+    // All three reference actions need a reference. An empty slot greys them rather than hiding
+    // them, so the row still says what the box is for while it is empty.
+    const bool haveRef = refCard.hasChord();
+    similarButton.setEnabled(haveRef);
+    followButton.setEnabled(haveRef);
+    clearRefButton.setEnabled(haveRef);
 
     // The Mood list belongs to the chain that is up.
     if (gen.chainMode() != lastChainMode)
         refreshMoodItems();
+
+    // And the tray belongs to the settings: change the Key and the sixteen candidates on screen
+    // are answers to the old question. It rerolls itself rather than greying a button, because
+    // unlike every other action in this window a tray card is not state and rerolling can lose
+    // nothing - a candidate you wanted is already on a pad. Polled for the same reason the
+    // source swap below is: these are parameters, so they also move from the Pads bar, the host
+    // and a session load.
+    tray.refreshForSettings();
 
     // Source switch: swap which of the two row-B bands is on screen. The source is a
     // parameter, so it can move from the window's own combo, from the host or from a session
@@ -368,7 +494,6 @@ void ChordGenPanel::resized()
     title.setBounds(top.removeFromLeft(kTitleW));
     closeButton.setBounds(top.removeFromRight(kCloseW).withSizeKeepingCentre(kCloseW, kHeaderH));
     pageLabel.setBounds(top.removeFromRight(kPageW));
-    modeEmotion.setBounds(top.reduced(kGap, 0));
     area.removeFromTop(kAfterHeader);
 
     const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
@@ -424,13 +549,40 @@ void ChordGenPanel::resized()
     cell(rowB, kLockInfW, lockInfluenceLabel, lockInfluenceSlider);
     area.removeFromTop(kAfterRowB);
 
-    // Row C: the page-wide actions. Clear is last and furthest from the two constructive ones,
-    // because it is the only button in here that can lose work.
-    auto rowC = area.removeFromTop(kActionH);
-    fillButton.setBounds(rowC.removeFromLeft(kFillW));
-    rowC.removeFromLeft(kGap);
-    regenButton.setBounds(rowC.removeFromLeft(kRegenW));
-    rowC.removeFromLeft(kGap);
-    clearButton.setBounds(rowC.removeFromLeft(kClearW));
+    // The tray takes everything left, so making the window taller makes the cards taller rather
+    // than leaving a band of background under them. Its header carries the instruction on the
+    // left and the three actions on the right, and they sit *on the tray's own header* rather
+    // than in a row of their own above it because that is the whole point of the change: a
+    // button in this window acts on the tray it is attached to, and nothing here writes a pad.
+    // Clear is last and furthest from the two constructive ones, as it was on the old row.
+    // The reference row, above the tray and outside it, which is the point: everything below is
+    // disposable and this is not.
+    {
+        auto row = area.removeFromTop(kRefH);
+        refLabel.setBounds(row.removeFromLeft(kRefLabelW).withSizeKeepingCentre(kRefLabelW, 14));
+        refCard.setBounds(row.removeFromLeft(kRefCardW));
+        row.removeFromLeft(kGap * 2);
+        const auto refAction = [&row](juce::TextButton& b, int w)
+        {
+            b.setBounds(row.removeFromLeft(w).withSizeKeepingCentre(w, 34));
+            row.removeFromLeft(kGap);
+        };
+        refAction(similarButton, kSimilarW);
+        refAction(followButton, kFollowW);
+        refAction(clearRefButton, kClearRefW);
+    }
+    area.removeFromTop(kAfterRef);
+
+    auto trayHeader = area.removeFromTop(kTrayHeaderH);
+    const auto action = [&trayHeader](juce::TextButton& b, int w)
+    {
+        b.setBounds(trayHeader.removeFromRight(w).withSizeKeepingCentre(w, 34));
+        trayHeader.removeFromRight(kGap);
+    };
+    action(clearButton, kClearW);
+    action(regenButton, kRegenW);
+    action(fillButton, kFillW);
+    trayLabel.setBounds(trayHeader);
+    tray.setBounds(area);
 }
 } // namespace keys
