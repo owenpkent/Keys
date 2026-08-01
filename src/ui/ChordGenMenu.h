@@ -77,6 +77,13 @@ public:
     void addPadMenuItems(int slot, juce::PopupMenu&);
     void handlePadMenuChoice(int slot, int id);
 
+    // The pad linked to the keyboard for editing, or -1. The editor owns that link and tells
+    // this as well as ChordPads, because both items above write a pad's chord and the keybed
+    // rewrites the pad it is editing on every latch change. New chord greys on that card and
+    // a suggestion lands past it, which is the rule Octave down/up and Next voicing already
+    // follow on the same menu.
+    void setEditingSlot(int slot) { editingSlot = slot; }
+
     // Whether the current source reads Mode and Scale Compliance at all. The Markov brain
     // walks a table of transitions rather than a scale, so to it those two mean nothing.
     // The Pads bar and the generator's window both grey them on this one answer, so the same
@@ -134,6 +141,8 @@ private:
     int lastSuggestTarget = -1;
 
     std::vector<int> previewNotes; // suggestion audition currently sounding
+
+    int editingSlot = -1; // pad the keyboard is editing, pushed from the editor; see the setter
 
     JUCE_DECLARE_WEAK_REFERENCEABLE(ChordGenMenu)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenMenu)

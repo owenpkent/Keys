@@ -5,6 +5,7 @@
 #include "../ScaleModes.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
+#include <algorithm>
 
 namespace keys
 {
@@ -385,7 +386,11 @@ void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
     lastSuggestions.clear();
     lastSuggestTarget = -1;
 
-    menu.addItem(idNewChord, "New chord", ! pad.locked);
+    // Greyed on a locked card, and on the card the keyboard is editing. The second is the
+    // same rule Octave down/up and Next voicing follow on this menu: while the link lasts the
+    // keybed writes that pad on every latch change, so a chord generated into it survives
+    // until the next click on a key and then goes, silently and with no undo.
+    menu.addItem(idNewChord, "New chord", ! pad.locked && slot != editingSlot);
 
     // "What could follow this?" - the four suggestion families, each row carrying a
     // play button so it can audition without closing the menu (Octavium's per-row
@@ -399,8 +404,12 @@ void ChordGenMenu::addPadMenuItems(int slot, juce::PopupMenu& menu)
     // (`emptyPadsOnPage`, which Fill uses): a lock protects a chord, and a blank slot has no
     // chord to protect. The search here used to demand empty *and* unlocked, which disagreed
     // with the helper next to it about the same page.
+    // The card being edited is not a landing site either, for the reason New chord is greyed
+    // on it: the keybed owns that pad until the link ends.
     const auto blanks = emptyPadsOnPage();
-    const int target = filled && ! blanks.empty() ? blanks.front() : -1;
+    const auto free = std::find_if(blanks.begin(), blanks.end(),
+                                   [this](int s) { return s != editingSlot; });
+    const int target = filled && free != blanks.end() ? *free : -1;
     // One row, four families inside it. The families were four rows of their own with a
     // section header over them until 2026-07-30, which is five rows for a path that is
     // explored occasionally and never in a hurry - and rows were what the menu had run out of.

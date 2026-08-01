@@ -141,6 +141,20 @@ drift came from). The cost is that doubled note, once. What it buys is a cycle t
 one register however the chord was built, and no arrangement that can ever play a pitch
 twice.
 
+### Fixed: New chord on the card you are editing, and Hold off for a pattern-only launch
+
+Two found reviewing this branch, both the same shape as fixes already in it.
+
+**New chord** is greyed on the card linked to the keyboard, and a picked suggestion lands past
+that card rather than in it. It is the rule the three items above it on the same menu follow
+(see below): the keybed rewrites the pad it is editing on every latch change, so a chord
+generated into it lasted until the next click on a key and then went, with no undo.
+
+**Hold off** on the arp bar now lights for a launched slot that holds a pattern and no chord,
+which is the third condition ArpPanel's **Stop** has always tested. The two are one button,
+and the chip was greying itself out in front of work it could do: the ring stays lit, nothing
+is sounding, no chain is running, and releasing is exactly what clears it.
+
 ### Fixed: Octave and Next voicing on the card you are editing
 
 **Octave down**, **Octave up** and **Next voicing** are greyed while that card is the one

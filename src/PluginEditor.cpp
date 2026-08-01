@@ -1301,6 +1301,7 @@ void KeysEditor::toggleEditPad(int slot)
     keyboard.panic(); // clean slate, so the latched set mirrors exactly this pad
     keyboard.recallOutputNotes(lastEditNotes);
     chordPads.setEditingSlot(slot); // the pad grows a tick that ends the edit
+    chordGen.setEditingSlot(slot);  // and its two menu items step off that card
 }
 
 void KeysEditor::endPadEdit()
@@ -1310,6 +1311,7 @@ void KeysEditor::endPadEdit()
     editingPad = -1;
     lastEditNotes.clear();
     chordPads.setEditingSlot(-1);
+    chordGen.setEditingSlot(-1);
     keyboard.panic(); // the editing chord stops ringing; the pad keeps what it got
 }
 
@@ -1376,7 +1378,13 @@ void KeysEditor::timerCallback()
     // chord at the coming bar line, so there is something to let go of and the button has to
     // be live to let go of it. Enabling has to match what the click can do, or the one
     // control that stops a runaway progression greys itself out at the moment it is needed.
-    arpHoldOffButton.setEnabled(! processor.arpHeldNotes().empty() || processor.chainRunning());
+    // The same three-way test ArpPanel's Stop uses, and it has to be, because the tooltip on
+    // both says they are one button. A launched slot counts on its own: a slot holding a
+    // pattern and no chord lights its ring with nothing sounding and no chain running, and
+    // releaseArpChord() is what clears it, so the click has work to do and the chip was
+    // greying itself out in front of it.
+    arpHoldOffButton.setEnabled(processor.arpLaunchedSlot() >= 0
+                                || ! processor.arpHeldNotes().empty() || processor.chainRunning());
 
     // Mode and Scale Compliance are the generator's, and the Markov brain reads neither: it
     // walks a table of transitions instead of a scale. The generator's window already hides
