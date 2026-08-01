@@ -596,7 +596,10 @@ void SourceViz::paintPlaning(juce::Graphics& g, juce::Rectangle<float> area) con
         {
             const float t = 1.0f - (float) (nte - lo) / (float) span;
             const float cy = diagram.getY() + juce::jlimit(0.0f, 1.0f, t) * diagram.getHeight();
-            g.setColour(accent.base.withAlpha(haveData ? (0.3f + 0.6f * a) : 0.3f));
+            // Same alpha ceiling as every chip elsewhere in this window (~0.7 at brightest)
+            // rather than the near-solid 0.9 this used to reach, so a busy sixteen-chord tray
+            // of small dots doesn't read any heavier than a row of chips would.
+            g.setColour(accent.base.withAlpha(haveData ? (0.25f + 0.45f * a) : 0.25f));
             g.fillEllipse(juce::Rectangle<float>(6.0f, 6.0f).withCentre({ cx, cy }));
             sumY += cy;
         }
@@ -635,27 +638,39 @@ void SourceViz::paintAlgorithmic(juce::Graphics& g, juce::Rectangle<float> area)
     static const char* lower[] = { "i", "ii", "iii", "iv", "v", "vi", "vii" };
     const float colW = diagram.getWidth() / (float) juce::jmax(1, n);
 
+    // Capped at roughly half the band and sitting on a baseline rule, with slim columns rather
+    // than filled slot-wide blocks - a full-height, full-width bar chart of solid fills read as
+    // a different, much louder application next to the fine-lined wheel and triangle either
+    // side of it in the Source picker. The baseline rule is what lets an empty degree still
+    // read as "zero here" rather than as nothing at all.
+    const float labelH = 12.0f;
+    const float baselineY = diagram.getBottom() - labelH - 2.0f;
+    const float barsTop = juce::jmax(diagram.getY(), baselineY - diagram.getHeight() * 0.5f);
+
+    g.setColour(skin::textFaint.withAlpha(0.4f));
+    g.drawLine(diagram.getX(), baselineY, diagram.getRight(), baselineY, 1.0f);
+
     for (int d = 0; d < n; ++d)
     {
-        auto col = diagram.withWidth(colW).withX(diagram.getX() + (float) d * colW).reduced(4.0f, 0.0f);
-        const auto labelArea = col.removeFromBottom(12.0f);
-
-        g.setColour(skin::well.withAlpha(0.6f));
-        g.fillRoundedRectangle(col, 3.0f);
+        const float slotX = diagram.getX() + (float) d * colW;
+        const float barW = juce::jmax(3.0f, colW / 3.0f);
 
         if (counts[(size_t) d] > 0)
         {
             const float frac = (float) counts[(size_t) d] / (float) maxCount;
-            const auto bar = col.withHeight(col.getHeight() * frac).withY(col.getBottom() - col.getHeight() * frac);
-            g.setColour(accent.base.withAlpha(0.75f));
-            g.fillRoundedRectangle(bar, 3.0f);
+            const float barH = (baselineY - barsTop) * frac;
+            const auto bar = juce::Rectangle<float>(barW, barH).withPosition(slotX + (colW - barW) * 0.5f, baselineY - barH);
+            g.setColour(accent.base.withAlpha(0.55f));
+            g.fillRoundedRectangle(bar, 2.0f);
         }
 
         const bool major = qualities[(size_t) d] == modes::Quality::major
                           || qualities[(size_t) d] == modes::Quality::augmented;
         g.setColour(skin::textDim);
         g.setFont(skin::micro(9.0f));
-        g.drawText(major ? upper[d % 7] : lower[d % 7], labelArea, juce::Justification::centred, false);
+        g.drawText(major ? upper[d % 7] : lower[d % 7],
+                   juce::Rectangle<float>(colW, labelH).withPosition(slotX, diagram.getBottom() - labelH),
+                   juce::Justification::centred, false);
     }
 }
 

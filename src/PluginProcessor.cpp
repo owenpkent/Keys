@@ -179,6 +179,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 2, 11, 3));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 2, 11, 4));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctaveMax", 1 }, "Octave Max", 2, 6, 4));
+
+    // Lean the chords major or minor, whatever brain made them and whatever mode they are in.
+    // Zero is neutral and means "leave every third alone", which is why this one needs no tick
+    // box beside it: its off position is already a value on the dial.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genMajMin", 1 }, "Major / Minor", -100, 100, 0));
+
+    // The tick boxes (Owen, 2026-08-01: "check marks for the different sliders and options that
+    // enable or disable them for the generation process"). Ticked, the setting constrains
+    // generation; unticked, the generator is free and rolls that choice itself.
+    //
+    // Only the six settings where "free" is genuinely different from "zero" get one. Lock
+    // Influence, Smooth Voicing and Major/Minor already have an off position on their own dial,
+    // so a tick box beside them would be a second control for a thing the first one does.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseKey", 1 }, "Constrain Key", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseMode", 1 }, "Constrain Mode", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseOctave", 1 }, "Constrain Octave", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseNotes", 1 }, "Constrain Note Count", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseInversions", 1 }, "Constrain Inversions", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseCompliance", 1 }, "Constrain Scale Compliance", true));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "markovMode", 1 }, "Markov Mode",
                                                       juce::StringArray { "Major", "Minor", "Modal" }, 0));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "markovTemp", 1 }, "Markov Temperature",

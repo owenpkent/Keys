@@ -177,6 +177,23 @@ private:
     std::pair<int, int> octaveRange() const;
     void fitVoicing(std::vector<chordgen::Chord>& chords);
     void fitPads(std::vector<KeysProcessor::ChordPad>& pads); // the Markov half of that
+
+    // Lean every chord's third major or minor, whatever produced it. A third pass over the
+    // output rather than a seventh brain, for the reason the other two are: it is a question
+    // about the chords you got, not about how to get them.
+    void applyMajorMinorBias(std::vector<chordgen::Chord>& chords);
+
+    // The tick boxes. `constrains(id)` is the one reader, so a box that is not wired anywhere
+    // reads as ticked rather than silently freeing a setting nobody meant to free.
+    bool constrains(const char* paramId) const;
+
+    // Key and Mode are chosen once per *generation* when their box is unticked, not once per
+    // chord. Every source takes a single root and mode for a whole batch (a circle walk, a chain
+    // step, a progression transposed), so a per-chord roll would mean sixteen unrelated
+    // one-chord walks rather than one wandering progression. `rollFreeChoices` picks them; -1
+    // means "the parameter is in charge", which is what genRoot / genMode look for.
+    void rollFreeChoices();
+    int rolledRoot = -1, rolledMode = -1;
     void smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const; // the Markov half of that
 
     // The Markov source (Source: Markov). Same page mechanics, different brain.
@@ -191,7 +208,10 @@ private:
     void stopPreview();
 
     KeysProcessor& processor;
-    juce::Random rng;
+    // Mutable because `currentOptions() const` rolls a free Scale Compliance when its tick box is
+    // clear, and that call site is const for good reasons elsewhere. Safe: ChordGenMenu is
+    // message-thread only, so there is no second reader to race.
+    mutable juce::Random rng;
 
     // Mood and Start are transient (like the performance wheels): they are choices about the
     // progression you are generating right now, not session state, and empty means Any. They

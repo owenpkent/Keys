@@ -7,6 +7,7 @@
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
 #include <algorithm>
+#include <cmath>
 
 namespace keys
 {
@@ -96,6 +97,52 @@ bool ChordGenMenu::markovActive() const { return sourceIndex() == 1; }
 bool ChordGenMenu::readsScaleSettings() const { return sourceIndex() == 0; }
 bool ChordGenMenu::readsMode() const { return sourceIndex() != 1; }
 
+bool ChordGenMenu::constrains(const char* paramId) const
+{
+    // Absent parameter reads as ticked. A setting whose box was never wired should behave as it
+    // always did, not silently free itself.
+    if (auto* v = processor.apvts.getRawParameterValue(paramId))
+        return v->load() > 0.5f;
+    return true;
+}
+
+void ChordGenMenu::rollFreeChoices()
+{
+    rolledRoot = constrains("genUseKey") ? -1 : rng.nextInt(12);
+    // Diatonic modes only when Mode is free. The table's back half is harmonic minor, blues and
+    // the pentatonics, which are scales rather than modes: wandering into a five-note scale
+    // because you unticked a box is a surprise, not a freedom.
+    rolledMode = constrains("genUseMode") ? -1 : rng.nextInt(7);
+}
+
+// Lean every chord's third. Positive pushes major, negative minor, and the magnitude is the
+// chance that any given chord is pushed at all, so 40% leans most of a page without flattening
+// it into one colour. Only the third moves: the root, the fifth and every extension stay, so a
+// major ninth leaned minor is still a ninth.
+void ChordGenMenu::applyMajorMinorBias(std::vector<chordgen::Chord>& chords)
+{
+    const int bias = (int) processor.apvts.getRawParameterValue("genMajMin")->load();
+    if (bias == 0)
+        return;
+    const bool wantMajor = bias > 0;
+    const float chance = (float) std::abs(bias) * 0.01f;
+
+    for (auto& c : chords)
+    {
+        if (c.notes.empty() || rng.nextFloat() > chance)
+            continue;
+        for (auto& n : c.notes)
+        {
+            const int iv = (((n - c.rootPc) % 12) + 12) % 12;
+            if (wantMajor && iv == 3 && n + 1 <= 127)
+                n += 1;
+            else if (! wantMajor && iv == 4 && n - 1 >= 0)
+                n -= 1;
+        }
+        std::sort(c.notes.begin(), c.notes.end());
+    }
+}
+
 // Ranges rather than single values since 2026-08-01, and read with the ends swapped if they cross:
 // two independent parameters cannot police each other, and the alternative is a generator that
 // silently produces nothing whenever a min is dragged past its max.
@@ -129,14 +176,23 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
     const auto [minOct, maxOct] = octaveRange();
     const auto& scale = modes::get(genMode()).intervals; // semitone offsets from the tonic
     const int root = genRoot();
-    const auto inversions = currentOptions().inversions; // already defaulted to root if none ticked
+    // Unticked means every inversion is fair game, which is not the same as every box ticked:
+    // the boxes are a *choice* the generator may not exceed, and this is the absence of one.
+    const bool freeNotes = ! constrains("genUseNotes");
+    const bool freeOctave = ! constrains("genUseOctave");
+    const auto inversions = constrains("genUseInversions")
+                                ? currentOptions().inversions // defaulted to root if none ticked
+                                : std::vector<int> { 0, 1, 2, 3 };
 
     for (auto& c : chords)
     {
         if (c.notes.empty())
             continue;
 
-        const int want = minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
+        // Unticked means the range is not a constraint at all, so the roll spans the whole 2..11
+        // the parameter can express rather than whatever the two steppers happen to read.
+        const int want = freeNotes ? 2 + rng.nextInt(10)
+                                   : minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
         std::sort(c.notes.begin(), c.notes.end());
 
         // Grow: keep stacking scale thirds above the top note. Stepping two scale degrees at a
@@ -187,7 +243,8 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
 
         // Register: move the whole chord so its lowest note sits in an octave inside the range.
         // The chord moves in one piece, so its shape and its voice leading are untouched.
-        const int wantOct = minOct + (maxOct > minOct ? rng.nextInt(maxOct - minOct + 1) : 0);
+        const int wantOct = freeOctave ? 2 + rng.nextInt(5)
+                                       : minOct + (maxOct > minOct ? rng.nextInt(maxOct - minOct + 1) : 0);
         const int haveOct = c.notes.front() / 12;
         const int shift = (wantOct - haveOct) * 12;
         if (shift != 0)
@@ -208,6 +265,7 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
 // at the caller already smoothed by however much the dial asks for.
 std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
 {
+    rollFreeChoices(); // before anything reads genRoot or genMode
     const auto& a = processor.apvts;
     const int oct = currentOptions().octave;
     const int root = genRoot(), mode = genMode();
@@ -246,6 +304,9 @@ std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
     // Order matters: fit the voicing first, then smooth it. fitVoicing moves whole chords
     // between octaves, so running it after the smoothing pass would undo exactly what that pass
     // had just worked out.
+    // Bias the thirds, then fit the voicing, then smooth it. Bias first because it changes which
+    // notes a chord holds and the other two only move them about.
+    applyMajorMinorBias(out);
     fitVoicing(out);
     sources::applyVoiceLeading(out, a.getRawParameterValue("genSmooth")->load() * 0.01f);
     return out;
@@ -271,6 +332,7 @@ void ChordGenMenu::fitPads(std::vector<KeysProcessor::ChordPad>& pads)
         c.notes = p.notes;
         tmp.push_back(std::move(c));
     }
+    applyMajorMinorBias(tmp); // same order as generateChords: bias, then fit
     fitVoicing(tmp);
     for (size_t i = 0; i < pads.size() && i < tmp.size(); ++i)
     {
@@ -318,11 +380,15 @@ juce::String ChordGenMenu::moodForChain() const
 
 int ChordGenMenu::genRoot() const
 {
+    if (rolledRoot >= 0)
+        return rolledRoot; // Key is unticked; rollFreeChoices picked one for this generation
     return (int) processor.apvts.getRawParameterValue("genRoot")->load();
 }
 
 int ChordGenMenu::genMode() const
 {
+    if (rolledMode >= 0)
+        return rolledMode; // Mode is unticked
     return juce::jlimit(0, modes::count() - 1, (int) processor.apvts.getRawParameterValue("genMode")->load());
 }
 
@@ -352,7 +418,11 @@ chordgen::Options ChordGenMenu::currentOptions() const
     if (on("genInv3")) o.inversions.push_back(3);
     if (o.inversions.empty())
         o.inversions = { 0 };
-    o.scaleCompliance = a.getRawParameterValue("genCompliance")->load() * 0.01f;
+    // Free means a different amount of straying every generation, which is what "the generator
+    // decides" has to mean for a dial: pinning it to 0 or 100 would just be a third fixed value.
+    o.scaleCompliance = constrains("genUseCompliance")
+                            ? a.getRawParameterValue("genCompliance")->load() * 0.01f
+                            : rng.nextFloat();
     o.lockInfluence = a.getRawParameterValue("genLockInfluence")->load() * 0.01f;
     return o;
 }
@@ -430,6 +500,7 @@ void ChordGenMenu::timerCallback()
 
 void ChordGenMenu::regeneratePageMarkov()
 {
+    rollFreeChoices();
     // Octavium regenerates unlocked cards left to right, each stepping the chain
     // from its (possibly just-updated) left neighbour, so changes cascade.
     const int offset = processor.padPageOffset();
@@ -444,6 +515,7 @@ void ChordGenMenu::regeneratePageMarkov()
 
 void ChordGenMenu::fillPageMarkov()
 {
+    rollFreeChoices();
     const auto targets = emptyPadsOnPage();
     if (targets.empty())
         return;
@@ -468,6 +540,7 @@ void ChordGenMenu::fillPageMarkov()
 
 void ChordGenMenu::regeneratePadMarkov(int slot)
 {
+    rollFreeChoices();
     const int offset = processor.padPageOffset();
     // The chain steps from the pad to the left on this page; the first pad restarts.
     juce::String predecessor;
@@ -499,6 +572,7 @@ std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
         return out;
     out.reserve((size_t) count);
 
+    rollFreeChoices(); // Markov reads genRoot below, so this must precede it too
     if (markovActive())
     {
         // One walk of the chain rather than `count` independent first chords, so the tray reads

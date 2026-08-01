@@ -5,6 +5,41 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: two character sliders, and tick boxes that let the generator off the leash
+
+**Brightness** sweeps the seven modes from brightest to darkest: Lydian, Major, Mixolydian,
+Dorian, Minor, Phrygian, Locrian. That is the circle-of-fifths ordering of the modes, where each
+step flattens exactly one more degree, which is what brighter and darker actually mean and why the
+axis is a line rather than a taste. Major and minor are two points on it, so sliding past either
+lands somewhere real. It is a **view onto `genMode`**, not a second parameter, because two
+parameters for one thing is how they end up disagreeing. It greys when Mode is one of the scales
+off that axis (harmonic minor, blues, the pentatonics) and keeps its last position rather than
+snapping to an end, because either end would be a lie about where you are.
+
+**Lean** is the other half of "a slider that goes between major and minor": it moves generated
+chords' **thirds** major or minor whatever mode you are in. The size of the lean is how often a
+chord gets pushed, so 40% colours a page without flattening it into one shade. Only the third
+moves, so a major ninth leaned minor is still a ninth.
+
+**Six tick boxes.** Ticked, the setting constrains generation. Unticked, the generator picks that
+one freely: an unticked Key wanders, an unticked Notes range rolls anywhere in 2 to 11, an
+unticked Scale Compliance strays by a different amount every time. Key and Mode roll **once per
+generation** rather than once per chord, because every source takes a single root and mode for a
+whole batch (a circle walk, a chain step, a progression transposed), so a per-chord roll would be
+sixteen unrelated one-chord walks rather than one wandering progression.
+
+Only six settings have a box, and the omissions are deliberate: **Lock Influence**, **Smooth
+Voicing** and **Lean** already have an off position on their own dial, so a box beside them would
+be a second control for what 0 already says.
+
+A tick box is 34 px wide and the full height of its cell. The mouse-only floor applies to a check
+box exactly as it does to a button, and a tick parked in the 14 px caption strip would be a target
+you cannot hit.
+
+**The band row collapses when a source has no band**, which is now Algorithmic (everything that
+was its own moved to the fixed rows) and Negative Harmony (a reflection needs only Key, Mode and
+Octave). The height goes to the tray, so the window does not resize as you switch source.
+
 ### Changed: the generator stops generating behind your back, and shows its working
 
 Four asks from Owen on 2026-08-01, in one pass.

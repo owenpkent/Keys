@@ -208,6 +208,24 @@ private:
     juce::ToggleButton planingDiatonicButton { "Diatonic" };
     juce::Label planingLabel;
 
+    // Brightness sweeps the seven diatonic modes from Lydian to Locrian, which is what "a slider
+    // between major and minor" turns out to mean once you look at what is between them (Owen,
+    // 2026-08-01: "what about a slider that goes between major and minor?"). Major and minor are
+    // positions 1 and 4 on it, so sliding past either lands you somewhere real rather than
+    // nowhere. It is a **view onto `genMode`**, not a parameter of its own, because two
+    // parameters for one thing is how they end up disagreeing; `brightnessOrder` is the map.
+    // The mode table's back half (harmonic minor, blues, the pentatonics) is not on this axis at
+    // all, so the slider greys when Mode is one of those and says so by doing nothing.
+    juce::Slider brightnessSlider;
+    juce::Label brightnessLabel;
+    void setModeFromBrightness(int position);
+    void refreshBrightness();
+    int lastBrightnessShown = -1;
+
+    // And the other half of that ask: lean the chords major or minor without moving the mode.
+    juce::Slider majMinSlider;
+    juce::Label majMinLabel;
+
     // Voice leading is not a band. It is a pass over whatever a source produced, so it belongs to
     // all seven and sits in row A where none of them can hide it.
     juce::Slider smoothSlider;
@@ -222,7 +240,13 @@ private:
     std::unique_ptr<ComboAtt> progressionAtt;
     std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt, tempAtt, lengthAtt;
     std::unique_ptr<SliderAtt> plrPAtt, plrLAtt, plrRAtt, smoothAtt;
-    std::unique_ptr<SliderAtt> notesMinAtt, notesMaxAtt, octaveMaxAtt;
+    std::unique_ptr<SliderAtt> notesMinAtt, notesMaxAtt, octaveMaxAtt, majMinAtt;
+
+    // The tick boxes. Each is 34 px wide and the full height of its cell, because the mouse-only
+    // floor applies to a check box exactly as it does to a button, and a tick parked in a 14 px
+    // caption strip would be a target you cannot hit.
+    std::array<juce::ToggleButton, 6> useBoxes;
+    std::array<std::unique_ptr<ButtonAtt>, 6> useAtts;
     std::unique_ptr<ButtonAtt> planingDiatonicAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;
 

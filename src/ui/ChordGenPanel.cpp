@@ -30,6 +30,10 @@ namespace
     constexpr int kAfterViz = 8;
     constexpr int kFixedRowH = 44;
     constexpr int kAfterFixedRow = 6;
+    // A tick box is 34 px wide and the full height of its cell. The mouse-only floor applies to a
+    // check box exactly as it does to a button, and a tick in the 14 px caption strip would be a
+    // target you cannot hit.
+    constexpr int kCheckW = 34;
     constexpr int kSourceBtnW = 128; // seven of these plus gaps sets the window's floor width
 
     // The audition tray. Its rows are 54 px rather than the 34 px mouse-only floor because a
@@ -61,6 +65,7 @@ namespace
     constexpr int kNotesW = 230, kInvW = 200, kComplianceW = 230, kLockInfW = 230;
     constexpr int kChainW = 110, kMoodW = 150, kStartW = 100, kTempW = 200, kLengthW = 150;
     constexpr int kSmoothW = 210;    // row A, under every source
+    constexpr int kBrightW = 300, kMajMinW = 220;
     constexpr int kCircleDirW = 220; // and one per band added 2026-08-01
     constexpr int kPlrW = 200;
     constexpr int kProgW = 260;
@@ -76,6 +81,15 @@ namespace
         return w;
     }
 
+    // The seven diatonic modes ordered bright to dark, as indices into modes::all(). This is the
+    // circle-of-fifths ordering of the modes: each step flattens exactly one more degree, which is
+    // what "brighter" and "darker" actually mean and why the axis is a line rather than a taste.
+    // Lydian raises the 4th; Locrian has flattened everything it can.
+    constexpr int kBrightnessOrder[] = { 1, 0, 2, 4, 3, 5, 6 };
+    constexpr int kBrightnessCount = 7;
+    const char* const kBrightnessNames[] = { "Lydian", "Major", "Mixolydian", "Dorian",
+                                             "Minor", "Phrygian", "Locrian" };
+
     void styleLabel(juce::Label& l, const juce::String& text)
     {
         l.setText(text.toUpperCase(), juce::dontSendNotification);
@@ -88,19 +102,21 @@ juce::Point<int> ChordGenPanel::contentSize()
 {
     // The widest row wins the width, and the rows plus the gaps between them make the height.
     // Both then take the panel's margin on each side.
-    const int rows = juce::jmax(juce::jmax(rowWidth({ kTitleW, kPageW, kCloseW }),
-                                           rowWidth({ kKeyW, kModeW, kOctaveW, kOctaveW, kSmoothW }),
-                                           rowWidth({ kNotesW, kInvW, kComplianceW, kLockInfW }),
-                                           7 * kSourceBtnW + 6 * kGap),
-                                juce::jmax(rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
-                                           rowWidth({ kPlrW, kPlrW, kPlrW }),
-                                           kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW })));
+    const int rows =
+        juce::jmax(juce::jmax(rowWidth({ kTitleW, kPageW, kCloseW }),
+                              rowWidth({ kKeyW, kModeW, kBrightW, kMajMinW }) + 2 * kCheckW,
+                              rowWidth({ kNotesW, kInvW, kOctaveW, kOctaveW }) + 3 * kCheckW,
+                              rowWidth({ kComplianceW, kLockInfW, kSmoothW }) + kCheckW),
+                   juce::jmax(7 * kSourceBtnW + 6 * kGap,
+                              rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
+                              rowWidth({ kPlrW, kPlrW, kPlrW }),
+                              kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW })));
     // No action row of its own since 2026-08-01: the three buttons ride the tray's header, which
     // is the row that says they belong to it. The reference row is its own though, because what
     // is on it is a card rather than controls and a card wants the height.
     const int h = kHeaderH + kAfterHeader + kRowH + kAfterRowA
                   + kSourceRowH + kAfterSourceRow + SourceViz::preferredHeight() + kAfterViz
-                  + kFixedRowH + kAfterFixedRow
+                  + 2 * (kFixedRowH + kAfterFixedRow)
                   + kRowH + kAfterRowB + kRefH + kAfterRef + kTrayH;
     return { rows + kInset * 2, h + kInset * 2 };
 }
@@ -313,6 +329,57 @@ void ChordGenPanel::buildControls()
     }
 
     // Voice leading, in row A because it belongs to all seven sources rather than to any of them.
+    // Brightness: a view onto genMode through kBrightnessOrder, not a parameter of its own.
+    styleLabel(brightnessLabel, "Brightness (major / minor)");
+    addAndMakeVisible(brightnessLabel);
+    brightnessSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    brightnessSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 84, 26);
+    brightnessSlider.setRange(0, kBrightnessCount - 1, 1);
+    brightnessSlider.setTitle("Mode brightness");
+    brightnessSlider.setTooltip("Slides through the seven modes from brightest to darkest: "
+                               "Lydian, Major, Mixolydian, Dorian, Minor, Phrygian, Locrian. "
+                               "Major and minor are two points on it, so you can slide past "
+                               "either into the modes between. It sets Mode.");
+    brightnessSlider.textFromValueFunction = [](double v)
+    {
+        const int i = juce::jlimit(0, kBrightnessCount - 1, (int) v);
+        return juce::String(kBrightnessNames[i]);
+    };
+    brightnessSlider.onValueChange = [this] { setModeFromBrightness((int) brightnessSlider.getValue()); };
+    addAndMakeVisible(brightnessSlider);
+
+    // Major / Minor: leans the thirds without touching the mode.
+    styleLabel(majMinLabel, "Lean");
+    addAndMakeVisible(majMinLabel);
+    majMinSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    majMinSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 50, 26);
+    majMinSlider.setRange(-100, 100, 1);
+    majMinSlider.setTitle("Major / minor lean");
+    majMinSlider.setTooltip("Leans generated chords major (right) or minor (left) by moving their "
+                            "thirds, whatever mode you are in. The size of the lean is how often "
+                            "a chord gets pushed, so it colours a page without flattening it. "
+                            "Centre leaves every chord as its source made it.");
+    addAndMakeVisible(majMinSlider);
+    majMinAtt = std::make_unique<SliderAtt>(processor.apvts, "genMajMin", majMinSlider);
+
+    // The six tick boxes, in the order their settings appear.
+    {
+        static const char* ids[] = { "genUseKey", "genUseMode", "genUseOctave",
+                                     "genUseNotes", "genUseInversions", "genUseCompliance" };
+        static const char* what[] = { "Key", "Mode", "Octave", "note count", "inversions",
+                                      "scale compliance" };
+        for (int i = 0; i < (int) useBoxes.size(); ++i)
+        {
+            useBoxes[(size_t) i].setTitle(juce::String("Constrain ") + what[i]);
+            useBoxes[(size_t) i].setTooltip(juce::String("Ticked, generation obeys the ") + what[i]
+                                            + " beside this box. Unticked, the generator picks it "
+                                              "freely each time it generates.");
+            addAndMakeVisible(useBoxes[(size_t) i]);
+            useAtts[(size_t) i] = std::make_unique<ButtonAtt>(processor.apvts, ids[i],
+                                                              useBoxes[(size_t) i]);
+        }
+    }
+
     // "Voice Leading" until 2026-08-01, when Owen said "I don't understand what the voice
     // reading does". The name was the problem: it is jargon for a thing with a plain description,
     // and the tooltip below is now that description rather than a restatement of the label.
@@ -532,6 +599,37 @@ void ChordGenPanel::refreshRadioStates()
         circleDirButtons[(size_t) i].setToggleState(i == dir, juce::dontSendNotification);
 }
 
+// Brightness writes genMode and reads it back, the same shape the source buttons use and for the
+// same reason: JUCE has no attachment for "a control whose value is a permutation of a
+// parameter's". Both halves live here so the mapping exists in exactly one place.
+void ChordGenPanel::setModeFromBrightness(int position)
+{
+    const int p = juce::jlimit(0, kBrightnessCount - 1, position);
+    if (auto* param = processor.apvts.getParameter("genMode"))
+        param->setValueNotifyingHost(param->convertTo0to1((float) kBrightnessOrder[p]));
+}
+
+void ChordGenPanel::refreshBrightness()
+{
+    const int mode = (int) processor.apvts.getRawParameterValue("genMode")->load();
+    int pos = -1;
+    for (int i = 0; i < kBrightnessCount; ++i)
+        if (kBrightnessOrder[i] == mode)
+            pos = i;
+
+    // Off the axis entirely (harmonic minor, blues, a pentatonic). The slider greys and keeps
+    // whatever it last showed rather than snapping to an end, because either end would be a lie
+    // about where you are. Moving it is still how you get back onto the axis.
+    const bool onAxis = pos >= 0;
+    brightnessSlider.setEnabled(onAxis);
+    brightnessLabel.setEnabled(onAxis);
+    if (onAxis && pos != lastBrightnessShown)
+    {
+        lastBrightnessShown = pos;
+        brightnessSlider.setValue(pos, juce::dontSendNotification);
+    }
+}
+
 std::vector<juce::Component*> ChordGenPanel::bandFor(int source)
 {
     switch (source)
@@ -667,6 +765,7 @@ void ChordGenPanel::timerCallback()
     if (const int src = gen.sourceIndex(); src != shownSource)
         applySource(src);
     refreshRadioStates();
+    refreshBrightness();
 
     // Keep the diagram pointed at what is actually happening. Each setter no-ops when nothing
     // changed, so this costs a few comparisons per tick rather than a repaint.
@@ -730,15 +829,21 @@ void ChordGenPanel::resized()
 
     // Row A: key, mode, octave, and which brain generates. Every one of these is live under
     // both sources except Mode, which the timer greys.
+    // A cell with its tick box: the box takes 34 px of full height at the left, then the caption
+    // and control fill what is left. Only the six settings where "free" differs from "zero" have
+    // one, which is why `cell` still exists beside this.
+    const auto checkCell = [&cell](juce::Rectangle<int>& row, int w, juce::ToggleButton& box,
+                                   juce::Label& lab, juce::Component& ctl)
+    {
+        box.setBounds(row.removeFromLeft(kCheckW));
+        cell(row, w, lab, ctl);
+    };
+
     auto rowA = area.removeFromTop(kRowH);
-    cell(rowA, kKeyW, rootLabel, rootBox);
-    cell(rowA, kModeW, modeLabel, modeBox);
-    // Octave is a range now: the low end, then "to", then the high end.
-    cell(rowA, kOctaveW, octaveLabel, octaveSlider);
-    cell(rowA, kOctaveW, octaveMaxLabel, octaveMaxSlider);
-    // Voice leading is here rather than in a band because it belongs to every source: it is a
-    // pass over whatever a source produced, so no band may be able to hide it.
-    cell(rowA, kSmoothW, smoothLabel, smoothSlider);
+    checkCell(rowA, kKeyW, useBoxes[0], rootLabel, rootBox);
+    checkCell(rowA, kModeW, useBoxes[1], modeLabel, modeBox);
+    cell(rowA, kBrightW, brightnessLabel, brightnessSlider);
+    cell(rowA, kMajMinW, majMinLabel, majMinSlider);
     area.removeFromTop(kAfterRowA);
 
     // The source row. Seven buttons, equal width, filling whatever the window is: at the layout's
@@ -767,6 +872,7 @@ void ChordGenPanel::resized()
     {
         auto row = area.removeFromTop(kFixedRowH);
         // Notes first: it is the one most often reached for, and it is the one that changed shape.
+        useBoxes[3].setBounds(row.removeFromLeft(kCheckW));
         {
             auto c = row.removeFromLeft(kNotesW);
             row.removeFromLeft(kGap);
@@ -776,6 +882,7 @@ void ChordGenPanel::resized()
             c.removeFromLeft(kGap);
             notesMaxSlider.setBounds(c.removeFromLeft(w));
         }
+        useBoxes[4].setBounds(row.removeFromLeft(kCheckW));
         {
             auto c = row.removeFromLeft(kInvW);
             row.removeFromLeft(kGap);
@@ -786,8 +893,19 @@ void ChordGenPanel::resized()
             inv2Button.setBounds(c.removeFromLeft(w));
             inv3Button.setBounds(c);
         }
-        cell(row, kComplianceW, complianceLabel, complianceSlider);
+        checkCell(row, kOctaveW, useBoxes[2], octaveLabel, octaveSlider);
+        cell(row, kOctaveW, octaveMaxLabel, octaveMaxSlider);
+    }
+    area.removeFromTop(kAfterFixedRow);
+
+    // A second fixed row for the three dials whose own zero already means "off", which is exactly
+    // why none of them carries a tick box: a box beside Smooth Voicing would be a second control
+    // for what 0 % already says.
+    {
+        auto row = area.removeFromTop(kFixedRowH);
+        checkCell(row, kComplianceW, useBoxes[5], complianceLabel, complianceSlider);
         cell(row, kLockInfW, lockInfluenceLabel, lockInfluenceSlider);
+        cell(row, kSmoothW, smoothLabel, smoothSlider);
     }
     area.removeFromTop(kAfterFixedRow);
 
@@ -795,7 +913,12 @@ void ChordGenPanel::resized()
     // is up, its chain controls in the same band. Both are laid out here and applySource() has
     // already hidden one of them, which it must: these two rects overlap and the algorithmic
     // set is the wider, so a hidden-but-visible one paints out past the other's right edge.
-    auto rowB = area.removeFromTop(kRowH);
+    // The band row collapses when the source has no band, which since 2026-08-01 is Algorithmic
+    // (everything that was its own moved to the fixed rows) and Negative Harmony (a reflection
+    // needs only Key, Mode and Octave). Leaving a 44 px hole under those two read as a missing
+    // control rather than as an absent one. The height goes to the tray, which takes whatever is
+    // left, so the window does not resize under you when you switch source.
+    auto rowB = area.removeFromTop(bandFor(shownSource).empty() ? 0 : kRowH);
     // A pristine copy, because the algorithmic band below consumes `rowB` as it goes and every
     // other band has to start from the same left edge rather than from whatever is left over.
     const auto rowFull = rowB;
