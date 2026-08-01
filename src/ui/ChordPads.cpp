@@ -15,10 +15,7 @@ namespace
     constexpr float kGap = 6.0f;
     constexpr float kRadius = 6.0f;
     constexpr float kSaveW = 38.0f; // the edit tick's strip at the right end of a pad
-    // Below this a pad is a name and nothing else; above it there is room for the note list
-    // and the mini keyboard as well. A height, not a mode flag, so the card draws whatever
-    // its space affords and Big/Small stays purely a question of layout.
-    constexpr float kRichCardH = 58.0f;
+    constexpr float kNoteLineH = 11.0f; // the note list under the chord name, on every card
     bool isChord(const std::vector<int>& n) { return n.size() >= 2; }
 
     bool onKeyboard(const std::vector<int>& notes)
@@ -46,8 +43,10 @@ namespace
         return v;
     }
 
-    // The two halves of the full chord card. They were the chord generator's, drawn onto its
-    // own copy of this same page of pads; the generator's grid is gone and they live here.
+    // What a card is made of, under what it is called. This came from the chord generator's
+    // own copy of this same page of pads; that grid went on 2026-07-30 and this stayed, at
+    // first only on the tall (Big) arrangement, and now on every card - a line of it costs
+    // 11 px, which the short card has, so Big had nothing left to offer and went too.
     juce::String noteListText(const std::vector<int>& notes)
     {
         const auto names = okstudio::scales::noteNames();
@@ -57,44 +56,6 @@ namespace
         return out;
     }
 
-    // Two octaves (three when the chord spills over) from the low note's C, held keys lit.
-    // Purely informative, never a target.
-    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes,
-                          skin::Accent ac)
-    {
-        if (notes.empty())
-            return;
-        const int lo = *std::min_element(notes.begin(), notes.end());
-        const int hi = *std::max_element(notes.begin(), notes.end());
-        const int base = (lo / 12) * 12;
-        const int octaves = hi < base + 24 ? 2 : 3;
-        const auto held = [&notes](int n)
-        { return std::find(notes.begin(), notes.end(), n) != notes.end(); };
-
-        constexpr int whitePc[7] = { 0, 2, 4, 5, 7, 9, 11 };
-        const int whites = octaves * 7;
-        const float ww = r.getWidth() / (float) whites;
-        for (int i = 0; i < whites; ++i)
-        {
-            const int note = base + (i / 7) * 12 + whitePc[i % 7];
-            const auto key = juce::Rectangle<float>(r.getX() + ww * (float) i, r.getY(),
-                                                    ww, r.getHeight()).reduced(0.5f, 0.0f);
-            g.setColour(held(note) ? ac.base : juce::Colours::white.withAlpha(0.30f));
-            g.fillRoundedRectangle(key, 1.0f);
-        }
-
-        constexpr int blackAfterWhite[5] = { 0, 1, 3, 4, 5 }; // C# D# F# G# A#
-        constexpr int blackPc[5] = { 1, 3, 6, 8, 10 };
-        const float bw = ww * 0.62f, bh = r.getHeight() * 0.62f;
-        for (int o = 0; o < octaves; ++o)
-            for (int b = 0; b < 5; ++b)
-            {
-                const int note = base + o * 12 + blackPc[b];
-                const float x = r.getX() + ww * (float) (o * 7 + blackAfterWhite[b] + 1) - bw * 0.5f;
-                g.setColour(held(note) ? ac.hot : juce::Colour(0xff101216));
-                g.fillRoundedRectangle({ x, r.getY(), bw, bh }, 1.0f);
-            }
-    }
 } // namespace
 
 ChordPads::ChordPads(KeysProcessor& p) : processor(p)
@@ -108,19 +69,11 @@ juce::Rectangle<float> ChordPads::cardBounds() const
     return r.removeFromLeft(kCardW);
 }
 
-void ChordPads::setBigCards(bool big)
-{
-    if (bigCards == big)
-        return;
-    bigCards = big;
-    repaint(); // geometry is computed per paint, so there is nothing else to move
-}
-
 juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
-    const int rows = rowsFor(bigCards);
-    const int cols = KeysProcessor::padsPerPage / rows; // 16 as 2x8 or 4x4
+    constexpr int rows = 2;
+    constexpr int cols = KeysProcessor::padsPerPage / rows; // sixteen as two rows of eight
     r.removeFromLeft(kCardW + 10.0f); // card + separation
     const int row = visibleIndex / cols;
     const int col = visibleIndex % cols;
@@ -196,10 +149,23 @@ void ChordPads::paint(juce::Graphics& g)
             g.setColour(juce::Colours::white.withAlpha(0.05f));
             g.drawRoundedRectangle(b, kRadius, 1.0f);
         }
+        // Named, and under it the notes themselves, the same way a pad card reads. The live
+        // card is what is under your hand rather than what is stored, which is the one place
+        // "what notes are these" is a question you ask mid-chord.
+        auto cardText = b.reduced(6.0f);
+        const auto liveNotes = has ? cardText.removeFromBottom(kNoteLineH)
+                                   : juce::Rectangle<float>();
         g.setColour(has ? skin::text : skin::textFaint);
         g.setFont(has ? skin::uiSemi(15.0f) : skin::ui(11.0f));
-        g.drawText(has ? currentName : juce::String("hold a chord"), b.reduced(6.0f),
-                   juce::Justification::centred);
+        g.drawText(has ? currentName : juce::String("hold a chord"), cardText,
+                   juce::Justification::centred, true);
+        if (has)
+        {
+            g.setColour(skin::textDim);
+            g.setFont(skin::micro(9.0f));
+            g.drawText(noteListText(currentNotes), liveNotes.toNearestInt(),
+                       juce::Justification::centred, true);
+        }
         if (recallHover)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
     }
@@ -243,38 +209,22 @@ void ChordPads::paint(juce::Graphics& g)
                 skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
             }
 
-            // Tall enough, and the card says what the chord *is* as well as what it is
-            // called: the note list with octave numbers, and a mini keyboard of the shape
-            // under your hand. Short, and there is only room for the name, which is the
-            // strip this section has always been.
+            // The card says what the chord *is* as well as what it is called: the name, and
+            // under it the notes a press of this pad will play, with octave numbers. Both,
+            // always - the note list used to be the tall arrangement's alone, and a card is
+            // no use as a reference if reading it means a mode switch first.
             const auto ink = active ? inkOnAccent : skin::text;
-            auto text = nameArea.reduced(4.0f);
-            if (text.getHeight() >= kRichCardH)
-            {
-                text = text.reduced(6.0f, 4.0f);
-                const float kbH = juce::jmin(24.0f, text.getHeight() * 0.34f);
-                const auto kb = text.removeFromBottom(kbH)
-                                    .withSizeKeepingCentre(juce::jmin(170.0f, text.getWidth()), kbH);
-                text.removeFromBottom(3.0f);
-                const auto noteLine = text.removeFromBottom(13.0f);
+            auto text = nameArea.reduced(4.0f, 3.0f);
+            const auto noteLine = text.removeFromBottom(kNoteLineH);
 
-                g.setColour(ink);
-                g.setFont(skin::uiSemi(16.0f));
-                g.drawText(pad.name, text, juce::Justification::centred, true);
+            g.setColour(ink);
+            g.setFont(skin::uiSemi(13.5f));
+            g.drawText(pad.name, text, juce::Justification::centred, true);
 
-                g.setColour(active ? inkOnAccent.withAlpha(0.75f) : skin::textDim);
-                g.setFont(skin::micro(10.0f));
-                g.drawText(noteListText(pad.notes), noteLine.toNearestInt(),
-                           juce::Justification::centred, true);
-
-                drawMiniKeyboard(g, kb, pad.notes, skin::accentOf(*this));
-            }
-            else
-            {
-                g.setColour(ink);
-                g.setFont(skin::uiSemi(13.5f));
-                g.drawText(pad.name, text, juce::Justification::centred);
-            }
+            g.setColour(active ? inkOnAccent.withAlpha(0.75f) : skin::textDim);
+            g.setFont(skin::micro(9.0f));
+            g.drawText(noteListText(pad.notes), noteLine.toNearestInt(),
+                       juce::Justification::centred, true);
         }
 
         // The pad currently feeding the arp. A ring rather than the "active" fill, because

@@ -40,8 +40,8 @@ namespace keys
 //
 // There is no pad grid. The panel drew a 4x4 copy of the current page until 2026-07-30 - the
 // same sixteen pads, through the same KeysProcessor::setChordPad, as the Pads section already
-// on screen. The cards are the Pads section's, and Big gives them the tall arrangement this
-// grid used to have.
+// on screen. The cards are the Pads section's, and each of them names its chord and lists its
+// notes, which is what this grid was for.
 class ChordGenPanel : public juce::Component,
                       private juce::Timer
 {

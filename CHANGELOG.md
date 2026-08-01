@@ -5,6 +5,33 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: every chord card shows its notes, and the Big switch is gone
+
+Owen: "I think we can remove the big button in the chord section, and I want it to just show
+what notes are being played in the small button below the chord name."
+
+A pad card now reads its chord's **name**, and under it the **notes that pressing it plays**,
+with octave numbers: `Dm` over `D3  F3  A3`. Every card, all sixteen of a page, in the two
+rows of eight the strip has always been. The live card at the left says the same about what is
+under your hand, so the notes of a chord you are holding are named before you capture it.
+
+**Big is removed.** It was a chip on the Pads bar that gave four rows of four, each card tall
+enough for a note list and a mini keyboard of the shape being held: the tall arrangement the
+chord generator used to draw over the top of these same pads, before that duplicate grid went
+on 2026-07-30. The note list is the part of it worth reading, and it costs 11 px, which the
+short card has. What 190 px of extra section height still bought was the mini keyboard, and
+that is not worth a mode switch, a bar chip and a window that resizes under you.
+
+So the section is `padRowH` (96) whatever else is happening, `padBigRowH` (286) is gone, and
+the worst case the editor has to be able to grow to fell from **1473 px to 1283**. The Pads
+bar's left-hand group dropped from 286 px to 214; `minWidthForView()` stays at 1070, because
+what set that floor is the right-hand group (Detach, the generator's three chips and its three
+combo boxes) and none of that moved.
+
+**Sessions saved with Big on open with it off**, which is the only state there is now. The
+`padsBig` layout property is no longer written and no longer read; an unread ValueTree
+property is simply dropped, so an older session loads exactly as it always did.
+
 ### Added: the chord generator opens in a window of its own
 
 Owen: "I think the chord generator should just pop out a new window instead of being in the

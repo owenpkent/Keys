@@ -288,11 +288,6 @@ public:
         bool padsDetached = false;
         bool detached = false;  // keybed lives in its own resizable window
 
-        // Two rows of eight, or four rows of four with the full chord card on each. The tall
-        // arrangement is what the chord generator used to draw over the top of these same
-        // pads; it belongs to the pads now, so it is available whatever else is on screen.
-        bool padsBig = false;
-
         // The chord generator's window (2026-07-30, Owen's call). Not a section: it is never
         // docked, has no bar and no fold, and opens from a button on the Pads bar. It is in
         // here all the same because it is the same question - where did Owen leave a window,

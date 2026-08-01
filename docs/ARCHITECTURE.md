@@ -206,7 +206,10 @@ ordering and the scheduling are one implementation rather than two that drift.
 Pads live in the processor (`ChordPad`), so they persist and keep
 sounding independent of the editor; `ChordPads` is just the view. They are arranged as
 four pages of sixteen (`padsPerPage` × `numPadPages`, Octavium's 4x4 per page; drawn as two
-rows of eight, or as that 4x4 with the full chord card on each when **Big** is on). The strip shows the page `padPage`
+rows of eight, each card carrying the chord's name and its notes underneath). The alternate
+4x4 arrangement, a full card and a mini keyboard per pad, was the Pads section's **Big**
+switch, and it went on 2026-07-31 once the note list fit under the name on the ordinary card
+too. The strip shows the page `padPage`
 selects and indexes by **absolute slot**, so a chord left ringing on another page keeps
 sounding and a drag can't land on the wrong pad. Sessions saved when pages held eight
 carry a `padsPerPage` marker (absent = 8) and each slot is re-based on load, so every
@@ -304,8 +307,8 @@ into a folded arp needs a way out that is still on screen (see `docs/ARP_DESIGN.
 
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
-chord) was also the one place you could not reach a chord. Their page buttons and the **Big**
-switch ride on the Pads bar from the left, and the generator's **Fill**, **Regen** and
+chord) was also the one place you could not reach a chord. Their page buttons ride on the
+Pads bar from the left, and the generator's **Fill**, **Regen** and
 **Generator** chips and its **Key** / **Mode** / **Scale Compliance** combos come off the
 right end (the pages hide with the strip, that whole right-hand group never does). What a
 card click *means* is the arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp
@@ -375,8 +378,8 @@ contributes no height to the main window and a folded one hides its window inste
 slot: one control means one thing wherever the section happens to be. The two that do not
 walk it are the two where each section genuinely costs something different, and they read
 the table instead. `sectionHeight()` is a switch (Controls adds the knob row when it is
-unfolded, Pads answers Big or not, the arp asks its panel), and `resized()` lays each bar
-out in a block of its own, because what rides each bar differs.
+unfolded, the arp asks its panel; Pads is a fixed `padRowH` now that Big is gone), and
+`resized()` lays each bar out in a block of its own, because what rides each bar differs.
 
 The keybed was the first to do this and keeps two extras. Detached, `PianoKeyboard`'s 185 px
 key-height cap comes off: dragging that window is meant to resize the keys, which is the whole
@@ -386,8 +389,8 @@ the editor's. Every detached window carries the button that undoes the detach on
 the top, so the control that re-docks a section is never in the window you are not looking at.
 
 Controls that belong to the *editor* rather than to the content stay behind on the bar: the
-arp's **On** and **Hold off**, the pads' page buttons and **Big** switch, the generator's
-**Fill** / **Regen** / **Generator** chips and its three combos, the Controls bar's **Knobs**
+arp's **On** and **Hold off**, the pads' page buttons, the generator's **Fill** / **Regen** /
+**Generator** chips and its three combos, the Controls bar's **Knobs**
 chip and theme swatch. Paging a strip that is off in a window of its own is one click either
 way, so the pages are no more the content's than the swatch is. A bar whose section is away
 says so, in the space its own controls did not use.
@@ -411,7 +414,10 @@ have had one since 2026-07-25, so the grid was the same page drawn twice, at two
 of which could set a pad's lock state and one of which could only paint the dot for it. The
 tall arrangement became the Pads section's **Big** switch (`layout.padsBig`, four rows of
 four), so the large card (chord name, its notes with octave numbers, a mini keyboard of what
-is held) is available whatever else is open.
+is held) was available whatever else was open. **Big went on 2026-07-31**: every pad, in the
+ordinary two rows of eight, now carries the chord name with its notes underneath (octave
+numbers included, no mini keyboard), so the tall arrangement had nothing left to show that the
+short one didn't, and `layout.padsBig` and `padBigRowH` came out with it.
 
 **Then it lost the panel too**, in the same round that removed the centre view, and **got it
 back as a window a few hours later** (Owen: "I think the chord generator should just pop out a
@@ -601,8 +607,8 @@ every session that held one. `latch` came back off the list on 2026-07-30, which
 other reason to keep dead parameters registered: a retired control is sometimes only resting.
 
 The folding layout (which of the four sections are open, whether the knobs and the wheels
-are, whether the pad cards are Big, and where each detached window was left) and the
-instance's accent colour are **not** parameters: they change no note, and
+are, and where each detached window was left) and the instance's accent colour are **not**
+parameters: they change no note, and
 exposing them to automation would only add ways to break a session. They live in
 `KeysProcessor::LayoutState` and ride along in the session tree. The Mod and
 Pitch wheels, knob positions, and the Markov Mood and

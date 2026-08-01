@@ -1478,7 +1478,6 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("arpDetached", layout.arpDetached, nullptr);
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
-    tree.setProperty("padsBig", layout.padsBig, nullptr);
     tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
@@ -1506,7 +1505,6 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.arpDetached = flag("arpDetached", false);
     layout.controlsDetached = flag("controlsDetached", false);
     layout.padsDetached = flag("padsDetached", false);
-    layout.padsBig = flag("padsBig", false); // absent before the pads could be tall
     // Absent before the generator had a window of its own; shut is the right default either
     // way, since it is a settings window rather than something you play from.
     layout.chordGen = flag("chordGen", false);

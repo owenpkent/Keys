@@ -80,7 +80,7 @@ the window reads at a glance, before you have read a single caption.
 |---------|-----|-----------|
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Humanize, Velocity, Strum, Dir, BPM, and the eight knobs in the row beneath them. **Knobs**, at the left end of this bar, folds just that knob row; the theme swatch at the right end stays put whatever you fold. |
 | **Arp** | below the controls | The arpeggiator. Its **On** toggle and the **Hold off** chip ride on the bar and stay there folded, so the arp can be switched on and made to let go of a chord with the panel shut. **Detach** rides on it too, but goes with the fold like every other section's. Folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
-| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons and the **Big** card-size switch ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips and its **Key**, **Mode** and **Scale Compliance** combo boxes ride at the right and never do. |
+| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips and its **Key**, **Mode** and **Scale Compliance** combo boxes ride at the right and never do. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
 A bar is a real button, not a painted strip, so it carries an accessible name for screen
@@ -111,8 +111,8 @@ large as the screen allows. That window carries its own **Size** and **Wheels** 
 alongside Re-dock, because those belong to the keybed rather than to the editor.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
-arp's **On** toggle and **Hold off** chip, the pad page buttons and **Big**, the generator's
-**Fill**, **Regen** and **Generator** chips with the **Key**, **Mode** and **Scale Compliance**
+arp's **On** toggle and **Hold off** chip, the pad page buttons, the generator's **Fill**,
+**Regen** and **Generator** chips with the **Key**, **Mode** and **Scale Compliance**
 combo boxes beside them, the **Knobs** chip, and the theme swatch. All of them keep working
 while the section they name is off in a window.
 
@@ -204,7 +204,11 @@ Everything here persists with the DAW session.
 Two rows of eight pads (sixteen a page) and a live chord card sit between the arpeggiator
 and the playing area. They let you keep a palette of chords a single click away, and they
 are the **only** chord cards in Keys: the generator draws none of its own, so what you
-audition here is what you play.
+audition here is what you play. Every card, filled or live, shows its chord's name with the
+notes underneath in octave numbers (for example "C3  E3  G3"), so you can read what a pad
+or the live card holds without pressing it. That used to need a bigger card: **Big**, on the
+Pads bar, swapped the two rows of eight for four rows of four with a full card and a mini
+keyboard on each, and it went on 2026-07-31 once the note list fit under the name here too.
 
 1. **Build a chord.** Turn **Latch** on (or **Sustain**, or right-click) and click the notes you want.
    The card names the chord it hears (for example `Cm7`).
@@ -222,12 +226,7 @@ audition here is what you play.
    and still cannot be emptied**: dropping one off the rows does nothing, the same answer
    the greyed-out **Clear pad** on its menu gives. The ghost fades as you leave the rows to
    say so before you let go.
-6. **Make the cards bigger.** **Big**, on the Pads bar, swaps the two rows of eight for four
-   rows of four, each card showing the chord's notes with octave numbers and a mini keyboard
-   of the shape under your hand. It is the arrangement the chord generator used to draw over
-   the top of these same pads, back when it had a panel; now these pads are the only place
-   those large cards exist.
-7. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
+6. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
    chord latches onto the keys, and every key you add or remove is written straight back
    to the pad, with the name re-detected as you go. That pad wears a **✓** at its
    right-hand end while the link lasts — click it to finish. (The pad is written as you
@@ -321,8 +320,9 @@ The generator is **three chips, three combo boxes, a window, and two items on a 
 It works on the page of pads you are looking at, so each page can be a different key. The
 chords it makes *are* the pads: there is exactly one set of chord cards in Keys and this is
 it, so what you audition is what you play. (It used to draw its own full-size copy of the
-same sixteen pads, from back when it covered the whole plugin. **Big** on the Pads bar gives
-you those large cards where the pads actually are.)
+same sixteen pads, from back when it covered the whole plugin. That arrangement became the
+Pads section's **Big** switch, and then went altogether on 2026-07-31, once every pad showed
+its own notes without needing to grow.)
 
 ### Filling a page
 
@@ -339,9 +339,9 @@ you those large cards where the pads actually are.)
    something richer from it.
    Anything already on the page stays exactly as it is, so filling a half-finished page is
    safe. To replace what is there, use **Regen** instead, and lock the cards you want kept.
-3. **Play them.** Press a pad to hear it. Turn **Big** on if you want to read the notes of
-   each chord while you work. **Octave** and **Next voicing** on a pad's right-click menu move
-   one card around without changing what chord it is.
+3. **Play them.** Press a pad to hear it: the notes are already printed under its name, so
+   there is nothing extra to turn on to read them. **Octave** and **Next voicing** on a pad's
+   right-click menu move one card around without changing what chord it is.
 
 ### Generator settings
 

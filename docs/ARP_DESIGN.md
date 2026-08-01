@@ -492,7 +492,7 @@ section destroys the editor, never the arpeggiator, which is why On lives on the
 than inside the panel, and why On and Hold off stay put when their section folds. They are
 not alone in that any more: the theme swatch on the Controls bar, and Fill, Regen, Generator,
 Key, Mode and Compliance on the Pads bar, all outlive their fold for the same kind of reason.
-What hides with a fold is what would be a control with nothing behind it - the pad pages, Big,
+What hides with a fold is what would be a control with nothing behind it - the pad pages,
 Knobs, Wheels. Detach hides with it too.
 Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with every
 other section since 2026-07-27); a detached section takes no height in the main window, and

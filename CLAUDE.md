@@ -124,7 +124,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   its panel, Perform went with the Centre section itself, and there are no tabs left to switch.
   **There is exactly one set of chord cards**: the generator draws none of its own, because the
   grid it used to draw was the same sixteen pads of the same page as the strip below it. Its
-  `Big` arrangement became the Pads section's. **The generator is a brain plus three surfaces,
+  `Big` arrangement became the Pads section's, and went for good on 2026-07-31: every pad now
+  carries its chord's notes under the name on the ordinary two-rows-of-eight card, so there is
+  no separate size left to switch to. **The generator is a brain plus three surfaces,
   and it owns none of them**: `ChordGenMenu` is a plain value member the editor holds for its
   whole life, and it is reached from (1) three 24 px chips at the right end of the Pads *bar* -
   Fill, Regen and **Generator**, which opens the window - plus three 24 px combo boxes beside
@@ -181,7 +183,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   the section it was reaching into. This **reverses the 2026-07-27 removal** of the same
   override; any doc still saying the whole bar is the target is describing that three-day
   window. **Detach hides with its section**, and so does every control that would be reaching
-  into content that is not on screen: the pad pages, Big, Knobs, Wheels. What stays on a folded
+  into content that is not on screen: the pad pages, Knobs, Wheels. What stays on a folded
   bar is what you reach for while playing or generating - arp On and Hold off, the Pads bar's
   Fill / Regen / Generator and its Key / Mode / Scale Compliance combos, the Keyboard bar's
   Exclusive / Sustain / Latch / All Off - plus the theme swatch, which belongs to the plugin

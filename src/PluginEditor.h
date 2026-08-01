@@ -241,11 +241,6 @@ private:
 
     // Chord-pad page navigation, riding the Pads bar.
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
-    // Two rows of eight, or four rows of four with the full chord card on each. The tall
-    // arrangement is the one the chord generator used to draw over the top of these same
-    // pads before its grid was removed; it belongs to the pads, so it works whatever else
-    // is on screen.
-    juce::TextButton padsBigButton { "Big" };
 
     // The generator's two bulk actions, riding the Pads bar. They are the fast path into
     // generation, and they are on a bar because a bar is 34 px that already exists: a control

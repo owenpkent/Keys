@@ -81,7 +81,7 @@ releasing a pedal-held note live nowhere else.
 | **Latch** | Click to hold a key, click again to release it. Sustain's twin, and the difference between them is exactly that second click |
 | **Humanize** | Draw each note's velocity at random from the Velocity range, so repeats and chords don't sound machine-perfect |
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu. They are the bottom row of the Controls section, and the **Knobs** chip on that bar folds just that row |
-| **Chord pads** | Their own section, and the only chord cards in Keys. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page, and **Big** swaps the two rows of eight for four rows of four, each card showing the chord's notes and a mini keyboard |
+| **Chord pads** | Their own section, and the only chord cards in Keys. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page. Every card shows the chord's name with its notes (octave numbers included) on a line underneath, in the same two rows of eight; **Big**, which used to swap that for four rows of four with a mini keyboard on each, went on 2026-07-31 once the note list fit on the small card too |
 | **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
 | **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins, and an arp rate set in Hz follows neither |
 | **Arp** | Its own section too, folded when you first open the plugin because it is the tall one. The bar carries an **On** toggle and a **Hold off** chip, so the arpeggiator can be switched on and made to let go of a chord with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern, a chord and a rate that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
@@ -156,8 +156,8 @@ Modal, with **Temperature** (conservative to adventurous), **Length**, a **Mood*
 **Start** chord. The Markov controls take the place of the pool's own row when you switch to
 them, since neither set means anything to the other brain.
 
-Press any pad to hear it, and turn **Big** on (Pads bar) if you want to read each chord's
-notes while you work.
+Press any pad to hear it: its notes sit under the chord name on the card already, so there
+is nothing extra to turn on to read them while you work.
 
 ## Driving it with Claude
 

@@ -25,11 +25,15 @@ namespace keys
 // a target, and Lock is set from the card menu alone. The generator's own settings left this
 // menu at the same time and live in a window of their own (ChordGenPanel).
 //
-// Sixteen pads per page, as two rows of eight or (Big) four rows of four with the full chord
-// card on each: its notes with octave numbers and a mini keyboard of the shape under your
-// hand. The tall arrangement is the one the chord generator used to draw over the top of
-// these same pads, before that duplicate grid was removed on 2026-07-30; it lives here now,
-// so it is available whatever else is on screen.
+// Sixteen pads per page, two rows of eight, and every card reads the same way: the chord's
+// name, and under it the notes a press of it plays, with octave numbers. The live card at the
+// left says the same about what is under your hand.
+//
+// One arrangement, not two. A Big switch on the Pads bar gave four rows of four with a note
+// list and a mini keyboard on each - the tall card the chord generator used to draw over the
+// top of these same pads, before that duplicate grid went on 2026-07-30. It came out the next
+// day (Owen): the note list is the part worth reading, it fits a short card, so the only thing
+// 190 px of extra section height still bought was the mini keyboard.
 //
 // The pad definitions and playback live in the processor, so they persist with the session
 // and keep sounding independent of the editor. This is just the view/controller.
@@ -54,13 +58,6 @@ public:
     // keyboard. The editor owns the edit link; the strip only requests and paints it.
     std::function<void(int)> onEditToggle;
     void setEditingSlot(int slot); // absolute slot being edited, or -1
-
-    // Two rows of eight, or four rows of four with room for the full chord card (the note
-    // list and a mini keyboard of what is held). The tall arrangement is the one the chord
-    // generator used to draw itself, over the top of these same sixteen pads; it belongs to
-    // the pads, so it is available whatever else is on screen.
-    void setBigCards(bool);
-    static int rowsFor(bool big) { return big ? 4 : 2; }
 
     // Extra items for a pad's right-click menu, from whoever can service them - today the
     // chord generator, whose per-card actions (New chord, Next: could follow) reach the cards
@@ -106,7 +103,6 @@ private:
     // different mode than the arp itself.
     bool toArp() const;
     int editingSlot = -1;
-    bool bigCards = false;
     std::vector<int> currentNotes;
     juce::String currentName;
 

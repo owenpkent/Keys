@@ -56,15 +56,11 @@ namespace
     // trade for 12 px of window height. 110 it is, and the floor stays a floor.
     constexpr int knobRowH = 110;
     constexpr int knobGap = 6;       // between the header rows and the knob row
-    constexpr int padRowH = 96;      // two rows of eight, names only
-    // Four rows of four, with room for the full chord card. Derived from ChordPads, not
-    // chosen: a pad draws its note list and mini keyboard only while its text area clears
-    // kRichCardH (58), and that text area is the pad less 4 all round, so a pad needs 66.
-    // ChordPads insets itself by 2 at each end and four rows share three 6 px gaps, so the
-    // strip needs 4 * 66 + 18 + 4 = 286. It was 320, which bought a 4 px taller mini keyboard
-    // and nothing else. Below 286 nothing fails loudly - every Big card silently falls back
-    // to the name alone, which is the small arrangement with more space around it.
-    constexpr int padBigRowH = 286;
+    // Two rows of eight, each card carrying its chord's name and the notes under it. One
+    // arrangement now: a Big switch here gave four rows of four at 286 px, and it went on
+    // 2026-07-31 when the note list moved onto the short card, which is what anyone was
+    // turning Big on to read.
+    constexpr int padRowH = 96;
     // The keybed. PianoKeyboard caps a white key at 185 px docked and anchors the keys to the
     // bottom, so 185 is the floor: below it the keys themselves shrink. Nothing needs room
     // above them - the fallboard rail and its shadow are painted *downwards* from the top of
@@ -78,19 +74,20 @@ namespace
     // because applyLayout() passes that same worst case in as the *minimum*: at 1400 the two
     // crossed over and every fully-open layout asked JUCE for a minimum above its maximum.
     //
-    // Worst case, everything open and docked, knobs on, Big cards on, the arp in Pattern
-    // shape (the one that opens the step editor):
+    // Worst case, everything open and docked, knobs on, the arp in Pattern shape (the one
+    // that opens the step editor):
     //     margins            10 + 10                        =   20
     //     four bars          4 * SectionBar::height (34)     =  136
     //     three gaps         3 * 6                           =   18
     //     Controls           4 + headerH 112 + 6 + 110       =  232
     //     Arp                4 + ArpPanel::preferredHeight() =  584   (arpPatternH 564 + 16)
-    //     Pads               4 + padBigRowH                  =  290
+    //     Pads               4 + padRowH                     =  100
     //     Keyboard           4 + dockedKeybedH               =  193
     //                                                          ----
-    //                                                          1473
-    // 1800 leaves room for the arp to grow a lane row or two without this becoming a bug
-    // again, and the slack above idealHeight() is all instrument body under the keys.
+    //                                                          1283
+    // It was 1473 while Big cards existed and the Pads line could read 290. 1800 leaves room
+    // for the arp to grow a lane row or two without this becoming a bug again, and the slack
+    // above idealHeight() is all instrument body under the keys.
     constexpr int maxEditorHeight = 1800;
 
     juce::StringArray channelItems()
@@ -391,28 +388,6 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         };
         addAndMakeVisible(b);
     }
-
-    // Two rows of eight, or four rows of four with the full chord card on each - the tall
-    // arrangement the chord generator used to draw over the top of these same pads. It sits
-    // on the Pads bar because it is a question about the pads, not about the generator, and
-    // it is worth reaching from any view.
-    padsBigButton.setClickingTogglesState(false); // syncSectionControls owns the lit state
-    padsBigButton.setTooltip("Bigger cards: four rows of four, each showing the chord's notes "
-                             "and a mini keyboard.");
-    padsBigButton.onClick = [this]
-    {
-        processor.layout.padsBig = ! processor.layout.padsBig;
-        chordPads.setBigCards(processor.layout.padsBig);
-        // Big changes what sectionHeight(secPads) answers by 190 px, so it is a fold in
-        // everything but name and goes through the same call every fold does. It used to do
-        // three of applyLayout's four jobs by hand - sync, tell an embedding host, re-lay out
-        // - and skip the fourth, setSize/setResizeLimits, so the window kept the height it
-        // had: the cards grew into a band that had not grown, and the keybed was carved off
-        // the bottom. applyLayout() is a strict superset of what was here.
-        applyLayout();
-    };
-    addAndMakeVisible(padsBigButton);
-    chordPads.setBigCards(processor.layout.padsBig);
 
     // The generator's bulk actions, on the same bar. They were buttons on a panel that no
     // longer exists, and they had to survive it: a right-click menu is not a left click, so
@@ -904,8 +879,6 @@ void KeysEditor::syncSectionControls()
     // already looking at is one click either way.
     for (auto& b : pageButtons)
         b.setVisible(lay.pads); // pointless without pads
-    padsBigButton.setVisible(lay.pads);
-    padsBigButton.setToggleState(lay.padsBig, juce::dontSendNotification);
     // Fill, Regen, the Generator button and the three combos beside them are deliberately
     // *not* in the list above, and are never hidden: they are the arp On of this bar. Fill and
     // Regen used to hide with the strip, on the reasoning that generating into cards you cannot
@@ -948,7 +921,7 @@ int KeysEditor::sectionHeight(SectionId id) const
         // arithmetic anywhere else and the window is the wrong size with nothing to say so.
         case secControls:   return headerH + (processor.layout.knobs ? knobGap + knobRowH : 0);
         case secArp:        return arpHeight();
-        case secPads:       return processor.layout.padsBig ? padBigRowH : padRowH;
+        case secPads:       return padRowH;
         case secKeyboard:   return dockedKeybedH;
         default:            return 0;
     }
@@ -982,12 +955,16 @@ int KeysEditor::minWidthForView() const
     // 92 px fold zone and the 8 px each side of it):
     //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 10,
     //             Compliance 74, 6, Mode 148, 6, Key 58                        = 644
-    //     left    four pages at 46 + 4, 10, Big 62, 14                         = 286
-    //                                                                    total = 930
-    // 1070 hands it 942, so the bar fits with 12 px of caption zone left over when the section
+    //     left    four pages at 46 + 4, 14                                     = 214
+    //                                                                    total = 858
+    // 1070 hands it 942, so the bar fits with 84 px of caption zone left over when the section
     // is docked. Nothing is drawn in that zone while it is: paint() only writes "IN ITS OWN
     // WINDOW" there, needs 90 px for it, and gets Detach's 104 back the moment the section
-    // leaves - which is 116 and fits.
+    // leaves - which is 188 and fits.
+    //
+    // The left group was 286 until the Big switch left it (2026-07-31). The floor stays at
+    // 1070 rather than following it down: what set 1070 is the right-hand group, which is the
+    // whole generator's reach and has not moved.
     //
     // It was 1010 until 2026-07-30, and moved when the Generator button joined Fill and Regen
     // on this bar. The floor is worth spending on that: everything on this end of the bar
@@ -1605,7 +1582,7 @@ void KeysEditor::resized()
         // Off, Fill, Regen): contentArea() is the 34 px strip less 4 at each end, so 26 is
         // the ceiling here and the mouse-only floor is bought in width instead - 86 px of
         // Hold off is a bigger target than a 34 px square. The fold chips that hide with
-        // their section - the pad pages, Big, Knobs - are still 22 (reduced(1, 2)).
+        // their section - the pad pages, Knobs - are still 22 (reduced(1, 2)).
         auto bar = layoutDetachRow(secArp, arpBar.contentArea(), true);
         bar.removeFromRight(6);
         arpOnButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
@@ -1627,7 +1604,7 @@ void KeysEditor::resized()
         // The generator - three chips, three combos and two items on a card menu (2026-07-30)
         // - comes off the *right*, which is where every control that outlives its section's
         // fold sits: On and Hold off on the arp bar, the theme swatch on the Controls bar. It
-        // has to be that end. The pages and Big are laid out from the left and hide when the
+        // has to be that end. The page buttons are laid out from the left and hide when the
         // strip folds, so anything placed after them would keep a couple of hundred px of hole
         // where they were. 24 px like the other bar controls that act rather than fold.
         bar.removeFromRight(6);
@@ -1644,7 +1621,7 @@ void KeysEditor::resized()
         // Key, Mode and Compliance, left of the three chips and reading in that order, which is
         // the order the generator's window lists them in. Same end of the bar and the same
         // unconditional placement as Fill and Regen, for the same two reasons: they outlive
-        // the fold, and the left end is where the hole appears when the pages and Big go.
+        // the fold, and the left end is where the hole appears when the page buttons go.
         //
         // 24 px like everything on a bar that acts rather than folds, so the whole group is
         // one height. What the bar spends, at its floor and above, is worked out in
@@ -1664,8 +1641,6 @@ void KeysEditor::resized()
             b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
             bar.removeFromLeft(4);
         }
-        bar.removeFromLeft(10);
-        padsBigButton.setBounds(bar.removeFromLeft(62).reduced(1, 2));
         bar.removeFromLeft(14);
         section(secPads).caption = bar;
     }
