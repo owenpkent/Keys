@@ -339,7 +339,9 @@ It fills from `laneDefaults` now.
 **Chain** walks the slots that hold a chord, giving each the number of bars its card shows,
 and launches each in turn. One click plays the row as a twelve-chord song, which is what a
 row of cards showing chord names has looked like it should do since the slots stopped being
-eight lettered buttons. `Bars` (1..16, on the action row) edits the **active** slot - the one
+eight lettered buttons. It is **per line**: each of the three has its own chain over its own
+twelve slots, its own bar count and its own position, so three progressions can run against
+each other at three rates. The button starts the chain of whichever line the tabs are showing. `Bars` (1..16, on the action row) edits the **active** slot - the one
 whose lanes the editor is showing - which a click on a card already makes it, so setting a
 length is click the card, click the plus. A card shows `x2` and up; twelve cards each saying
 `x1` would be twelve pieces of noise for the one case where the answer does not matter.
@@ -419,6 +421,10 @@ Originally 8 lettered patterns (A-H) per session. **Twelve launchable slots sinc
 2026-07-25**, at Owen's request, after a reference layout where the pattern memories are
 cards you fire rather than letters you recall.
 
+There are twelve **per line** since 2026-08-01, so thirty-six in a session. A slot belongs to
+one arpeggiator, which is what lets the single row on screen be whichever line the tabs have
+selected rather than a shared pool three lines fight over.
+
 A slot carries its lane data *and* a chord, a shape and a rate - the rate meaning the
 division, the unit it was captured in and, when that unit was Hz, the frequency. Launching it
 (one left click, anywhere on the card) installs the pattern, moves the Shape, Rate and rate-mode
@@ -494,21 +500,35 @@ closed the first half):
 - **Send to arp slot**, in the pad's card menu, which copies the chord into a slot for
   later. A copy and not a reference, so regenerating the pad page cannot silently rewrite
   what a slot plays.
+- **Dragging a chord card onto a slot card** (2026-08-01), which is the same thing with a
+  target picker instead of a submenu, and is what retired that menu item's status as a
+  right-click-only path. **Dragging onto a line tab** hands the chord to that line there and
+  then, without going through a slot at all.
 
-The held chord is tagged `arpChordTag` so it never collides with pad or live-card
-scheduling, and `allNotesOff()` forgets it - otherwise a panic silences the chord while the
-launched slot still paints as playing.
+Every one of these names a line. A click and the two menu items go to the **current** line
+(`arpCurrentLine`, shown on the Pads bar and by the panel's tabs); a drag goes to the line
+whose tab or slot it landed on, and makes that line current, because you aimed at it.
+
+The held chord is tagged `arpChordTag - line` (-3, -4, -5) so it never collides with pad or
+live-card scheduling *or with another line's hold* - each is released independently, and
+`cancelScheduledNotes` matches the exact tag, so one shared tag would have letting go of B
+drop A's un-fired strum notes. `allNotesOff()` forgets all three - otherwise a panic silences
+the chord while the launched slot still paints as playing.
 
 ### Hold off, and `releaseArpHold()`
 
 Held means held: nothing follows the note-ons until something replaces them. With the card
 click turned into a retrigger, the way to stop a hold outright is a control of its own, so
-**Hold off** is a 24 px chip on the **arp bar**, next to On (2026-07-30). It is on the bar
-and not in the panel for the same reason On is: a chord can be held into a folded arp, and
-the only exit from it cannot be inside the section that is folded away. The editor's timer
-enables it exactly when there is something to let go of
-(`! processor.arpHeldNotes().empty() || processor.chainRunning()`) and greys it otherwise, so
-it never reads as a dead target. Its accessible name is "Arp hold off", because "Hold off"
+**Hold off** is a 24 px chip on the **arp bar**, next to the line switches (2026-07-30). It is
+on the bar and not in the panel for the same reason those are: a chord can be held into a
+folded arp, and the only exit from it cannot be inside the section that is folded away.
+
+**It releases every line, and stops every chain.** With three lines that is a decision rather
+than an accident: a Hold off that let go of only the line the panel happened to be showing
+would leave the other two droning, and the tabs that would name them are exactly what folding
+the section takes away. One button, one meaning. The editor's timer enables it whenever *any*
+line has something to let go of (`processor.anyArpHold()`, plus a launched slot on any line)
+and greys it otherwise, so it never reads as a dead target. Its accessible name is "Arp hold off", because "Hold off"
 alone says nothing to a script driving the plugin through UI Automation.
 
 Both it and the panel's **Stop** button call one new processor method:
@@ -558,11 +578,12 @@ Concrete remaps:
 ## UI placement (decided: a section of its own)
 
 The arp is a foldable **section**, between the Controls section and the chord pads, with its
-**On** toggle, a **Hold off** chip and a **Detach** button on its own bar. Folding the
-section destroys the editor, never the arpeggiator, which is why On lives on the bar rather
-than inside the panel, and why On and Hold off stay put when their section folds. They are
-not alone in that any more: the theme swatch on the Controls bar, and Fill, Regen, Generator,
-Key, Mode and Compliance on the Pads bar, all outlive their fold for the same kind of reason.
+line switches (**A**, **B**, **C** - a single **On** until 2026-08-01), a **Hold off** chip
+and a **Detach** button on its own bar. Folding the section destroys the editor, never the
+arpeggiators, which is why the switches live on the bar rather than inside the panel, and why
+they and Hold off stay put when their section folds. They are not alone in that any more: the
+theme swatch on the Controls bar, and Fill, Regen, Generator, Key, Mode, Compliance and the
+arp's target-line letter on the Pads bar, all outlive their fold for the same kind of reason.
 What hides with a fold is what would be a control with nothing behind it - the pad pages,
 Knobs, Wheels. Detach hides with it too.
 Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with every
@@ -572,8 +593,8 @@ the Re-dock button travels into the window with it.
 **Only the left end of the bar folds it** (2026-07-30). `SectionBar::hitTest` narrows the
 button to `foldZone()`, the chevron and the caption, about 92 px at the narrowest caption,
 with a painted hairline marking where the target ends. For three days the whole strip folded,
-and on this bar in particular that was expensive: a click aimed at On or Hold off that missed
-by a few pixels hid the arp instead. See `docs/ARCHITECTURE.md`, **Folding layout**. Folding
+and on this bar in particular that was expensive: a click aimed at a line switch or Hold off
+that missed by a few pixels hid the arp instead. See `docs/ARCHITECTURE.md`, **Folding layout**. Folding
 is still one click and still leaves the arpeggiator running behind a single dim strip.
 
 It got there in three steps, all at Owen's request. A full-editor overlay first, changed to
@@ -690,14 +711,19 @@ Automation (`BoundingRectangle`, divided by the display scale), not with a ruler
 
 ## v1 implementation notes
 
-- `ArpEngine.h`: pure, allocation-free on the audio thread (fixed 32-step, 6-lane
+- `ArpEngine.h`: pure, allocation-free on the audio thread (fixed 32-step, ten-lane
   arrays; fixed-capacity event output; mt19937 seeded once for probability). Lane
-  data crosses UI -> audio as arrays of atomics; no locks anywhere.
-- The arp consumes note on/off from the block's merged MIDI stream as its input
-  (so keyboard, latch, and chord pads all feed it uniformly), holds the set
-  (latch = ignore note-offs), and emits its own stream; CCs pass through.
+  data crosses UI -> audio as arrays of atomics; no locks anywhere. The processor holds
+  three instances of it; the file itself is unaware of that and did not change.
+- Each line consumes note on/off from **its own** input buffer, holds the set
+  (latch = ignore note-offs), and emits its own stream; CCs pass through untouched at the
+  stage above. Until 2026-08-01 that input was the block's merged stream directly; it is now
+  that line's queue plus a copy of the keybed's notes when its **Keys** switch is on, which is
+  the same thing for line A on its own.
 - Lane/pattern data persists as an "arp" ValueTree next to the chord pads, in the
-  base KeysProcessor state, so all three products carry it identically.
+  base KeysProcessor state, so all three products carry it identically. Line A's twelve slots
+  sit on that node as they always have; B and C hang off a `line` child each, so a session
+  from before the lines needs no migration and loses nothing.
 
 ## Research caveats carried forward
 

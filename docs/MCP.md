@@ -24,7 +24,7 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 
 | Tool | Purpose |
 |------|---------|
-| `get_state` | Snapshot the load-bearing controls, whether the arp is reading its step lanes (`arpPattern`), the active arp pattern, which slot the chain is playing (`arpChainSlot`, -1 when it is not running), pad page, and how many chord pads are loaded. Call this first. |
+| `get_state` | Snapshot the load-bearing controls, whether the arp is reading its step lanes (`arpPattern`), the active arp pattern, which slot the chain is playing (`arpChainSlot`, -1 when it is not running), pad page, and how many chord pads are loaded. Also `arpLines`, an entry per arpeggiator line (see below) with its on/off, active pattern, held chord, launched slot and whether it is chaining. Call this first. |
 | `list_params` | Every parameter Keys exposes, with its current value and legal range/choices. |
 | `set_params` | Set one or more parameters at once, by id. |
 | `play_notes` | Play one or more notes now, release them after a duration. |
@@ -39,6 +39,31 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `set_arp_pattern` | Write one or more lanes of a pattern: the live lanes, or a stored slot. Lane names are `note`, `octave`, `velocity`, `gate`, `ratchet`, `probability`, and — since 2026-07-30 — `transpose` (scale degrees), `late` (percent of a step), `harmony` (chord tones above) and `chord` (0 = off, 1..12 = play that arp slot's stored chord on this step). |
 | `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
+
+### The three arpeggiator lines
+
+Keys runs three arpeggiators (2026-08-01; `docs/ARP_DESIGN.md`). All four arp tools take an
+optional **`line`**, 0, 1 or 2 — A, B or C — and **default to 0**, the arpeggiator Keys has
+always had. Every script written before the lines existed therefore still drives the line it
+was written for, unchanged.
+
+Each line owns its own live lanes, its own twelve slots, its own held chord and its own chain,
+so `slot` is read *within* a line: `{ "line": 1, "slot": 3 }` is B's fourth slot, a different
+place from A's. `set_arp_pattern` and `get_arp_pattern` echo the `line` they acted on.
+
+The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
+`arpRate`, `arpSwing` — and B and C repeat that whole list as `arp2*` and `arp3*`:
+`arp2On`, `arp2Rate`, `arp3Direction`, and so on. `list_params` shows all three sets. Two ids
+are new on every line: `arpKeys` (does this line arpeggiate what you play, or only the chords
+handed to it) and `arpChannel` (Global, or 1-16).
+
+A polyrhythm from a cold start is three `set_params` calls and a chord:
+
+```
+set_params { "values": { "arpOn": true,  "arpRate": "1/8" } }
+set_params { "values": { "arp2On": true, "arp2Rate": "1/8", "arp2Trip": true } }
+play_notes { "notes": [60, 64, 67], "durationMs": 4000 }
+```
 
 ## How scheduled notes are timed
 
@@ -99,4 +124,9 @@ A short session once `keys mcp` is connected:
 
 `arpPattern` is not optional there. The step lanes are only read when it is on (it is the
 Shape menu's "Pattern" entry); with it off the arp runs as a plain shape and lanes you
-have written sit silent. `get_state` reports it for exactly this reason.
+have written sit silent. `get_state` reports it for exactly this reason. It is per line like
+everything else, so the same call against line B needs `arp2Pattern`.
+
+5. `set_params { "values": { "arp2On": true, "arp2Rate": "1/4" } }`: bring line B in
+   underneath at half the speed. Both lines chew on the same held chord, because `arpKeys`
+   and `arp2Keys` both default to on.

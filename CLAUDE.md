@@ -267,10 +267,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   override; any doc still saying the whole bar is the target is describing that three-day
   window. **Detach hides with its section**, and so does every control that would be reaching
   into content that is not on screen: the pad pages, Knobs, Wheels. What stays on a folded
-  bar is what you reach for while playing or generating - arp On and Hold off, the Pads bar's
-  Fill / Regen / Generator and its Key / Mode / Scale Compliance combos, the Keyboard bar's
-  Exclusive / Sustain / Latch / All Off - plus the theme swatch, which belongs to the plugin
-  rather than to any one section. Open and folded bars are painted at different weights on
+  bar is what you reach for while playing or generating - the arp's A / B / C line switches and
+  Hold off, the Pads bar's Fill / Regen / Generator, its Key / Mode / Scale Compliance combos
+  and the arp target-line letter beside them, the Keyboard bar's Exclusive / Sustain / Latch /
+  All Off - plus the theme swatch, which belongs to the plugin rather than to any one section. Open and folded bars are painted at different weights on
   purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
   or the caption ellipsises and the controls beside it shift as a section folds.
 - **The knob bank is the bottom row of the Controls section**, not a band of its own:
@@ -336,11 +336,18 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      strip, and Fill and Regen on the bar are New chord in bulk - but the per-card edits are
      reached from this menu and nowhere else, because a card is all playing surface and there
      is nowhere left on it to put a button. Ending an edit is the exception that proves it: the
-     tick on the card being edited is a left click. The three paths below are the ones Owen
-     ruled on one at a time.
-  2. ***Send to arp slot* has no left-click twin** (2026-07-25). Binding a chord to one
-     particular slot needs a target picker. A left click on a card with the arp **On** is the
-     left-click way to get a chord *into* the arp, which is what keeps this to one item.
+     tick on the card being edited is a left click. The paths below are the ones Owen ruled on
+     one at a time; entry 2 has since been retired, and is kept because knowing why a rule
+     existed is what stops it being reinvented.
+  2. ***Send to arp slot* had no left-click twin* (2026-07-25), **and now it does** (2026-08-01).
+     The reason it was ever an exception is that binding a chord to one *particular* slot needs
+     a target picker; a drag is one, so **dragging a chord card onto a slot card** does the same
+     job and the exception is retired. The menu item stays as the accelerator it always was.
+     This is the one entry on this list that closed rather than opened, and it closed because
+     the thing it was waiting for got built, not because anybody changed their mind: do not
+     re-open it by removing the drag. A left click on a card with a line **On** is still the
+     left-click way to get a chord into the arp without naming a slot - it goes to the current
+     line, and a drag onto that line's tab is the aimed version of the same thing.
   3. ***Lock / Unlock has no left-click twin*** (2026-07-30, Owen: "I don't want the lock
      button to be visible. I only want it to be in right click"). This is the one path where a
      left-click twin was **built and then deliberately taken away**: a lock chip sat in the
@@ -418,6 +425,17 @@ Four things will bite otherwise:
   boxes are reachable by their *current* text (`-SetValues "Up=Pattern"`), but two combos
   can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
   match; set the other one out of the way first.
+- **The arp's own controls are named per line**, for the same first-match reason: the bar
+  chips are `Arp line A` / `B` / `C`, the panel's line tabs are `Arp line A tab` and so on
+  (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
+  the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
+  `Arp target line`. Hold off is `Arp hold off`.
+- **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
+  applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
+  the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that
+  throws can leave the combo's popup open as a top-level window, after which every subsequent
+  lookup roots itself on that popup: the tell is a capture that comes out about 156x159, and
+  the only way back is to restart the app. Budget for it, or drive the parameter another way.
 - **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
   write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 

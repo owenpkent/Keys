@@ -5,13 +5,13 @@ standalone app). Keys makes no sound of its own: you click the on-screen piano a
 it sends MIDI to whatever instrument sits downstream, in your DAW or over a virtual
 port. Built for creators who work entirely with a mouse, including users with motor
 disabilities: every control is a single click, a drag, or a scroll. No keyboard and no
-modifier keys. Right-click is only ever an accelerator, with three exceptions Owen asked for:
-**Send to arp slot** and **Lock**, both in a chord card's menu, and releasing one note out of a
-chord the **Sustain** pedal is holding. None of the three has a left-click twin.
+modifier keys. Right-click is only ever an accelerator, with two exceptions Owen asked for:
+**Lock**, in a chord card's menu, and releasing one note out of a chord the **Sustain** pedal
+is holding. Neither has a left-click twin.
 
 Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain and latch, the Humanize settings, the
-arpeggiator down to its step lanes and its twelve slots, which sections you
+three arpeggiators down to their step lanes and their twelve slots each, which sections you
 had folded away and which you had pulled out into windows of their own (down to where each
 window sat, the chord generator's included), this instance's colour, the eight knob CC
 assignments, and your captured chord pads all save into the DAW project and come back when you
@@ -62,8 +62,8 @@ flat and dim, so the shape of the window reads before you have read a caption.
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
 toggle, not a modifier key, on purpose. Right-click opens the card menus on the chord pads
-and the arp slots, and toggles a hold on a key; only **Send to arp slot**, **Lock** and
-releasing a pedal-held note live nowhere else.
+and the arp slots, and toggles a hold on a key; only **Lock** and releasing a pedal-held note
+live nowhere else.
 
 ## Controls
 
@@ -83,10 +83,10 @@ releasing a pedal-held note live nowhere else.
 | **Knobs** | Eight rotary CC knobs; the label under each opens a one-click reassign menu. They are the bottom row of the Controls section, and the **Knobs** chip on that bar folds just that row |
 | **Chord pads** | Their own section, and the only chord cards in Keys. Capture chords to sixteen pads a page and press beat-pad style to play (Sustain holds); **Exclusive** chokes the last chord, **Strum** rakes a chord's notes Up / Down / Random over a time drawn from its range. Four numbered buttons on the Pads bar pick the page. Every card shows the chord's name with its notes (octave numbers included) on a line underneath, in the same two rows of eight; **Big**, which used to swap that for four rows of four with a mini keyboard on each, went on 2026-07-31 once the note list fit on the small card too |
 | **MIDI in** | Play a hardware keyboard through Keys and its keys light up on screen, with the live card naming the chord. The stream passes through untouched |
-| **BPM** | Tempo the arpeggiator runs at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins, and an arp rate set in Hz follows neither |
-| **Arp** | Its own section too, folded when you first open the plugin because it is the tall one. The bar carries an **On** toggle and a **Hold off** chip, so the arpeggiator can be switched on and made to let go of a chord with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern, a chord and a rate that one click installs. With it on, clicking a chord card hands that chord to the arp and leaves it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays the twelve slots as a progression, each for the bars its card shows |
+| **BPM** | Tempo the arpeggiators run at when there is no transport to follow — always in the standalone, and whenever the host is stopped. A playing host wins, and an arp rate set in Hz follows neither |
+| **Arp** | Its own section too, folded when you first open the plugin because it is the tall one. **Three arpeggiators, A B C**, each with its own rate, shape, pattern, twelve slots, chord and chain — so a polyrhythm is one plugin, not three. The bar carries a switch per line and a **Hold off** chip, so a line can be switched on and made to let go of a chord with the section folded shut; inside are the control band and twelve launchable slots, each holding a pattern, a chord and a rate that one click installs. A/B/C tabs at the left of the slot row pick which line the panel edits. With a line on, clicking a chord card hands that chord to the current line and leaves it there — or drag the card onto a slot to bind it, or onto a tab to send it there. Twelve shapes (including **Chord**, which plays the whole held chord every step) plus **Pattern**, which opens a ten-lane step editor; **Distance** stacks the chord by scale degrees rather than fixed intervals; **Chain** plays a line's twelve slots as a progression, each for the bars its card shows |
 | **Rate** | A dial in the arp's control band, with a **Sync** / **Hz** switch beside it. Sync detents through eleven tempo-synced divisions, 16 bars down to 1/64; Hz free-runs from 0.031 to 32 Hz, which is exactly the span those divisions cover at 120 bpm, and never reads the transport. **Dot**, **Trip** and **Anchor** grey out in Hz, since there is no beat left to subdivide or bar to pin to. A pair of steppers beside the dial walks every value one at a time, so nothing here needs a drag |
-| **Hold off** | On the Arp bar. Lets go of the chord being held into the arp and stops the Chain. Greyed out when there is nothing to let go of. Clicking the lit pad restrikes the chord instead, so this is the way to stop a hold outright |
+| **Hold off** | On the Arp bar. Lets go of the chord every line is holding and stops every Chain — one button on purpose, since a per-line release would leave the other two droning behind a folded bar. Greyed out when there is nothing to let go of. Clicking the lit pad restrikes the chord instead, so this is the way to stop a hold outright |
 | **Fill** / **Regen** / **Generator** | The chord generator, at the right of the Pads bar, with **Key**, **Mode** and **Scale Compliance** as combo boxes beside them. **Generator** opens a window holding every setting it has, plus a 4x4 tray for auditioning candidate chords, with its own Fill / Regen / Clear, before they touch a pad. See below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
 | **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it, so unfold from the chevron first |
@@ -201,7 +201,8 @@ is nothing extra to turn on to read them while you work.
 
 Keys embeds an MCP server, so Claude Code (or any local MCP client) can set
 parameters, play notes and phrases, write and fire chord pads, and edit arp
-patterns directly. See [docs/MCP.md](docs/MCP.md).
+patterns directly — on any of the three lines, via an optional `line` argument that
+defaults to A. See [docs/MCP.md](docs/MCP.md).
 
 ## Using it in Ableton Live
 
@@ -251,8 +252,8 @@ Details and troubleshooting: [docs/BUILD.md](docs/BUILD.md).
 Keys exists because most on-screen keyboards and controllers quietly assume two
 hands and a keyboard. Its rules: every function is reachable with single left-clicks,
 drags, and scrolls, bar the right-click gestures Owen asked for (the chord-card menus - where
-**Lock** and **Send to arp slot** live with no left-click twin, both by his call - and
-releasing one note out of a pedal-held chord); no keyboard shortcut is ever required; no
+**Lock** lives with no left-click twin, by his call - and releasing one note out of a
+pedal-held chord); no keyboard shortcut is ever required; no
 double-clicks, no modifier keys, no precision gestures on the critical path; large targets
 and high contrast. If something doesn't work for you with a mouse, that's a bug: open an
 issue.
