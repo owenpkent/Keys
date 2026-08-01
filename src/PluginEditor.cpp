@@ -400,7 +400,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // a user clicks constantly. Fill and Regen stay because they are constructive and they are
     // the only left-click path into generation; a destructive bulk action is worth the extra
     // click of opening a window. It spent a few hours on the card menu in between, which is
-    // where the older comments about it put it. `ChordGenMenu::clearPage()` is unchanged
+    // where the older comments about it put it. `ChordGenMenu::clearPage()` was deleted
     // throughout, only what reaches it.
     //
     // Each carries a setTitle: "Fill" and "Regen" are unique today, but an accessible name is

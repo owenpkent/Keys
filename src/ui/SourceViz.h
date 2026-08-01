@@ -30,7 +30,7 @@ public:
     // three from a 15 Hz timer whether or not anything moved.
     void setSource(int sourceIndex); // 0..6, the genSource order (Algorithmic, Markov, Circle
                                       // of Fifths, Neo-Riemannian, Progressions, Negative
-                                      // Harmony, Planing - see ChordGenPanel::sourceBox)
+                                      // Harmony, Planing - see ChordGenPanel::sourceButtons)
     void setKey(int rootPc, int mode);
     void setChords(const std::vector<KeysProcessor::ChordPad>& chords); // what the tray holds
 

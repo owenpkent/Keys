@@ -102,6 +102,33 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   sessions saved before this still open on the right brain: APVTS stores a choice parameter's
   plain index, not a normalised fraction. Reordering would silently move every saved session's
   source, and there is no migration hook for it the way `migrateRateMode` covers the arp's clock.
+  **The voicing is three post-passes, not seven implementations** (2026-08-01, Owen: "all of
+  their options should have the option for how many notes and what inversion"). Note count
+  (`genNotesMin`/`Max`, a range 2..11), register (`genOctave`/`genOctaveMax`) and inversions run
+  in `fitVoicing` over whatever any source produced, then `Lean` (`genMajMin`) moves the thirds,
+  then `applyVoiceLeading` picks the octaves. That order is load-bearing: Lean changes *which*
+  notes a chord holds and the other two only move them about. `fitPads` is the Markov twin, since
+  its chords carry a numeral `chordgen::Chord` has no field for. Growing stacks further thirds
+  **through the mode** so an eleven-note chord is still in the key; shrinking drops from the top so
+  the root and third survive. Inversions **replace** the rotation a chord arrived in (root position
+  first, then invert), so ticking R alone means root position even from a pool that had inverted.
+  **Changing a setting generates nothing** (Owen, same day: "I don't want it to auto generate when
+  you change a source"). `settingsMovedSinceFill()` only makes the tray caption say so. The tray
+  rerolled on any settings change for part of that day, which threw it away six times while you
+  swept Source to hear the seven brains: a control you cannot explore without destroying your work
+  is one you stop touching. Fill and Regen generate; nothing else does.
+  **The tick boxes are constraints, not enables** (`genUseKey`, `genUseMode`, `genUseOctave`,
+  `genUseNotes`, `genUseInversions`, `genUseCompliance`). Unticked means the generator rolls that
+  setting itself, and Key and Mode roll **once per generation** rather than per chord, because
+  every source takes a single root and mode for a whole batch. Lock Influence, Smooth Voicing and
+  Lean have no box on purpose: their own zero already means off, so a box would be a second
+  control for what the dial says. `readsScaleSettings()` and `readsMode()` are **two different
+  questions** - Compliance and Lock Influence belong to the weighted pool alone, but Mode is read
+  by every source except Markov, and conflating them greyed Mode under five sources that use it.
+  **`SourceViz` is a picture and nothing else**: read-only, click-through
+  (`setInterceptsMouseClicks(false, false)`), writes no parameter and plays no note. It draws the
+  current source and the walk that produced the tray. If it ever needs to *do* something, that is
+  a different component.
 - **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
   chord, a shape and a rate; launching one installs all of it and holds the chord into the
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
@@ -292,6 +319,14 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   `acceptsMidi()` true). Ableton refuses to load an instrument without one. The
   failure is silent-looking ("This VST3 plug-in could not be opened") and pluginval
   passes without the bus, so only a real Live load test catches it.
+- **The 34 px floor applies to every target, including the small ones.** A check box, a stepper's
+  `-`/`+` pair and a caption-row button are targets exactly as a `TextButton` is, and all three
+  have been built too small at least once (2026-08-01: a Reroll button at 18 px in a caption
+  strip, note-count steppers collapsed to 22 px in a 120 px cell, and a tick box that would have
+  gone in a 14 px label strip). The fix is always the same: give the cell the height or width the
+  target needs, rather than shrinking the target into the cell. Where a value has a slider, it
+  also needs a click-only path, because **a slider is a drag** - the arp's rate steppers and the
+  generator's note-count steppers exist for that reason, not as a convenience.
 - **Mouse-only UI**: single left-click or drag; targets ≥ ~34 px; no
   keyboard/double-click/modifiers. Sustain is an on-screen toggle by design, never a
   modifier key, and **Latch is a second one beside it** (restored 2026-07-30 at Owen's
@@ -363,6 +398,16 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   `okstudio1/keys-releases`; assets named exactly `KeysSetup-<version>.exe`, tag
   `v<version>`; every verification gate stays fail-closed.
 
+## Skin
+
+`src/ui/KeysLookAndFeel.h` holds every colour and font as a `skin::` token; never reintroduce
+per-file hex chrome. One trap, learned the hard way on 2026-08-01: **judge the dim text tokens
+against the background at the size they are actually used, not against `skin::text`.**
+`textDim` and `textFaint` had been chosen by eye next to `text` and were too dark to read, because
+nearly everything wearing them is 9 to 11 px letter-spaced uppercase (the micro-caps captions, the
+note list under every chord card) and small letterforms need far more contrast than large ones for
+the same effort. Both were lifted; `text` was never the problem.
+
 ## Screenshots for docs
 
 Use `scripts/capture-window.ps1`, which is the PrintWindow approach (never
@@ -374,6 +419,15 @@ movement involved.
 
 Four things will bite otherwise:
 
+- **`-WindowTitle` changes what is captured, NOT where `-InvokeButtons` and `-SetValues` look.**
+  Those two resolve against `MainWindowHandle`, always, which in Keys Host is the *hosted synth's*
+  GUI. So `-WindowTitle "Keys Chord Generator" -InvokeButtons "Fill"` fails with "UIA element not
+  found" even though the button plainly exists, and so does naming the main window. To drive a
+  control in any window that is not `MainWindowHandle`, enumerate it yourself: find the top-level
+  `AutomationElement` whose `Name` matches, `FindFirst` the control by name under it, and Invoke
+  its `InvokePattern`. Combo boxes are UIA read-only, so `ValuePattern.SetValue` throws "Value is
+  read-only"; expand with `ExpandCollapsePattern` and Invoke the row instead, which is what the
+  script's own `-SetValues` does. Worth knowing before you spend twenty minutes on it.
 - **Pass `-WindowTitle` for anything but plain Keys.** The default target is
   `MainWindowHandle`, a heuristic that lands on the *hosted instrument's* GUI in Keys Host
   (that GUI is a top-level window of the same process) and on an arbitrary section once any

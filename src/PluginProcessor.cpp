@@ -70,9 +70,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genMode", 1 }, "Generator Mode",
                                                       modes::names(), 0));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctave", 1 }, "Generator Octave", 2, 6, 4));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genTriads", 1 }, "Generate Triads", true));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genSevenths", 1 }, "Generate 7ths", true));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genNinths", 1 }, "Generate 9ths", false));
+    // genTriads / genSevenths / genNinths were here until 2026-08-01. They picked which chord
+    // *types* the weighted pool could draw from, by note count, and the three tick boxes that
+    // drove them became the Notes range. They are deleted rather than left unread: a parameter no
+    // control can reach but generation still obeys is the worst of both, and note count is now
+    // decided after the fact by `fitVoicing` for every source rather than by type filtering for
+    // one. An old session simply carries three entries nothing looks at, which APVTS ignores.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv0", 1 }, "Inversion Root", true));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv1", 1 }, "Inversion 1st", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv2", 1 }, "Inversion 2nd", false));

@@ -5,6 +5,21 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Removed: genTriads / genSevenths / genNinths
+
+The three note-count tick boxes became the Notes range, which left their parameters unreachable
+from any control while generation still obeyed them: they filtered which chord *types* the
+weighted pool could draw from. That is the worst of both, so they are deleted rather than left
+unread. The pool now draws from every type and `fitVoicing` decides the note count afterwards,
+for every source rather than for one, which is also a wider pool: a request for five notes used
+to be answerable only by a type that already had five, and is now "any chord, grown to five". An
+old session carries three entries nothing reads, which APVTS ignores.
+
+**The tray's staleness check now watches every generator setting**, not the handful it was
+written against. It was still keyed on the three deleted parameters and had never been extended to
+the sources, the ranges, Lean or the tick boxes, so "settings changed since these were generated"
+was silent for most of what you can change.
+
 ### Added: two character sliders, and tick boxes that let the generator off the leash
 
 **Brightness** sweeps the seven modes from brightest to darkest: Lydian, Major, Mixolydian,
@@ -105,9 +120,12 @@ would play listed underneath.
   suggestion list has always used, so Humanize and the base velocity colour it exactly as a pad
   would. Nothing is written anywhere.
 - **Drag a card onto a pad to keep it.** The pad lights while the candidate is over it, and the
-  card you took is replaced by a fresh candidate on the spot, so the tray never grows holes.
-- **Reroll** replaces all sixteen. The tray also rerolls itself whenever a generator setting
-  moves, because sixteen answers to the old Key are worth nothing once the Key has changed.
+  cell it came from goes empty, which is how you see what you have already taken.
+- **Fill**, **Regen** and **Clear** act on the tray and on nothing else.
+
+(This entry described a **Reroll** button and a tray that rerolled itself on any settings change.
+Both were replaced later the same day by the two entries above, which is why they are described
+here in their final form rather than as they first shipped: nothing in between was ever released.)
 
 **A tray card is not on a pad, and that is the whole point.** These chords belong to no slot,
 are not in the session, and go away with the window. Until now the only way to hear what the

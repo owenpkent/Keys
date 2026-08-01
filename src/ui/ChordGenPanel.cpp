@@ -22,9 +22,10 @@ namespace
     constexpr int kAfterRowB = 8;
 
     // Source is a row of its own now: a 14 px caption over seven 34 px buttons, which is the
-    // mouse-only floor and the reason this is not a combo box. The fixed row under it carries
-    // Scale Compliance and Lock Influence, which every source can see whether or not it reads
-    // them (they grey where they are dead).
+    // mouse-only floor and the reason this is not a combo box. The two fixed rows under it carry
+    // what every source can see whether or not it reads it: Notes, Inversions and the Octave
+    // range on one, Scale Compliance, Lock Influence and Smooth Voicing on the other. They grey
+    // where they are dead rather than leaving the row.
     constexpr int kSourceRowH = 48;
     constexpr int kAfterSourceRow = 6;
     constexpr int kAfterViz = 8;
@@ -39,8 +40,9 @@ namespace
     // The audition tray. Its rows are 54 px rather than the 34 px mouse-only floor because a
     // card carries a chord name over a note list, exactly as a pad card does, and 34 px fits one
     // of those two. Four rows plus its own header line is what the window grows by.
-    // 38, not the 20 a caption line needs, because Reroll rides this row and a button is a
-    // target: the mouse-only floor is ~34 px and a caption-height strip put it at 18.
+    // 38, not the 20 a caption line needs, because Fill / Regen / Clear ride this row and a
+    // button is a target: the mouse-only floor is ~34 px and a caption-height strip put the
+    // button that used to be here at 18.
     constexpr int kTrayHeaderH = 38;
     constexpr int kTrayRowH = 54;
     constexpr int kTrayGap = 6;

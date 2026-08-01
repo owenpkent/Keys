@@ -405,12 +405,12 @@ chordgen::Options ChordGenMenu::currentOptions() const
 
     chordgen::Options o;
     o.octave = (int) a.getRawParameterValue("genOctave")->load();
-    o.noteCounts.clear();
-    if (on("genTriads"))   o.noteCounts.push_back(3);
-    if (on("genSevenths")) o.noteCounts.push_back(4);
-    if (on("genNinths"))   o.noteCounts.push_back(5);
-    if (o.noteCounts.empty())
-        o.noteCounts = { 3 }; // unticking everything would generate nothing; triads are the floor
+    // Every type the pool knows, always. This used to be filtered by the three note-count tick
+    // boxes; since 2026-08-01 the Notes range decides how many notes a chord ends up with, in
+    // `fitVoicing`, after the source has chosen it. Filtering here as well would mean a request
+    // for five notes could only ever be met by a type that already had five, which is a much
+    // narrower pool than "any chord, grown to five".
+    o.noteCounts = { 3, 4, 5 };
     o.inversions.clear();
     if (on("genInv0")) o.inversions.push_back(0);
     if (on("genInv1")) o.inversions.push_back(1);

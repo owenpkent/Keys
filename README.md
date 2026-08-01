@@ -164,11 +164,20 @@ is the one being edited on the keyboard, because the keybed would write the unsh
 straight back over the move.
 
 The settings in the window: **Key** and **Mode** (12 modes),
-**Octave**, **Scale Compliance** (how far outside the key it may go: 100% stays in, lower
-borrows from related modes, then reaches for secondary dominants, then anything), **Lock
-Influence** (how much new chords copy the character of the ones you locked), **Notes** and
-**Inversions** (triads, 7ths, 9ths; root position and inversions), and **Source**, which since
-2026-08-01 is seven choices rather than two:
+**Octave** (a range now, so a page can spread across registers), **Scale Compliance**
+(Algorithmic only: how far outside the key it may go - 100% stays in, lower borrows from
+related modes, then reaches for secondary dominants, then anything), **Lock Influence**
+(Algorithmic only: how much new chords copy the character of the ones you locked), **Smooth
+Voicing** (all seven sources, renamed from "Voice Leading" 2026-08-01: chooses which octave
+each note sits in so consecutive chords stay close, never which chords you get), **Notes**
+(a 2-11 range, replacing the old 3/4/5 tick boxes - below 3 you get dyads, above 5 the stack
+keeps climbing in thirds through the mode) and **Inversions** (root position plus 1st/2nd/3rd,
+which **replaces** the rotation a chord arrived in rather than compounding with it), two new
+sliders **Brightness** (a view onto Mode, sweeping the seven diatonic modes Lydian to Locrian)
+and **Lean** (nudges chords' thirds major or minor whatever the mode, 0 = neutral), six tick
+boxes that let any of Key / Mode / Octave / Notes / Inversions / Scale Compliance off the
+leash (unticked, the generator rolls that one freely), and **Source**, which since
+2026-08-01 is seven always-visible buttons rather than a dropdown of two:
 
 - **Algorithmic**, the weighted pool above, gated by Scale Compliance and Lock Influence.
 - **Markov**: real-progression chains per Major / Minor / Modal, with **Temperature**
@@ -185,14 +194,19 @@ Influence** (how much new chords copy the character of the ones you locked), **N
   chromatically, the constant-structure sound.
 
 Each source's own controls take the place of the pool's row when you switch to it, since a
-row of settings that means nothing to a different brain is worse than no row at all.
-**Mode** greys out for every source but Algorithmic too - though five of the other six still
-read whatever it was last set to, only **Scale Compliance** (Algorithmic's own weighting
-knob) is actually dead to them. **Voice Leading**, new the
-same day, sits beside Source rather than in any of those rows: it's a pass over whatever the
-source produced, revoicing each chord to move as little as possible from the one before it,
-and it never changes which notes a chord contains, only which octave they land in. The choices
-are appended to the list, so a session saved as Markov still reopens as Markov.
+row of settings that means nothing to a different brain is worse than no row at all -
+Algorithmic and Negative Harmony have no band at all any more, since Notes, Inversions,
+Scale Compliance and Lock Influence now live on fixed rows above every source rather than
+inside the pool's own. **Mode** greys out for **Markov only** - every other source still
+reads whatever it was last set to. **Scale Compliance** and **Lock Influence** are the ones
+actually dead outside Algorithmic. A read-only diagram under the Source buttons draws the
+shape whichever one is doing - the fifths wheel, the PLR triangle, the mirror clock, and so
+on - and highlights the walk that produced whatever's in the tray. **Smooth Voicing**
+(renamed from "Voice Leading" the same day) sits on its own fixed row rather than in any
+source's band: it's a pass over whatever the source produced, revoicing each chord to move
+as little as possible from the one before it, and it never changes which notes a chord
+contains, only which octave they land in. The choices are appended to the list, so a session
+saved as Markov still reopens as Markov.
 
 Press any pad to hear it: its notes sit under the chord name on the card already, so there
 is nothing extra to turn on to read them while you work.
