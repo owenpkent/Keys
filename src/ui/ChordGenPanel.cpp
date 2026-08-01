@@ -1,7 +1,5 @@
 #include "ChordGenPanel.h"
 #include "../ChordMarkov.h"
-#include "../ChordSuggest.h"
-#include "../Chords.h"
 #include "../ScaleModes.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
@@ -12,8 +10,31 @@ namespace keys
 {
 namespace
 {
-    const juce::Colour panelBg { 0xff1c1f24 };
-    const juce::Colour scrim { 0xcc0d0f12 };
+    // The panel's geometry, written once and read by both resized() and contentSize(), so the
+    // window's minimum size is the layout's own arithmetic and not a number somebody chose.
+    constexpr int kInset = 12;   // margin round everything
+    constexpr int kHeaderH = 28; // title, mode character, page, Close
+    constexpr int kRowH = 44;    // a labelled control row: 14 px label over a 30 px control
+    constexpr int kActionH = 36; // the page-wide buttons
+    constexpr int kGap = 8;      // between cells in a row
+    constexpr int kAfterHeader = 10;
+    constexpr int kAfterRowA = 6;
+    constexpr int kAfterRowB = 8;
+
+    // Cell widths, per row. Named because contentSize() adds the same numbers up.
+    constexpr int kKeyW = 70, kModeW = 190, kOctaveW = 110, kSourceW = 130;
+    constexpr int kNotesW = 120, kInvW = 200, kComplianceW = 230, kLockInfW = 230;
+    constexpr int kChainW = 110, kMoodW = 150, kStartW = 100, kTempW = 200, kLengthW = 150;
+    constexpr int kFillW = 120, kRegenW = 150, kClearW = 120;
+    constexpr int kTitleW = 160, kPageW = 120, kCloseW = 90;
+
+    int rowWidth(std::initializer_list<int> cells)
+    {
+        int w = -kGap; // n cells have n-1 gaps between them
+        for (const int c : cells)
+            w += c + kGap;
+        return w;
+    }
 
     void styleLabel(juce::Label& l, const juce::String& text)
     {
@@ -21,196 +42,59 @@ namespace
         l.setFont(skin::micro(10.0f));
         l.setColour(juce::Label::textColourId, skin::textDim);
     }
-
-    // A chord's own register, so a suggestion lands where the chord it follows sits.
-    int octaveOf(const std::vector<int>& notes, int fallback)
-    {
-        if (notes.empty())
-            return fallback;
-        return *std::min_element(notes.begin(), notes.end()) / 12;
-    }
-
-    // "C4  E4  G4" — the note list a card carries under its chord name.
-    juce::String noteListText(const std::vector<int>& notes)
-    {
-        const auto names = okstudio::scales::noteNames();
-        juce::String out;
-        for (const int n : notes)
-            out << (out.isEmpty() ? "" : "  ") << names[((n % 12) + 12) % 12] << juce::String(n / 12 - 1);
-        return out;
-    }
-
-    // A card's mini keyboard: two octaves (three when the chord spills over) from the
-    // low note's C, held keys lit in accent. Purely informative, not a target.
-    //
-    // The accent is passed in rather than looked up: this is a free function with no
-    // component to resolve it from, and the accent is per instance now.
-    void drawMiniKeyboard(juce::Graphics& g, juce::Rectangle<float> r, const std::vector<int>& notes,
-                          skin::Accent ac)
-    {
-        if (notes.empty())
-            return;
-        const int lo = *std::min_element(notes.begin(), notes.end());
-        const int hi = *std::max_element(notes.begin(), notes.end());
-        const int base = (lo / 12) * 12;
-        const int octaves = hi < base + 24 ? 2 : 3;
-        const auto held = [&notes](int n)
-        { return std::find(notes.begin(), notes.end(), n) != notes.end(); };
-
-        constexpr int whitePc[7] = { 0, 2, 4, 5, 7, 9, 11 };
-        const int whites = octaves * 7;
-        const float ww = r.getWidth() / (float) whites;
-        for (int i = 0; i < whites; ++i)
-        {
-            const int note = base + (i / 7) * 12 + whitePc[i % 7];
-            const auto key = juce::Rectangle<float>(r.getX() + ww * (float) i, r.getY(),
-                                                    ww, r.getHeight()).reduced(0.5f, 0.0f);
-            g.setColour(held(note) ? ac.base : juce::Colours::white.withAlpha(0.30f));
-            g.fillRoundedRectangle(key, 1.0f);
-        }
-
-        constexpr int blackAfterWhite[5] = { 0, 1, 3, 4, 5 }; // C# D# F# G# A#
-        constexpr int blackPc[5] = { 1, 3, 6, 8, 10 };
-        const float bw = ww * 0.62f, bh = r.getHeight() * 0.62f;
-        for (int o = 0; o < octaves; ++o)
-            for (int b = 0; b < 5; ++b)
-            {
-                const int note = base + o * 12 + blackPc[b];
-                const float x = r.getX() + ww * (float) (o * 7 + blackAfterWhite[b] + 1) - bw * 0.5f;
-                g.setColour(held(note) ? ac.hot : juce::Colour(0xff101216));
-                g.fillRoundedRectangle(x, r.getY(), bw, bh, 1.0f);
-            }
-    }
-
-    // One row of the Next menu: a play button that auditions without closing the menu
-    // (Octavium's per-row preview), then the row itself places the chord. The whole
-    // non-button area triggers, so the target stays huge.
-    class SuggestionRow : public juce::PopupMenu::CustomComponent
-    {
-    public:
-        SuggestionRow(juce::String text, std::function<void()> preview)
-            : juce::PopupMenu::CustomComponent(true), label(std::move(text))
-        {
-            play.setButtonText(juce::String::fromUTF8("\xe2\x96\xb6"));
-            play.setTooltip("Hear it (the menu stays open)");
-            play.onClick = std::move(preview);
-            addAndMakeVisible(play);
-        }
-
-        void getIdealSize(int& w, int& h) override
-        {
-            w = 320;
-            h = okstudio::ui::minHitPx;
-        }
-
-        void resized() override
-        {
-            play.setBounds(getLocalBounds().removeFromLeft(okstudio::ui::minHitPx).reduced(2));
-        }
-
-        void paint(juce::Graphics& g) override
-        {
-            if (isItemHighlighted())
-            {
-                const auto r = getLocalBounds().toFloat().reduced(2.0f, 1.0f);
-                g.setColour(skin::accentOf(*this).base.withAlpha(0.15f));
-                g.fillRoundedRectangle(r, 4.0f);
-                g.setColour(skin::accentOf(*this).base.withAlpha(0.4f));
-                g.drawRoundedRectangle(r, 4.0f, 1.0f);
-            }
-            g.setColour(isItemHighlighted() ? juce::Colour(0xffeafcff) : skin::text);
-            g.setFont(skin::ui(14.0f));
-            g.drawText(label, getLocalBounds().withTrimmedLeft(okstudio::ui::minHitPx + 10),
-                       juce::Justification::centredLeft);
-        }
-
-    private:
-        juce::String label;
-        juce::TextButton play;
-    };
 } // namespace
 
-void ChordGenPanel::PadButton::paintButton(juce::Graphics& g, bool over, bool down)
+juce::Point<int> ChordGenPanel::contentSize()
 {
-    // Chip background through the skin, then the card's own layout instead of the
-    // base class's single text line.
-    getLookAndFeel().drawButtonBackground(g, *this,
-                                          findColour(juce::TextButton::buttonColourId), over, down);
-
-    if (notes.empty())
-    {
-        g.setColour(skin::textFaint);
-        g.setFont(skin::ui(13.0f));
-        g.drawText("-", getLocalBounds(), juce::Justification::centred);
-        return;
-    }
-
-    auto r = getLocalBounds().toFloat().reduced(10.0f, 8.0f);
-    const float kbH = juce::jmin(26.0f, r.getHeight() * 0.34f);
-    const auto kb = r.removeFromBottom(kbH)
-                        .withSizeKeepingCentre(juce::jmin(170.0f, r.getWidth()), kbH);
-    r.removeFromBottom(3.0f);
-    const auto noteLine = r.removeFromBottom(14.0f);
-
-    g.setColour(skin::text);
-    g.setFont(skin::uiSemi(17.0f));
-    g.drawText(getButtonText(), r, juce::Justification::centred, true);
-
-    g.setColour(skin::textDim);
-    g.setFont(skin::micro(10.0f));
-    g.drawText(noteListText(notes), noteLine.toNearestInt(), juce::Justification::centred, true);
-
-    drawMiniKeyboard(g, kb, notes, skin::accentOf(*this));
-
-    if (locked)
-    {
-        const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
-                             .withCentre({ (float) getWidth() - 10.0f, 10.0f });
-        g.setColour(okstudio::theme::good.withAlpha(0.4f));
-        g.fillEllipse(dot.expanded(2.0f));
-        g.setColour(okstudio::theme::good);
-        g.fillEllipse(dot);
-    }
+    // The widest row wins the width, and the rows plus the gaps between them make the height.
+    // Both then take the panel's margin on each side.
+    const int rows = juce::jmax(juce::jmax(rowWidth({ kTitleW, kPageW, kCloseW }),
+                                           rowWidth({ kKeyW, kModeW, kOctaveW, kSourceW }),
+                                           rowWidth({ kNotesW, kInvW, kComplianceW, kLockInfW })),
+                                juce::jmax(rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
+                                           rowWidth({ kFillW, kRegenW, kClearW })));
+    const int h = kHeaderH + kAfterHeader + kRowH + kAfterRowA + kRowH + kAfterRowB + kActionH;
+    return { rows + kInset * 2, h + kInset * 2 };
 }
 
-ChordGenPanel::ChordGenPanel(KeysProcessor& p) : processor(p)
+juce::Point<int> ChordGenPanel::minWindowSize()
+{
+    // The content, plus what DetachedWindow puts round it: a 38 px title bar (mouse-only, so
+    // the window buttons clear the 34 px floor) and the window's border. That border is 1 px a
+    // side, not 4: DetachedWindow calls setResizable(true, true), so it gets a corner grip and
+    // ResizableWindow::getBorderThickness answers 1 wherever there is no draggable frame. The
+    // 8 px below is therefore generous by 6, deliberately - a floor that leaves a few px of
+    // slack costs nothing, and a floor that is 6 px short clips the bottom row of controls.
+    // Same sum the sections' own minimums are written from.
+    const auto c = contentSize();
+    return { c.x + 8, c.y + 38 + 8 };
+}
+
+juce::Point<int> ChordGenPanel::defaultWindowSize()
+{
+    // A little over the floor, so the first opening does not look like it is already jammed
+    // against its own minimum.
+    const auto m = minWindowSize();
+    return { m.x + 60, m.y + 40 };
+}
+
+ChordGenPanel::ChordGenPanel(KeysProcessor& p, ChordGenMenu& g) : processor(p), gen(g)
 {
     okstudio::ui::makeMouseOnly(*this);
     buildControls();
-    startTimerHz(15); // keep the pad grid and the mode's emotion line honest
+    // Pick the band that matches the source *now*, not on the first timer tick 66 ms from now.
+    // Open this window with Source already on Markov and that tick is the difference between a
+    // clean row and both sets painted over each other for a frame.
+    applySource(! gen.readsScaleSettings());
+    startTimerHz(15); // the mode's character line, the page number, and what the buttons can do
 }
 
 ChordGenPanel::~ChordGenPanel()
 {
     stopTimer();
-    stopPreview(); // a suggestion left auditioning must not outlive the panel
-}
-
-bool ChordGenPanel::markovActive() const
-{
-    return (int) processor.apvts.getRawParameterValue("genSource")->load() == 1;
-}
-
-juce::String ChordGenPanel::moodArg() const
-{
-    const auto text = moodBox.getText();
-    return text == "Any" ? juce::String() : text;
-}
-
-juce::String ChordGenPanel::startArg() const
-{
-    const auto text = startBox.getText();
-    return text == "Any" ? juce::String() : text;
-}
-
-int ChordGenPanel::genRoot() const
-{
-    return (int) processor.apvts.getRawParameterValue("genRoot")->load();
-}
-
-int ChordGenPanel::genMode() const
-{
-    return juce::jlimit(0, modes::count() - 1, (int) processor.apvts.getRawParameterValue("genMode")->load());
+    // Nothing else to unwind. This class never calls noteOn: the one path that does, the
+    // suggestion audition, is ChordGenMenu's and is released by that object's own 800 ms timer
+    // and destructor. Closing this window can therefore never leave a note ringing.
 }
 
 void ChordGenPanel::buildControls()
@@ -224,18 +108,27 @@ void ChordGenPanel::buildControls()
     modeEmotion.setColour(juce::Label::textColourId, okstudio::theme::accentSoft);
     addAndMakeVisible(modeEmotion);
 
+    // The on-screen way out. The title bar's X is the other, and the editor points both at one
+    // call, so the two can never tear down differently.
+    closeButton.setTitle("Close chord generator");
+    closeButton.setTooltip("Shut this window. The generator keeps its settings, and Fill and "
+                           "Regen stay on the Pads bar.");
     closeButton.onClick = [this] { if (onClose) onClose(); };
     addAndMakeVisible(closeButton);
 
     styleLabel(rootLabel, "Key");
     addAndMakeVisible(rootLabel);
     rootBox.addItemList(okstudio::scales::noteNames(), 1);
+    rootBox.setTitle("Generator key (window)"); // the Pads bar carries one on the same parameter
     addAndMakeVisible(rootBox);
     rootAtt = std::make_unique<ComboAtt>(processor.apvts, "genRoot", rootBox);
 
     styleLabel(modeLabel, "Mode");
     addAndMakeVisible(modeLabel);
+    // The full names here, aliases and all: this window has the width the bar's combo does not,
+    // and "Natural Minor (Aeolian)" is worth spelling out where there is room for it.
     modeBox.addItemList(modes::names(), 1);
+    modeBox.setTitle("Generator mode (window)");
     addAndMakeVisible(modeBox);
     modeAtt = std::make_unique<ComboAtt>(processor.apvts, "genMode", modeBox);
 
@@ -244,6 +137,7 @@ void ChordGenPanel::buildControls()
     octaveSlider.setSliderStyle(juce::Slider::IncDecButtons);
     octaveSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 40, 26);
     octaveSlider.setRange(2, 6, 1);
+    octaveSlider.setTooltip("Which register generated chords land in.");
     addAndMakeVisible(octaveSlider);
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "genOctave", octaveSlider);
 
@@ -274,8 +168,9 @@ void ChordGenPanel::buildControls()
     complianceSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
     complianceSlider.setRange(0, 100, 1);
     complianceSlider.setTextValueSuffix(" %");
+    complianceSlider.setTitle("Scale compliance (window)");
     complianceSlider.setTooltip("100% stays in the key. Lower borrows from parallel modes, "
-                               "then secondary dominants, then anything.");
+                                "then secondary dominants, then anything.");
     addAndMakeVisible(complianceSlider);
     complianceAtt = std::make_unique<SliderAtt>(processor.apvts, "genCompliance", complianceSlider);
 
@@ -285,15 +180,27 @@ void ChordGenPanel::buildControls()
     lockInfluenceSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
     lockInfluenceSlider.setRange(0, 100, 1);
     lockInfluenceSlider.setTextValueSuffix(" %");
-    lockInfluenceSlider.setTooltip("How much new chords copy the character of the ones you locked.");
+    lockInfluenceSlider.setTooltip("How much new chords copy the character of the ones you "
+                                   "locked. Lock a card from its right-click menu.");
     addAndMakeVisible(lockInfluenceSlider);
     lockInfluenceAtt = std::make_unique<SliderAtt>(processor.apvts, "genLockInfluence", lockInfluenceSlider);
 
-    fillButton.onClick = [this] { fillPage(false); };
-    regenButton.onClick = [this] { fillPage(true); };
-    clearButton.onClick = [this] { clearPage(); };
-    fillButton.setTooltip("Fill every pad on this page (locked pads are kept).");
-    regenButton.setTooltip("New chords for the unlocked pads only.");
+    // The page-wide actions, all three straight through to the brain. Fill and Regen are also
+    // chips on the Pads bar; this is the same call, not a second implementation.
+    fillButton.setTitle("Fill chord page (window)");
+    fillButton.setTooltip("Fill the empty pads on this page. Nothing already on the page is "
+                          "touched.");
+    fillButton.onClick = [this] { gen.fillPage(); };
+    regenButton.setTitle("Regenerate unlocked chords (window)");
+    regenButton.setTooltip("Replace the chords on this page with new ones, except on locked "
+                           "pads. Lock a card from its right-click menu to keep it.");
+    regenButton.onClick = [this] { gen.regeneratePage(); };
+    // Clear page lives here and nowhere else. It empties every unlocked pad on the page and
+    // Keys has no undo, so it belongs behind a window you opened on purpose rather than 4 px
+    // from Regen on a bar (which is where it was until 2026-07-30).
+    clearButton.setTitle("Clear chord page");
+    clearButton.setTooltip("Empty every unlocked pad on this page. There is no undo.");
+    clearButton.onClick = [this] { gen.clearPage(); };
     for (auto* b : { &fillButton, &regenButton, &clearButton })
         addAndMakeVisible(*b);
 
@@ -301,23 +208,39 @@ void ChordGenPanel::buildControls()
     styleLabel(sourceLabel, "Source");
     addAndMakeVisible(sourceLabel);
     sourceBox.addItemList({ "Algorithmic", "Markov" }, 1);
+    sourceBox.setTitle("Generator source");
+    sourceBox.setTooltip("Algorithmic weighs chords by degree and scale compliance; Markov "
+                         "walks a table of moves taken from real progressions.");
     addAndMakeVisible(sourceBox);
     sourceAtt = std::make_unique<ComboAtt>(processor.apvts, "genSource", sourceBox);
 
     styleLabel(chainLabel, "Chain");
     chainBox.addItemList({ "Major", "Minor", "Modal" }, 1);
+    chainBox.setTitle("Markov chain");
     chainAtt = std::make_unique<ComboAtt>(processor.apvts, "markovMode", chainBox);
 
     styleLabel(moodLabel, "Mood");
     styleLabel(startLabel, "Start");
+    // Mood and Start are the two picks that are not parameters: they belong to the progression
+    // being generated right now, so they live on ChordGenMenu and outlive this window. The
+    // combo boxes are a view of that state in both directions.
+    moodBox.setTitle("Markov mood");
+    moodBox.onChange = [this] { gen.setMoodChoice(moodBox.getSelectedId() <= 1 ? juce::String()
+                                                                              : moodBox.getText()); };
     startBox.addItem("Any", 1);
     {
         int id = 2;
         for (const char* token : markov::startTokens())
             startBox.addItem(token, id++);
     }
-    startBox.setSelectedId(1, juce::dontSendNotification);
+    startBox.setTitle("Markov start");
     startBox.setTooltip("Force the first chord of the progression, or let the chain pick.");
+    startBox.setSelectedId(1, juce::dontSendNotification);
+    startBox.onChange = [this] { gen.setStartChoice(startBox.getSelectedId() <= 1 ? juce::String()
+                                                                                 : startBox.getText()); };
+    for (int i = 0; i < startBox.getNumItems(); ++i)
+        if (startBox.getItemText(i) == gen.startChoice())
+            startBox.setSelectedId(startBox.getItemId(i), juce::dontSendNotification);
 
     styleLabel(tempLabel, "Temperature");
     tempSlider.setSliderStyle(juce::Slider::LinearHorizontal);
@@ -333,497 +256,154 @@ void ChordGenPanel::buildControls()
     lengthSlider.setTooltip("Unique chords generated before the page loops them.");
     lengthAtt = std::make_unique<SliderAtt>(processor.apvts, "markovLength", lengthSlider);
 
-    markovShown = markovActive();
-    for (auto* c : std::initializer_list<juce::Component*> { &chainLabel, &chainBox, &moodLabel, &moodBox,
-                                                             &startLabel, &startBox, &tempLabel, &tempSlider,
-                                                             &lengthLabel, &lengthSlider })
-    {
+    // Parented but not shown: applySource() decides which of the two row-B sets is on screen,
+    // and the constructor runs it once before this panel is ever painted.
+    for (auto* c : markovBand())
         addChildComponent(*c);
-        c->setVisible(markovShown);
-    }
     refreshMoodItems();
 
     pageLabel.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     pageLabel.setColour(juce::Label::textColourId, okstudio::theme::textDim);
+    pageLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(pageLabel);
-
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-    {
-        auto row = std::make_unique<PadRow>();
-
-        // Press-and-hold auditions the chord: same gesture as the pad strip, same code path.
-        // Including "To Arp" - it is a mode about what clicking a chord card means, so a card
-        // here has to obey it too. It used to be a flag private to the pad strip, which left
-        // this grid playing momentarily while the strip held, and its note-offs then silenced
-        // whatever the arp was chewing on.
-        row->play.onStateChange = [this, v]
-        {
-            auto& r = *padRows[(size_t) v];
-            const int slot = processor.padPageOffset() + v;
-            const bool down = r.play.isDown();
-            if (processor.cardsFeedArp())
-            {
-                if (down && ! r.playHeld)
-                {
-                    if (processor.arpHeldPad() == slot)
-                        processor.releaseArpChord();
-                    else
-                        processor.holdArpChordFromPad(slot);
-                }
-            }
-            else if (down && ! r.playHeld)
-                processor.pressChordPad(slot);
-            else if (! down && r.playHeld)
-                processor.releaseChordPad(slot);
-            r.playHeld = down;
-        };
-        // Octavium's card menu, back on the card itself: Lock / New chord / Next.
-        row->play.onRightClick = [this, v] { showPadMenu(processor.padPageOffset() + v); };
-        row->play.setTooltip("Hold to hear it. Right-click for Lock, New chord, and what could follow.");
-
-        addAndMakeVisible(row->play);
-        padRows[(size_t) v] = std::move(row);
-    }
 }
 
-chordgen::Options ChordGenPanel::currentOptions() const
+// The two sets that share row B. They are laid into the *same* rect, so exactly one of them
+// may be visible: at the layout's own minimum width the algorithmic set is 804 px wide and the
+// Markov set 742, and leaving both on screen put 62 px of a greyed Lock Influence slider, its
+// percent box and a sliver of its label out to the right of Length.
+std::array<juce::Component*, 13> ChordGenPanel::algorithmicBand()
 {
-    const auto& a = processor.apvts;
-    const auto on = [&a](const char* id) { return a.getRawParameterValue(id)->load() > 0.5f; };
-
-    chordgen::Options o;
-    o.octave = (int) a.getRawParameterValue("genOctave")->load();
-    o.noteCounts.clear();
-    if (on("genTriads"))   o.noteCounts.push_back(3);
-    if (on("genSevenths")) o.noteCounts.push_back(4);
-    if (on("genNinths"))   o.noteCounts.push_back(5);
-    if (o.noteCounts.empty())
-        o.noteCounts = { 3 }; // unticking everything would generate nothing; triads are the floor
-    o.inversions.clear();
-    if (on("genInv0")) o.inversions.push_back(0);
-    if (on("genInv1")) o.inversions.push_back(1);
-    if (on("genInv2")) o.inversions.push_back(2);
-    if (on("genInv3")) o.inversions.push_back(3);
-    if (o.inversions.empty())
-        o.inversions = { 0 };
-    o.scaleCompliance = a.getRawParameterValue("genCompliance")->load() * 0.01f;
-    o.lockInfluence = a.getRawParameterValue("genLockInfluence")->load() * 0.01f;
-    return o;
+    return { &notesLabel, &triadsButton, &seventhsButton, &ninthsButton,
+             &invLabel, &inv0Button, &inv1Button, &inv2Button, &inv3Button,
+             &complianceLabel, &complianceSlider, &lockInfluenceLabel, &lockInfluenceSlider };
 }
 
-std::vector<int> ChordGenPanel::lockedTypesOnPage() const
+std::array<juce::Component*, 10> ChordGenPanel::markovBand()
 {
-    std::vector<int> out;
-    const int offset = processor.padPageOffset();
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-    {
-        const auto& pad = processor.chordPad(offset + v);
-        if (pad.locked && ! pad.notes.empty() && pad.type >= 0)
-            out.push_back(pad.type);
-    }
-    return out;
+    return { &chainLabel, &chainBox, &moodLabel, &moodBox, &startLabel,
+             &startBox, &tempLabel, &tempSlider, &lengthLabel, &lengthSlider };
 }
 
-void ChordGenPanel::writeChord(int slot, const chordgen::Chord& c)
+void ChordGenPanel::applySource(bool markov)
 {
-    KeysProcessor::ChordPad pad;
-    pad.notes = c.notes;
-    pad.name = chords::detect(c.notes); // name it the way the live card would, not by type name
-    pad.rootPc = c.rootPc;
-    pad.type = c.type;
-    pad.degree = c.degree;
-    pad.locked = processor.chordPad(slot).locked;
-    processor.setChordPad(slot, pad);
+    markovShown = markov;
+    for (auto* c : markovBand())
+        c->setVisible(markov);
+    for (auto* c : algorithmicBand())
+        c->setVisible(! markov);
+    // Mode is row A's, so it never overlaps anything and stays on screen either way. It means
+    // nothing to a chain walk, so it greys rather than hides (Octavium left it clickable and
+    // silently ignored it; greying is honest). Everything else the source turns off is in the
+    // band above, where hiding says the same thing more plainly.
+    modeBox.setEnabled(! markov);
+    modeLabel.setEnabled(! markov);
+    resized();
 }
 
 void ChordGenPanel::refreshMoodItems()
 {
-    lastChainMode = juce::jlimit(0, 2, (int) processor.apvts.getRawParameterValue("markovMode")->load());
-    const auto keep = moodBox.getText();
+    lastChainMode = gen.chainMode();
+    const auto keep = gen.moodChoice();
     moodBox.clear(juce::dontSendNotification);
     moodBox.addItem("Any", 1);
     int id = 2;
-    for (const auto& mood : markov::moodsFor(lastChainMode))
-        moodBox.addItem(mood, id++);
+    for (const auto& m : markov::moodsFor(lastChainMode))
+        moodBox.addItem(m, id++);
     moodBox.setSelectedId(1, juce::dontSendNotification);
     for (int i = 0; i < moodBox.getNumItems(); ++i)
         if (moodBox.getItemText(i) == keep)
             moodBox.setSelectedId(moodBox.getItemId(i), juce::dontSendNotification);
-}
-
-void ChordGenPanel::previewChord(const std::vector<int>& notes)
-{
-    stopPreview();
-    const float vel = processor.baseVelocity01();
-    for (const int n : notes)
-        processor.noteOn(n, vel); // Humanize colours the audition like everything else
-    previewNotes = notes;
-    previewEndMs = juce::Time::getMillisecondCounter() + 800; // Octavium's preview length
-}
-
-void ChordGenPanel::stopPreview()
-{
-    for (const int n : previewNotes)
-        processor.noteOff(n);
-    previewNotes.clear();
-    previewEndMs = 0;
-}
-
-void ChordGenPanel::fillPageMarkov(bool onlyUnlocked)
-{
-    const int offset = processor.padPageOffset();
-
-    if (onlyUnlocked)
-    {
-        // Octavium regenerates unlocked cards left to right, each stepping the chain
-        // from its (possibly just-updated) left neighbour, so changes cascade.
-        for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        {
-            const int slot = offset + v;
-            const auto& pad = processor.chordPad(slot);
-            if (! pad.locked && ! pad.notes.empty())
-                regeneratePadMarkov(slot);
-        }
-        return;
-    }
-
-    std::vector<int> targets;
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        if (! processor.chordPad(offset + v).locked)
-            targets.push_back(offset + v);
-    if (targets.empty())
-        return;
-
-    const int chain = juce::jlimit(0, 2, (int) processor.apvts.getRawParameterValue("markovMode")->load());
-    const auto generated = markov::generate(chain, genRoot(), currentOptions().octave,
-                                            (int) processor.apvts.getRawParameterValue("markovLength")->load(),
-                                            processor.apvts.getRawParameterValue("markovTemp")->load(),
-                                            moodArg(), startArg(), (int) targets.size(), rng);
-    for (int i = 0; i < (int) targets.size() && i < (int) generated.size(); ++i)
-    {
-        const auto& c = generated[(size_t) i];
-        KeysProcessor::ChordPad pad;
-        pad.notes = c.notes;
-        pad.name = chords::detect(c.notes);
-        pad.rootPc = c.rootPc;
-        pad.type = c.type;
-        pad.numeral = c.numeral;
-        pad.locked = processor.chordPad(targets[(size_t) i]).locked;
-        processor.setChordPad(targets[(size_t) i], pad);
-    }
-}
-
-void ChordGenPanel::regeneratePadMarkov(int slot)
-{
-    const int offset = processor.padPageOffset();
-    // The chain steps from the pad to the left on this page; the first pad restarts.
-    juce::String predecessor;
-    if (slot > offset)
-        predecessor = processor.chordPad(slot - 1).numeral;
-
-    const int chain = juce::jlimit(0, 2, (int) processor.apvts.getRawParameterValue("markovMode")->load());
-    const auto c = markov::regenerateSingle(chain, genRoot(), currentOptions().octave,
-                                            predecessor, processor.chordPad(slot).numeral,
-                                            processor.apvts.getRawParameterValue("markovTemp")->load(),
-                                            moodArg(), rng);
-    KeysProcessor::ChordPad pad;
-    pad.notes = c.notes;
-    pad.name = chords::detect(c.notes);
-    pad.rootPc = c.rootPc;
-    pad.type = c.type;
-    pad.numeral = c.numeral;
-    pad.locked = processor.chordPad(slot).locked;
-    processor.setChordPad(slot, pad);
-}
-
-void ChordGenPanel::fillPage(bool onlyUnlocked)
-{
-    if (markovActive())
-    {
-        fillPageMarkov(onlyUnlocked);
-        return;
-    }
-
-    const int offset = processor.padPageOffset();
-    const auto opts = currentOptions();
-    const auto locked = lockedTypesOnPage();
-
-    // Which slots we're allowed to write. Fill replaces everything except locks; Regen only
-    // touches unlocked slots. Either way a locked pad is never overwritten.
-    std::vector<int> targets;
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-    {
-        const int slot = offset + v;
-        if (processor.chordPad(slot).locked)
-            continue;
-        if (onlyUnlocked && processor.chordPad(slot).notes.empty())
-            continue; // Regen refreshes what's there; it doesn't fill blanks
-        targets.push_back(slot);
-    }
-    if (targets.empty())
-        return;
-
-    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(), opts, locked, rng);
-    for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
-        writeChord(targets[(size_t) i], chords[(size_t) i]);
-}
-
-void ChordGenPanel::clearPage()
-{
-    const int offset = processor.padPageOffset();
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        if (! processor.chordPad(offset + v).locked) // Clear spares locks too, like Regen
-            processor.clearChordPad(offset + v);
-}
-
-void ChordGenPanel::regeneratePad(int slot)
-{
-    const auto& pad = processor.chordPad(slot);
-    if (pad.locked)
-        return;
-    // A Markov pad regenerates through its chain regardless of the Source combo: the
-    // numeral is the pad's provenance, the way degree is for an algorithmic pad.
-    if (pad.numeral.isNotEmpty())
-    {
-        regeneratePadMarkov(slot);
-        return;
-    }
-    const auto c = chordgen::generateSingle(genRoot(), genMode(), pad.degree, pad.type,
-                                            currentOptions(), lockedTypesOnPage(), rng);
-    writeChord(slot, c);
-}
-
-void ChordGenPanel::newChordFor(int slot)
-{
-    const auto& pad = processor.chordPad(slot);
-    if (pad.locked)
-        return;
-    if (! pad.notes.empty())
-    {
-        regeneratePad(slot);
-        return;
-    }
-    // An empty slot gets a fresh chord from whichever brain is up; a Markov one
-    // steps from its left neighbour, exactly like a page fill would.
-    if (markovActive())
-    {
-        regeneratePadMarkov(slot);
-        return;
-    }
-    const auto generated = chordgen::generate(genRoot(), genMode(), 1, currentOptions(),
-                                              lockedTypesOnPage(), rng);
-    if (! generated.empty())
-        writeChord(slot, generated.front());
-}
-
-void ChordGenPanel::showPadMenu(int slot)
-{
-    const auto& pad = processor.chordPad(slot);
-    const bool filled = ! pad.notes.empty();
-    const int offset = processor.padPageOffset();
-    juce::Component::SafePointer<ChordGenPanel> safe(this);
-
-    juce::PopupMenu menu;
-    menu.addItem(1, pad.locked ? "Unlock" : "Lock", filled);
-    menu.addItem(2, "New chord", ! pad.locked);
-
-    // "What could follow this?" — the four suggestion families, each row carrying a
-    // play button so it can audition without closing the menu (Octavium's per-row
-    // preview). A pick lands in the next free pad on the page rather than replacing
-    // the chord you asked about; with the page full it takes the slot right after,
-    // which is where a progression would go anyway.
-    std::vector<suggest::Suggestion> flat;
-    int target = -1;
-    if (filled)
-    {
-        for (int v = 0; v < KeysProcessor::padsPerPage && target < 0; ++v)
-        {
-            const int s = offset + v;
-            if (processor.chordPad(s).notes.empty() && ! processor.chordPad(s).locked)
-                target = s;
-        }
-        if (target < 0)
-        {
-            const int after = slot + 1 < offset + KeysProcessor::padsPerPage ? slot + 1 : offset;
-            target = processor.chordPad(after).locked ? -1 : after;
-        }
-    }
-    if (filled && target >= 0)
-    {
-        // A generated pad already knows what it is; a hand-captured one gets worked out here.
-        auto [rootPc, type] = pad.type >= 0 ? std::pair<int, int> { pad.rootPc, pad.type }
-                                            : suggest::analyse(pad.notes);
-        const auto suggestions = suggest::all(rootPc, type, octaveOf(pad.notes, currentOptions().octave));
-
-        menu.addSeparator();
-        menu.addSectionHeader("Next: could follow");
-        const char* categories[] = { "Neo-Riemannian", "Circle of Fifths", "Diatonic", "Chromatic" };
-        int id = 10;
-        for (const char* cat : categories)
-        {
-            juce::PopupMenu sub;
-            for (const auto& s : suggestions)
-            {
-                if (juce::String(s.category) != cat)
-                    continue;
-                sub.addCustomItem(id++,
-                                  std::make_unique<SuggestionRow>(juce::String(s.transform) + "   " + s.name,
-                                                                  [safe, notes = s.notes]
-                                                                  {
-                                                                      if (safe != nullptr)
-                                                                          safe->previewChord(notes);
-                                                                  }));
-                flat.push_back(s);
-            }
-            menu.addSubMenu(cat, sub);
-        }
-    }
-
-    menu.showMenuAsync(juce::PopupMenu::Options()
-                           .withTargetComponent(&padRows[(size_t) (slot - offset)]->play)
-                           .withStandardItemHeight(okstudio::ui::minHitPx), // mouse-only: no small targets
-                       [safe, slot, flat, target](int choice)
-    {
-        if (safe == nullptr)
-            return;
-        safe->stopPreview(); // don't let the last audition ring past the menu
-        if (choice == 1)
-        {
-            auto& p = safe->processor;
-            p.setChordPadLocked(slot, ! p.chordPad(slot).locked);
-            return;
-        }
-        if (choice == 2)
-        {
-            safe->newChordFor(slot);
-            return;
-        }
-        if (choice < 10 || choice - 10 >= (int) flat.size() || target < 0)
-            return;
-        const auto& s = flat[(size_t) (choice - 10)];
-        safe->writeChord(target, { s.rootPc, s.type, s.notes, -1 });
-    });
+    // The chain may have moved under a mood that no longer exists in it; say so out loud
+    // rather than leaving the box reading Any while the brain still holds the old tag.
+    gen.setMoodChoice(moodBox.getSelectedId() <= 1 ? juce::String() : moodBox.getText());
 }
 
 void ChordGenPanel::timerCallback()
 {
-    modeEmotion.setText(modes::get(genMode()).emotion, juce::dontSendNotification);
+    const int mode = juce::jlimit(0, modes::count() - 1,
+                                  (int) processor.apvts.getRawParameterValue("genMode")->load());
+    modeEmotion.setText(modes::get(mode).emotion, juce::dontSendNotification);
     pageLabel.setText("Page " + juce::String(processor.padPage() + 1) + " of "
                           + juce::String(KeysProcessor::numPadPages),
                       juce::dontSendNotification);
 
-    // A suggestion audition stops itself after Octavium's 800 ms.
-    if (! previewNotes.empty() && juce::Time::getMillisecondCounter() >= previewEndMs)
-        stopPreview();
+    // Each action greys itself out when it would find nothing to do, the same answers the two
+    // chips on the Pads bar grey on. Clear page takes exactly what Regen would - every unlocked
+    // pad that carries a chord - so it asks the same question.
+    fillButton.setEnabled(gen.pageHasEmptyPads());
+    regenButton.setEnabled(gen.pageHasRegeneratablePads());
+    clearButton.setEnabled(gen.pageHasRegeneratablePads());
 
-    // The Mood list belongs to the chain that's up.
-    if ((int) processor.apvts.getRawParameterValue("markovMode")->load() != lastChainMode)
+    // The Mood list belongs to the chain that is up.
+    if (gen.chainMode() != lastChainMode)
         refreshMoodItems();
 
-    // Source switch: show the Markov controls, grey what doesn't apply to chains
-    // (Octavium left these clickable and silently ignored them — greying is honest).
-    const bool markov = markovActive();
-    if (markov != markovShown)
-    {
-        markovShown = markov;
-        for (auto* c : std::initializer_list<juce::Component*> { &chainLabel, &chainBox, &moodLabel, &moodBox,
-                                                                 &startLabel, &startBox, &tempLabel, &tempSlider,
-                                                                 &lengthLabel, &lengthSlider })
-            c->setVisible(markov);
-        resized();
-    }
-    for (auto* c : std::initializer_list<juce::Component*> { &modeBox, &modeLabel, &notesLabel, &invLabel,
-                                                             &triadsButton, &seventhsButton, &ninthsButton,
-                                                             &inv0Button, &inv1Button, &inv2Button, &inv3Button,
-                                                             &complianceSlider, &complianceLabel,
-                                                             &lockInfluenceSlider, &lockInfluenceLabel })
-        c->setEnabled(! markov);
-    const int offset = processor.padPageOffset();
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-    {
-        const auto& pad = processor.chordPad(offset + v);
-        auto& r = *padRows[(size_t) v];
-        const bool filled = ! pad.notes.empty();
-
-        r.play.setButtonText(filled ? pad.name : juce::String("-"));
-        r.play.setEnabled(filled); // the right-click menu still opens on an empty pad
-        if (r.play.locked != pad.locked || r.play.notes != pad.notes)
-        {
-            r.play.locked = pad.locked;
-            r.play.notes = pad.notes;
-            r.play.repaint();
-        }
-    }
-    repaint();
-}
-
-void ChordGenPanel::mouseDown(const juce::MouseEvent&)
-{
-    // Opaque to clicks: as an overlay nothing behind it should react, and inline the
-    // card's own background should not fall through to the editor either.
-}
-
-void ChordGenPanel::setInlineMode(bool b)
-{
-    if (inlineMode == b)
-        return;
-    inlineMode = b;
-    repaint();
+    // Source switch: swap which of the two row-B bands is on screen. The source is a
+    // parameter, so it can move from the window's own combo, from the host or from a session
+    // load, and this poll is what catches all three.
+    if (const bool markov = ! gen.readsScaleSettings(); markov != markovShown)
+        applySource(markov);
 }
 
 void ChordGenPanel::paint(juce::Graphics& g)
 {
-    if (! inlineMode)
-        g.fillAll(scrim); // dim whatever is behind, so the panel reads as the active surface
-    const auto b = getLocalBounds().reduced(8).toFloat();
-    g.setColour(panelBg);
-    g.fillRoundedRectangle(b, skin::panelRadius);
-    g.setColour(juce::Colours::white.withAlpha(0.05f));
-    g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
-    skin::glowRect(g, b, skin::panelRadius, skin::accentOf(*this).base, inlineMode ? 0.30f : 0.55f);
+    // A window of its own, so this is the whole surface rather than a card floating on the
+    // editor: the plain background every detached section's holder paints, and one accent hair
+    // line under the header to separate the settings from the title row.
+    g.fillAll(skin::bgBot);
+
+    const auto band = getLocalBounds().reduced(kInset).removeFromTop(kHeaderH + kAfterHeader / 2);
+    g.setColour(skin::accentOf(*this).base.withAlpha(0.25f));
+    g.fillRect((float) band.getX(), (float) band.getBottom(), (float) band.getWidth(), 1.0f);
 }
 
 void ChordGenPanel::resized()
 {
-    auto area = getLocalBounds().reduced(8).reduced(12);
+    auto area = getLocalBounds().reduced(kInset);
+    if (area.isEmpty())
+        return;
 
-    auto top = area.removeFromTop(28);
-    title.setBounds(top.removeFromLeft(150));
-    closeButton.setBounds(top.removeFromRight(80).withSizeKeepingCentre(80, 28));
-    pageLabel.setBounds(top.removeFromRight(110));
-    modeEmotion.setBounds(top.reduced(8, 0));
-    area.removeFromTop(8);
+    auto top = area.removeFromTop(kHeaderH);
+    title.setBounds(top.removeFromLeft(kTitleW));
+    closeButton.setBounds(top.removeFromRight(kCloseW).withSizeKeepingCentre(kCloseW, kHeaderH));
+    pageLabel.setBounds(top.removeFromRight(kPageW));
+    modeEmotion.setBounds(top.reduced(kGap, 0));
+    area.removeFromTop(kAfterHeader);
 
     const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
     {
         auto c = row.removeFromLeft(w);
-        row.removeFromLeft(8);
+        row.removeFromLeft(kGap);
         lab.setBounds(c.removeFromTop(14));
         ctl.setBounds(c);
     };
 
-    // Row 1: key, mode, octave, and which brain generates.
-    auto rowA = area.removeFromTop(44);
-    cell(rowA, 70, rootLabel, rootBox);
-    cell(rowA, 170, modeLabel, modeBox);
-    cell(rowA, 110, octaveLabel, octaveSlider);
-    cell(rowA, 130, sourceLabel, sourceBox);
-    area.removeFromTop(4);
+    // Row A: key, mode, octave, and which brain generates. Every one of these is live under
+    // both sources except Mode, which the timer greys.
+    auto rowA = area.removeFromTop(kRowH);
+    cell(rowA, kKeyW, rootLabel, rootBox);
+    cell(rowA, kModeW, modeLabel, modeBox);
+    cell(rowA, kOctaveW, octaveLabel, octaveSlider);
+    cell(rowA, kSourceW, sourceLabel, sourceBox);
+    area.removeFromTop(kAfterRowA);
 
-    // Row 2: note counts, inversions, and the two weighting sliders — or, when the
-    // Markov source is up, its chain controls in the same band (visibility picks one).
-    auto rowC = area.removeFromTop(44);
+    // Row B: note counts, inversions and the two weighting sliders - or, when the Markov source
+    // is up, its chain controls in the same band. Both are laid out here and applySource() has
+    // already hidden one of them, which it must: these two rects overlap and the algorithmic
+    // set is the wider, so a hidden-but-visible one paints out past the other's right edge.
+    auto rowB = area.removeFromTop(kRowH);
     {
-        auto markovRow = rowC;
-        cell(markovRow, 110, chainLabel, chainBox);
-        cell(markovRow, 150, moodLabel, moodBox);
-        cell(markovRow, 100, startLabel, startBox);
-        cell(markovRow, 220, tempLabel, tempSlider);
-        cell(markovRow, 150, lengthLabel, lengthSlider);
+        auto markovRow = rowB;
+        cell(markovRow, kChainW, chainLabel, chainBox);
+        cell(markovRow, kMoodW, moodLabel, moodBox);
+        cell(markovRow, kStartW, startLabel, startBox);
+        cell(markovRow, kTempW, tempLabel, tempSlider);
+        cell(markovRow, kLengthW, lengthLabel, lengthSlider);
     }
     {
-        auto c = rowC.removeFromLeft(120);
-        rowC.removeFromLeft(8);
+        auto c = rowB.removeFromLeft(kNotesW);
+        rowB.removeFromLeft(kGap);
         notesLabel.setBounds(c.removeFromTop(14));
         const int w = c.getWidth() / 3;
         triadsButton.setBounds(c.removeFromLeft(w));
@@ -831,8 +411,8 @@ void ChordGenPanel::resized()
         ninthsButton.setBounds(c);
     }
     {
-        auto c = rowC.removeFromLeft(200);
-        rowC.removeFromLeft(8);
+        auto c = rowB.removeFromLeft(kInvW);
+        rowB.removeFromLeft(kGap);
         invLabel.setBounds(c.removeFromTop(14));
         const int w = c.getWidth() / 4;
         inv0Button.setBounds(c.removeFromLeft(w));
@@ -840,31 +420,17 @@ void ChordGenPanel::resized()
         inv2Button.setBounds(c.removeFromLeft(w));
         inv3Button.setBounds(c);
     }
-    cell(rowC, 230, complianceLabel, complianceSlider);
-    cell(rowC, 230, lockInfluenceLabel, lockInfluenceSlider);
-    area.removeFromTop(6);
+    cell(rowB, kComplianceW, complianceLabel, complianceSlider);
+    cell(rowB, kLockInfW, lockInfluenceLabel, lockInfluenceSlider);
+    area.removeFromTop(kAfterRowB);
 
-    // Row 3: the page-wide actions (the left-click bulk path).
-    auto rowD = area.removeFromTop(36);
-    fillButton.setBounds(rowD.removeFromLeft(120));
-    rowD.removeFromLeft(8);
-    regenButton.setBounds(rowD.removeFromLeft(150));
-    rowD.removeFromLeft(8);
-    clearButton.setBounds(rowD.removeFromLeft(120));
-    area.removeFromTop(8);
-
-    // The pad grid: 4 across, 4 down (16 pads, Octavium's 4x4). Just the cards — the
-    // per-pad actions live in each card's right-click menu, so every card is a big,
-    // clean play target.
-    const int cols = 4, rows = KeysProcessor::padsPerPage / 4;
-    const int gap = 8;
-    const int cw = (area.getWidth() - gap * (cols - 1)) / cols;
-    const int ch = (area.getHeight() - gap * (rows - 1)) / juce::jmax(rows, 1);
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-    {
-        auto& r = *padRows[(size_t) v];
-        const int col = v % cols, rw = v / cols;
-        r.play.setBounds(area.getX() + col * (cw + gap), area.getY() + rw * (ch + gap), cw, ch);
-    }
+    // Row C: the page-wide actions. Clear is last and furthest from the two constructive ones,
+    // because it is the only button in here that can lose work.
+    auto rowC = area.removeFromTop(kActionH);
+    fillButton.setBounds(rowC.removeFromLeft(kFillW));
+    rowC.removeFromLeft(kGap);
+    regenButton.setBounds(rowC.removeFromLeft(kRegenW));
+    rowC.removeFromLeft(kGap);
+    clearButton.setBounds(rowC.removeFromLeft(kClearW));
 }
 } // namespace keys

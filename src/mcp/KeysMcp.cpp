@@ -8,12 +8,17 @@ namespace keys
 {
 namespace
 {
-    const char* laneNames[ArpEngine::numLanes] = { "note", "octave", "velocity", "gate", "ratchet", "probability" };
+    // Both of these are sized by numLanes and both must stay full: the loops below walk
+    // every entry, so a lane added upstream without a name here leaves a null string and a
+    // {0, 0, 0} range that silently clamps the *note* lane to zero.
+    const char* laneNames[ArpEngine::numLanes] = { "note", "octave", "velocity", "gate", "ratchet",
+                                                   "probability", "transpose", "late", "harmony", "chord" };
 
     // Legal per-lane range, straight from ArpEngine.h's Lanes comment: note is
     // -1 (mute) .. 8 (fixed chord-note index, 0 = follow direction mode); octave is
     // added octaves; velocity/gate are percentages; ratchet is sub-hits; probability
-    // is a percent chance.
+    // is a percent chance; transpose counts scale degrees; late is a percentage of a
+    // step; harmony counts chord tones; chord names an arp slot, 1-based, 0 = off.
     struct LaneRange
     {
         int lane;
@@ -26,6 +31,10 @@ namespace
         { ArpEngine::laneGate, 5, 200 },
         { ArpEngine::laneRatchet, 1, 4 },
         { ArpEngine::laneProbability, 0, 100 },
+        { ArpEngine::laneTranspose, -7, 7 },
+        { ArpEngine::laneLate, 0, 90 },
+        { ArpEngine::laneHarmony, 0, 7 },
+        { ArpEngine::laneChord, 0, 12 },
     };
 
     juce::var intVectorToVar(const std::vector<int>& values)
@@ -54,7 +63,7 @@ namespace
         return true;
     }
 
-    // Fills a result object with the six per-step lanes (trimmed to each lane's
+    // Fills a result object with every per-step lane (trimmed to each lane's
     // length), plus "lengths" and "clockDivs" sub-objects. Shared by get_arp_pattern's
     // live-lane and stored-slot branches.
     void writeArpPatternInto(juce::DynamicObject& obj,
@@ -187,7 +196,8 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
     t.name = "get_state";
     t.description = "Snapshot of Keys' current performance state: product and version, "
                      "the load-bearing controls (root, scale, scale lock, octave, sustain, "
-                     "latch, velocity, arp on/rate/direction/octaves/latch, which arp "
+                     "latch, velocity, arp on/rate (both the synced division and the "
+                     "free-running Hz, plus which of the two is live)/direction/octaves/latch, which arp "
                      "pattern is active, and which chord-pad page is showing), plus how "
                      "many chord pads currently hold a chord. Call this first to orient "
                      "before changing anything.";
@@ -206,13 +216,24 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("velocity", juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         obj->setProperty("arpOn", text("arpOn"));
         obj->setProperty("arpRate", text("arpRate"));
+        // Which of the two rates is actually running. Without this a client reads arpRate,
+        // sees "1/16" and cannot tell that the arp is free-running at 3 Hz instead.
+        obj->setProperty("arpRateFree", text("arpRateFree"));
+        obj->setProperty("arpRateHz", text("arpRateHz"));
         obj->setProperty("arpDirection", text("arpDirection"));
         // Without this a client cannot tell why lanes it just wrote are silent: the step
         // lanes are only read while arpPattern is on (Shape "Pattern").
         obj->setProperty("arpPattern", text("arpPattern"));
         obj->setProperty("arpOctaves", text("arpOctaves"));
+        obj->setProperty("arpDistance", text("arpDistance"));
+        obj->setProperty("arpOffset", text("arpOffset"));
         obj->setProperty("arpLatch", text("arpLatch"));
+        obj->setProperty("arpRetrigBars", text("arpRetrigBars"));
+        obj->setProperty("arpVelRamp", text("arpVelRamp"));
+        obj->setProperty("arpHumanize", text("arpHumanize"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
+        // Progression mode: -1 when it is not running, else the slot it is playing.
+        obj->setProperty("arpChainSlot", processor.chainSlot());
         obj->setProperty("padPage", processor.padPage());
         int padCount = 0;
         for (int i = 0; i < KeysProcessor::numChordPads; ++i)
@@ -640,8 +661,9 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
 {
     okstudio::mcp::Tool t;
     t.name = "get_arp_pattern";
-    t.description = "Read an arp pattern's six per-step lanes (note, octave, velocity, "
-                     "gate, ratchet, probability), each trimmed to its own length, plus "
+    t.description = "Read an arp pattern's ten per-step lanes (note, octave, velocity, "
+                     "gate, ratchet, probability, transpose, late, harmony, chord), each "
+                     "trimmed to its own length, plus "
                      "its per-lane clock dividers and which pattern is active. Without "
                      "slot, reads the live lanes (what's currently playing/showing in the "
                      "editor); with slot, reads that stored pattern (0..11) without "
@@ -690,7 +712,11 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "mode, 1..8 = fixed chord-note index), octave (-3..3 added octaves), velocity "
         "(10..200, percent of the played velocity), gate (5..200, percent of the step "
         "length; over 100 ties into the next step), ratchet (1..4 sub-hits per step), "
-        "probability (0..100, percent chance the step fires). Each lane array you supply "
+        "probability (0..100, percent chance the step fires), transpose (-7..7, counted in "
+        "*scale degrees* of the current Root/Scale, not semitones), late (0..90, percent of "
+        "a step to delay this step by), harmony (0..7, adds a second voice that many chord "
+        "tones above), chord (0 = off, 1..12 = play the chord stored in that arp slot for "
+        "this step instead of a note of what is held). Each lane array you supply "
         "also sets that lane's length to the array's size (clamped 1..32). Shorter "
         "arrays make a shorter pattern for that lane, for polymeter against the others. "
         "clockDivs is an optional map of lane name -> 0 (every step) / 1 (every 2nd) / 2 "
@@ -705,6 +731,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         { "gate", "array", "Per-step gate lane (5..200).", false },
         { "ratchet", "array", "Per-step ratchet lane (1..4).", false },
         { "probability", "array", "Per-step probability lane (0..100).", false },
+        { "transpose", "array", "Per-step transpose lane, in scale degrees (-7..7).", false },
+        { "late", "array", "Per-step delay lane, percent of a step (0..90).", false },
+        { "harmony", "array", "Per-step harmony lane, chord tones above (0..7).", false },
+        { "chord", "array", "Per-step chord lane: 0 = off, 1..12 = that arp slot's chord.", false },
         { "clockDivs", "object", "Optional map of lane name -> clock divider 0/1/2.", false },
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var

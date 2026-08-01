@@ -1,113 +1,86 @@
 #pragma once
 
-#include "../ChordGen.h"
 #include "../PluginProcessor.h"
+#include "ChordGenMenu.h"
 #include <juce_gui_basics/juce_gui_basics.h>
-#include <okstudio/Theme.h>
 #include <array>
 #include <functional>
 #include <memory>
 
 namespace keys
 {
-// The chord generator, ported from Octavium's Autofill + Options dialogs and its
-// right-click card menu (app/chord_autofill.py, app/chord_suggestions.py).
+// The chord generator's controls, as the content of a window of its own (2026-07-30, Owen: "I
+// think the chord generator should just pop out a new window instead of being in the right
+// click menu").
 //
-// It is inline rather than a dialog: a plugin editor has no business opening OS windows,
-// and the centre view keeps every target inside the one surface the mouse is already in.
-// Picking Chords swaps it in where the knob bank and chord pads sit, so the keyboard
-// stays playable while you generate. It fills the *current pad page*, so the four pages
-// can hold four different keys.
+// This is a **view onto ChordGenMenu, never its owner.** The brain is a member of the editor
+// and lives for the editor's whole life; this is built when the window opens and destroyed
+// when it closes. That split is the whole design and it is load-bearing rather than tidy:
+// "New chord" and "Next: could follow" are items on a pad's card menu, and while the generator
+// *was* a panel those items came and went with it, which is the bug that made it a plain
+// member in the first place. Nothing here may become the only copy of anything.
 //
-// The pad grid is repeated at full size (not the strip) so each pad is a generous
-// play target. Per-pad actions (Lock / New chord / Next suggestions) live in the
-// pad's right-click menu, restoring Octavium's card menu at Owen's request; the
-// page-wide left-click buttons (Fill / Regen / Clear) remain the bulk path. This is
-// the one deliberate exception to the "right-click is only an accelerator" rule —
-// see the Invariants section of CLAUDE.md.
+// Recovered from the panel that was deleted on 2026-07-30 (`git show
+// 7261228^:src/ui/ChordGenPanel.cpp`), which is a layout Owen used and liked, and adapted:
+//
+//   * every control is an APVTS attachment, exactly as it was, so it and the twin on the Pads
+//     bar (Key, Mode, Scale Compliance) read and write the one parameter and can never
+//     disagree. There is no hand-syncing anywhere in this class;
+//   * the page-wide actions call straight into ChordGenMenu - `fillPage`, `regeneratePage`,
+//     `clearPage`. The old panel had its own copies of all three; those are gone, and Fill's
+//     "empty pads only" rule (Owen, the same day) came with the move for free;
+//   * **Clear page** is here rather than on the Pads bar or a card menu. It empties sixteen
+//     pads and Keys has no undo of any kind, so it wants to be somewhere you went on purpose;
+//   * the suggestion audition is *not* here. It calls noteOn with no pad behind it and is
+//     released by an 800 ms timer, so it stays in ChordGenMenu where the destructor that
+//     stops it cannot be closed away (see ~ChordGenMenu). This class never plays a note;
+//   * Mood and Start are not held here either. They are transient picks that belong to the
+//     progression being generated, and shutting the window must not reset them, so the combo
+//     boxes read and write ChordGenMenu's copies.
+//
+// There is no pad grid. The panel drew a 4x4 copy of the current page until 2026-07-30 - the
+// same sixteen pads, through the same KeysProcessor::setChordPad, as the Pads section already
+// on screen. The cards are the Pads section's, and each of them names its chord and lists its
+// notes, which is what this grid was for.
 class ChordGenPanel : public juce::Component,
                       private juce::Timer
 {
 public:
-    explicit ChordGenPanel(KeysProcessor&);
+    ChordGenPanel(KeysProcessor&, ChordGenMenu&);
     ~ChordGenPanel() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
-    void mouseDown(const juce::MouseEvent&) override; // swallow clicks so the editor below is inert
 
-    std::function<void()> onClose; // dismiss the panel
+    // The on-screen Close button. The window's title-bar X runs the same teardown; the editor
+    // wires both to one call, so there is exactly one way for this object to die.
+    std::function<void()> onClose;
 
-    // Inline: draw as a plain card filling our bounds, with no scrim behind it.
-    void setInlineMode(bool);
-
-    // Header rows plus a 4x4 pad grid whose cards stay comfortable play targets.
-    static constexpr int preferredHeight = 16 + 24 + (28 + 8) + (44 + 4) + (44 + 6) + (36 + 8) + 4 * 74 + 3 * 8;
+    // What the layout below actually needs, so the window's minimum is derived rather than
+    // guessed. Widest row is the algorithmic settings row; tallest is all four rows plus the
+    // gaps between them. See resized() for the arithmetic each of these adds up.
+    static juce::Point<int> contentSize();
+    static juce::Point<int> minWindowSize();     // contentSize + the window's own furniture
+    static juce::Point<int> defaultWindowSize(); // where it opens the first time
 
 private:
-    bool inlineMode = false;
-
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
-    // The pad itself: left-click press-and-hold auditions (plain Button behaviour),
-    // right-click opens the pad's action menu. Paints a full chord card — name, the
-    // note list with octave numbers, a mini keyboard of what's held, the lock dot —
-    // so the grid needs no extra widgets.
-    struct PadButton : juce::TextButton
-    {
-        std::function<void()> onRightClick;
-        bool locked = false;
-        std::vector<int> notes; // what the card renders; pushed from the panel timer
-
-        void mouseDown(const juce::MouseEvent& e) override
-        {
-            if (e.mods.isPopupMenu())
-            {
-                if (onRightClick)
-                    onRightClick();
-                return; // not a press: never auditions, never shows the down state
-            }
-            juce::TextButton::mouseDown(e);
-        }
-
-        void paintButton(juce::Graphics&, bool over, bool down) override; // ChordGenPanel.cpp
-    };
-
-    struct PadRow
-    {
-        PadButton play;        // shows the chord name; press-and-hold auditions it
-        bool playHeld = false; // edge-detects the press, so audition fires and stops once
-    };
-
     void timerCallback() override;
     void buildControls();
-    void fillPage(bool onlyUnlocked);
-    void clearPage();
-    void regeneratePad(int slot);
-    void newChordFor(int slot); // regenerate a filled pad, or conjure one for an empty slot
-    void showPadMenu(int slot); // the right-click card menu: Lock / New chord / Next
-    void writeChord(int slot, const chordgen::Chord& c);
-    chordgen::Options currentOptions() const;
-    std::vector<int> lockedTypesOnPage() const;
-    int genRoot() const;
-    int genMode() const;
+    void refreshMoodItems(); // the Mood list belongs to the chain that is up
 
-    // The Markov source (Source: Markov). Same page mechanics, different brain.
-    bool markovActive() const;
-    juce::String moodArg() const;  // "" = Any
-    juce::String startArg() const; // "" = Any
-    void fillPageMarkov(bool onlyUnlocked);
-    void regeneratePadMarkov(int slot);
-    void refreshMoodItems();
-
-    // Suggestion audition: play a chord for a moment without closing the menu.
-    void previewChord(const std::vector<int>& notes);
-    void stopPreview();
+    // The two sets of controls that share row B, and the one place that decides which of them
+    // is on screen. Returned by value rather than as an initializer_list, whose backing array
+    // would not outlive the return.
+    std::array<juce::Component*, 13> algorithmicBand();
+    std::array<juce::Component*, 10> markovBand();
+    void applySource(bool markov);
 
     KeysProcessor& processor;
-    juce::Random rng;
+    ChordGenMenu& gen;
 
     juce::Label title, modeEmotion, pageLabel;
     juce::TextButton closeButton { "Close" };
@@ -125,24 +98,23 @@ private:
     juce::TextButton regenButton { "Regen Unlocked" };
     juce::TextButton clearButton { "Clear Page" };
 
-    // The Markov source's controls; visible only while Source is Markov. Mood and
-    // Start are transient (like the wheels): performance choices, not session state.
+    // The Markov source's controls; visible only while Source is Markov, in the same band as
+    // the algorithmic settings they replace. Those settings mean nothing to a chain walk, so
+    // the band shows whichever set is live rather than reserving a row that is dead half the
+    // time. Sharing the rect makes the visibility swap load-bearing rather than cosmetic:
+    // applySource() owns it, and the two sets are never on screen together.
     juce::ComboBox sourceBox, chainBox, moodBox, startBox;
     juce::Label sourceLabel, chainLabel, moodLabel, startLabel;
     juce::Slider tempSlider, lengthSlider;
     juce::Label tempLabel, lengthLabel;
-
-    std::array<std::unique_ptr<PadRow>, KeysProcessor::padsPerPage> padRows;
 
     std::unique_ptr<ComboAtt> rootAtt, modeAtt, sourceAtt, chainAtt;
     std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt, tempAtt, lengthAtt;
     std::unique_ptr<ButtonAtt> triadsAtt, seventhsAtt, ninthsAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;
 
-    int lastChainMode = -1;      // rebuild the Mood list when the chain mode changes
-    bool markovShown = false;    // last visibility applied, to relayout on source change
-    std::vector<int> previewNotes; // suggestion audition currently sounding
-    juce::uint32 previewEndMs = 0; // when to stop it (0 = nothing playing)
+    int lastChainMode = -1;   // rebuild the Mood list when the chain mode changes
+    bool markovShown = false; // last visibility applied, to relayout on source change
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenPanel)
 };

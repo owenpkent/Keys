@@ -1,7 +1,11 @@
 #include "ChordPads.h"
+#include "../ChordGen.h"
+#include "../ChordSuggest.h"
 #include "../Chords.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
+#include <okstudio/Scales.h>
+#include <algorithm>
 
 namespace keys
 {
@@ -10,9 +14,48 @@ namespace
     constexpr float kCardW = 108.0f;
     constexpr float kGap = 6.0f;
     constexpr float kRadius = 6.0f;
-    constexpr int kRows = 2; // two rows of eight, Octavium parity
     constexpr float kSaveW = 38.0f; // the edit tick's strip at the right end of a pad
+    constexpr float kNoteLineH = 11.0f; // the note list under the chord name, on every card
     bool isChord(const std::vector<int>& n) { return n.size() >= 2; }
+
+    bool onKeyboard(const std::vector<int>& notes)
+    {
+        return std::none_of(notes.begin(), notes.end(), [](int n) { return n < 0 || n > 127; });
+    }
+
+    // The whole chord an octave down or up, or empty when that would run it off the ends of
+    // MIDI. No wrapping: a chord that cannot move in one piece does not move at all, and the
+    // menu item greys out rather than folding a note round to the other end of the keyboard.
+    std::vector<int> shiftedOctave(const std::vector<int>& notes, int semitones)
+    {
+        if (notes.empty())
+            return {};
+        std::vector<int> out;
+        out.reserve(notes.size());
+        for (const int n : notes)
+            out.push_back(n + semitones);
+        return onKeyboard(out) ? out : std::vector<int> {};
+    }
+
+    std::vector<int> sortedCopy(std::vector<int> v)
+    {
+        std::sort(v.begin(), v.end());
+        return v;
+    }
+
+    // What a card is made of, under what it is called. This came from the chord generator's
+    // own copy of this same page of pads; that grid went on 2026-07-30 and this stayed, at
+    // first only on the tall (Big) arrangement, and now on every card - a line of it costs
+    // 11 px, which the short card has, so Big had nothing left to offer and went too.
+    juce::String noteListText(const std::vector<int>& notes)
+    {
+        const auto names = okstudio::scales::noteNames();
+        juce::String out;
+        for (const int n : notes)
+            out << (out.isEmpty() ? "" : "  ") << names[((n % 12) + 12) % 12] << juce::String(n / 12 - 1);
+        return out;
+    }
+
 } // namespace
 
 ChordPads::ChordPads(KeysProcessor& p) : processor(p)
@@ -29,8 +72,8 @@ juce::Rectangle<float> ChordPads::cardBounds() const
 juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
-    const int rows = kRows;
-    const int cols = KeysProcessor::padsPerPage / kRows; // 16 / 2 = 8 across
+    constexpr int rows = 2;
+    constexpr int cols = KeysProcessor::padsPerPage / rows; // sixteen as two rows of eight
     r.removeFromLeft(kCardW + 10.0f); // card + separation
     const int row = visibleIndex / cols;
     const int col = visibleIndex % cols;
@@ -106,10 +149,23 @@ void ChordPads::paint(juce::Graphics& g)
             g.setColour(juce::Colours::white.withAlpha(0.05f));
             g.drawRoundedRectangle(b, kRadius, 1.0f);
         }
+        // Named, and under it the notes themselves, the same way a pad card reads. The live
+        // card is what is under your hand rather than what is stored, which is the one place
+        // "what notes are these" is a question you ask mid-chord.
+        auto cardText = b.reduced(6.0f);
+        const auto liveNotes = has ? cardText.removeFromBottom(kNoteLineH)
+                                   : juce::Rectangle<float>();
         g.setColour(has ? skin::text : skin::textFaint);
         g.setFont(has ? skin::uiSemi(15.0f) : skin::ui(11.0f));
-        g.drawText(has ? currentName : juce::String("hold a chord"), b.reduced(6.0f),
-                   juce::Justification::centred);
+        g.drawText(has ? currentName : juce::String("hold a chord"), cardText,
+                   juce::Justification::centred, true);
+        if (has)
+        {
+            g.setColour(skin::textDim);
+            g.setFont(skin::micro(9.0f));
+            g.drawText(noteListText(currentNotes), liveNotes.toNearestInt(),
+                       juce::Justification::centred, true);
+        }
         if (recallHover)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot);
     }
@@ -139,21 +195,36 @@ void ChordPads::paint(juce::Graphics& g)
             g.setColour(juce::Colours::white.withAlpha(0.035f));
             g.drawRoundedRectangle(b, kRadius, 1.0f);
         }
-        else if (active)
-        {
-            g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(), skin::accentOf(*this).base, 0.0f, b.getBottom(), false });
-            g.fillRoundedRectangle(b, kRadius);
-            skin::glowRect(g, b, kRadius, skin::accentOf(*this).base);
-            g.setColour(inkOnAccent);
-            g.setFont(skin::uiSemi(13.5f));
-            g.drawText(pad.name, nameArea.reduced(4.0f), juce::Justification::centred);
-        }
         else
         {
-            skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
-            g.setColour(skin::text);
+            if (active)
+            {
+                g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(),
+                                    skin::accentOf(*this).base, 0.0f, b.getBottom(), false });
+                g.fillRoundedRectangle(b, kRadius);
+                skin::glowRect(g, b, kRadius, skin::accentOf(*this).base);
+            }
+            else
+            {
+                skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+            }
+
+            // The card says what the chord *is* as well as what it is called: the name, and
+            // under it the notes a press of this pad will play, with octave numbers. Both,
+            // always - the note list used to be the tall arrangement's alone, and a card is
+            // no use as a reference if reading it means a mode switch first.
+            const auto ink = active ? inkOnAccent : skin::text;
+            auto text = nameArea.reduced(4.0f, 3.0f);
+            const auto noteLine = text.removeFromBottom(kNoteLineH);
+
+            g.setColour(ink);
             g.setFont(skin::uiSemi(13.5f));
-            g.drawText(pad.name, nameArea.reduced(4.0f), juce::Justification::centred);
+            g.drawText(pad.name, text, juce::Justification::centred, true);
+
+            g.setColour(active ? inkOnAccent.withAlpha(0.75f) : skin::textDim);
+            g.setFont(skin::micro(9.0f));
+            g.drawText(noteListText(pad.notes), noteLine.toNearestInt(),
+                       juce::Justification::centred, true);
         }
 
         // The pad currently feeding the arp. A ring rather than the "active" fill, because
@@ -168,9 +239,16 @@ void ChordPads::paint(juce::Graphics& g)
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot, 0.8f);
         }
 
-        // Locked pads carry a corner dot. It is an indicator, not a target: the toggle
-        // lives in the Chords panel, where it can be a full-size button.
-        if (filled && pad.locked)
+        // Locked pads carry a corner dot, and only locked ones. It is an indicator and nothing
+        // else: the toggle is Lock on this pad's own card menu, where it can be a full-size
+        // item (Owen, 2026-07-30 - "I don't want the lock button to be visible. I only want it
+        // to be in right click"). A clickable chip lived here for a few hours earlier the same
+        // day; it took a quarter of the card away from playing, dragging and feeding the arp,
+        // which is the whole point of the card. A dot costs the surface nothing.
+        //
+        // Not on the card being edited: the tick that ends the edit is a full-height strip at
+        // that same right-hand end, and the dot would sit inside it.
+        if (filled && pad.locked && i != editingSlot)
         {
             const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
                                  .withCentre({ b.getRight() - 8.0f, b.getY() + 8.0f });
@@ -216,17 +294,36 @@ void ChordPads::paint(juce::Graphics& g)
     }
 
     // Drag ghost following the cursor.
+    //
+    // A locked card is dragged like any other - moveChordPad swaps two slots and destroys
+    // nothing, so rearranging a page is not what a lock is protecting against - but dropping
+    // one *off* the strip no longer clears it (see mouseUp). The ghost says so on the way:
+    // it carries the same corner dot the card does, and it fades once the pointer is over
+    // nothing, which is the spot where an unlocked card would be wiped and this one will not.
     if (dragging && sourceIsDraggable())
     {
+        const bool locked = dragSource >= 0 && processor.chordPad(dragSource).locked;
+        const float dim = (locked && hovered == -1) ? 0.45f : 1.0f;
         const juce::String label = dragSource == -2 ? currentName : processor.chordPad(dragSource).name;
         auto ghost = juce::Rectangle<float>(0.0f, 0.0f, 84.0f, 26.0f).withCentre(dragPos);
-        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.setColour(juce::Colours::black.withAlpha(0.35f * dim));
         g.fillRoundedRectangle(ghost.translated(0.0f, 2.0f), kRadius);
-        g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, ghost.getY(), skin::accentOf(*this).base, 0.0f, ghost.getBottom(), false });
+        g.setGradientFill({ skin::accentOf(*this).hot.withMultipliedAlpha(dim), 0.0f, ghost.getY(),
+                            skin::accentOf(*this).base.withMultipliedAlpha(dim), 0.0f, ghost.getBottom(), false });
         g.fillRoundedRectangle(ghost, kRadius);
-        g.setColour(inkOnAccent);
+        g.setColour(inkOnAccent.withMultipliedAlpha(dim));
         g.setFont(skin::uiSemi(12.0f));
         g.drawText(label, ghost, juce::Justification::centred);
+
+        if (locked)
+        {
+            const auto dot = juce::Rectangle<float>(5.0f, 5.0f)
+                                 .withCentre({ ghost.getRight() - 8.0f, ghost.getY() + 8.0f });
+            g.setColour(inkOnAccent.withAlpha(0.4f * dim));
+            g.fillEllipse(dot.expanded(2.0f));
+            g.setColour(inkOnAccent.withMultipliedAlpha(dim));
+            g.fillEllipse(dot);
+        }
     }
 }
 
@@ -243,18 +340,83 @@ bool ChordPads::toArp() const
     return processor.cardsFeedArp();
 }
 
+// A pad's card menu. Nine rows and two separators, which at the 34 px mouse-only item height
+// (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) is 9 * 34 + 2 * 17 =
+// 340 px. That budget is the reason this list is short: the menu hangs off a pad near the
+// bottom of a 699 px window and grows *upwards*, and JUCE answers one taller than the space it
+// has by splitting it into columns or making it hover-scroll. A scrolling popup cannot be used
+// with one mouse at all - hovering the arrow scrolls, and moving to click scrolls the item
+// away. It ran to 23 rows and roughly 820 px earlier on 2026-07-30. Three groups, no headers,
+// nothing three levels deep except the suggestion families:
+//
+//   Edit on keyboard / Clear pad / Lock
+//   Octave down / Octave up / Next voicing
+//   New chord / Next: could follow > / Send to arp slot >
+//
+// The fourth group went with the generator's settings, into the window that now holds them
+// (ChordGenPanel): Clear page sits in there beside Fill and Regen, where the other page-wide
+// actions are. The separators do the work section headers used to, at half the height and
+// without naming what is already obvious from the items under them.
 void ChordPads::showPadMenu(int slot)
 {
     const auto& pad = processor.chordPad(slot);
     const bool editing = slot == editingSlot;
+    const bool filled = ! pad.notes.empty();
 
     juce::PopupMenu menu;
     menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");
-    menu.addItem(2, "Clear pad", ! pad.notes.empty() && ! pad.locked);
+    menu.addItem(2, "Clear pad", filled && ! pad.locked);
+    // The only way to set a lock (Owen, 2026-07-30). It is the one item in the plugin whose
+    // left-click twin was deliberately taken away rather than never built: a chip in the card's
+    // corner did the job for a few hours and cost the card a quarter of its surface. The card
+    // still *shows* a lock as a corner dot, so the state is readable without opening this menu.
+    // Recorded as an owner-directed right-click-only path in CLAUDE.md.
+    menu.addItem(3, pad.locked ? "Unlock" : "Lock", filled);
+
+    // Octave and voicing: the two ways to move a chord without changing what it is. Both act
+    // on the stored chord, and both are offered on a locked pad on purpose - a lock protects a
+    // chord from *generation*, not from its owner asking for this card by name.
+    //
+    // All three grey out while this card is the one linked to the keyboard, because
+    // rewritePadChord cannot reach the keybed and the edit link is the keybed's to write.
+    // Left live they were worse than useless: the card moved, the keys stayed where they were,
+    // and the next latched note wrote the *un*shifted set straight back over the shift through
+    // the capture path, which also drops the generator metadata rewritePadChord exists to keep.
+    // Pushing the new notes back the other way is not the cheaper fix it looks: recalling onto
+    // the keybed means panic() first (recallOutputNotes only ever adds), and panic() takes
+    // every other sounding chord in the plugin with it. Done editing is the row above.
+    const auto down = shiftedOctave(pad.notes, -12);
+    const auto up = shiftedOctave(pad.notes, 12);
+    const int rootPc = padRootPc(slot);
+    const auto base = chordgen::rootPosition(pad.notes, rootPc);
+    const int voicing = chordgen::voicingOf(pad.notes, rootPc);
+    const auto revoiced = chordgen::applyVoicing(base, voicing + 1);
+
+    juce::String voicingItem = "Next voicing";
+    if (filled && voicing >= 0)
+        voicingItem << "   (now: " << chordgen::voicingName(voicing, (int) base.size()) << ")";
+
+    menu.addSeparator();
+    menu.addItem(4, "Octave down", ! editing && ! down.empty());
+    menu.addItem(5, "Octave up", ! editing && ! up.empty());
+    // isChord on the *result* as well as the source: a card holding nothing but a doubled pitch
+    // class collapses to one note in root position, and a one-note pad is not a chord card.
+    menu.addItem(6, voicingItem,
+                 ! editing && isChord(pad.notes) && isChord(revoiced) && onKeyboard(revoiced)
+                     && sortedCopy(revoiced) != sortedCopy(pad.notes));
+
+    // Whatever else can act on this pad right now: the generator adds New chord and the
+    // suggestion families. Both are per-card actions, so they belong on a card's own menu
+    // however the generator's settings are reached; they are offered on every pad and every
+    // page whether or not the generator's window is open, which is what ChordGenMenu outliving
+    // that window is for.
+    menu.addSeparator();
+    if (onExtraMenuItems)
+        onExtraMenuItems(slot, menu);
 
     // Bind this card to an arp slot, so launching that slot plays this chord through that
-    // slot's pattern. The other half of the "cards into the arp" pair: To Arp holds a card
-    // right now, this parks one in a slot for later.
+    // slot's pattern. The other half of the "cards into the arp" pair: a click with the arp
+    // On holds a card right now, this parks one in a slot for later.
     juce::PopupMenu slots;
     for (int s = 0; s < KeysProcessor::numArpPatterns; ++s)
     {
@@ -262,10 +424,9 @@ void ChordPads::showPadMenu(int slot)
         auto label = juce::String(s + 1);
         if (target.chordName.isNotEmpty())
             label += "  (" + target.chordName + ")";
-        slots.addItem(100 + s, label, ! pad.notes.empty());
+        slots.addItem(100 + s, label, filled);
     }
-    menu.addSeparator();
-    menu.addSubMenu("Send to arp slot", slots, ! pad.notes.empty());
+    menu.addSubMenu("Send to arp slot", slots, filled);
 
     const auto area = localAreaToGlobal(padBounds(slot - processor.padPageOffset()).toNearestInt());
     juce::Component::SafePointer<ChordPads> safe(this);
@@ -286,12 +447,99 @@ void ChordPads::showPadMenu(int slot)
                 safe->onEditToggle(slot); // end the edit before wiping its target
             safe->processor.clearChordPad(slot);
         }
+        else if (choice == 3)
+        {
+            safe->processor.setChordPadLocked(slot, ! safe->processor.chordPad(slot).locked);
+        }
+        else if (choice == 4)
+        {
+            safe->shiftPadOctave(slot, -12);
+        }
+        else if (choice == 5)
+        {
+            safe->shiftPadOctave(slot, 12);
+        }
+        else if (choice == 6)
+        {
+            safe->nextPadVoicing(slot);
+        }
         else if (choice >= 100 && choice < 100 + KeysProcessor::numArpPatterns)
         {
             const auto& pad = safe->processor.chordPad(slot);
             safe->processor.setArpSlotChord(choice - 100, pad.notes, pad.name);
         }
+        else if (choice >= extraMenuIdBase && safe->onExtraMenuChoice)
+        {
+            safe->onExtraMenuChoice(slot, choice);
+        }
     });
+}
+
+int ChordPads::padRootPc(int slot) const
+{
+    const auto& pad = processor.chordPad(slot);
+    // A generated card knows its own root; one built on the keyboard gets worked out, exactly
+    // the way the suggestion menu works one out for the same reason.
+    if (pad.rootPc >= 0)
+        return pad.rootPc;
+    return pad.notes.empty() ? 0 : suggest::analyse(pad.notes).first;
+}
+
+// New notes on a pad that already has a chord, keeping everything else about the card: the
+// lock, and the generator metadata that lets New chord know which degree this was.
+//
+// The chord may be sounding (Sustain left it ringing) and may be the one held into the
+// arpeggiator, and both have to follow the card to the new notes. Neither is released by
+// hand: `pressChordPad` is the stop-then-press path, `holdArpChordFromPad` goes through
+// `holdArpChord` which releases the previous hold first, so every note-on gives its reference
+// back before the new one takes it. A raw noteOff here would take a reference belonging to
+// somebody else, leak this pad's, and leave the chord droning.
+void ChordPads::rewritePadChord(int slot, const std::vector<int>& notes)
+{
+    auto pad = processor.chordPad(slot);
+    if (pad.notes.empty() || notes.empty())
+        return;
+
+    const bool wasSounding = processor.chordPadActive(slot);
+    const bool wasHeld = processor.arpHeldPad() == slot;
+
+    pad.notes = notes;
+    pad.name = chords::detect(notes);
+    processor.setChordPad(slot, pad);
+
+    // Each state restored exactly once, and with Exclusive on only one of them can be.
+    //
+    // Exclusive makes both restore paths call stopAllChordPads(), and that stops every pad
+    // *and* releases the arp hold. Doing both therefore fired the chord, killed it, and fired
+    // it again - two Humanize/strum rolls audible in a row - and left the card holding the arp
+    // but not sounding, which is neither of the states it started in. Exclusive means one chord
+    // source at a time, so when it is on there is one state to put back, and it is the hold:
+    // the arp goes on playing off a held chord until something replaces it, where a pad that is
+    // still ringing is only what Sustain left behind. Hold first either way, since with
+    // Exclusive off pressChordPad only re-triggers this one pad and leaves the hold alone.
+    const bool exclusive = processor.apvts.getRawParameterValue("chordExclusive")->load() > 0.5f;
+    if (wasHeld)
+        processor.holdArpChordFromPad(slot);
+    if (wasSounding && ! (exclusive && wasHeld))
+        processor.pressChordPad(slot);
+    repaint();
+}
+
+void ChordPads::shiftPadOctave(int slot, int semitones)
+{
+    const auto moved = shiftedOctave(processor.chordPad(slot).notes, semitones);
+    if (! moved.empty()) // empty means it would have run off the keyboard; the item is greyed
+        rewritePadChord(slot, moved);
+}
+
+void ChordPads::nextPadVoicing(int slot)
+{
+    const auto notes = processor.chordPad(slot).notes; // a copy: rewritePadChord writes the slot
+    const int rootPc = padRootPc(slot);
+    const auto base = chordgen::rootPosition(notes, rootPc);
+    const auto next = chordgen::applyVoicing(base, chordgen::voicingOf(notes, rootPc) + 1);
+    if (isChord(next) && onKeyboard(next)) // matches the menu item's own enable test
+        rewritePadChord(slot, next);
 }
 
 void ChordPads::mouseDown(const juce::MouseEvent& e)
@@ -325,26 +573,47 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         }
     }
 
+    // Nothing else on a card is a target. The lock had a clickable chip in the top-right
+    // corner for a few hours on 2026-07-30 and Owen asked for it back off: it stole a quarter
+    // of the card from playing, dragging and feeding the arp, and every one of those is a
+    // gesture the whole surface is supposed to answer. Lock is a right-click item now, and only
+    // that; the card paints a dot when it is set, which is a mark and not a target.
     downPos = e.position;
     dragPos = e.position;
     dragging = false;
     playing = -1;
     dragSource = cellAt(e.position);
 
-    // To Arp: a filled pad hands its chord to the arpeggiator and it stays there. Not a
+    // Arp On: a filled pad hands its chord to the arpeggiator and it stays there. Not a
     // beat-pad press, so `playing` stays -1 and mouseUp has nothing to release; a second
-    // click on the same pad takes it back. Checked before the beat-pad branch because in
-    // this mode the click means something else entirely.
+    // click on the pad already feeding the arp re-plays it, the way a second press on a
+    // beat pad re-fires it. Checked before the beat-pad branch because in this mode the
+    // click means something else entirely.
+    //
+    // The `arpHeldPad()` half of the test is not redundant with the notes test: a card can
+    // be cleared while it is still the one feeding the arp, and then it wears the ring with
+    // no notes behind it. Without that clause the click falls past every branch below and
+    // does nothing at all, which is a dead click on a lit target.
     if (toArp() && dragSource >= 0
         && (! processor.chordPad(dragSource).notes.empty() || processor.arpHeldPad() == dragSource))
     {
-        // The second half of that condition matters: a pad whose card was cleared while it
-        // was feeding the arp has no notes left but is still the holder, and it has to stay
-        // clickable or the chord is unreachable.
-        if (processor.arpHeldPad() == dragSource)
+        if (processor.chordPad(dragSource).notes.empty())
+        {
+            // Ringed but empty: there is nothing to re-play, so the click means the only
+            // other thing it can mean. This is the ring's own way out, and the reason it is
+            // drawn on a cleared card at all.
             processor.releaseArpChord();
+        }
         else
+        {
+            // Re-playing the holder is a retrigger, never a second owner on the same
+            // pitches: holdArpChordFromPad goes through holdArpChord, which releases the
+            // previous hold (releaseNotes on arpChordTag, so the refs and the arp's held set
+            // both unwind) before it fires, and applies Exclusive to the new one. Stopping a
+            // filled card's hold outright is the Hold off button on the arp bar.
             processor.holdArpChordFromPad(dragSource);
+        }
+
         dragSource = -1; // and it is not a drag handle in this mode either
         repaint();
         return;
@@ -434,9 +703,16 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
                     onRecall(processor.chordPad(dragSource).notes);
             }
             else if (target >= 0 && target != dragSource)
-                processor.moveChordPad(dragSource, target); // rearrange
-            else if (target == -1)
-                processor.clearChordPad(dragSource);         // dragged off the row = clear
+                processor.moveChordPad(dragSource, target); // rearrange, locked or not
+            else if (target == -1 && ! processor.chordPad(dragSource).locked)
+                processor.clearChordPad(dragSource); // dragged off the row = clear
+            // A locked card dropped off the strip does nothing at all. The lock is the thing
+            // that stops a chord being destroyed (Owen, 2026-07-30), and "Clear pad" on the
+            // card menu has always greyed for a locked pad - this path was the hole in that,
+            // and a wider gesture than the menu item it was quietly overriding. The drag
+            // itself stays allowed, because moveChordPad only swaps two slots and a locked
+            // card still has to be arrangeable; the ghost fades over the refusal so the card
+            // says which of the two it is doing.
         }
     }
     dragging = false;

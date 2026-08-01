@@ -7,8 +7,6 @@
 - A **JUCE 8** checkout at `../JUCE` (sibling of this repo)
 - The **kit** at `../okstudio-juce-kit` (sibling of this repo)
 - For installers: **Inno Setup 6** (`winget install JRSoftware.InnoSetup`)
-- For the Transcribe section (on by default): a working internet connection the first time
-  you configure, and patience — see below
 
 Layout:
 
@@ -19,37 +17,35 @@ dev/
 └── Keys/
 ```
 
-## The transcription dependency
+## No heavy dependency any more
 
-The Transcribe section is built on the kit's `okstudio_basicpitch` target, and that brings two
-things with it. Neither is a choice: both are properties of the prebuilt ONNX Runtime the
-engine links, published by the NeuralNote authors because building ONNX Runtime from source is
-its own project.
+**The first configure is cheap again, and `build/` is cheap to delete.** Keys had a
+**Transcribe** section for a few days, built on the kit's `okstudio_basicpitch` target, and
+that target's prebuilt ONNX Runtime brought two costs with it that were properties of the
+library rather than choices: a multi-gigabyte download unpacked into the build tree on the
+first configure, and the **static MSVC runtime**, which is contagious (MSVC will not link
+objects that disagree, so `CMAKE_MSVC_RUNTIME_LIBRARY` had to be forced on everything in the
+binary, JUCE included).
 
-- **A large download at configure time.** The archive is fetched into the build tree and
-  unpacks to a few gigabytes. It is never committed, and never re-downloaded once it is there,
-  but a fresh build tree pays for it again. Deleting `build/` is not free any more.
+The section was removed on 2026-07-30. Both costs went with it: there is no download, no
+`OKSTUDIO_ONNXRUNTIME_CACHE`, no `KEYS_TRANSCRIBE` option, no second `build-notranscribe`
+tree to keep warm, and Keys is back on the **default dynamic CRT**. The engine still lives in
+the kit (`okstudio/Transcribe.h`, `-DOKSTUDIO_KIT_BASICPITCH=ON`, its `docs/TRANSCRIPTION.md`)
+for whichever product wants it next; Keys just no longer asks.
 
-  Unless you keep it somewhere else: `-DOKSTUDIO_ONNXRUNTIME_CACHE=<dir>` puts the unpacked
-  runtime at a path of your choosing, shared by every build tree that points at it. Worth
-  setting once if you ever delete `build/`. CI uses the same flag with an `actions/cache`
-  step, keyed on the ONNX Runtime release.
-- **The static MSVC runtime.** That library is `/MT`, and MSVC will not link objects that
-  disagree, so `CMAKE_MSVC_RUNTIME_LIBRARY` is set before `add_subdirectory(JUCE)` in the
-  top-level `CMakeLists.txt`. Everything in the binary — JUCE included — is built that way.
-  The upside is one fewer redistributable to worry about; the cost is a slightly larger
-  binary and a full rebuild if you flip the option.
+**One catch on a build tree that predates the removal.** Keys used to set
+`OKSTUDIO_KIT_BASICPITCH` with `CACHE FORCE`, so the `ON` is still sitting in an old
+`CMakeCache.txt` and the kit will happily go on building the engine. Re-configure such a tree
+once with the flag off:
 
-`-DKEYS_TRANSCRIBE=OFF` avoids both, at the cost of the section. Anything that only touches
-the keyboard, the pads, the generator or the arp can be built that way and will configure and
-link much faster from cold.
+```powershell
+cmake -B build -DOKSTUDIO_KIT_BASICPITCH=OFF
+```
 
-**Give it its own build tree rather than flipping it in place.** The flag decides the C
-runtime for the entire binary, so toggling it invalidates every object in the tree — and with
-it on, re-configuring is the expensive part. `cmake -B build-notranscribe -DKEYS_TRANSCRIBE=OFF`
-keeps both trees warm and lets you move between them for the cost of a link.
-
-The engine and its own tests live in the kit; see its `docs/TRANSCRIPTION.md`.
+`run.py` will not clear it for you. It configures only a *cold* tree, on the grounds that
+the Visual Studio generator re-runs CMake by itself whenever `CMakeLists.txt` changes, and a
+stale cache entry is not a `CMakeLists.txt` change. A fresh tree needs nothing: the kit's own
+default is `OFF`. Deleting `build/` is the other way out, and it costs what it used to again.
 
 ## Testing a change (run.py)
 
@@ -91,11 +87,11 @@ real signed payload under `site-packages/cmake/data/bin`, an MSI install, and on
 PATH, taking the first that actually launches and saying which it picked when that is not
 the one on PATH. If none starts, it names each one that was blocked instead of a traceback.
 
-Keys Host can own a top-level window per detached section on top of its own and the hosted
-instrument's GUI — eight in all, if you pull everything out — and Windows picks `MainWindowHandle`
-between them heuristically, so the close is aimed at the window titled after the product
-(closing the instrument window only hides it, which would cost you a force-kill and the
-loaded synth).
+Keys Host can own a top-level window per detached section on top of its own, the hosted
+instrument's GUI and the chord generator's window (seven in all, if you pull all four
+sections out and open the generator), and Windows picks `MainWindowHandle` between them
+heuristically, so the close is aimed at the window titled after the product (closing the
+instrument window only hides it, which would cost you a force-kill and the loaded synth).
 
 ## Smart App Control
 
@@ -186,14 +182,18 @@ Artifacts:
 ## Tests
 
 Unit tests (JUCE UnitTest) cover the UI-free logic: note resolution, chord detection, the
-scale modes, chord generation and suggestion, the Markov progression model, and the
-arpeggiator engine's scheduling. They build as a separate console target, so normal plugin
-builds stay fast:
+scale modes, chord generation, the voicing cycle, chord suggestion, the Markov progression
+model, and the arpeggiator engine's scheduling in both rate modes (tempo-synced divisions
+and free Hz). They build as a separate console target, so normal plugin builds stay fast:
 
 ```powershell
 cmake --build build --config Release --target Keys_tests
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+The target is a plain console exe at `build/Release/Keys_tests.exe`; run it directly and it
+prints any failures and then the totals, since "all tests passed" alone cannot tell a full
+suite from one that silently stopped registering itself.
 
 CI builds and runs them on every push to `main` and on every pull request, except for
 changes that only touch Markdown, `docs/` or `assets/` (`paths-ignore`). The line's
@@ -212,7 +212,6 @@ how to keep it testable) is in
 | `KEYS_BUILD_HOST` | `ON` | build Keys Host (an instrument VST3 hosted inside Keys). Turning this off leaves `run.py`'s default target missing |
 | `KEYS_BUILD_MCP_SHIM` | `ON` | build `keys-mcp.exe`, the stdio bridge (see [MCP.md](MCP.md)) |
 | `KEYS_BUILD_MIDI_EFFECT` | `OFF` | also build Keys FX, the MIDI-effect variant Ableton rejects |
-| `KEYS_TRANSCRIBE` | `ON` | build the Transcribe section. Off drops the section, a multi-gigabyte ONNX Runtime download, and the static-MSVC-runtime requirement below |
 
 ## Troubleshooting
 

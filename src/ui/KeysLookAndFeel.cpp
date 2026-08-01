@@ -362,8 +362,12 @@ void KeysLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& butt
 
 juce::Font KeysLookAndFeel::getTextButtonFont(juce::TextButton&, int buttonHeight)
 {
-    // Tall buttons (the generator's chord cards) carry their name larger; ordinary
-    // chrome buttons stay at 14.
+    // Tall buttons carry their name larger; ordinary chrome buttons stay at 14. The 60 px
+    // branch was written for the generator's own chord cards, which were TextButtons; those
+    // went with the card merge on 2026-07-30 and nothing in Keys is a TextButton that tall
+    // today, so the branch is a rule waiting for its next case rather than a description of
+    // one. It costs a comparison and is still the right answer for any tall TextButton, so
+    // it stays - but do not read it as documenting a control that exists.
     const float cap = buttonHeight >= 60 ? 17.0f : 14.0f;
     return skin::uiSemi(juce::jmin(cap, (float) buttonHeight * 0.45f));
 }

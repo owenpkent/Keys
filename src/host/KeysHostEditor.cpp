@@ -16,10 +16,10 @@ namespace keys
 namespace
 {
     constexpr int barHeight = 44;
-    constexpr int keysHeight = 640;      // the embedded editor's comfortable height (gen-panel floor)
+    constexpr int keysHeight = 640;      // the embedded editor's comfortable height
     // The height Keys Host opens at. It is no longer a *floor*: every section of the Keys
     // editor folds away, and the window follows what the folds add up to, so the real
-    // minimum is the Keys editor's own (three bars and the margins, see absMinKeysHeight).
+    // minimum is the Keys editor's own (four bars and the margins, see absMinKeysHeight).
     constexpr int minKeysHeight = 620;
     constexpr int absMinKeysHeight = 150;
 
@@ -396,8 +396,8 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     keysEditor.setResizable(false, false);
     keysEditor.setEmbedded(true);
 
-    // Folding a section or opening a taller centre view changes what the Keys editor
-    // needs, and the window follows it in both directions: minimizing a section should
+    // Folding a section, or opening the arp with its step editor, changes what the Keys
+    // editor needs, and the window follows it in both directions: minimizing a section should
     // actually make the window smaller, which is the whole point of being able to fold
     // one. Width is left alone - it is the keybed's, and Owen sets it deliberately.
     keysEditor.onIdealHeightChanged = [this](int wanted)
@@ -411,10 +411,14 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     host.addChangeListener(this);
 
     setResizable(true, true);
-    setResizeLimits(1010, barHeight + absMinKeysHeight, 2600, 1700);
-    // Owen resizes to the minimum every time anyway — open there. (keysHeight is what
-    // the chord-generator overlay grows the embedded editor to when opened.)
-    setSize(1010, barHeight + minKeysHeight);
+    // Asked, not copied. This was a literal 1010 until 2026-07-30, when a Generator button
+    // joined Fill and Regen on the Pads bar and moved the editor's own floor to 1070 - and a
+    // host window narrower than the editor it embeds carves controls off the right-hand end of
+    // that bar with nothing to say so.
+    const int keysMinWidth = keysEditor.minWidthForView();
+    setResizeLimits(keysMinWidth, barHeight + absMinKeysHeight, 2600, 1700);
+    // Owen resizes to the minimum every time anyway - open there.
+    setSize(keysMinWidth, barHeight + minKeysHeight);
     juce::ignoreUnused(keysHeight);
     openInstrumentEditor(); // reflects "no instrument" too (label + bar state)
 }

@@ -91,11 +91,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // were three overlapping ways to set velocity; this is the one that earned nothing.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "curve", 1 }, "Velocity Curve",
                                                       juce::StringArray { "Soft", "Linear", "Hard" }, 1));
-    // Velocity and Latch, same story. The fixed Velocity slider only ever applied while
-    // Humanize was off, so it and the Humanize range were one control in two costumes;
-    // the range absorbed it (baseVelocity01). Latch-as-a-mode went once a left click
-    // released a held note, which left right-click-to-hold as the only path worth having.
+    // Velocity, same story. The fixed slider only ever applied while Humanize was off, so
+    // it and the Humanize range were one control in two costumes; the range absorbed it
+    // (baseVelocity01).
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
+    // Latch is read again (2026-07-30). It was briefly a retained-but-dead parameter, on the
+    // reasoning that a left click on a held note releases it and so a whole mode earned
+    // nothing; that made Sustain a per-note toggle, which is not what a pedal does. Sustain
+    // restrikes now, Latch is the toggle, and each has a button on the Keyboard bar.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "latch", 1 }, "Latch", false));
     // Timing Spread, retained but no longer read. It rode the same broken path Strum did
     // (see scheduleNoteOn), and even fixed it earned nothing: a random 0-30 ms nudge is
@@ -140,12 +143,63 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRate", 1 }, "Arp Rate",
                                                       StringArray { "16 bars", "8 bars", "4 bars", "2 bars", "1 bar",
                                                                     "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" }, 8));
+    // The same rate as a free-running frequency, and a switch between the two. Both added
+    // 2026-07-30, both additive: the choice list above is byte-identical, so every saved
+    // session and every automation lane still means what it did, and a session from before
+    // these two loads with Free off - which is exactly today's behaviour.
+    //
+    // The range is not a round number by choice. It is what the eleven divisions above span
+    // at 120 bpm: "1/64" is 32 steps a second, "16 bars" is one step per 32 seconds. Anything
+    // narrower would make Hz reach less than the list beside it. Those ends are ten octaves
+    // apart, so a linear dial would spend nine tenths of its travel between 3 and 32 Hz and
+    // put everything from "1 bar" down inside the last two degrees.
+    //
+    // The mapping is therefore exponential outright, not a skew: value = lo * (hi/lo)^t, so
+    // every octave gets exactly a tenth of the travel and one degree of the dial is the same
+    // *ratio* wherever you are on it. A skew is a power law, which is a different curve with
+    // a superficially similar shape - setSkewForCentre(1.0f) on these ends works out at ~0.198
+    // and spends 25.3% of the dial between 0.031 and 0.062 Hz against 12.9% between 16 and 32,
+    // so adjacent octaves came out four times apart and a quarter of the whole control was the
+    // gap between its two slowest settings. 1 Hz still lands at the centre (it is the
+    // geometric mean of the ends, and "1/2" at 120 bpm), now as a consequence rather than as
+    // the one point the curve was fitted through.
+    //
+    // Default 8 Hz = 1/16 at 120 bpm, matching arpRate's own default, so flipping the switch
+    // at a default tempo changes the sound not at all - only what the rate is tied to.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpRateFree", 1 }, "Arp Rate Free", false));
+    {
+        // JUCE clamps the proportion going in and the result coming out, so these two only
+        // have to guard the log against a value at or below zero.
+        NormalisableRange<float> hzRange {
+            (float) ArpEngine::minRateHz, (float) ArpEngine::maxRateHz,
+            [](float lo, float hi, float t) { return lo * std::pow(hi / lo, t); },
+            [](float lo, float hi, float v) { return std::log(jlimit(lo, hi, v) / lo) / std::log(hi / lo); }
+        };
+        layout.add(std::make_unique<AudioParameterFloat>(
+            ParameterID { "arpRateHz", 1 }, "Arp Rate Hz", hzRange, 8.0f,
+            AudioParameterFloatAttributes()
+                // No .withLabel("Hz"): the suffix is already in the text below, and a host
+                // that renders value-plus-unit printed "8.00 Hz Hz". The in-plugin readout is
+                // this string, so the suffix has to stay in it rather than move to the label.
+                // Decimals by decade, one copy of the rule (see ArpEngine::rateHzText): 0.031
+                // and 32.0 both have to read as themselves, and a fixed 2 would print the
+                // bottom of the range as "0.03" for a whole octave of the dial.
+                .withStringFromValueFunction([](float v, int) {
+                    return ArpEngine::rateHzText(v) + " Hz";
+                })
+                .withValueFromStringFunction([](const String& s) { return s.getFloatValue(); })));
+    }
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpDot", 1 }, "Arp Dotted", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrip", 1 }, "Arp Triplet", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpAnchor", 1 }, "Arp Anchor", true));
+    // The four shapes after "Reversed" were appended in 2026-07-30 and had to go on the end:
+    // this is a choice parameter, and inserting anywhere else renumbers what every saved
+    // session and automation lane already holds. The Shape combo lists them in this order and
+    // puts "Pattern" last, which is a display decision the panel makes, not this list.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDirection", 1 }, "Arp Direction",
                                                       StringArray { "Up", "Down", "Up-Down", "Down-Up",
-                                                                    "Up & Down", "Down & Up", "As Played", "Reversed" }, 0));
+                                                                    "Up & Down", "Down & Up", "As Played", "Reversed",
+                                                                    "Random", "Random Other", "Random Once", "Chord" }, 0));
     // Added after the arp shipped, both additive so an older session still loads: a
     // missing parameter falls back to its default here rather than shifting any
     // existing parameter's range. Note the default: arpPattern off means a session
@@ -169,6 +223,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // out. They multiply the lane value, so the defaults leave an edited pattern untouched.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpGate", 1 }, "Arp Gate", 5, 200, 100));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpChance", 1 }, "Arp Chance", 0, 100, 100));
+
+    // The 2026-07-30 expansion, all appended and all defaulting to what the arp did before
+    // them, so an older session sounds identical until one of them is moved.
+    //
+    // Distance is Octaves' other half: Octaves says how many times the chord repeats up the
+    // keyboard, Distance says how far each repeat goes. It defaulted to an octave forever
+    // because that was hardcoded. The scale-relative entries are the ones no stock arp has -
+    // "a third" that follows Root and Scale rather than a fixed three or four semitones.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpDistance", 1 }, "Arp Distance",
+                                                      StringArray { "Octave", "5th", "4th", "Maj 3rd", "min 3rd",
+                                                                    "Scale 2nd", "Scale 3rd", "Scale 5th", "Scale 7th" }, 0));
+    // Where the pattern starts. Rotates the lane reads and the direction walk together, so
+    // "the same run, heard from its third note" is one control rather than a re-drawn lane.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpOffset", 1 }, "Arp Offset", 0, 31, 0));
+    // Retrigger's other half, after Ableton: the toggle restarts on a new chord, this
+    // restarts on the clock, so a 5-step lane can still land on the bar.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpRetrigBars", 1 }, "Arp Retrigger Every",
+                                                      StringArray { "Off", "1 Beat", "2 Beats", "1 Bar", "2 Bars", "4 Bars" }, 0));
+    // Velocity ramp: over Ramp Time from the moment a chord starts, velocity scales toward
+    // (100 + Ramp)%. Negative fades a held chord out, positive swells it.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpVelRamp", 1 }, "Arp Velocity Ramp", -100, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpRampBeats", 1 }, "Arp Ramp Time", 1, 32, 8));
+    // One knob of "played, not programmed": nudges each hit late and takes a little off its
+    // velocity. The arp has never been humanized - Humanize proper lives in noteOn, which the
+    // arp's own notes never pass through - so this is the first thing that touches its feel.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "arpHumanize", 1 }, "Arp Humanize", 0, 100, 0));
 
     // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
     // A host that is *playing* always wins: this is what Keys runs at when there is no
@@ -195,6 +275,12 @@ KeysProcessor::KeysProcessor()
    #endif
       apvts(*this, nullptr, "PARAMS", createLayout())
 {
+    // 50 Hz. It only ever notices things, so the rate is about how late a chord change is
+    // allowed to be: 20 ms is comfortably inside a 1/16 step at any tempo anyone plays at,
+    // and the arp itself stays anchored to the bar grid regardless.
+    heartbeat.tick = [this] { heartbeatTick(); };
+    heartbeat.startTimerHz(50);
+
     // Last thing the constructor does: everything else this processor owns already
     // exists by the time the MCP bridge can be reached from another thread.
     mcpBridge = std::make_unique<KeysMcp>(*this);
@@ -204,6 +290,7 @@ KeysProcessor::~KeysProcessor()
 {
     // Stop taking MCP calls before anything else tears down.
     mcpBridge.reset();
+    heartbeat.stopTimer();
     stopTimer();
     deferred.clear();
 }
@@ -673,6 +760,13 @@ void KeysProcessor::allNotesOff()
     arpChordName = {};
     launchedSlot = -1;
     arpPadSlot = -1;
+
+    // And the Chain, for the same reason releaseArpHold() stops it: forgetting the chord is
+    // only true until the next bar line, when heartbeatTick() launches the following slot and
+    // the progression comes back out of a button whose whole job is silence. Last, not first,
+    // so the clears above have already emptied arpChordOn: stopChain() ends in releaseArpChord(),
+    // which would otherwise emit note-offs for references the panic loop has just zeroed.
+    stopChain();
 }
 
 void KeysProcessor::sendCC(int controller, int value)
@@ -738,6 +832,11 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ArpEngine::Params ap;
         ap.enabled = true;
         ap.rateIndex = (int) apvts.getRawParameterValue("arpRate")->load();
+        // Free: the rate is a frequency and the engine free-runs at it whatever the transport
+        // is doing. Both read every block like every other arp global, so the mode can be
+        // automated and the engine sees the change on the next boundary.
+        ap.rateFree = apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
+        ap.rateHz = (double) apvts.getRawParameterValue("arpRateHz")->load();
         ap.dotted = apvts.getRawParameterValue("arpDot")->load() > 0.5f;
         ap.triplet = apvts.getRawParameterValue("arpTrip")->load() > 0.5f;
         ap.anchored = apvts.getRawParameterValue("arpAnchor")->load() > 0.5f;
@@ -749,6 +848,42 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         ap.retrigger = apvts.getRawParameterValue("arpRetrigger")->load() > 0.5f;
         ap.gate = (int) apvts.getRawParameterValue("arpGate")->load();
         ap.chance = (int) apvts.getRawParameterValue("arpChance")->load();
+        ap.offset = (int) apvts.getRawParameterValue("arpOffset")->load();
+        ap.velRamp = (int) apvts.getRawParameterValue("arpVelRamp")->load();
+        ap.rampBeats = (double) (int) apvts.getRawParameterValue("arpRampBeats")->load();
+        ap.humanize = (int) apvts.getRawParameterValue("arpHumanize")->load();
+        ap.chords = &arpChordTable; // what the Chord lane calls up, slot for slot
+
+        // Distance: what each repeat past the first adds. The list names intervals rather
+        // than numbers because "5th" is the thing you want and "+7 semitones" is the way you
+        // would have had to ask for it; the scale-relative half of the list is the part no
+        // stock arp offers, and it costs Keys nothing because Root and Scale are already here.
+        {
+            static constexpr int dist[]  = { 12, 7, 5, 4, 3, 1, 2, 4, 6 };
+            static constexpr bool degs[] = { false, false, false, false, false, true, true, true, true };
+            const int di = juce::jlimit(0, (int) std::size(dist) - 1,
+                                        (int) apvts.getRawParameterValue("arpDistance")->load());
+            ap.spread = dist[di];
+            ap.spreadDegrees = degs[di];
+        }
+        // Restart every N beats, on top of the restart a new chord asks for.
+        {
+            static constexpr double bars[] = { 0.0, 1.0, 2.0, 4.0, 8.0, 16.0 };
+            ap.retrigBeats = bars[juce::jlimit(0, (int) std::size(bars) - 1,
+                                               (int) apvts.getRawParameterValue("arpRetrigBars")->load())];
+        }
+        // The scale, as a mask of pitch classes, for a Distance counted in scale degrees.
+        // Built here rather than in the engine so ArpEngine.h stays free of the scale tables
+        // and its tests can state a scale as a number.
+        ap.rootPc = (int) apvts.getRawParameterValue("root")->load();
+        {
+            const int scaleIdx = (int) apvts.getRawParameterValue("scale")->load();
+            unsigned int mask = 0;
+            for (int k = 0; k < 12; ++k)
+                if (okstudio::scales::isInScale(ap.rootPc + k, ap.rootPc, scaleIdx))
+                    mask |= 1u << k;
+            ap.scaleMask = mask != 0 ? mask : 0xFFFu; // an empty table would silence degree walking
+        }
 
         ArpEngine::HostClock hc;
         if (auto* playHead = getPlayHead())
@@ -771,6 +906,53 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
         arpScratch.clear();
         arp.process(ap, hc, buffer.getNumSamples(), midi, arpScratch);
         midi.swapWith(arpScratch);
+    }
+
+    advanceChainClock(buffer.getNumSamples());
+}
+
+// Audio thread. Counting the chain's bars belongs here because this is the only place with
+// a tempo, and outside the arpOn block because a progression is a chord player first: it
+// keeps moving whether or not anything is arpeggiating what it hands over. The *launch*
+// cannot happen here - it moves host parameters and fires notes - so this only ever raises
+// a flag for the heartbeat to act on.
+void KeysProcessor::advanceChainClock(int numSamples)
+{
+    if (! chainActive.load(std::memory_order_relaxed))
+    {
+        chainBeatsPlayed = 0.0;
+        return;
+    }
+
+    const int epoch = chainEpoch.load(std::memory_order_acquire);
+    if (epoch != chainSeenEpoch)
+    {
+        chainSeenEpoch = epoch;
+        chainBeatsPlayed = 0.0; // a slot was just launched: its bars start now
+    }
+
+    double bpm = (double) apvts.getRawParameterValue("bpm")->load();
+    double beatsPerBar = 4.0;
+    if (auto* playHead = getPlayHead())
+        if (auto pos = playHead->getPosition())
+        {
+            if (pos->getIsPlaying())
+                if (auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
+                    bpm = *hostBpm;
+            // A bar is four beats only in four-four. Asking the host costs nothing and is
+            // the difference between a chain that lands on the bar in 3/4 and one that does
+            // not; with no host to ask, four it is.
+            if (auto sig = pos->getTimeSignature(); sig && sig->denominator > 0)
+                beatsPerBar = 4.0 * (double) sig->numerator / (double) sig->denominator;
+        }
+
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    chainBeatsPlayed += bpm / 60.0 / sr * numSamples;
+    const double target = chainTargetBeats.load(std::memory_order_relaxed) * beatsPerBar / 4.0;
+    if (chainBeatsPlayed >= target)
+    {
+        chainBeatsPlayed = 0.0; // the epoch bump that follows will zero it again, harmlessly
+        chainAdvance.store(true, std::memory_order_release);
     }
 }
 
@@ -886,6 +1068,17 @@ void KeysProcessor::releaseArpChord()
     arpPadSlot = -1;
 }
 
+void KeysProcessor::releaseArpHold()
+{
+    // The chain first, and for the same reason the heartbeat stops it when the arp goes off:
+    // releasing the chord without it only wins until the next bar boundary, when
+    // heartbeatTick() launches the following slot and hands the arp another one. stopChain()
+    // is a no-op when nothing is chaining, and releases the chord it was holding when it is.
+    stopChain();
+    // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
+    releaseArpChord();
+}
+
 void KeysProcessor::holdArpChordFromPad(int padSlot)
 {
     if (padSlot < 0 || padSlot >= numChordPads)
@@ -929,7 +1122,31 @@ void KeysProcessor::launchArpSlot(int index)
             setChoice("arpDirection", slot.shape); // "Pattern" leaves the direction alone
     }
     if (slot.rate >= 0)
+    {
         setChoice("arpRate", slot.rate);
+        // The mode travels with the rate, and both move through the host for the same reason
+        // the choice above does. A slot saved before Hz existed reads back rateFree false, so
+        // this writes the mode it already had.
+        if (auto* free = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("arpRateFree")))
+        {
+            free->beginChangeGesture();
+            *free = slot.rateFree;
+            free->endChangeGesture();
+        }
+        // Only a slot captured in Hz brings a Hz value with it. `rateHz` is not a value every
+        // slot has: arpFromTree synthesises 8.0 for every slot in a session saved before the
+        // mode existed, so writing it unconditionally meant opening an old session, dialling
+        // 0.5 Hz and clicking any slot silently reset the rate to a fabricated 8 Hz. A Sync
+        // slot leaves the Hz control exactly where it found it, which is what the struct
+        // comment beside ArpPattern::rateHz already promises.
+        if (slot.rateFree)
+            if (auto* hz = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("arpRateHz")))
+            {
+                hz->beginChangeGesture();
+                *hz = slot.rateHz;
+                hz->endChangeGesture();
+            }
+    }
 
     // Hold last, so the chord starts against the pattern the slot just installed.
     if (! slot.chordNotes.empty())
@@ -944,12 +1161,132 @@ void KeysProcessor::stopArpSlot()
     releaseArpChord(); // clears launchedSlot too
 }
 
+int KeysProcessor::nextChainSlot(int from) const
+{
+    // The chain plays the slots that hold a chord. A pattern-only slot is a place to keep a
+    // rhythm, not a step of a progression, and walking through one would leave the previous
+    // chord ringing under a pattern that says nothing about it.
+    for (int i = 1; i <= numArpPatterns; ++i)
+    {
+        const int idx = (from + i) % numArpPatterns;
+        if (! arpPatterns[(size_t) idx].chordNotes.empty())
+            return idx;
+    }
+    return from >= 0 && ! arpPatterns[(size_t) from].chordNotes.empty() ? from : -1;
+}
+
+void KeysProcessor::startChain()
+{
+    const int first = nextChainSlot(numArpPatterns - 1); // wraps to the lowest filled slot
+    if (first < 0)
+        return; // nothing to play: the button does not stick on for an empty row
+    chainOn = true;
+    chainIndex = first;
+    launchArpSlot(first);
+    chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) first].bars));
+    chainEpoch.fetch_add(1); // tells the audio thread to count this slot from zero
+    // Clear the advance flag *before* arming the clock. stopChain() clears it too, but the
+    // audio thread can raise it once more in the block that straddles the stop, and nothing
+    // consumes it while chainOn is false - so a stale true survived into the next chain and
+    // stepped it to its second slot on the first heartbeat. Ordered last but one so there is
+    // no window where chainActive is set and the flag is still whatever it was.
+    chainAdvance.store(false);
+    chainActive.store(true);
+}
+
+void KeysProcessor::stopChain()
+{
+    if (! chainOn)
+        return;
+    chainOn = false;
+    chainIndex = -1;
+    chainActive.store(false);
+    chainAdvance.store(false);
+    stopArpSlot(); // the chord the chain was holding is the chain's to release
+}
+
+void KeysProcessor::setArpSlotBars(int index, int bars)
+{
+    if (index < 0 || index >= numArpPatterns)
+        return;
+    arpPatterns[(size_t) index].bars = juce::jlimit(1, 16, bars);
+    if (chainOn && index == chainIndex)
+        chainTargetBeats.store(4.0 * arpPatterns[(size_t) index].bars); // takes effect now
+}
+
+int KeysProcessor::arpSlotBars(int index) const
+{
+    if (index < 0 || index >= numArpPatterns)
+        return 1;
+    return juce::jlimit(1, 16, arpPatterns[(size_t) index].bars);
+}
+
+void KeysProcessor::heartbeatTick()
+{
+    // Releasing a chord held into the arp when the arp goes off. This lived in the editor's
+    // timer and was gated on the chord having come from a *pad*, so a chord handed over from
+    // the live card was never released - and with no editor open nothing polled at all, so
+    // automation or an MCP client writing arpOn false left it sounding with no way to stop
+    // it but All Off. Both edges close here: the processor owns the chord, so the processor
+    // is what should notice.
+    const bool arpOn = apvts.getRawParameterValue("arpOn")->load() > 0.5f;
+    if (! arpOn && lastArpOnHeartbeat)
+    {
+        // The chain goes first: a progression cycling with nothing arpeggiating it is the
+        // same drone-with-no-owner this whole check exists to prevent, and its Chain button
+        // is on the arp panel, so switching the arp off is switching the chain off.
+        stopChain();
+        // What is left is a chord a *card* handed over - a pad, or the live card, which is
+        // the case the editor's version of this missed entirely. A chord an arp *slot*
+        // launched is left alone on purpose: the lit card is still on screen and still
+        // releases it on a click, so it has an owner and this does not have to be one.
+        if (arpLaunchedSlot() < 0 && ! arpHeldNotes().empty())
+            releaseArpChord();
+    }
+    lastArpOnHeartbeat = arpOn;
+
+    if (chainOn && chainAdvance.exchange(false))
+    {
+        const int next = nextChainSlot(chainIndex);
+        if (next < 0)
+        {
+            stopChain(); // every chord was cleared out from under it
+            return;
+        }
+        chainIndex = next;
+        launchArpSlot(next);
+        chainTargetBeats.store(4.0 * juce::jmax(1, arpPatterns[(size_t) next].bars));
+        chainEpoch.fetch_add(1);
+    }
+}
+
+// Message thread. The Chord lane reads slot chords on the audio thread, so they live in a
+// mirror of atomics; this rebuilds the whole mirror, which is twelve chords of eight notes
+// and not worth being clever about. Every path that can change a slot's chord ends here.
+void KeysProcessor::syncArpChordTable()
+{
+    static_assert(ArpEngine::ChordTable::numSlots == numArpPatterns,
+                  "the Chord lane addresses slots one for one");
+    for (int s = 0; s < ArpEngine::ChordTable::numSlots; ++s)
+    {
+        const auto& notes = arpPatterns[(size_t) s].chordNotes;
+        const int n = juce::jlimit(0, ArpEngine::ChordTable::maxNotes, (int) notes.size());
+        for (int i = 0; i < ArpEngine::ChordTable::maxNotes; ++i)
+            arpChordTable.note[(size_t) s][(size_t) i].store(i < n ? notes[(size_t) i] : 0,
+                                                             std::memory_order_relaxed);
+        // Count last, and it is what the engine gates on, so a half-written chord is never
+        // reachable: the notes are in place before the count that admits them.
+        arpChordTable.count[(size_t) s].store(n, std::memory_order_release);
+    }
+}
+
 void KeysProcessor::setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
     arpPatterns[(size_t) index].chordNotes = notes;
     arpPatterns[(size_t) index].chordName = name;
+    syncArpChordTable();
     // Capture the shape and rate that are up right now, so launching the slot brings the
     // whole sound back and the card can say what it will play. Nothing else ever wrote
     // these, so every slot painted "--" and a launch left Shape and Rate alone.
@@ -958,6 +1295,9 @@ void KeysProcessor::setArpSlotChord(int index, const std::vector<int>& notes, co
                                             ? ArpEngine::numDirections
                                             : (int) apvts.getRawParameterValue("arpDirection")->load();
     arpPatterns[(size_t) index].rate = (int) apvts.getRawParameterValue("arpRate")->load();
+    // ...and the mode it is in, so a slot captured in Hz launches in Hz.
+    arpPatterns[(size_t) index].rateFree = apvts.getRawParameterValue("arpRateFree")->load() > 0.5f;
+    arpPatterns[(size_t) index].rateHz = apvts.getRawParameterValue("arpRateHz")->load();
 }
 
 void KeysProcessor::clearArpSlotChord(int index)
@@ -966,6 +1306,7 @@ void KeysProcessor::clearArpSlotChord(int index)
         return;
     arpPatterns[(size_t) index].chordNotes.clear();
     arpPatterns[(size_t) index].chordName = {};
+    syncArpChordTable();
     if (launchedSlot == index)
         releaseArpChord();
 }
@@ -976,6 +1317,7 @@ void KeysProcessor::copyArpPattern(int from, int to)
         return;
     storeActiveArpPattern();
     arpPatterns[(size_t) to] = arpPatterns[(size_t) from];
+    syncArpChordTable();
     if (to == activeArpPattern)
         recallArpPattern(to);
 }
@@ -993,6 +1335,7 @@ void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern)
     if (index < 0 || index >= numArpPatterns)
         return;
     arpPatterns[(size_t) index] = pattern;
+    syncArpChordTable();
     if (index != activeArpPattern)
         return;
     // Refresh the live lanes from the slot just written. Not recallArpPattern(index):
@@ -1030,6 +1373,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     // silently did nothing in Keys Host until this became one function. Anything session
     // shaped belongs here, not in either override.
     migrateStrumRange(root);
+    migrateRateMode(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -1083,31 +1427,64 @@ void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
         param->setValueNotifyingHost(param->convertTo0to1(low));
 }
 
+void KeysProcessor::migrateRateMode(const juce::ValueTree& root)
+{
+    // The arp rate gained a second unit on 2026-07-30: "arpRateFree" picks it and "arpRateHz"
+    // holds it. Neither exists in any session saved before that, and an absent parameter is
+    // not a reset - APVTS creates an adapter's child on the spot and flushes the *current*
+    // value into it. On a fresh instance that current value is the default and everything is
+    // right; in a live instance it is whatever the user has been playing with. So loading an
+    // old preset while the dial was in Hz restored and displayed arpRate while the engine
+    // carried on free-running at the Hz value from before the load, with the panel showing a
+    // division it was not playing. Exactly the shape migrateStrumRange above repairs, and the
+    // same fix: the tell is the absence, and the repair is to write the default explicitly.
+    //
+    // getDefaultValue() rather than a literal: it is already normalised, and it stays correct
+    // if either default ever moves. Reads the tree, not the live parameters, for the reason
+    // given above - this runs while the state is still landing.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    bool sawFree = false, sawHz = false;
+    for (int i = 0; i < params.getNumChildren(); ++i)
+    {
+        const auto id = params.getChild(i).getProperty("id").toString();
+        sawFree = sawFree || id == "arpRateFree";
+        sawHz = sawHz || id == "arpRateHz";
+    }
+
+    // Independently, though the two shipped together: a tree carrying one and not the other
+    // is malformed rather than old, and there is no reading of it under which the missing one
+    // meant anything but its default.
+    if (! sawFree)
+        if (auto* param = apvts.getParameter("arpRateFree"))
+            param->setValueNotifyingHost(param->getDefaultValue());
+    if (! sawHz)
+        if (auto* param = apvts.getParameter("arpRateHz"))
+            param->setValueNotifyingHost(param->getDefaultValue());
+}
+
 juce::ValueTree KeysProcessor::layoutToTree() const
 {
     juce::ValueTree tree { "layout" };
     tree.setProperty("controls", layout.controls, nullptr);
-    tree.setProperty("centre", layout.centre, nullptr);
     tree.setProperty("knobs", layout.knobs, nullptr);
     tree.setProperty("pads", layout.pads, nullptr);
     tree.setProperty("arp", layout.arp, nullptr);
-    tree.setProperty("transcribe", layout.transcribe, nullptr);
     tree.setProperty("wheels", layout.wheels, nullptr);
     tree.setProperty("keyboard", layout.keyboard, nullptr);
     tree.setProperty("detached", layout.detached, nullptr);
     tree.setProperty("arpDetached", layout.arpDetached, nullptr);
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
-    tree.setProperty("centreDetached", layout.centreDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
-    tree.setProperty("transcribeDetached", layout.transcribeDetached, nullptr);
-    tree.setProperty("view", layout.view, nullptr);
+    tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
     tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
-    tree.setProperty("centreDetachedBounds", layout.centreDetachedBounds.toString(), nullptr);
     tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
-    tree.setProperty("transcribeDetachedBounds", layout.transcribeDetachedBounds.toString(), nullptr);
+    tree.setProperty("chordGenBounds", layout.chordGenBounds.toString(), nullptr);
     return tree;
 }
 
@@ -1119,32 +1496,28 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     const auto flag = [&tree](const char* id, bool fallback)
     { return (bool) tree.getProperty(id, fallback); };
     layout.controls = flag("controls", true);
-    layout.centre = flag("centre", true);
     layout.knobs = flag("knobs", true);
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
-    layout.transcribe = flag("transcribe", false);
     layout.wheels = flag("wheels", true);
     layout.keyboard = flag("keyboard", true);
     layout.detached = flag("detached", false);
     layout.arpDetached = flag("arpDetached", false);
     layout.controlsDetached = flag("controlsDetached", false);
-    layout.centreDetached = flag("centreDetached", false);
     layout.padsDetached = flag("padsDetached", false);
-    layout.transcribeDetached = flag("transcribeDetached", false);
-    // "view" is 0 = Perform, 1 = Chords, and used to carry two more values that have each
-    // since become a flag of their own. Both legacy values leave no centre view to restore -
-    // they replaced it rather than sitting beside it - so both fall back to Perform, which
-    // is also what an unreadable value gets.
-    //   2, "Arp", before the arp became a section: open the arp section instead, which is
-    //      the same thing the user was looking at.
-    //   3, "folded away", before the centre got its own chevron like every other section.
-    const int storedView = (int) tree.getProperty("view", 0);
-    if (storedView == 2)
-        layout.arp = true;
-    else if (storedView == 3)
-        layout.centre = false;
-    layout.view = (storedView == 0 || storedView == 1) ? storedView : 0;
+    // Absent before the generator had a window of its own; shut is the right default either
+    // way, since it is a settings window rather than something you play from.
+    layout.chordGen = flag("chordGen", false);
+    // Older sessions carry keys nothing reads any more, and every one of them is simply
+    // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
+    // rest of the layout still arrives.
+    //   "transcribe" / "transcribeDetached" / "transcribeDetachedBounds", from before the
+    //   Transcribe section was removed.
+    //   "centre" / "centreDetached" / "centreDetachedBounds" and "view", from before the
+    //   centre section was removed (2026-07-30). The knob bank it held is a row of the
+    //   Controls band now, folded by "knobs", which those sessions already carry. "view"
+    //   was the centre's chosen view and had migrations of its own - 2 meaning "the arp",
+    //   from before the arp was a section - retired with the section they restored into.
     layout.accent = juce::jlimit(0, 7, (int) tree.getProperty("accent", 0));
 
     // A frame is only restored if the session actually carried one; an empty rectangle
@@ -1158,9 +1531,8 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     frame("detachedBounds", layout.detachedBounds);
     frame("arpDetachedBounds", layout.arpDetachedBounds);
     frame("controlsDetachedBounds", layout.controlsDetachedBounds);
-    frame("centreDetachedBounds", layout.centreDetachedBounds);
     frame("padsDetachedBounds", layout.padsDetachedBounds);
-    frame("transcribeDetachedBounds", layout.transcribeDetachedBounds);
+    frame("chordGenBounds", layout.chordGenBounds);
 }
 
 juce::ValueTree KeysProcessor::arpToTree() const
@@ -1169,6 +1541,11 @@ juce::ValueTree KeysProcessor::arpToTree() const
     const_cast<KeysProcessor*>(this)->storeActiveArpPattern();
     juce::ValueTree tree { "arp" };
     tree.setProperty("active", activeArpPattern, nullptr);
+    // A slot's `shape` is a direction index, with numDirections itself meaning "Pattern" -
+    // so the number that means Pattern moves every time a shape is added. Writing it down is
+    // what lets a session saved when there were eight shapes still open on twelve; without
+    // it, the four shapes added on 2026-07-30 silently turned every Pattern slot into Random.
+    tree.setProperty("shapeBase", ArpEngine::numDirections, nullptr);
     for (int pIndex = 0; pIndex < numArpPatterns; ++pIndex)
     {
         const auto& pat = arpPatterns[(size_t) pIndex];
@@ -1186,6 +1563,12 @@ juce::ValueTree KeysProcessor::arpToTree() const
         }
         pt.setProperty("shape", pat.shape, nullptr);
         pt.setProperty("rate", pat.rate, nullptr);
+        // The rate's mode, written alongside it. Absent in every session saved before Hz
+        // existed, which reads back as Sync at the `rate` index above - what those sessions
+        // actually played.
+        pt.setProperty("rateFree", pat.rateFree, nullptr);
+        pt.setProperty("rateHz", (double) pat.rateHz, nullptr);
+        pt.setProperty("bars", pat.bars, nullptr); // how long the chain holds this slot
         for (int l = 0; l < ArpEngine::numLanes; ++l)
         {
             juce::StringArray vals;
@@ -1208,6 +1591,11 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
     const auto tree = root.getChildWithName("arp");
     if (! tree.isValid())
         return; // sessions from before the arp: defaults stand
+    // What "Pattern" was numbered when this session was written. Absent means it predates
+    // the four shapes added on 2026-07-30, when there were eight directions and Pattern was
+    // eight; every save since says so itself.
+    const int savedShapeBase = juce::jlimit(1, ArpEngine::numDirections,
+                                            (int) tree.getProperty("shapeBase", 8));
     for (int c = 0; c < tree.getNumChildren(); ++c)
     {
         const auto pt = tree.getChild(c);
@@ -1221,7 +1609,16 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
                 pat.chordNotes.push_back(juce::jlimit(0, 127, n.getIntValue()));
         pat.chordName = pt.getProperty("chordName").toString();
         pat.shape = (int) pt.getProperty("shape", -1);
+        if (pat.shape == savedShapeBase)
+            pat.shape = ArpEngine::numDirections; // "Pattern" is wherever Pattern is now
+        pat.shape = juce::jlimit(-1, ArpEngine::numDirections, pat.shape);
         pat.rate = (int) pt.getProperty("rate", -1);
+        // Both absent before the Hz mode: false and the default 8 Hz, so an old session's
+        // slot launches the division it stored, exactly as it always did.
+        pat.rateFree = (bool) pt.getProperty("rateFree", false);
+        pat.rateHz = (float) juce::jlimit((double) ArpEngine::minRateHz, (double) ArpEngine::maxRateHz,
+                                          (double) pt.getProperty("rateHz", 8.0));
+        pat.bars = juce::jlimit(1, 16, (int) pt.getProperty("bars", 1)); // absent before the chain
         for (int lc = 0; lc < pt.getNumChildren(); ++lc)
         {
             const auto lt = pt.getChild(lc);
@@ -1235,6 +1632,7 @@ void KeysProcessor::arpFromTree(const juce::ValueTree& root)
             pat.clockDiv[(size_t) l] = (int) lt.getProperty("clockDiv", 0);
         }
     }
+    syncArpChordTable(); // the Chord lane's view of the slots, after a whole session lands
     // Recall the active pattern by hand (recallArpPattern would first snapshot the
     // live lanes over the data we just loaded).
     activeArpPattern = juce::jlimit(0, numArpPatterns - 1, (int) tree.getProperty("active", 0));

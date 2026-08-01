@@ -3,6 +3,7 @@
 #include "../ArpEngine.h"
 #include "../PluginProcessor.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <okstudio/RotaryKnob.h>
 #include <array>
 #include <functional>
 #include <memory>
@@ -10,7 +11,7 @@
 namespace keys
 {
 // The arpeggiator editor (docs/ARP_DESIGN.md). A band of captioned control groups, the
-// six per-parameter step lanes (Cthulhu architecture) when Shape is "Pattern", and a row
+// ten per-parameter step lanes (Cthulhu architecture) when Shape is "Pattern", and a row
 // of twelve launchable slots along the bottom.
 //
 // The band and the slot row follow a hardware-arp layout Owen asked for (2026-07-25):
@@ -20,11 +21,15 @@ namespace keys
 // slot is the one-click "pass a card into the arpeggiator" gesture: it installs the
 // pattern, applies the slot's shape and rate, and holds the slot's chord into the arp.
 //
-// It lives inline, as the editor's centre view: picking Arp swaps it in where the knob
-// bank sat, instead of throwing a dimmed sheet over the whole plugin. The old behaviour
-// hid the keyboard behind the panel, which is backwards for a plugin you play while you
-// edit the arp. setInlineMode(false) restores the overlay look (no caller does today;
-// kept because the class is shared with Keys Host).
+// It lives inline, as the content of the editor's Arp section: unfolding that section
+// makes room for it between the pads and the keybed, instead of throwing a dimmed sheet
+// over the whole plugin. The old behaviour hid the keyboard behind the panel, which is
+// backwards for a plugin you play while you edit the arp. setInlineMode(false) restores
+// the overlay look (no caller does today; kept because the class is shared with Keys Host).
+//
+// Folding the section destroys this object, so nothing on it can be the only way to reach
+// a running arpeggiator: On and Hold off ride the section bar for exactly that reason, and
+// the Stop button below is the panel's own copy of the second of them.
 //
 // Lane data lives in processor.arp.lanes as arrays of std::atomic<int>, written here
 // on the message thread and read on the audio thread; no locking, so every edit is a
@@ -159,22 +164,33 @@ private:
     void recallOrCopy(int index);
     void launchSlot(int index);   // left-click on a slot card
     void showSlotMenu(int index); // right-click accelerator; everything in it is also a button
-    void stepCombo(juce::ComboBox&, int delta); // the < > pair beside Shape and Rate
+    void stepCombo(juce::ComboBox&, int delta); // the < > pair beside Shape
+    // Rate spans two parameters and two units, so its < > pair cannot be stepCombo: in Sync it
+    // walks the division list, in Hz it multiplies the frequency. See stepRate().
+    void stepRate(int delta);
+    // Which of the two rate parameters the dial is attached to, plus everything that has to
+    // say which unit is live. Driven off arpRateFree, so a host automating it lands here too.
+    void refreshRateMode();
 
     // The captioned, ruled group boxes the band is drawn as. Filled in by resized() and
     // painted by paint(), because a caption and a rule are two lines of Graphics each and
-    // do not justify six more child components.
+    // do not justify five more child components.
     struct Group
     {
         juce::String caption;
         juce::Rectangle<int> bounds;
         bool visible = true;
     };
-    std::array<Group, 3> groups;
+    std::array<Group, 5> groups;
 
     bool patternMode() const; // Shape == "Pattern": the step editor is in play
     void applyShapeChoice();  // combo -> parameters
     void refreshShape();      // parameters -> combo, and show/hide the step editor
+    // Retrigger spans two parameters the same way Shape does (a bool for "on a new chord"
+    // and a choice for "every N beats"), so it cannot be a plain attachment either. One
+    // combo, because the two are alternatives in practice and Ableton proved the list.
+    void applyRetrigChoice();
+    void refreshRetrig();
 
     // The card the panel draws, sized to the controls actually in it. The overlay still
     // covers the editor (it dims what's behind and swallows clicks), but on a shape
@@ -183,6 +199,11 @@ private:
 
     bool inlineMode = false;
     int lastPatternMode = -1; // -1 = not yet laid out; else the last bool seen
+    int lastRateFree = -1;    // same trick for the rate mode: -1 = no attachment installed yet
+    // Is the rate dial being dragged right now? A drag is an open parameter gesture, and the
+    // attachment that opened it cannot be destroyed until it closes; refreshRateMode() defers
+    // the swap while this is set, and rateKnob.onDragEnd calls it back on the mouse-up.
+    bool rateDragging = false;
 
     KeysProcessor& processor;
 
@@ -192,16 +213,34 @@ private:
     // Shape carries the eight directions plus "Pattern", after Serum 2, whose step
     // editor only exists while SHAPE is "Pattern". It cannot be a plain APVTS
     // attachment because it spans two parameters (arpDirection + arpPattern).
-    juce::ComboBox rateBox, shapeBox;
-    juce::Label rateLabel, shapeLabel;
+    juce::ComboBox shapeBox, distanceBox, retrigBox;
+    juce::Label rateLabel, shapeLabel, distanceLabel, retrigLabel;
+    // Rate is a dial, and which parameter it turns depends on the mode: in Sync it detents
+    // through the eleven divisions of arpRate, in Hz it sweeps arpRateHz. One attachment is
+    // alive at a time (refreshRateMode swaps them), which is what makes the dial's range, its
+    // detents, its skew and its readout all come from the parameter rather than from here.
+    okstudio::RotaryKnob rateKnob;
+    // The switch between the two, reading the mode that is live. A dial position means two
+    // different things in the two modes, so this says which one you are looking at, and the
+    // readout under the dial says it a second time in its units.
+    juce::TextButton rateModeButton { "Sync" };
     // The < > pairs beside Shape and Rate. Not decoration: stepping to the next shape is
     // the commonest thing you do to an arp, and a button is one click where the combo is a
-    // click, a travel and a second click.
+    // click, a travel and a second click. Beside the rate dial they are load-bearing rather
+    // than a convenience - a dial is a *drag* target, and these are the click-only path to
+    // every value it can hold, in both modes.
     juce::TextButton shapePrev { "<" }, shapeNext { ">" }, ratePrev { "<" }, rateNext { ">" };
     juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
     juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
     juce::Label octavesLabel, swingLabel, gateLabel, chanceLabel;
-    juce::ToggleButton latchButton { "Latch" }, retriggerButton { "Retrigger" };
+    juce::ToggleButton latchButton { "Latch" };
+    // The second band row (2026-07-30). SPREAD is Repeats + Distance + Offset - how far the
+    // chord is stacked and where the run starts; FEEL is the three that decide whether it
+    // sounds played. Horizontal sliders rather than the band's rotaries: a knob column spans
+    // both rows of a group and this row is one row tall, which is what keeps the panel from
+    // growing by a whole band.
+    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider;
+    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel;
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
     int selectedLane = (int) ArpEngine::laneNote;
@@ -221,6 +260,13 @@ private:
     juce::TextButton cancelButton { "Cancel" };
     juce::TextButton randomizeButton { "Randomize" };
     juce::TextButton stopButton { "Stop" }; // release the launched chord, without a panic
+    // Progression mode: Chain walks the slots that hold a chord, each for its own number of
+    // bars. Bars edits the *active* slot - the one whose lanes the editor is showing - which
+    // a slot click already makes it, so setting a length is click the card, click the plus.
+    juce::TextButton chainButton { "Chain" };
+    juce::TextButton barsMinus { "-" }, barsPlus { "+" };
+    juce::Label barsReadout;
+    void nudgeBars(int delta);
 
     // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
     // mouse-only contract wants a left-click path for everything). Both arm: click the
@@ -231,9 +277,12 @@ private:
     void setArmed(Armed, int fromIndex = -1);
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, retriggerAtt, linkAtt;
-    std::unique_ptr<ComboAtt> rateAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, linkAtt, rateModeAtt;
+    std::unique_ptr<ComboAtt> distanceAtt;
+    // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
+    std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
+    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)
 };

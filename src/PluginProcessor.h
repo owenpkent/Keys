@@ -170,12 +170,37 @@ public:
     void setArpSlotChord(int index, const std::vector<int>& notes, const juce::String& name);
     void clearArpSlotChord(int index);
 
-    // Hold a chord into the arp without going through a slot: the Pads section's "To Arp"
-    // toggle sends a card here. Held means exactly that - the note-ons are emitted and no
+    // Progression mode: walk the slots that hold a chord, giving each one its own number of
+    // bars, and launch each in turn. One click plays a twelve-chord song, which is what the
+    // slot row has looked like it should do since it stopped being eight lettered buttons.
+    // Bars are counted on the audio thread (the only place with a tempo) and the launch is
+    // done on the message thread, because launching moves host parameters and fires notes.
+    void startChain();
+    void stopChain();
+    bool chainRunning() const { return chainOn; }
+    int chainSlot() const { return chainOn ? chainIndex : -1; }
+    void setArpSlotBars(int index, int bars);
+    int arpSlotBars(int index) const;
+
+    // Hold a chord into the arp without going through a slot: a click on a chord card with
+    // the arp On sends it here. Held means exactly that - the note-ons are emitted and no
     // note-off follows until the next call, so the arp keeps chewing on it whether or not
     // its own Latch is on. With the arp bypassed the chord simply sustains, which is honest.
+    // Clicking the same card again retriggers the hold rather than ending it, so the way out
+    // is releaseArpHold: the Hold off chip on the arp bar, or the panel's Stop button.
     void holdArpChord(const std::vector<int>& notes, const juce::String& name);
     void releaseArpChord();
+
+    // What "let go of the held chord" means to a *user*, and the only thing the UI should
+    // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
+    // leaves chainOn set, so the next bar boundary launches the following slot and the chord
+    // is back. A button that undoes itself a bar later reads as broken, so the chain is part
+    // of the hold as far as letting go is concerned, and the rule lives here with the state
+    // rather than in whichever surface happens to own the button.
+    void releaseArpHold();
+
+    // Empty when nothing is held. Hold off reads this - together with chainRunning(), since a
+    // chain about to fire the next chord is something to let go of too - to grey itself out.
     const std::vector<int>& arpHeldNotes() const { return arpChordOn; }
 
     // Hold a chord pad's chord into the arp, remembering which pad it came from so the
@@ -188,7 +213,8 @@ public:
     // That used to be its own "To Arp" toggle on the Pads bar; it is simply *the arp being
     // on* since 2026-07-27, because a mode you had to arm separately from the arp read as
     // doing nothing whenever the arp happened to be off. Every surface that shows a chord
-    // card asks here, so the pad strip and the generator's grid can never disagree.
+    // card asks here rather than caching a mode of its own, which is what keeps the answer
+    // the same wherever a card is drawn.
     bool cardsFeedArp() const { return apvts.getRawParameterValue("arpOn")->load() > 0.5f; }
 
     // A stored pattern slot (A-H), independent of whichever pattern is currently
@@ -197,6 +223,20 @@ public:
     // the editor never needs this, it only ever touches the live lanes directly.
     struct ArpPattern
     {
+        // Lane defaults, not zeroes. A never-written slot used to recall as every lane at 0,
+        // which is not "empty": velocity 0 clamps to a near-silent 0.05 and gate 0 to 5%, so
+        // launching a slot nobody had stored made the arp whisper. Found 2026-07-30 while
+        // adding lanes 7-10, which would have quietly widened the same hole.
+        ArpPattern()
+        {
+            for (int l = 0; l < ArpEngine::numLanes; ++l)
+            {
+                value[(size_t) l].fill(ArpEngine::laneDefaults[l]);
+                length[(size_t) l] = 8;
+                clockDiv[(size_t) l] = 0;
+            }
+        }
+
         std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
         std::array<int, ArpEngine::numLanes> length {};
         std::array<int, ArpEngine::numLanes> clockDiv {};
@@ -209,6 +249,17 @@ public:
         juce::String chordName;
         int shape = -1;  // 0..numDirections-1 a direction, numDirections = Pattern
         int rate = -1;   // index into the arpRate choice list
+        // The rate's *mode*, captured with it. A slot stored while the rate was in Hz has to
+        // bring the Hz value and the switch back with it, or launching it drops the user into
+        // Sync at whatever division `rate` happens to hold - silently, since the pattern and
+        // the chord would both be right. Read only when `rate >= 0`, which stays the single
+        // "this slot remembers a rate at all" flag - and `rateHz` only when `rateFree` is
+        // also set, because a Sync slot has no Hz value of its own to install (a session
+        // saved before the mode reads back as the default 8, which is not anything the user
+        // asked for and must not overwrite what they dialled in).
+        bool rateFree = false;
+        float rateHz = 8.0f;
+        int bars = 1;    // how long the chain holds this slot before moving on
     };
     const ArpPattern& arpPatternSlot(int index) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern); // refreshes live lanes too if index == active
@@ -220,12 +271,10 @@ public:
     // back. Message thread only; the audio thread never reads it.
     struct LayoutState
     {
-        bool controls = true;   // the three header rows
-        bool centre = true;     // the centre view (Perform / Chords)
-        bool knobs = true;      // the CC knob bank
+        bool controls = true;   // the header rows and the knob bank under them
+        bool knobs = true;      // the CC knob bank, the bottom row of the controls band
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
-        bool transcribe = false; // the Transcribe section (off by default: it is tall too)
         bool wheels = true;     // mod + pitch, left of the keybed
         bool keyboard = true;   // the keybed itself
 
@@ -235,22 +284,24 @@ public:
         // `detached` keeps its bare name: it is the keybed's, and renaming it would drop
         // the setting out of every session saved before this.
         bool controlsDetached = false;
-        bool centreDetached = false;
         bool arpDetached = false;
         bool padsDetached = false;
-        bool transcribeDetached = false;
         bool detached = false;  // keybed lives in its own resizable window
 
-        int  view = 0;          // which centre view: 0 = perform, 1 = chords
+        // The chord generator's window (2026-07-30, Owen's call). Not a section: it is never
+        // docked, has no bar and no fold, and opens from a button on the Pads bar. It is in
+        // here all the same because it is the same question - where did Owen leave a window,
+        // and was it open - and the answer has to survive the editor closing.
+        bool chordGen = false;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.
         juce::Rectangle<int> controlsDetachedBounds {};
-        juce::Rectangle<int> centreDetachedBounds {};
         juce::Rectangle<int> arpDetachedBounds {};
         juce::Rectangle<int> padsDetachedBounds {};
-        juce::Rectangle<int> transcribeDetachedBounds {};
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
+        juce::Rectangle<int> chordGenBounds {};     // the generator's window
     };
     LayoutState layout;
 
@@ -260,6 +311,9 @@ protected:
     void restoreSharedState(const juce::ValueTree& root);
     // Repairs a session saved before Strum became a range; see the definition for the tell.
     void migrateStrumRange(const juce::ValueTree& root);
+    // Same shape: puts the arp rate back in Sync when a session predates the Hz mode, since an
+    // absent parameter keeps the live instance's current value rather than resetting.
+    void migrateRateMode(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);
@@ -338,6 +392,38 @@ private:
     void clearInputNotes();
 
     std::array<ArpPattern, numArpPatterns> arpPatterns; // message thread only
+    // The slot chords, mirrored into atomics for the Chord lane to read on the audio thread.
+    // Rebuilt whole by syncArpChordTable() from every message-thread path that can change a
+    // slot's chord - there is no single choke point, so the call sites are the contract.
+    ArpEngine::ChordTable arpChordTable;
+    void syncArpChordTable();
+
+    // --- Progression mode ---------------------------------------------------------------
+    // The heartbeat is a second timer, separate from the strum scheduler above (which stops
+    // itself the moment nothing is queued). It runs for the life of the processor because
+    // two things need a pulse that outlives the editor: the chain, and releasing a chord
+    // held into the arp when the arp is switched off. That release used to live in the
+    // editor's timer, so it did nothing at all with no window open - a host or an MCP client
+    // writing arpOn false left the chord droning with no click left to stop it.
+    struct Heartbeat : juce::Timer
+    {
+        std::function<void()> tick;
+        void timerCallback() override { if (tick) tick(); }
+    };
+    Heartbeat heartbeat;
+    void heartbeatTick();
+
+    bool chainOn = false;       // message thread
+    int chainIndex = -1;        // message thread: the slot currently playing
+    bool lastArpOnHeartbeat = false;
+    std::atomic<bool> chainActive { false };   // message -> audio: count bars at all
+    std::atomic<bool> chainAdvance { false };  // audio -> message: this slot's bars are up
+    std::atomic<int> chainEpoch { 0 };         // message -> audio: restart the count
+    std::atomic<double> chainTargetBeats { 4.0 };
+    double chainBeatsPlayed = 0.0; // audio thread only
+    int chainSeenEpoch = 0;        // audio thread only
+    void advanceChainClock(int numSamples); // audio thread; raises chainAdvance, never launches
+    int nextChainSlot(int from) const; // the next slot holding a chord, wrapping; -1 if none
     int activeArpPattern = 0;                            // message thread only
     juce::MidiBuffer arpScratch;   // audio thread; sized in prepareToPlay
     bool lastArpOn = false;        // audio thread; to flush cleanly on bypass

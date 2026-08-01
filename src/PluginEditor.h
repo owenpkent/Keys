@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "ui/ArpPanel.h"
+#include "ui/ChordGenMenu.h"
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordPads.h"
 #include "ui/DetachedWindow.h"
@@ -9,9 +10,7 @@
 #include "ui/KnobBank.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
-#if KEYS_TRANSCRIBE
-#include "ui/TranscribePanel.h"
-#endif
+#include "ui/StepComboBox.h"
 #include <okstudio/Updater.h>
 #include <array>
 #include <memory>
@@ -39,11 +38,16 @@ public:
     // layout changes on its own.
     void setEmbedded(bool b) { embedded = b; }
 
-    // Embedded only: how tall this editor would like to be, after a fold or a change of
-    // centre view. The centre views (the generator, the arp with its step editor) need
-    // far more room than the player, so a parent that ignores this clips the keybed off
-    // the bottom. Keys Host grows itself to fit.
+    // Embedded only: how tall this editor would like to be, after a fold. The arp with its
+    // step editor needs far more room than the player, so a parent that ignores this clips
+    // the keybed off the bottom. Keys Host grows itself to fit.
     std::function<void(int)> onIdealHeightChanged;
+
+    // The narrowest this editor can be laid out at, which is the Pads bar's own arithmetic
+    // (see the definition). Public because Keys Host embeds one of these and has to set its
+    // window's floor from it - it held a copy of the number until 2026-07-30, and the copy
+    // went stale the first time a control joined that bar.
+    int minWidthForView() const;
 
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -62,36 +66,35 @@ private:
     void endPadEdit();
 
     // --- Folding layout ------------------------------------------------------------
-    // Which panel occupies the centre of the editor. The generator used to be a sheet thrown
-    // over the whole plugin, which hid the keyboard behind the thing you were editing; it is
-    // now a view that swaps in where the knob bank sits. `folded` is the third state: no
-    // centre at all.
-    //
-    // The arpeggiator was a third view here until Owen asked for it to stop competing with
-    // the other two (2026-07-25). It is a section of its own now, like the pads, so the arp
-    // and the knobs (or the generator) can be on screen together.
-    enum CentreView { viewPerform = 0, viewChords = 1 };
-
     // The sections of the editor, in the order they stack down the window. Every one of them
     // folds, and since 2026-07-27 every one of them also detaches into a window of its own,
-    // so the machinery below is written once and indexed by this rather than six times over.
-    enum SectionId { secControls, secCentre, secArp, secPads, secTranscribe, secKeyboard, numSections };
+    // so the machinery below is written once and indexed by this rather than four times over.
+    //
+    // The centre stopped being one of them on 2026-07-30. It had been whittled down to the
+    // knob bank alone - the arp became a section of its own, then the chord generator lost
+    // its panel - and a section holding one row is a bar, a gap and a caption spent on
+    // nothing. The knobs moved into Controls, which is the other band of settings-shaped
+    // controls, and kept their fold chip on that bar.
+    enum SectionId { secControls, secArp, secPads, secKeyboard, numSections };
 
-    void setCentreView(int view);      // picks a view, unfolding the section if needed
     void refreshSectionPanels();       // builds/destroys the panels the current folds call for
-    void refreshCentrePanels();        // creates/destroys the panel the state calls for
     void refreshArpPanel();            // the arp section's panel follows its own fold
-    void refreshTranscribePanel();     // ditto the Transcribe section
     void syncSectionControls();        // toggle states + visibility from processor.layout
-    int  centreHeight() const;         // height the current centre view asks for, 0 if folded
     int  arpHeight() const;            // height the arp section asks for, 0 if folded
     int  sectionHeight(SectionId) const; // 0 when the section is folded or in its own window
     int  idealHeight() const;          // total height with the current folds
-    int  minWidthForView() const;      // the centre views carry more controls than the player
     void applyLayout();                // resize to fit the folds (unless embedded), then resized()
 
     void setSectionDetached(SectionId, bool); // move a section in or out of its own window
     void rememberSectionBounds(SectionId);
+
+    // The chord generator's window. Not a section - it never docks, so it has no bar, no fold
+    // and no entry in `sections` - but it reuses the same DetachedWindow and the same
+    // remember-where-it-was-left contract, and its flag and frame live beside the sections' in
+    // KeysProcessor::LayoutState. Opening builds the panel, closing destroys it, so nothing of
+    // it exists while it is shut.
+    void setChordGenWindowOpen(bool);
+    void rememberChordGenBounds();
     // Places a section's Detach button, plus anything travelling with it, at the right-hand
     // end of `row`, and hands back what is left for that section's own controls. `onBar` says
     // which of the two rows this is - the section bar, or the strip a detached window carries
@@ -101,14 +104,10 @@ private:
     // detached one carries at the top for the controls that came out with it.
     juce::Rectangle<int> holderContent(SectionId);
 
-    void layoutControlsHolder();    // the two header rows, wherever the section lives
-    void layoutCentreHolder();      // the knob bank or the generator
+    void layoutControlsHolder();    // the two header rows and the knob bank, wherever the section lives
     void layoutPadsHolder();        // the chord-pad strip
-    void layoutTranscribeHolder();  // the Transcribe panel
     void layoutArpHolder();         // the arp panel
     void layoutKeybed();            // wheels + keys
-    // The centre bar's tabs and chip; hands back the bar space they did not use.
-    juce::Rectangle<int> layoutToolRow(juce::Rectangle<int>);
 
     // A section's content lives in a holder rather than directly in the editor, so popping it
     // out is one re-parent instead of a shuffle of every control in the section. The holder's
@@ -135,9 +134,8 @@ private:
         Holder holder;
         juce::TextButton detachButton { "Detach" };
         std::unique_ptr<DetachedWindow> window;
-        // What to call the section out loud: `name` for tooltips and accessible names (the
-        // centre bar's own caption follows the view, so it cannot serve), `windowTitle` for
-        // the title bar of the window it detaches into.
+        // What to call the section out loud: `name` for tooltips and accessible names,
+        // `windowTitle` for the title bar of the window it detaches into.
         juce::String name, windowTitle;
         juce::Point<int> minSize { 480, 200 }, defaultSize { 900, 420 };
 
@@ -181,10 +179,8 @@ private:
 
     // The holders by name, for the code that only ever means one of them.
     Holder& controlsHolder;
-    Holder& centreHolder;
     Holder& arpHolder;
     Holder& padsHolder;
-    Holder& transcribeHolder;
     Holder& keybedHolder;
 
     juce::Label title;
@@ -204,8 +200,23 @@ private:
     // detaching is one re-parent.
     PianoKeyboard keyboard;
 
-    KnobBank knobBank; // eight CC knobs, replaces the old Fader/XY surfaces
+    // Eight CC knobs, replacing the old Fader/XY surfaces. Parented into the Controls
+    // holder since 2026-07-30: it is the bottom row of that band, not a section of its own.
+    KnobBank knobBank;
     ChordPads chordPads;
+    // The chord generator's brain. A plain object and a member, not a unique_ptr and not
+    // something a window owns: it is reached from a pad's card menu and from the chips on the
+    // Pads bar, and neither can be allowed to go looking for it and find nothing. It used to
+    // live and die with the Chords view, which is what made "New chord" come and go from the
+    // menu, and the window below must not be able to reintroduce that.
+    ChordGenMenu chordGen;
+    // Its window, and the panel inside it. Both are built when the window opens and torn down
+    // when it closes, in that order reversed - DetachedWindow holds the content non-owned, so
+    // the window has to go first. The panel is a view and holds no state of its own: every
+    // control is an APVTS attachment and the two transient picks (Mood, Start) live on
+    // chordGen, so shutting this loses nothing.
+    std::unique_ptr<ChordGenPanel> chordGenPanel;
+    std::unique_ptr<DetachedWindow> chordGenWindow;
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
@@ -219,20 +230,64 @@ private:
 
     juce::ToggleButton scaleLockButton { "Scale Lock" };
     juce::ToggleButton sustainButton { "Sustain" };
+    // Latch is back as a toggle of its own (2026-07-30, Owen's call). It rides the Keyboard
+    // bar beside Sustain because the two are the same question — how does a note stop? —
+    // answered two ways: the pedal restrikes, Latch releases.
+    juce::ToggleButton latchButton { "Latch" };
     juce::ToggleButton humanizeButton { "Humanize" };
     juce::ToggleButton chordExclusiveButton { "Exclusive" };
     juce::TextButton panicButton { "All Off" };
     juce::TextButton updateButton;
 
-    // Chord-pad page navigation, and the two centre-view tabs. The tabs are toggles:
-    // clicking the lit one folds the centre away, which is how the centre section is
-    // minimized (it needs no chevron of its own, unlike the other sections).
+    // Chord-pad page navigation, riding the Pads bar.
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
-    juce::TextButton performButton { "Perform" }, chordsButton { "Chords" };
 
-    // Only the centre view currently showing is alive; the generator builds 16 chord cards
-    // and is not worth keeping warm behind the knob bank.
-    std::unique_ptr<ChordGenPanel> genPanel;
+    // The generator's two bulk actions, riding the Pads bar. They are the fast path into
+    // generation, and they are on a bar because a bar is 34 px that already exists: a control
+    // on one costs the window no height, which is what let the generator lose its band without
+    // losing its reach.
+    //
+    // They do *not* hide when the section folds, for exactly the reason the arp's On does not:
+    // the other route to a card is a right-click on it, and that folds away with the strip.
+    //
+    // Clear is not a third one here. It empties every unlocked pad on the page with one click,
+    // there is no undo anywhere in Keys, and it sat between Regen and the page buttons. It is a
+    // button in the generator's window now, beside these two; `clearPage()` itself is untouched.
+    juce::TextButton fillButton { "Fill" }, regenButton { "Regen" };
+
+    // And the way into everything else the generator has: its own window (2026-07-30, Owen's
+    // call). It rides the same bar and never hides, for the same reason those two do not -
+    // fold the pads away and this is the only thing left on screen that can reach the
+    // generator. The window is where Octave, Source, Notes, Inversions, Lock Influence, the
+    // Markov chains and Clear page live; they were submenus of a pad's card menu for a few
+    // hours earlier that day, which took the menu to 23 rows and 820 px.
+    juce::TextButton chordGenButton { "Generator" };
+
+    // The three generator settings that get reached for constantly, as combo boxes on the same
+    // bar (2026-07-30, Owen's ask). Every setting the generator has is also in its window, and
+    // opening a window to change the key while auditioning a page is the wrong price for the
+    // two or three you touch constantly. On the bar each is one click to open and one to pick,
+    // and it costs the window no height, same trade as Fill and Regen.
+    //
+    // They never hide, for the same reason those two do not. Laid out from the right end, again
+    // like those two, so they do not float in the hole the page buttons leave.
+    //
+    // Attachments, not hand-syncing: the window's own Key, Mode and Scale Compliance are
+    // attachments on these same three parameters, so both places read one source and neither
+    // has to know the other exists - which is what makes "the bar is the fast path, the window
+    // is the complete one" true rather than a promise.
+    //
+    // Key and Mode are choice parameters, so a bar combo and the window's combo hold the same
+    // set of values and cannot read differently. **Compliance can**, and by design: the
+    // parameter is a continuous 0-100, the window's slider steps by 1, and the bar offers five
+    // steps of it - so the bar shows the *nearest* step and reads "50 %" at 60. That is a
+    // display rounding and not a disagreement about the value, and it is the reason this one
+    // box is a StepComboBox driven by an explicit write rather than a ComboBoxAttachment: an
+    // attachment made picking the step already showing a dead click (see StepComboBox.h).
+    juce::ComboBox genRootBox, genModeBox;
+    StepComboBox genComplianceBox;
+    std::unique_ptr<ComboAtt> genRootAtt, genModeAtt;
+    std::unique_ptr<juce::ParameterAttachment> genComplianceAtt;
 
     // Alive whenever the arp section is open, wherever that section currently is.
     std::unique_ptr<ArpPanel> arpPanel;
@@ -241,24 +296,19 @@ private:
     // squeezed small when the screen is busy; the state lives on the processor
     // (KeysProcessor::LayoutState) so it survives the editor being closed and reopened.
     SectionBar controlsBar { "Controls" };
-    SectionBar centreBar { "Perform" };  // caption follows the view; the tabs ride on it
-    // The chord pads are their own section, below the centre view rather than inside the
-    // Perform one. Owen asked for this so a card stays reachable while the generator or the
-    // arp is up: you click a chord and hear it arpeggiated without leaving the view you are
-    // editing. Its page buttons ride on its own bar, where they used to sit under the strip.
+    // The chord pads are their own section. Owen asked for this so a card stays reachable
+    // while the arp is up: you click a chord and hear it arpeggiated without leaving what you
+    // were editing. Its page buttons ride on its own bar, where they used to sit under the strip.
     SectionBar padsBar { "Pads" };
     // The arpeggiator, a section in its own right since 2026-07-25. Its bar carries an On
     // toggle, so the thing you reach for while it runs stays reachable with the section
     // folded shut.
     SectionBar arpBar { "Arp" };
-    // Audio to MIDI. Built only when the transcription engine is compiled in, and alive only
-    // while its section is open: it holds an audio device and a CNN, neither of which is worth
-    // keeping warm behind a folded bar.
-    SectionBar transcribeBar { "Transcribe" };
-#if KEYS_TRANSCRIBE
-    std::unique_ptr<TranscribePanel> transcribePanel;
-#endif
     SectionBar keyboardBar { "Keyboard" };
+    // Folds the knob row off the bottom of the Controls band. It rides the Controls bar,
+    // which had a wide dead caption zone and now spends it on the one thing inside that
+    // section worth hiding on its own: the knob row is 110 px, the two header rows are the
+    // section itself. It hides with Controls like every other bar control.
     juce::TextButton knobsButton { "Knobs" };
     // The arp's power switch, and now also the thing that decides what a click on a chord
     // card means: with it lit, a card hands its chord to the arp instead of playing it while
@@ -266,6 +316,14 @@ private:
     // did nothing visible whenever the arp was off (removed 2026-07-27, Owen's call).
     juce::ToggleButton arpOnButton { "On" };
     std::unique_ptr<ButtonAtt> arpOnAtt;
+    // Lets go of the chord being held into the arp, and nothing else. It rides the arp bar
+    // beside On for the same reason On does: with the section folded it is the only way out
+    // of a hold. A click on a chord card retriggers the hold rather than ending it, the arp's
+    // own Stop button dies with the panel when the section folds (and this section starts
+    // folded), and All Off kills the pads and the live card too - so without this there was
+    // no on-screen release for just the held chord in the default layout. Disabled while
+    // nothing is held, which makes it a state display as well as a button.
+    juce::TextButton arpHoldOffButton { "Hold off" };
     juce::TextButton wheelsButton { "Wheels" };
 
     // A second Size selector, for the detached keyboard window. The keybed's key count
@@ -287,7 +345,7 @@ private:
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
     std::unique_ptr<SliderAtt> octaveAtt, bpmAtt; // strum has two values; synced by hand
-    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, humanizeAtt, chordExclusiveAtt;
+    std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;
     okstudio::updater::UpdateInfo pendingUpdate;
@@ -296,7 +354,6 @@ private:
     int lastChannel = -1;    // to panic on MIDI-channel change (avoids notes stuck on the old channel)
     bool embedded = false;   // see setEmbedded()
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
-    bool lastArpOn = false;   // to release a chord held into the arp when the arp goes off
     bool pitchReturning = false; // pitch wheel is gliding back to centre (Octavium's ~160 ms ease)
     float panicFlash = 0.0f;  // 1 -> 0 decay behind the All Off button, on an explicit click only
 

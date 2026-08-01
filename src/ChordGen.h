@@ -137,6 +137,120 @@ namespace keys::chordgen
         return notes;
     }
 
+    // ---- Voicings -------------------------------------------------------------------------
+    //
+    // The arrangements one chord can sit in, which is what the pad menu's "Next voicing" walks:
+    // root position, one inversion per note above the root, then a spread, then round to root
+    // again. Same pitch classes throughout - a voicing changes where the notes are, never which
+    // notes they are. The vocabulary is the generator's own: `applyInversion` above and the
+    // genInv0..genInv3 parameters that feed `Options::inversions` name the first four steps, and
+    // the spread is the one addition, because it is the voicing those four cannot express.
+
+    // Spread: the voice just above the bass opens up an octave, leaving the root where it is.
+    // Below three notes there is no inner voice to move, so the chord comes back as it went in.
+    //
+    // Opening upwards rather than dropping the second voice from the top (the jazz "drop 2")
+    // is what keeps the cycle in one register: the root stays the lowest note, so
+    // rootPosition() below reads the same base octave back out of a spread chord and the walk
+    // never creeps an octave down each time round.
+    inline std::vector<int> applySpread(std::vector<int> notes)
+    {
+        if (notes.size() < 3)
+            return notes;
+        std::sort(notes.begin(), notes.end());
+        notes[1] += 12;
+        std::sort(notes.begin(), notes.end());
+        return notes;
+    }
+
+    // Every note re-stacked upward from the root, in the register the chord already sits in.
+    // This is the base every voicing is built from, which is what makes the cycle stable
+    // however the chord arrived (generated, captured, or already inverted).
+    //
+    // A repeated pitch class collapses to one note. It used to be kept and stacked an octave
+    // higher, on the reasoning that re-voicing should never change how many notes a chord has,
+    // and that broke the cycle in two ways that two hands on the keybed produce constantly.
+    // The register was not read back: {60,64,67,72} came back as {60,72,76,79}, so "Next
+    // voicing" wrote the chord an octave *up* and climbed again on every press until it ran off
+    // the keyboard and the menu item greyed for good. And a doubled note cannot survive the
+    // walk anyway - the last inversion of a doubled root is literally root position an octave
+    // up, and an inversion that lifts one copy onto the other emits the same MIDI note twice,
+    // which makes the polyphony cap count two voices and chords::detect name four notes in a
+    // three-note chord. So the double is dropped once, on the first press, and in exchange the
+    // walk closes in one register and no arrangement can ever repeat a pitch.
+    inline std::vector<int> rootPosition(const std::vector<int>& notes, int rootPc)
+    {
+        if (notes.empty())
+            return {};
+        const int pc = ((rootPc % 12) + 12) % 12;
+        std::vector<int> offsets;
+        offsets.reserve(notes.size());
+        for (const int n : notes)
+            offsets.push_back(((((n % 12) + 12) % 12) - pc + 12) % 12);
+        std::sort(offsets.begin(), offsets.end());
+        offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+
+        const int lowest = *std::min_element(notes.begin(), notes.end());
+        int base = (lowest / 12) * 12 + pc; // the root, in the chord's own octave
+        if (base > lowest)
+            base -= 12;
+
+        std::vector<int> out;
+        out.reserve(offsets.size());
+        for (const int off : offsets)
+            out.push_back(base + off);
+        return out;
+    }
+
+    // How many arrangements the cycle has: root position, an inversion per note above the root,
+    // and the spread.
+    inline int voicingCount(int noteCount) { return juce::jmax(2, noteCount + 1); }
+
+    inline const char* voicingName(int voicing, int noteCount)
+    {
+        const int n = voicingCount(noteCount);
+        const int v = ((voicing % n) + n) % n;
+        if (v == n - 1)
+            return "Spread";
+        static const char* const inversions[] = { "Root", "1st inv", "2nd inv", "3rd inv", "4th inv" };
+        return inversions[juce::jlimit(0, 4, v)];
+    }
+
+    // The chord in one arrangement. `root` is what rootPosition() handed back; `voicing` wraps,
+    // so stepping past the last one comes back to root position.
+    inline std::vector<int> applyVoicing(const std::vector<int>& root, int voicing)
+    {
+        if (root.empty())
+            return {};
+        const int n = voicingCount((int) root.size());
+        const int v = ((voicing % n) + n) % n;
+        return v == n - 1 ? applySpread(root) : applyInversion(root, v);
+    }
+
+    // Which arrangement a set of notes is already in, or -1 for one that is none of them (a
+    // chord built by hand on the keyboard). Matched on shape - every note's distance from the
+    // lowest - so the answer does not depend on the register, and nothing has to be remembered
+    // on the card for "Next voicing" to know where it is in the cycle.
+    inline int voicingOf(const std::vector<int>& notes, int rootPc)
+    {
+        if (notes.empty())
+            return -1;
+        const auto shape = [](std::vector<int> v)
+        {
+            std::sort(v.begin(), v.end());
+            const int lo = v.front();
+            for (auto& x : v)
+                x -= lo;
+            return v;
+        };
+        const auto base = rootPosition(notes, rootPc);
+        const auto want = shape(notes);
+        for (int v = 0; v < voicingCount((int) base.size()); ++v)
+            if (shape(applyVoicing(base, v)) == want)
+                return v;
+        return -1;
+    }
+
     struct Options
     {
         int octave = 4;
