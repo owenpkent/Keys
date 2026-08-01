@@ -533,6 +533,29 @@ the twelve slot cards, Bars and Chain. Each tab shows whether its line is on and
 it is holding, so three tabs read as three arpeggiators at a glance. The panel is no taller
 for having them.
 
+### The macro view: all three at once
+
+The fourth tab, **All**, is where a polyrhythm gets built. It replaces the per-line band and
+the step editor with **three rows, one per line**, each holding:
+
+| | |
+|---|---|
+| **A / B / C** | that line on or off |
+| **< rate >** and **Sync / Hz** | its rate, stepped one value at a time. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
+| **< shape >** | its shape, including Pattern (whose step editor is on that line's own tab) |
+| **Gate** | how much of each step its notes fill. Short gates let another line through |
+| **Chance** | how often a step fires at all. Thin one line out and the other two show through |
+| **Swing** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
+| the chord | what that line is holding, or `...` while a quantized launch is waiting |
+| **Chain** | start that line's progression. Three chains at three rates is the point of the view |
+
+Under the three rows sits what they share: the **BPM** knob and **Quantize**.
+
+**All is a view, not a fourth line.** The current line stays whatever it was, so clicking a
+chord card still has one unambiguous target while all three are on screen; clicking A, B or C
+takes you back to that line's own controls. The panel is exactly as tall in this view as in
+any other, because the rows take the band's space rather than joining it.
+
 **The letter chip on the Pads bar says which line a chord card feeds**, and clicking it
 cycles A → B → C. It is the same choice as the tabs, so either moves both; it is on that bar
 because that is where the cards are, and because with the arp folded shut the tabs are off
@@ -576,6 +599,8 @@ in seconds instead.
 | **A** / **B** / **C** | bar | One per arpeggiator line: that line on or off. Everything else stays editable while a line is off. B and C default to off. |
 | **A / B / C tabs** | slot row | Which line the rest of the panel is editing. Each shows its line's on/off state and the chord it holds. |
 | **Keys** | Playback | Does this line arpeggiate what you *play*, or only the chords you hand it? On for all three by default. Turn it off and that line becomes a card player, independent of the keybed. |
+| **BPM** | All (macro) | The tempo the lines run at when there is no transport to follow: always in the standalone, and whenever the host is stopped. A host that is *playing* always wins, and a line whose rate is in Hz follows neither. The same tempo as the Controls section's BPM, not a second one. |
+| **Quantize** | All (macro) | **Off**, or 1/16, 1/8, 1/4, 1/2, 1 Bar, 2 Bars. Off fires a chord the instant you click it. Anything else holds the click until the next boundary, so a card can only ever land on the grid - Ableton's Quantization, for the arp. It holds the whole gesture: a slot's pattern, shape, rate and chord all arrive together. The line's row shows `...` while one is waiting. **It never delays the keys you play.** |
 | **Channel** | Playback | Where this line's notes go: **Global** (the plugin's own channel, and the old behaviour) or 1–16, for driving three different sounds in a multitimbral rack. It buys nothing in Keys Host until the hosted instrument is itself multitimbral. |
 | **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, **Random**, **Random Other** (never the same note twice running), **Random Once** (a shuffled order, kept for as long as the chord is held), **Chord** (every note of the chord on every step, so the arp plays rhythm instead of a run), or **Pattern** (opens the step editor). |
 | **Rate** | Pattern | A dial. In **Sync**, step length from 16 bars down to 1/64, detented onto the eleven divisions. In **Hz**, a free-running 0.031 to 32 Hz, which is the same span those divisions cover at 120 bpm. The Hz dial is exponential: ten octaves, a tenth of the travel each, so 1 Hz sits at the centre and a degree of the dial is the same *ratio* wherever you are on it. |

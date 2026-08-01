@@ -63,6 +63,11 @@ public:
     // Pads bar has to be able to say so with this panel folded away.
     int editLine() const;
     void setEditLine(int line);
+    // The macro view: all three lines at once, in place of the band and the step editor. It is
+    // a *view*, not a fourth line - the current line stays whatever it was, so a chord card
+    // click still has one unambiguous target while all three are on screen.
+    bool isMacroView() const { return macroView; }
+    void setMacroView(bool);
     // Told when a tab is clicked, so the editor can move the Pads bar's letter chip with it.
     std::function<void()> onEditLineChanged;
 
@@ -77,6 +82,55 @@ public:
     // Paint the slot or tab a drag is currently over (-1 = none). Set by the editor while a
     // card is being dragged, so the target lights up before the mouse is released.
     void setExternalDropTarget(int slot, int lineTab);
+
+    using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
+
+    // One arpeggiator line, in one row: the four settings that decide how it sits against the
+    // other two, what it is holding, and a way to start it. Three of these are the **macro
+    // view**, which is what the fourth tab on the slot row selects (2026-08-01, Owen: "a fourth
+    // option for a simplified version that shows a little bit of all of them ... the goal is to
+    // be able to create complex polyrhythms from one view").
+    //
+    // Each row's attachments are bound to its own line for the row's whole life, unlike the
+    // band above, which rebinds every time the tabs move. That is the point of the row: three
+    // lines on screen at once cannot each be "the current line".
+    class MacroRow : public juce::Component
+    {
+    public:
+        MacroRow(KeysProcessor&, int line);
+
+        void paint(juce::Graphics&) override;
+        void resized() override;
+        // Readouts that no attachment drives: the rate text (it spans two parameters and two
+        // units), the shape, and the chord this line is holding. Called by the panel's timer.
+        void refresh();
+
+    private:
+        void applyShape();
+        void stepShape(int delta);
+        void stepRate(int delta);
+
+        KeysProcessor& processor;
+        int line;
+
+        juce::ToggleButton onButton;
+        juce::Label rateReadout;
+        juce::TextButton ratePrev { "<" }, rateNext { ">" };
+        juce::TextButton rateModeButton { "Sync" };
+        juce::ComboBox shapeBox;
+        juce::TextButton shapePrev { "<" }, shapeNext { ">" };
+        juce::Slider gateSlider, chanceSlider, swingSlider;
+        juce::Label gateLabel, chanceLabel, swingLabel;
+        juce::Label chordLabel;
+        juce::TextButton chainButton { "Chain" };
+
+        std::unique_ptr<ButtonAtt> onAtt, rateModeAtt;
+        std::unique_ptr<SliderAtt> gateAtt, chanceAtt, swingAtt;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MacroRow)
+    };
 
     // LaneGrid and MuteRow are implementation detail, but public: their member
     // functions are defined out-of-line in ArpPanel.cpp, which needs to name them,
@@ -178,6 +232,9 @@ public:
     class LineTab : public juce::Button
     {
     public:
+        // `line` < 0 is the macro tab: the fourth one, which selects the all-three view
+        // rather than a line. One class for both because they are one row of targets and have
+        // to look like one.
         LineTab(KeysProcessor&, const ArpPanel& owner, int line);
 
         void paintButton(juce::Graphics&, bool over, bool down) override;
@@ -193,10 +250,6 @@ public:
     };
 
 private:
-    using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
-    using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
-
     // One lane: the tab that selects it and the grid it shows. Length and clock
     // division used to live here, per lane, which meant six copies of both on screen at
     // once with no room left to label any of them. With one lane visible there is one
@@ -246,6 +299,7 @@ private:
     std::array<Group, 5> groups;
 
     bool patternMode() const; // Shape == "Pattern": the step editor is in play
+    int contentHeight() const; // one answer for the macro, shape and pattern views
     void applyShapeChoice();  // combo -> parameters
     void refreshShape();      // parameters -> combo, and show/hide the step editor
     // Retrigger spans two parameters the same way Shape does (a bool for "on a new chord"
@@ -323,6 +377,21 @@ private:
     // The three line tabs, at the left of that same row. They cost no height: the slot row is
     // 58 px and a tab is the mouse-only 34, centred in it.
     std::array<std::unique_ptr<LineTab>, KeysProcessor::numArpLines> lineTabs;
+    // The fourth tab. It selects a *view*, not a line: the current line stays whatever it was,
+    // so a chord card click still has somewhere unambiguous to go while all three are on screen.
+    std::unique_ptr<LineTab> macroTab;
+    bool macroView = false;
+    std::array<std::unique_ptr<MacroRow>, KeysProcessor::numArpLines> macroRows;
+    // Shared by all three lines, and the reason the macro view is more than three rows: one
+    // tempo they all run at, and one quantize that lands their changes together.
+    okstudio::RotaryKnob bpmKnob;
+    juce::TextButton bpmPrev { "<" }, bpmNext { ">" };
+    juce::Label bpmLabel, quantizeLabel;
+    juce::ComboBox quantizeBox;
+    std::unique_ptr<SliderAtt> bpmAtt;
+    std::unique_ptr<ComboAtt> quantizeAtt;
+    void nudgeBpm(int delta);
+    void refreshMacro();
     juce::TextButton copyButton { "Copy" };
     juce::TextButton clearButton { "Clear" };
     juce::TextButton cancelButton { "Cancel" };

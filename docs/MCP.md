@@ -51,6 +51,12 @@ Each line owns its own live lanes, its own twelve slots, its own held chord and 
 so `slot` is read *within* a line: `{ "line": 1, "slot": 3 }` is B's fourth slot, a different
 place from A's. `set_arp_pattern` and `get_arp_pattern` echo the `line` they acted on.
 
+Two arp parameters are **not** per line, because they are about the three of them together:
+`bpm` (the tempo they run at with no transport to follow) and `arpQuantize` (Launch Quantize -
+Off, or the boundary a chord card, a slot launch or a drag onto a line waits for before it
+lands). Setting `arpQuantize` from a script is worth knowing about: with it on, a
+`press_chord_pad` that feeds a line will not sound until the next boundary.
+
 The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
 `arpRate`, `arpSwing` — and B and C repeat that whole list as `arp2*` and `arp3*`:
 `arp2On`, `arp2Rate`, `arp3Direction`, and so on. `list_params` shows all three sets. Two ids

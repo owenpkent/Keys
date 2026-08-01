@@ -5,6 +5,51 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a macro view, so a polyrhythm is built from one screen
+
+Owen: "I want a poly arp view where you can view the rate and shape of all three arpeggiators
+at once ... the goal is to be able to create complex polyrhythms from one view."
+
+A **fourth tab** joins A, B and C at the left of the slot row: **All**. It swaps the panel's
+per-line band and step editor for **three rows, one per line**, each carrying that line's
+switch, rate (with its Sync/Hz unit), shape, **gate**, **chance** and **swing**, the chord it
+is holding, and its own **Chain** button. Under them sits what all three share: a **BPM** knob
+and **Launch Quantize**.
+
+- **It is a view, not a fourth line.** The current line stays whatever it was, so a chord card
+  click still has one unambiguous target while all three are on screen. Clicking A, B or C
+  goes back to that line's deep controls.
+- **The panel does not grow.** The macro rows take the band's space rather than joining it.
+- Rate is a readout between two steppers rather than a dial, because this row exists to be
+  read three at a time and nudged with single clicks.
+- The view you left is remembered, like the line you left.
+
+### Added: Launch Quantize, so a chord can only land on the grid
+
+Owen: "there's a setting in Ableton where the arpeggiator, if you start a new note or something
+that goes into the next sequence, so it sounds good always. I don't know what it's called."
+
+It is Ableton's transport-bar **Quantization**, and Keys has it now as `arpQuantize`:
+**Off / 1/16 / 1/8 / 1/4 / 1/2 / 1 Bar / 2 Bars**, in the macro view's shared row.
+
+With it set, a gesture that *fires* something - clicking a chord card, launching a slot,
+dragging a card onto a line tab - is held until the next boundary and then happens whole: the
+pattern, the shape, the rate and the chord all land together, on the grid. The line's row shows
+`...` while one is waiting. **Off is the default**, which is exactly what Keys did before.
+
+**It never delays the keys you play.** Playing a note is playing an instrument, and an
+instrument that waits half a bar before it sounds is broken. It is also global rather than
+per line: the whole value of it is that the three lines land *together*.
+
+Retrigger, the other half of "sounds good always", was already here - it restarts a line's
+*pattern* every N beats where Quantize decides when a new *chord* starts. It stays in the
+per-line Playback group.
+
+The **BPM knob** in the macro view is the same `bpm` parameter the Controls section has, not a
+second tempo. Worth knowing what it does and does not do: it is the tempo the lines run at when
+there is no transport to follow - always in the standalone, and whenever the host is stopped.
+A host that is *playing* always wins, and a line whose rate is in Hz follows neither.
+
 ### Added: three arpeggiators, so Keys can hold a polyrhythm
 
 Owen: "I had the idea of having three arpeggiators so we can get polyrhythms and keep keeping

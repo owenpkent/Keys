@@ -233,6 +233,21 @@ public:
     void holdArpChord(const std::vector<int>& notes, const juce::String& name, int line = 0);
     void releaseArpChord(int line = 0);
 
+    // --- Launch Quantize ------------------------------------------------------------------
+    // With `arpQuantize` off, every gesture that fires a chord happens the instant you ask,
+    // which is what Keys has always done. With it set, the gesture is *held* until the next
+    // 1/16, 1/4, bar (and so on) and then happens whole - so a card can only land on the grid.
+    // See the parameter's comment in createLayout for why it is global rather than per line.
+    //
+    // Only the gestures that fire something go through here. Playing the keybed never does.
+    bool arpQuantizeOn() const;
+    // How long a launch asked for *now* would wait, in milliseconds. 0 when quantize is off or
+    // the boundary is already here. Message thread.
+    double arpQuantizeDelayMs() const;
+    // What is waiting, for the UI to show as pending. -1 = nothing waiting on that line.
+    int arpPendingSlot(int line) const;
+    bool arpLaunchPending(int line) const;
+
     // What "let go of the held chord" means to a *user*, and the only thing the UI should
     // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
     // leaves chainOn set, so the next bar boundary launches the following slot and the chord
@@ -356,6 +371,10 @@ public:
 
         // Which arp line the panel is editing and a chord card feeds. See arpCurrentLine().
         int  arpLine = 0;
+        // ...and whether it is showing the macro view instead of that line's own controls.
+        // Same kind of state and the same reason it lives here: the panel is destroyed every
+        // time the section folds, and Owen should get back the view he left.
+        bool arpMacro = false;
 
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
@@ -446,6 +465,36 @@ private:
         int dest;    // which stream it fires into; see noteOn
     };
     std::vector<DeferredNote> deferred; // sorted by atMs; message thread only
+
+    // A launch waiting for its quantize boundary. It carries the *gesture*, not its result:
+    // a slot launch moves that line's Shape and Rate as well as its chord, and all of it has
+    // to land on the boundary together rather than the parameters moving when you clicked.
+    struct PendingLaunch
+    {
+        int line;
+        double atMs;             // wall clock, same frame as DeferredNote::atMs
+        int slot = -1;           // >= 0: launch this slot
+        int padSlot = -1;        // >= 0: hold this chord pad
+        std::vector<int> notes;  // otherwise: hold these notes
+        juce::String name;
+    };
+    std::vector<PendingLaunch> pendingLaunches; // message thread only
+    // The three gestures with the wait already served. Everything that must *not* wait calls
+    // these directly: the chain (already on a bar line), and a slot launch's own chord.
+    void holdArpChordNow(const std::vector<int>& notes, const juce::String& name, int line);
+    void holdArpChordFromPadNow(int padSlot, int line);
+    void launchArpSlotNow(int index, int line);
+    // The gesture, with quantize already decided. The public entry points defer into here.
+    void fireLaunchNow(const PendingLaunch&);
+    // Queue it, or do it now if quantize is off. Returns true if it was queued.
+    bool deferLaunch(PendingLaunch);
+    void firePendingLaunches(double nowMs);
+    // Beats since the transport started, or since this instance did when there is none. Written
+    // once a block on the audio thread, read on the message thread to work out how far the next
+    // quantize boundary is. Not a sample-accurate clock and does not need to be: it decides a
+    // wall-clock deadline that a 1 ms timer then waits out.
+    std::atomic<double> arpBeats { 0.0 };
+    std::atomic<double> arpBeatsBpm { 120.0 }; // the tempo those beats are running at
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread

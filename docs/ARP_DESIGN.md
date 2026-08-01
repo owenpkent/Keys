@@ -14,6 +14,11 @@ mute row appear between the band and the slots.
 
 ![The arpeggiator in Pattern shape](../assets/screenshots/arpeggiator.png)
 
+The **All** tab: three lines at once, over the tempo and the Launch Quantize they share. Same
+panel height as a shape, because the rows take the band's space rather than joining it.
+
+![The macro view, all three lines at once](../assets/screenshots/arpeggiator-macro.png)
+
 ## Placement and contract
 
 A new stage in the MIDI path, in this order (Cthulhu's proven pipeline order):
@@ -102,6 +107,56 @@ thread owns; not attempted here.
   Screen-position hit-testing through `Desktop::findComponentAt`, mediated by the editor, for
   the reason the audition tray needs the same: mouse capture keeps the gesture on the strip and
   the two surfaces can be in different windows.
+
+### The macro view (the fourth tab)
+
+Owen: *"a fourth option for a simplified version that shows a little bit of all of them ... the
+goal is to be able to create complex polyrhythms from one view."*
+
+**All** sits after C in the tab row and swaps the per-line band and the step editor for three
+`MacroRow`s - switch, rate (with its Sync/Hz unit), shape, gate, chance, swing, the held chord,
+and that line's Chain - over a shared row carrying the **BPM** knob and **Launch Quantize**.
+
+Three decisions worth keeping:
+
+1. **It is a view, not a fourth line.** `editedLine` is untouched by it, so a chord card click
+   still has one unambiguous target while all three lines are on screen. A "line D" that meant
+   "all of them" would have made that click ambiguous and the Pads bar's letter chip a lie.
+2. **The panel does not grow.** `arpMacroTotalH` replaces the two band rows rather than joining
+   them. A fourth band would have taken Pattern shape past the default window height, which is
+   the whole reason this is a tab and not a section.
+3. **Each row's attachments are bound to its own line for good**, where the band's rebind on
+   every tab change. Three lines at once cannot each be "the current line", so the two cannot
+   share a mechanism - and the rows are built once and hidden rather than created on demand, so
+   nothing churns when the tab moves.
+
+Rate is a readout between two steppers rather than a dial, because this row is read three at a
+time and nudged with single clicks; the detented dial is one tab away.
+
+### Launch Quantize
+
+Owen, asking for something he could not name: *"there's a setting in Ableton where the
+arpeggiator, if you start a new note or something that goes into the next sequence, so it
+sounds good always."* It is the transport bar's **Quantization**, and `arpQuantize` is it:
+Off, 1/16, 1/8, 1/4, 1/2, 1 bar, 2 bars.
+
+- **It defers the gesture, not the notes.** A slot launch moves that line's Shape and Rate as
+  well as its chord; all of it has to land on the boundary together, or the parameters jump
+  when you click and the chord arrives half a bar later. So `PendingLaunch` carries what was
+  asked for, and `fireLaunchNow` is the single description of what a launch *does*.
+- **Public entry points defer; the `*Now` twins do not.** `launchArpSlotNow` is what the chain
+  calls (it is on a bar line by construction) and what a slot launch calls for its own chord
+  (that launch has already waited). Deferring either would drift.
+- **One pending launch per line**, replaced rather than queued: a second click before the
+  boundary is you changing your mind.
+- **The deadline is wall clock.** `arpBeats` - the beat position the audio thread publishes
+  once a block, the host's own while it rolls and an internal count otherwise - turns "beats
+  until the boundary" into milliseconds, and the 1 ms strum timer waits it out. Not the 50 Hz
+  heartbeat: 20 ms is a sixth of a 1/16 at 120 bpm, which is the sloppiness this removes. And
+  not the audio thread, which cannot move parameters or fire notes.
+- **Global, not per line.** The value of it is that the three land together.
+- **Never the keybed.** Playing a note is playing an instrument.
+- A panic and Hold off both clear what is pending: a chord on its way is a chord to let go of.
 
 ## Engine (build from scratch; JUCE's demo is not a reference)
 

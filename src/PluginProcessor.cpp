@@ -178,6 +178,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     for (int line = 0; line < numArpLines; ++line)
         addArpLineParams(layout, line);
 
+    // Launch Quantize, after Ableton's transport-bar Quantization (2026-08-01, Owen's ask:
+    // "if you start a new note or something that goes into the next sequence, so it sounds good
+    // always"). Off fires a chord the instant you click it, which is what Keys has always done.
+    // Anything else holds the click until the next boundary, so a card can only ever land on
+    // the grid - which is what makes three lines at three rates performable rather than a race
+    // against your own mouse.
+    //
+    // **Global, not per line.** The whole value of it is that the three lines land *together*;
+    // three separate quantize settings would be three ways to miss each other.
+    //
+    // It quantizes the gestures that *fire* something - a chord card, a slot launch, a drag
+    // onto a line tab, a chain step - and never the keybed. Playing a note is playing an
+    // instrument, and an instrument that waits half a bar before it sounds is broken.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "arpQuantize", 1 },
+                                                      "Arp Launch Quantize",
+                                                      StringArray { "Off", "1/16", "1/8", "1/4",
+                                                                    "1/2", "1 Bar", "2 Bars" }, 0));
+
     // Tempo for everything that is timed in beats - which today is the arpeggiator alone.
     // A host that is *playing* always wins: this is what Keys runs at when there is no
     // transport to follow, which is every moment in the standalone and every stopped
@@ -726,6 +744,9 @@ std::vector<int> KeysProcessor::cancelScheduledNotes(int padSlot)
 void KeysProcessor::timerCallback()
 {
     const double now = juce::Time::getMillisecondCounterHiRes();
+    // Launch Quantize rides this timer rather than the 50 Hz heartbeat: a 20 ms tick is a sixth
+    // of a 1/16 at 120 bpm, which is exactly the sloppiness this feature exists to remove.
+    firePendingLaunches(now);
     size_t due = 0;
     while (due < deferred.size() && deferred[due].atMs <= now)
         ++due;
@@ -738,7 +759,7 @@ void KeysProcessor::timerCallback()
             noteOn(n.note, n.vel01, 0.0, n.channel, n.dest);
     }
 
-    if (deferred.empty())
+    if (deferred.empty() && pendingLaunches.empty())
         stopTimer();
 }
 
@@ -955,6 +976,9 @@ void KeysProcessor::allNotesOff()
         l.launchedSlot = -1;
         l.padSlot = -1;
     }
+    // And anything Launch Quantize is still holding back. A panic that let a queued chord land
+    // half a bar later would be a panic you have to press twice.
+    pendingLaunches.clear();
 
     // And the Chain, for the same reason releaseArpHold() stops it: forgetting the chord is
     // only true until the next bar line, when heartbeatTick() launches the following slot and
@@ -1248,6 +1272,28 @@ void KeysProcessor::advanceChainClock(int numSamples)
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
     const double blockBeats = bpm / 60.0 / sr * numSamples;
 
+    // Publish where we are, in beats, for Launch Quantize to measure the next boundary from.
+    // The host's own position while it is rolling, so a quantized launch lands on the *host's*
+    // bar line and not on one of our own invention; otherwise a count of our own, which is the
+    // only clock there is in the standalone. Both are read on the message thread, which turns
+    // "beats until the boundary" into a wall-clock deadline and waits that out on a 1 ms timer -
+    // so this only has to be right to within a block, not to a sample.
+    {
+        bool haveHostPos = false;
+        if (auto* playHead = getPlayHead())
+            if (auto pos = playHead->getPosition())
+                if (pos->getIsPlaying())
+                    if (auto ppq = pos->getPpqPosition())
+                    {
+                        arpBeats.store(*ppq, std::memory_order_relaxed);
+                        haveHostPos = true;
+                    }
+        if (! haveHostPos)
+            arpBeats.store(arpBeats.load(std::memory_order_relaxed) + blockBeats,
+                           std::memory_order_relaxed);
+        arpBeatsBpm.store(bpm, std::memory_order_relaxed);
+    }
+
     for (auto& ln : lines)
     {
         if (! ln.chainActive.load(std::memory_order_relaxed))
@@ -1373,7 +1419,118 @@ void KeysProcessor::recallArpPattern(int index, int line)
     }
 }
 
+bool KeysProcessor::arpQuantizeOn() const
+{
+    return apvts.getRawParameterValue("arpQuantize")->load() > 0.5f;
+}
+
+double KeysProcessor::arpQuantizeDelayMs() const
+{
+    // Off, 1/16, 1/8, 1/4, 1/2, 1 bar, 2 bars - in beats. Four to the bar, which is the same
+    // assumption `chainTargetBeats` makes; a chain in 3/4 is corrected on the audio thread by
+    // the host's time signature, and this is not, because a launch waiting one beat too long is
+    // a launch that still landed on a beat. Worth revisiting if anyone works in 7/8.
+    static constexpr double beats[] = { 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0 };
+    const int idx = juce::jlimit(0, (int) std::size(beats) - 1,
+                                 (int) apvts.getRawParameterValue("arpQuantize")->load());
+    const double div = beats[idx];
+    if (div <= 0.0)
+        return 0.0;
+
+    const double now = arpBeats.load(std::memory_order_relaxed);
+    const double bpm = juce::jmax(1.0, arpBeatsBpm.load(std::memory_order_relaxed));
+    // The next boundary strictly ahead of us. `+ 1e-9` before the floor rather than a plain
+    // ceil, so a click that lands exactly on a boundary fires now instead of waiting a whole
+    // division for the next one.
+    const double next = (std::floor(now / div + 1.0e-9) + 1.0) * div;
+    return juce::jmax(0.0, (next - now) / bpm * 60000.0);
+}
+
+int KeysProcessor::arpPendingSlot(int line) const
+{
+    for (const auto& p : pendingLaunches)
+        if (p.line == line)
+            return p.slot;
+    return -1;
+}
+
+bool KeysProcessor::arpLaunchPending(int line) const
+{
+    for (const auto& p : pendingLaunches)
+        if (p.line == line)
+            return true;
+    return false;
+}
+
+// The gesture, with quantize already settled. Called either straight from deferLaunch (off) or
+// from the timer at the boundary (on), so there is exactly one description of what a launch
+// does and the wait cannot change it.
+void KeysProcessor::fireLaunchNow(const PendingLaunch& p)
+{
+    if (p.slot >= 0)
+        launchArpSlotNow(p.slot, p.line);
+    else if (p.padSlot >= 0)
+        holdArpChordFromPadNow(p.padSlot, p.line);
+    else
+        holdArpChordNow(p.notes, p.name, p.line);
+}
+
+bool KeysProcessor::deferLaunch(PendingLaunch p)
+{
+    const double wait = arpQuantizeDelayMs();
+    if (wait <= 0.0)
+    {
+        fireLaunchNow(p);
+        return false;
+    }
+
+    // One pending launch per line. A second click before the boundary *replaces* the first
+    // rather than queueing behind it: you changed your mind, and two chords landing on one
+    // boundary is not something anybody asked for by clicking twice.
+    pendingLaunches.erase(std::remove_if(pendingLaunches.begin(), pendingLaunches.end(),
+                                         [&p](const PendingLaunch& q) { return q.line == p.line; }),
+                          pendingLaunches.end());
+    p.atMs = juce::Time::getMillisecondCounterHiRes() + wait;
+    pendingLaunches.push_back(std::move(p));
+    if (! isTimerRunning())
+        startTimer(1);
+    return true;
+}
+
+void KeysProcessor::firePendingLaunches(double nowMs)
+{
+    if (pendingLaunches.empty())
+        return;
+    // Copied out before firing: a launch moves parameters and fires notes, and anything it
+    // touches could in principle come back through deferLaunch and reallocate this vector.
+    std::vector<PendingLaunch> due;
+    for (auto& p : pendingLaunches)
+        if (p.atMs <= nowMs)
+            due.push_back(p);
+    if (due.empty())
+        return;
+    pendingLaunches.erase(std::remove_if(pendingLaunches.begin(), pendingLaunches.end(),
+                                         [nowMs](const PendingLaunch& q) { return q.atMs <= nowMs; }),
+                          pendingLaunches.end());
+    for (const auto& p : due)
+        fireLaunchNow(p);
+}
+
 void KeysProcessor::holdArpChord(const std::vector<int>& notes, const juce::String& name, int line)
+{
+    if (notes.empty())
+    {
+        holdArpChordNow(notes, name, line); // an empty hold is a release; never worth waiting for
+        return;
+    }
+    PendingLaunch p;
+    p.line = juce::jlimit(0, numArpLines - 1, line);
+    p.notes = notes;
+    p.name = name;
+    deferLaunch(std::move(p));
+}
+
+void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::String& name, int line)
 {
     line = juce::jlimit(0, numArpLines - 1, line);
     releaseArpChord(line);
@@ -1410,6 +1567,9 @@ void KeysProcessor::releaseArpHold()
     // Every line, because this is one button and it means "let go". A Hold off that released
     // only the line the panel happened to be showing would leave the other two droning, with
     // nothing on a folded bar to stop them.
+    // Anything waiting on a quantize boundary is let go of too: it has not sounded yet, but it
+    // is a chord on its way, and Hold off means "nothing is coming".
+    pendingLaunches.clear();
     for (int n = 0; n < numArpLines; ++n)
     {
         // The chain goes first, and for the same reason the heartbeat stops it when the arp
@@ -1445,11 +1605,23 @@ void KeysProcessor::holdArpChordFromPad(int padSlot, int line)
 {
     if (padSlot < 0 || padSlot >= numChordPads)
         return;
+    if (chordPads[(size_t) padSlot].notes.empty())
+        return;
+    PendingLaunch p;
+    p.line = juce::jlimit(0, numArpLines - 1, line);
+    p.padSlot = padSlot;
+    deferLaunch(std::move(p));
+}
+
+void KeysProcessor::holdArpChordFromPadNow(int padSlot, int line)
+{
+    if (padSlot < 0 || padSlot >= numChordPads)
+        return;
     const auto& pad = chordPads[(size_t) padSlot];
     if (pad.notes.empty())
         return;
     line = juce::jlimit(0, numArpLines - 1, line);
-    holdArpChord(pad.notes, pad.name, line); // clears this line's previous holder, slot or pad
+    holdArpChordNow(pad.notes, pad.name, line); // clears this line's previous holder, slot or pad
     lines[(size_t) line].padSlot = padSlot;
 }
 
@@ -1469,6 +1641,19 @@ int KeysProcessor::arpLineHoldingPad(int padSlot) const
 }
 
 void KeysProcessor::launchArpSlot(int index, int line)
+{
+    if (index < 0 || index >= numArpPatterns)
+        return;
+    PendingLaunch p;
+    p.line = juce::jlimit(0, numArpLines - 1, line);
+    p.slot = index;
+    deferLaunch(std::move(p));
+}
+
+// The whole gesture, and it is a gesture rather than a setting: the pattern, the shape, the
+// rate and the chord all land together, which is why Launch Quantize defers this and not just
+// the note-ons inside it.
+void KeysProcessor::launchArpSlotNow(int index, int line)
 {
     if (index < 0 || index >= numArpPatterns)
         return;
@@ -1528,9 +1713,11 @@ void KeysProcessor::launchArpSlot(int index, int line)
             }
     }
 
-    // Hold last, so the chord starts against the pattern the slot just installed.
+    // Hold last, so the chord starts against the pattern the slot just installed. The *Now
+    // path, because this launch has already served whatever wait Launch Quantize asked for -
+    // deferring again here would make a quantized slot land a whole division late.
     if (! slot.chordNotes.empty())
-        holdArpChord(slot.chordNotes, slot.chordName, line);
+        holdArpChordNow(slot.chordNotes, slot.chordName, line);
     else
         releaseArpChord(line); // a pattern-only slot arpeggiates whatever you are already holding
     lines[(size_t) line].launchedSlot = index;
@@ -1570,7 +1757,7 @@ void KeysProcessor::startChain(int line)
     auto& ln = lines[(size_t) line];
     ln.chainOn = true;
     ln.chainIndex = first;
-    launchArpSlot(first, line);
+    launchArpSlotNow(first, line); // the chain owns its own timing; see heartbeatTick
     ln.chainTargetBeats.store(4.0 * juce::jmax(1, ln.patterns[(size_t) first].bars));
     ln.chainEpoch.fetch_add(1); // tells the audio thread to count this slot from zero
     // Clear the advance flag *before* arming the clock. stopChain() clears it too, but the
@@ -1660,7 +1847,7 @@ void KeysProcessor::heartbeatTick()
                 continue;
             }
             ln.chainIndex = next;
-            launchArpSlot(next, n);
+            launchArpSlotNow(next, n); // already on a bar boundary; quantizing it again would drift
             ln.chainTargetBeats.store(4.0 * juce::jmax(1, ln.patterns[(size_t) next].bars));
             ln.chainEpoch.fetch_add(1);
         }
@@ -1907,6 +2094,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
     tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
+    tree.setProperty("arpMacro", layout.arpMacro, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -1939,6 +2127,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // Absent before there were three lines, and line A is the right answer for those: it is
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
+    layout.arpMacro = flag("arpMacro", false);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.
