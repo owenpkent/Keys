@@ -165,19 +165,44 @@ The line beside the title read `modes::get(mode).emotion` ("Bluesy, Relaxed, Roc
 It is a claim about how a mode feels, in a window whose whole job is to let you hear chords and
 decide that for yourself. `modes::get().emotion` is untouched and still used elsewhere.
 
-### Added: ChordSources.h, six new generation brains (not yet reachable)
+### Added: five new generation sources, and voice leading over all of them
 
-A new UI-free, unit-tested header (`src/ChordSources.h`, `tests/ChordSourceTests.cpp`) holding
-**circle of fifths**, **Neo-Riemannian PLR**, **progression templates** (ii-V-I, axis, 12-bar
-blues, Andalusian, Royal Road, rhythm changes, Coltrane cycle), **negative harmony**, **planing /
-constant structure**, and **voice-leading** as a post-pass usable after any source including the
-two that already exist.
+**Source** was Algorithmic or Markov. It is now seven, in a new UI-free, unit-tested header
+(`src/ChordSources.h`, `tests/ChordSourceTests.cpp`):
 
-**None of it is reachable from the UI yet.** Wiring it widens the `genSource` parameter, which
-breaks saved sessions, so that lands as its own change. Three simplifications worth knowing: the
-Coltrane entry is the bare major-third root cycle rather than full Giant Steps machinery, the
-12-bar blues has no quick-change or turnaround, and Locrian's diminished tonic gives PLR no proper
-triad to start from so it starts minor.
+- **Circle of Fifths** walks the circle from the tonic, taking the quality each degree has in your
+  mode, and occasionally doubles a step or reverses so sixteen chords are not one mechanical lap.
+  Its band is the direction: flat-ward is the falling fifth most progressions are built on.
+- **Neo-Riemannian** starts on the tonic triad and moves by P, L or R, each shifting exactly one
+  note and keeping the common tones in place. Its band is the three weights. This is the one to
+  reach for when you want smooth and key-ambiguous.
+- **Progressions** transposes a real progression to your key: ii-V-I, the axis (I-V-vi-IV), 12-bar
+  blues, Andalusian, Royal Road, rhythm changes, and the Coltrane major-third cycle. Random picks
+  a different one each time.
+- **Negative Harmony** mirrors the key about the axis between tonic and dominant, so C major
+  becomes C minor and G major becomes F minor. It is the one source with **no band at all**: Key,
+  Mode and Octave are the whole of what a reflection needs, and an empty row is more honest than a
+  control invented to fill it.
+- **Planing** takes one chord shape and slides it, through the scale (the quality bends to fit) or
+  chromatically (the shape is preserved exactly, the Debussy sound).
+
+**Voice Leading** is a percentage in the top row, not a source, because it is a pass over whatever
+a source produced: each chord is revoiced to move the least from the one before it. It applies to
+all seven, Markov and Algorithmic included. It never changes which notes a chord contains, only
+which octave they sit in, so a chord's name is as true after it as before.
+
+**Saved sessions are safe.** The new sources are *appended* to the `genSource` list, and APVTS
+stores a choice parameter's plain index rather than a normalised fraction, so a session saved as
+Markov still reopens as Markov. This is why the parameter's comment says never to reorder or
+insert into that list: doing so would silently reopen every saved session on a different brain,
+and there is no migration hook for it the way `migrateRateMode` covers the arp's clock. (An
+earlier note in this file warned that adding sources would break sessions. It does not.)
+
+Three simplifications worth knowing: the Coltrane entry is the bare major-third root cycle rather
+than full Giant Steps machinery, the 12-bar blues has no quick-change or turnaround, and Locrian's
+diminished tonic gives PLR no proper triad to start from, so it starts minor. One characteristic
+rather than a bug: a four-chord template **loops** to fill sixteen, which is what you want when
+filling a page and means the tray shows four distinct chords rather than sixteen.
 
 ### Changed: every chord card shows its notes, and the Big switch is gone
 

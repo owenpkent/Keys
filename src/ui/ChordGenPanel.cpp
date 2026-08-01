@@ -1,5 +1,6 @@
 #include "ChordGenPanel.h"
 #include "../ChordMarkov.h"
+#include "../ChordSources.h" // the Progression picker's items are that table's own names
 #include "../ScaleModes.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
@@ -44,6 +45,11 @@ namespace
     constexpr int kKeyW = 70, kModeW = 190, kOctaveW = 110, kSourceW = 130;
     constexpr int kNotesW = 120, kInvW = 200, kComplianceW = 230, kLockInfW = 230;
     constexpr int kChainW = 110, kMoodW = 150, kStartW = 100, kTempW = 200, kLengthW = 150;
+    constexpr int kSmoothW = 210;    // row A, under every source
+    constexpr int kCircleDirW = 220; // and one per band added 2026-08-01
+    constexpr int kPlrW = 200;
+    constexpr int kProgW = 260;
+    constexpr int kPlaningW = 140;
     constexpr int kFillW = 120, kRegenW = 150, kClearW = 120;
     constexpr int kTitleW = 160, kPageW = 120, kCloseW = 90;
 
@@ -68,9 +74,10 @@ juce::Point<int> ChordGenPanel::contentSize()
     // The widest row wins the width, and the rows plus the gaps between them make the height.
     // Both then take the panel's margin on each side.
     const int rows = juce::jmax(juce::jmax(rowWidth({ kTitleW, kPageW, kCloseW }),
-                                           rowWidth({ kKeyW, kModeW, kOctaveW, kSourceW }),
+                                           rowWidth({ kKeyW, kModeW, kOctaveW, kSourceW, kSmoothW }),
                                            rowWidth({ kNotesW, kInvW, kComplianceW, kLockInfW })),
                                 juce::jmax(rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
+                                           rowWidth({ kPlrW, kPlrW, kPlrW }),
                                            kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW })));
     // No action row of its own since 2026-08-01: the three buttons ride the tray's header, which
     // is the row that says they belong to it. The reference row is its own though, because what
@@ -109,7 +116,7 @@ ChordGenPanel::ChordGenPanel(KeysProcessor& p, ChordGenMenu& g)
     // Pick the band that matches the source *now*, not on the first timer tick 66 ms from now.
     // Open this window with Source already on Markov and that tick is the difference between a
     // clean row and both sets painted over each other for a frame.
-    applySource(! gen.readsScaleSettings());
+    applySource(gen.sourceIndex());
     startTimerHz(15); // the mode's character line, the page number, and what the buttons can do
 }
 
@@ -239,12 +246,74 @@ void ChordGenPanel::buildControls()
     // The generator's brain: the weighted pool above, or Octavium's Markov chains.
     styleLabel(sourceLabel, "Source");
     addAndMakeVisible(sourceLabel);
-    sourceBox.addItemList({ "Algorithmic", "Markov" }, 1);
+    // Seven, in the parameter's own order. Never reorder: the choice index is what a session
+    // stores, so moving an entry moves every saved session's source with it.
+    sourceBox.addItemList({ "Algorithmic", "Markov", "Circle of Fifths", "Neo-Riemannian",
+                            "Progressions", "Negative Harmony", "Planing" },
+                          1);
     sourceBox.setTitle("Generator source");
-    sourceBox.setTooltip("Algorithmic weighs chords by degree and scale compliance; Markov "
-                         "walks a table of moves taken from real progressions.");
+    sourceBox.setTooltip("Which brain writes the chords. Each one brings its own settings to the "
+                         "row below.");
     addAndMakeVisible(sourceBox);
     sourceAtt = std::make_unique<ComboAtt>(processor.apvts, "genSource", sourceBox);
+
+    // Voice leading, in row A because it belongs to all seven sources rather than to any of them.
+    styleLabel(smoothLabel, "Voice Leading");
+    addAndMakeVisible(smoothLabel);
+    smoothSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    smoothSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 44, 26);
+    smoothSlider.setRange(0, 100, 1);
+    smoothSlider.setTextValueSuffix(" %");
+    smoothSlider.setTooltip("How much each chord is revoiced to move the least from the one "
+                            "before it. 0 leaves the voicings alone. Never changes which notes a "
+                            "chord contains, only which octave they sit in.");
+    addAndMakeVisible(smoothSlider);
+    smoothAtt = std::make_unique<SliderAtt>(processor.apvts, "genSmooth", smoothSlider);
+
+    // --- the five bands added on 2026-08-01, one per new source -------------------------------
+    styleLabel(circleDirLabel, "Direction");
+    circleDirBox.addItemList({ "Flat-ward (down a 5th)", "Sharp-ward (up a 5th)" }, 1);
+    circleDirBox.setTitle("Circle direction");
+    circleDirBox.setTooltip("Which way round the circle the walk goes. Flat-ward is the falling "
+                            "fifth that most progressions are built on.");
+    circleDirAtt = std::make_unique<ComboAtt>(processor.apvts, "genCircleDir", circleDirBox);
+
+    // Relative weights, not percentages, which is why they do not have to add up and why all
+    // three at zero is read as equal thirds rather than as "generate nothing".
+    styleLabel(plrPLabel, "P (Parallel)");
+    styleLabel(plrLLabel, "L (Leading-tone)");
+    styleLabel(plrRLabel, "R (Relative)");
+    for (auto* s : { &plrPSlider, &plrLSlider, &plrRSlider })
+    {
+        s->setSliderStyle(juce::Slider::LinearHorizontal);
+        s->setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 26);
+        s->setRange(0, 100, 1);
+    }
+    plrPSlider.setTooltip("Major to minor on the same root, and back. C to Cm.");
+    plrLSlider.setTooltip("The root falls a semitone: C E G to B E G, which is E minor.");
+    plrRSlider.setTooltip("To the relative: C major to A minor, A minor to C major.");
+    plrPAtt = std::make_unique<SliderAtt>(processor.apvts, "genPlrP", plrPSlider);
+    plrLAtt = std::make_unique<SliderAtt>(processor.apvts, "genPlrL", plrLSlider);
+    plrRAtt = std::make_unique<SliderAtt>(processor.apvts, "genPlrR", plrRSlider);
+
+    styleLabel(progressionLabel, "Progression");
+    {
+        // The picker's items are the table's own names, so the two can never drift apart.
+        int id = 1;
+        for (const auto& n : sources::progressionNames())
+            progressionBox.addItem(n, id++);
+    }
+    progressionBox.setTitle("Progression template");
+    progressionBox.setTooltip("A real progression, transposed to your key. Random picks a "
+                              "different one each time you generate.");
+    progressionAtt = std::make_unique<ComboAtt>(processor.apvts, "genProgression", progressionBox);
+
+    styleLabel(planingLabel, "Planing");
+    planingDiatonicButton.setTooltip("On: the shape slides through the scale, so its quality "
+                                     "bends to fit the key. Off: it slides chromatically and the "
+                                     "shape is preserved exactly, which is the Debussy sound.");
+    planingDiatonicAtt = std::make_unique<ButtonAtt>(processor.apvts, "genPlaningDiatonic",
+                                                     planingDiatonicButton);
 
     styleLabel(chainLabel, "Chain");
     chainBox.addItemList({ "Major", "Minor", "Modal" }, 1);
@@ -288,10 +357,12 @@ void ChordGenPanel::buildControls()
     lengthSlider.setTooltip("Unique chords generated before the page loops them.");
     lengthAtt = std::make_unique<SliderAtt>(processor.apvts, "markovLength", lengthSlider);
 
-    // Parented but not shown: applySource() decides which of the two row-B sets is on screen,
-    // and the constructor runs it once before this panel is ever painted.
-    for (auto* c : markovBand())
-        addChildComponent(*c);
+    // Parented but not shown: applySource() decides which row-B band is on screen, and the
+    // constructor runs it once before this panel is ever painted. Every band except the
+    // algorithmic one goes in as a child component, so nothing flashes on the first paint.
+    for (int src = 1; src <= 6; ++src)
+        for (auto* c : bandFor(src))
+            addChildComponent(*c);
     refreshMoodItems();
 
     // The audition tray, and the one line that says what a card in it does. The label is worth
@@ -361,32 +432,56 @@ void ChordGenPanel::buildControls()
 // may be visible: at the layout's own minimum width the algorithmic set is 804 px wide and the
 // Markov set 742, and leaving both on screen put 62 px of a greyed Lock Influence slider, its
 // percent box and a sliver of its label out to the right of Length.
-std::array<juce::Component*, 13> ChordGenPanel::algorithmicBand()
+std::vector<juce::Component*> ChordGenPanel::bandFor(int source)
 {
-    return { &notesLabel, &triadsButton, &seventhsButton, &ninthsButton,
-             &invLabel, &inv0Button, &inv1Button, &inv2Button, &inv3Button,
-             &complianceLabel, &complianceSlider, &lockInfluenceLabel, &lockInfluenceSlider };
+    switch (source)
+    {
+        case 1: // Markov
+            return { &chainLabel, &chainBox, &moodLabel, &moodBox, &startLabel,
+                     &startBox, &tempLabel, &tempSlider, &lengthLabel, &lengthSlider };
+        case 2: // Circle of Fifths
+            return { &circleDirLabel, &circleDirBox };
+        case 3: // Neo-Riemannian
+            return { &plrPLabel, &plrPSlider, &plrLLabel, &plrLSlider, &plrRLabel, &plrRSlider };
+        case 4: // Progressions
+            return { &progressionLabel, &progressionBox };
+        case 5: // Negative Harmony: Key, Mode and Octave in row A are the whole of it
+            return {};
+        case 6: // Planing
+            return { &planingLabel, &planingDiatonicButton };
+        default: // Algorithmic
+            return { &notesLabel, &triadsButton, &seventhsButton, &ninthsButton,
+                     &invLabel, &inv0Button, &inv1Button, &inv2Button, &inv3Button,
+                     &complianceLabel, &complianceSlider, &lockInfluenceLabel, &lockInfluenceSlider };
+    }
 }
 
-std::array<juce::Component*, 10> ChordGenPanel::markovBand()
+std::vector<juce::Component*> ChordGenPanel::allBandControls()
 {
-    return { &chainLabel, &chainBox, &moodLabel, &moodBox, &startLabel,
-             &startBox, &tempLabel, &tempSlider, &lengthLabel, &lengthSlider };
+    // Every band's controls, so applySource can hide the lot before showing one and never has to
+    // know which band it is hiding. Built from bandFor rather than listed again, because a second
+    // list of the same components is a list that goes stale the first time a band gains a control.
+    std::vector<juce::Component*> all;
+    for (int s = 0; s <= 6; ++s)
+        for (auto* c : bandFor(s))
+            all.push_back(c);
+    return all;
 }
 
-void ChordGenPanel::applySource(bool markov)
+void ChordGenPanel::applySource(int source)
 {
-    markovShown = markov;
-    for (auto* c : markovBand())
-        c->setVisible(markov);
-    for (auto* c : algorithmicBand())
-        c->setVisible(! markov);
-    // Mode is row A's, so it never overlaps anything and stays on screen either way. It means
-    // nothing to a chain walk, so it greys rather than hides (Octavium left it clickable and
-    // silently ignored it; greying is honest). Everything else the source turns off is in the
-    // band above, where hiding says the same thing more plainly.
-    modeBox.setEnabled(! markov);
-    modeLabel.setEnabled(! markov);
+    shownSource = source;
+    for (auto* c : allBandControls())
+        c->setVisible(false);
+    for (auto* c : bandFor(source))
+        c->setVisible(true);
+    // Mode is row A's, so it never overlaps anything and stays on screen whatever is below. It
+    // means nothing to the sources that do not weigh a scale, so it greys rather than hides
+    // (Octavium left it clickable and silently ignored it; greying is honest). Everything else a
+    // source turns off is in the band, where hiding says the same thing more plainly.
+    const bool scaleAware = gen.readsScaleSettings();
+    modeBox.setEnabled(scaleAware);
+    modeLabel.setEnabled(scaleAware);
     resized();
 }
 
@@ -465,11 +560,11 @@ void ChordGenPanel::timerCallback()
     // and a session load.
     tray.refreshForSettings();
 
-    // Source switch: swap which of the two row-B bands is on screen. The source is a
-    // parameter, so it can move from the window's own combo, from the host or from a session
-    // load, and this poll is what catches all three.
-    if (const bool markov = ! gen.readsScaleSettings(); markov != markovShown)
-        applySource(markov);
+    // Source switch: swap which row-B band is on screen. The source is a parameter, so it can
+    // move from the window's own combo, from the host or from a session load, and this poll is
+    // what catches all three.
+    if (const int src = gen.sourceIndex(); src != shownSource)
+        applySource(src);
 }
 
 void ChordGenPanel::paint(juce::Graphics& g)
@@ -511,6 +606,9 @@ void ChordGenPanel::resized()
     cell(rowA, kModeW, modeLabel, modeBox);
     cell(rowA, kOctaveW, octaveLabel, octaveSlider);
     cell(rowA, kSourceW, sourceLabel, sourceBox);
+    // Voice leading is here rather than in a band because it belongs to every source: it is a
+    // pass over whatever a source produced, so no band may be able to hide it.
+    cell(rowA, kSmoothW, smoothLabel, smoothSlider);
     area.removeFromTop(kAfterRowA);
 
     // Row B: note counts, inversions and the two weighting sliders - or, when the Markov source
@@ -518,8 +616,11 @@ void ChordGenPanel::resized()
     // already hidden one of them, which it must: these two rects overlap and the algorithmic
     // set is the wider, so a hidden-but-visible one paints out past the other's right edge.
     auto rowB = area.removeFromTop(kRowH);
+    // A pristine copy, because the algorithmic band below consumes `rowB` as it goes and every
+    // other band has to start from the same left edge rather than from whatever is left over.
+    const auto rowFull = rowB;
     {
-        auto markovRow = rowB;
+        auto markovRow = rowFull;
         cell(markovRow, kChainW, chainLabel, chainBox);
         cell(markovRow, kMoodW, moodLabel, moodBox);
         cell(markovRow, kStartW, startLabel, startBox);
@@ -547,6 +648,31 @@ void ChordGenPanel::resized()
     }
     cell(rowB, kComplianceW, complianceLabel, complianceSlider);
     cell(rowB, kLockInfW, lockInfluenceLabel, lockInfluenceSlider);
+
+    // The four bands added on 2026-08-01, each laid into that same rect from the left. Every one
+    // of them is invisible unless its source is up, which applySource guarantees, so overlapping
+    // rects here are correct rather than a bug waiting to happen. Negative Harmony is absent on
+    // purpose: it has no band, so there is nothing to place.
+    {
+        auto row = rowFull;
+        cell(row, kCircleDirW, circleDirLabel, circleDirBox);
+    }
+    {
+        auto row = rowFull;
+        cell(row, kPlrW, plrPLabel, plrPSlider);
+        cell(row, kPlrW, plrLLabel, plrLSlider);
+        cell(row, kPlrW, plrRLabel, plrRSlider);
+    }
+    {
+        auto row = rowFull;
+        cell(row, kProgW, progressionLabel, progressionBox);
+    }
+    {
+        auto row = rowFull;
+        auto c = row.removeFromLeft(kPlaningW);
+        planingLabel.setBounds(c.removeFromTop(14));
+        planingDiatonicButton.setBounds(c);
+    }
     area.removeFromTop(kAfterRowB);
 
     // The tray takes everything left, so making the window taller makes the cards taller rather

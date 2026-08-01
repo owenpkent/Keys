@@ -91,6 +91,17 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   locked chords. `ScaleModes.h` is deliberately *not* the kit's scale table: that one
   answers "is this note in the scale", generation also needs a quality per degree.
   All of it (plus `ChordSuggest.h`) is UI-free so it unit-tests.
+  **Seven brains, not two** (2026-08-01). `ChordSources.h` adds circle of fifths, Neo-Riemannian
+  PLR, progression templates, negative harmony and planing to the weighted pool and
+  `ChordMarkov.h`, and **voice leading** as a post-pass over whatever any of them produced
+  (`genSmooth`, a percentage in the window's top row, not a source of its own; it changes only
+  which octave a note sits in, never which notes). `ChordGenMenu::generateChords()` is the one
+  dispatcher for all but Markov, which keeps its three paths because its chords carry a numeral
+  ChordGen has no field for and its per-pad regenerate steps the chain from the left neighbour.
+  **Never reorder or insert into the `genSource` choice list.** Appending is safe and is why
+  sessions saved before this still open on the right brain: APVTS stores a choice parameter's
+  plain index, not a normalised fraction. Reordering would silently move every saved session's
+  source, and there is no migration hook for it the way `migrateRateMode` covers the arp's clock.
 - **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
   chord, a shape and a rate; launching one installs all of it and holds the chord into the
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card

@@ -105,12 +105,15 @@ private:
     void buildControls();
     void refreshMoodItems(); // the Mood list belongs to the chain that is up
 
-    // The two sets of controls that share row B, and the one place that decides which of them
-    // is on screen. Returned by value rather than as an initializer_list, whose backing array
-    // would not outlive the return.
-    std::array<juce::Component*, 13> algorithmicBand();
-    std::array<juce::Component*, 10> markovBand();
-    void applySource(bool markov);
+    // The seven sets of controls that share row B, and the one place that decides which is on
+    // screen. They are laid into the *same* rect and exactly one may be visible: the bands are
+    // different widths, so a hidden-but-visible one paints out past the edge of the one that is
+    // up. Two of these until 2026-08-01, when the five `sources::` brains arrived; the shape did
+    // not change, only the count, and `bandFor` replaced the pair of fixed-size arrays because a
+    // switch that has to name every band is a switch somebody forgets to extend.
+    std::vector<juce::Component*> bandFor(int source);
+    std::vector<juce::Component*> allBandControls();
+    void applySource(int source);
 
     KeysProcessor& processor;
     ChordGenMenu& gen;
@@ -164,13 +167,31 @@ private:
     juce::Slider tempSlider, lengthSlider;
     juce::Label tempLabel, lengthLabel;
 
+    // The five brains added on 2026-08-01, one band each. Negative Harmony has no band at all:
+    // it reflects the key about the axis between tonic and dominant, and Key, Mode and Octave in
+    // row A are the whole of what that needs, so an empty row B is the honest answer rather than
+    // a control invented to fill it.
+    juce::ComboBox circleDirBox, progressionBox;
+    juce::Label circleDirLabel, progressionLabel;
+    juce::Slider plrPSlider, plrLSlider, plrRSlider;
+    juce::Label plrPLabel, plrLLabel, plrRLabel;
+    juce::ToggleButton planingDiatonicButton { "Diatonic" };
+    juce::Label planingLabel;
+
+    // Voice leading is not a band. It is a pass over whatever a source produced, so it belongs to
+    // all seven and sits in row A where none of them can hide it.
+    juce::Slider smoothSlider;
+    juce::Label smoothLabel;
+
     std::unique_ptr<ComboAtt> rootAtt, modeAtt, sourceAtt, chainAtt;
+    std::unique_ptr<ComboAtt> circleDirAtt, progressionAtt;
     std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt, tempAtt, lengthAtt;
-    std::unique_ptr<ButtonAtt> triadsAtt, seventhsAtt, ninthsAtt;
+    std::unique_ptr<SliderAtt> plrPAtt, plrLAtt, plrRAtt, smoothAtt;
+    std::unique_ptr<ButtonAtt> triadsAtt, seventhsAtt, ninthsAtt, planingDiatonicAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;
 
-    int lastChainMode = -1;   // rebuild the Mood list when the chain mode changes
-    bool markovShown = false; // last visibility applied, to relayout on source change
+    int lastChainMode = -1; // rebuild the Mood list when the chain mode changes
+    int shownSource = -1;   // last band applied, to relayout on a source change
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenPanel)
 };

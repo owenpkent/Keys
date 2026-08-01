@@ -406,41 +406,68 @@ which is what lets you audition a dozen chords for the one you keep.
 ### Generator settings
 
 All of these live in the generator's window, opened by the **Generator** chip on the Pads bar.
-Two rows of controls: key, mode, octave and source on the first; note counts, inversions and
-the two weighting sliders on the second, which the Markov controls replace when the source is
-**Markov** (those settings mean nothing to a chain walk, so the row shows whichever set is
-live). Underneath, since 2026-08-01, is the reference card and the 4x4 audition tray, with
-**Fill**, **Regen** and **Clear** on the tray's own header row - none of the three writes a
-pad any more, they act on the tray (see above).
+Row A is key, mode, octave, **Source** and, since 2026-08-01, **Voice Leading** - that last
+one is not a source, it is a pass over whatever a source produces, so it sits where none of
+the seven can hide it. Row B is one band of settings that swaps with Source, all seven sharing
+the same rect since only one is ever on screen: the weighted pool's note counts, inversions
+and the two weighting sliders for **Algorithmic**; the chain controls for **Markov**; and,
+added 2026-08-01, one band each for the five new brains below. Underneath is the reference
+card and the 4x4 audition tray, with **Fill**, **Regen** and **Clear** on the tray's own
+header row - none of the three writes a pad any more, they act on the tray (see above).
 
 **Key**, **Mode** and **Scale Compliance** are also combo boxes on the Pads bar, which is the
 fast way to reach the three you change most. Both places drive the same setting.
 
+**Source is seven choices now** (2026-08-01, up from Algorithmic and Markov): Algorithmic,
+Markov, Circle of Fifths, Neo-Riemannian, Progressions, Negative Harmony, Planing. The list is
+*appended to*, never reordered - the parameter stores a plain choice index, so a session saved
+as Markov still opens as Markov, and reordering the list would silently reopen every saved
+session on a different brain.
+
 | Setting | What it does |
 |---------|--------------|
-| **Source** | **Algorithmic** (the weighted pool) or **Markov** (chains learned from real progressions) |
-| **Key** | The tonic the chords are built from. Feeds both sources |
-| **Octave** | Which register the generated chords land in. Feeds both sources |
-| **Mode** | 12 modes |
-| **Notes** | Which chord sizes to build: **3** triads, **4** 7ths and 6ths, **5** 9ths and extensions |
-| **Inversions** | **Root** position, and whether **1st** / **2nd** / **3rd** are allowed. An inversion lets a chord sit with its lower notes moved up an octave, so a progression moves less |
-| **Scale Compliance** | How adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows from related modes, then reaches for secondary dominants, then for anything at all |
-| **Lock Influence** | How much the chords you locked steer the new ones |
+| **Source** | Which of the seven brains fills the page - see the table below |
+| **Voice Leading** | 0-100%, in row A beside Source rather than in any band. A post-pass over whatever the source produced: each chord is revoiced to move as little as possible from the one before it. Applies to all seven sources, changes which octave notes sit in and never which notes a chord contains |
+| **Key** | The tonic the chords are built from. Feeds every source |
+| **Octave** | Which register the generated chords land in. Feeds every source |
+| **Mode** | 12 modes. Read by Algorithmic only - see below |
+| **Notes** | Algorithmic only: which chord sizes to build - **3** triads, **4** 7ths and 6ths, **5** 9ths and extensions |
+| **Inversions** | Algorithmic only: **Root** position, and whether **1st** / **2nd** / **3rd** are allowed. An inversion lets a chord sit with its lower notes moved up an octave, so a progression moves less |
+| **Scale Compliance** | Algorithmic only: how adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows from related modes, then reaches for secondary dominants, then for anything at all |
+| **Lock Influence** | Algorithmic only: how much the chords you locked steer the new ones |
 | **Chain** | Markov only: Major, Minor or Modal chain tables |
 | **Mood** | Markov only: learn only from progressions tagged with this mood |
 | **Start** | Markov only: force the first chord (I, i, IV, V, vi, …) or let it pick |
 | **Temperature** | Markov only, 0.30 to 2.00. Low sticks to the most common moves; high flattens toward anything the corpus has ever done |
 | **Length** | Markov only: how many unique chords are generated (4 to 16) before the sequence loops to fill the page |
+| **Direction** | Circle of Fifths only: flat-ward (down a 5th, the falling-fifth motion most progressions are built on) or sharp-ward (up a 5th) |
+| **P / L / R** | Neo-Riemannian only: three relative weights, 0-100 each (all zero reads as equal thirds). P swaps major for minor on the same root; L is the leading-tone exchange; R moves to the relative major or minor. Each moves exactly one voice and holds the other two in place |
+| **Progression** | Progressions only: a named template (ii-V-I, the axis I-V-vi-IV, 12-bar blues, Andalusian, Royal Road, rhythm changes, Coltrane's major-third cycle) transposed to your key, or **Random** to let it pick. A short template loops to fill the page, so a 3-chord ii-V-I asked for sixteen just repeats |
+| **Diatonic** | Planing only, on by default: slides the chosen shape through the scale, bending its quality to fit each degree. Off slides it chromatically instead, preserving the exact shape - the Debussy sound |
 
-**Mode**, **Notes**, **Inversions**, **Scale Compliance** and **Lock Influence** all belong to
-the weighted pool, and under **Markov** not one of them is left clickable and silently ignored
-(which is what Octavium did). Mode is on the first row, where nothing else wants the space, so
-it simply greys; the four on the second row are the ones the Markov controls take the place of,
-so under Markov they are not on screen at all. **Mode** and **Scale Compliance** on the Pads bar
-grey with their twins here, and **Key** stays live, because the chains do transpose to it. The
-**Mood** list follows whichever chain is up. **Mood** and **Start** are choices about the
-progression you are generating right now rather than session settings, so they are not saved -
-but they do survive closing and reopening the window.
+**Negative Harmony has no band at all.** It mirrors the key about the axis between tonic and
+dominant (C major becomes C minor, G major becomes F minor), and Key, Mode and Octave in row A
+are the whole of what a reflection needs - an empty row B is more honest than a control
+invented to fill it.
+
+**Mode** greys out for every source except Algorithmic, not only under Markov - but greyed is
+not the same as unread. Circle of Fifths, Neo-Riemannian and Progressions still read whatever
+Mode was last set to (it decides the quality of each degree Circle of Fifths and Progressions
+land on, and which triad Neo-Riemannian starts from); Negative Harmony and Planing take it as
+the scale they reflect or slide through. **Scale Compliance** is what's actually dead outside
+Algorithmic - none of the other six weigh a pool against it - which is why it greys alongside
+Mode rather than the other way around. **Notes**, **Inversions** and **Lock Influence** belong
+to the weighted pool alone and live in row B, so they leave the screen entirely under any
+other source rather than sitting there clickable and silently ignored (which is what Octavium
+did). **Mode** and **Scale Compliance** on the Pads bar grey with their twins here, and **Key** stays live, since
+every source transposes to it. The **Mood** list follows whichever chain is up. **Mood** and
+**Start** are choices about the progression you are generating right now rather than session
+settings, so they are not saved - but they do survive closing and reopening the window.
+
+Known simplifications, worth knowing rather than hiding: the Coltrane entry is the bare
+major-third root cycle rather than full Giant Steps machinery, the 12-bar blues has no
+quick-change or turnaround, and Locrian's diminished tonic gives Neo-Riemannian no proper
+major-or-minor triad to start from, so it starts minor.
 
 ### Keeping what you like
 

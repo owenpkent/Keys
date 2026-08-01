@@ -167,11 +167,32 @@ The settings in the window: **Key** and **Mode** (12 modes),
 **Octave**, **Scale Compliance** (how far outside the key it may go: 100% stays in, lower
 borrows from related modes, then reaches for secondary dominants, then anything), **Lock
 Influence** (how much new chords copy the character of the ones you locked), **Notes** and
-**Inversions** (triads, 7ths, 9ths; root position and inversions), and **Source**. Source is
-**Algorithmic** (the weighted pool) or **Markov**: real-progression chains per Major / Minor /
-Modal, with **Temperature** (conservative to adventurous), **Length**, a **Mood** filter and a
-**Start** chord. The Markov controls take the place of the pool's own row when you switch to
-them, since neither set means anything to the other brain.
+**Inversions** (triads, 7ths, 9ths; root position and inversions), and **Source**, which since
+2026-08-01 is seven choices rather than two:
+
+- **Algorithmic**, the weighted pool above, gated by Scale Compliance and Lock Influence.
+- **Markov**: real-progression chains per Major / Minor / Modal, with **Temperature**
+  (conservative to adventurous), **Length**, a **Mood** filter and a **Start** chord.
+- **Circle of Fifths**: walks the circle from the tonic with a **Direction** (flat-ward or
+  sharp-ward), landing on each degree's own diatonic quality where it's in the key.
+- **Neo-Riemannian**: moves the tonic triad by P, L or R, weighted by three sliders - the
+  smoothest, most key-ambiguous of the seven, since each move changes exactly one note.
+- **Progressions**: transposes a named template (ii-V-I, the axis, 12-bar blues, Andalusian,
+  Royal Road, rhythm changes, Coltrane's major-third cycle, or **Random**) to your key.
+- **Negative Harmony**: mirrors the key about the tonic/dominant axis (C major becomes C
+  minor). The one source with no settings of its own - Key, Mode and Octave are enough.
+- **Planing**: slides one chord shape up or down, diatonically or (**Diatonic** off)
+  chromatically, the constant-structure sound.
+
+Each source's own controls take the place of the pool's row when you switch to it, since a
+row of settings that means nothing to a different brain is worse than no row at all.
+**Mode** greys out for every source but Algorithmic too - though five of the other six still
+read whatever it was last set to, only **Scale Compliance** (Algorithmic's own weighting
+knob) is actually dead to them. **Voice Leading**, new the
+same day, sits beside Source rather than in any of those rows: it's a pass over whatever the
+source produced, revoicing each chord to move as little as possible from the one before it,
+and it never changes which notes a chord contains, only which octave they land in. The choices
+are appended to the list, so a session saved as Markov still reopens as Markov.
 
 Press any pad to hear it: its notes sit under the chord name on the card already, so there
 is nothing extra to turn on to read them while you work.

@@ -19,8 +19,8 @@ src/
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ChordSources.h            # circle of fifths, Neo-Riemannian PLR, progression templates,
 │                             # negative harmony, planing, voice-leading as a post-pass
-│                             # (tests/ChordSourceTests.cpp). Not wired to the UI yet - the
-│                             # Source setting still only offers Algorithmic and Markov
+│                             # (tests/ChordSourceTests.cpp). Wired to the UI since 2026-08-01:
+│                             # Source is seven choices now (Algorithmic, Markov and these five)
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync
 │                             # (docs/ARP_DESIGN.md)
@@ -32,8 +32,9 @@ src/
 │   │                         # Controls section
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain (algorithmic + Markov). Draws
-│   │                         # nothing; a member of the editor, so it outlives every view
+│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain, all seven sources plus voice
+│   │                         # leading. Draws nothing; a member of the editor, so it
+│   │                         # outlives every view
 │   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
 │   │                         # when that window opens, destroyed when it closes
 │   ├── ChordTray.{h,cpp}     # 4x4 grid of candidate chords inside that window (2026-08-01),
@@ -283,6 +284,39 @@ algorithm is Octavium's, verified line-by-line; the corpus is authored for Keys,
 because Octavium's was never in its repo or installer — its shipped Markov source
 degenerated to I-I-I-I for every user. Realisation is root-position through
 `chordgen::chordNotes` at the generator octave (Octavium hardcoded octave 4).
+
+`ChordSources.h` added five more brains on 2026-08-01, taking Source from two choices to
+seven: **Circle of Fifths** walks the circle from the tonic, taking each degree's diatonic
+quality where the landing is in the key and major otherwise, with an occasional doubled or
+reversed step so a lap doesn't read as one mechanical scale run; its one setting is
+direction (flat-ward, the falling fifth most progressions are built on, or sharp-ward).
+**Neo-Riemannian** starts on the tonic triad and takes P/L/R steps, each moving exactly one
+voice and holding the other two in place, weighted by three sliders (all zero reads as equal
+thirds). **Progressions** transposes a named template (ii-V-I, the axis, 12-bar blues,
+Andalusian, Royal Road, rhythm changes, Coltrane's major-third cycle) to the current key and
+loops it to fill the page; index 0 is Random. **Negative Harmony** mirrors a plain diatonic
+progression about the tonic/dominant axis (C major becomes C minor) and is the one source
+with no band of its own, since Key, Mode and Octave are the whole of what a reflection needs.
+**Planing** takes one chord shape and slides it, diatonically (the quality bends to fit the
+scale) or chromatically (the shape is preserved exactly, the Debussy sound). All five return
+plain `chordgen::Chord`s, are not scale-compliance-gated and take no lock bias — a source
+like this replaces a whole page in one call, and per-chord lock influence stays the weighted
+pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algorithmic plus
+these five; Markov keeps its own three paths, because its chords carry a numeral these don't
+and its per-pad regeneration steps the chain from the left neighbour.
+
+Sitting over all seven is **Voice Leading** (`genSmooth`), a post-pass rather than a source
+of its own: each chord after the first has each pitch class placed in whichever octave sits
+closest to the previous chord, blended by the percentage. Blending in octave counts rather
+than raw semitones is deliberate — two notes sharing a pitch class are always a whole number
+of octaves apart, so every intermediate amount still lands on the source chord's own notes;
+it never changes which notes a chord contains, only which octave they sit in. `smoothPads()`
+runs it over the Markov path; the other six get it inline in `generateChords`.
+
+The new sources are *appended* to the `genSource` list, and APVTS stores a choice
+parameter's plain index, so a session saved as Markov still reopens as Markov — the list must
+never be reordered or inserted into, only appended to, or a saved session would silently
+reopen on a different brain.
 
 All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
 
@@ -630,9 +664,11 @@ the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStrumDir` /
 `padPage`, the generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the
 note-count and inversion
-toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`faderCC8`
-CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
-`markovLength`.
+toggles, `genCompliance`, `genLockInfluence`, `genSmooth` (Voice Leading, over all seven
+sources) — the knob row's `faderCC1`-`faderCC8` CC assignments, `genSource` (the seven-way
+choice itself), the Markov set `markovMode`, `markovTemp`, `markovLength`, and the five
+sources' own bands: `genCircleDir`, `genPlrP` / `genPlrL` / `genPlrR`, `genProgression`,
+`genPlaningDiatonic`. Negative Harmony has none — Key, Mode and Octave are all it reads.
 
 The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
 `arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`

@@ -1,5 +1,6 @@
 #include "ChordGenMenu.h"
 #include "../ChordMarkov.h"
+#include "../ChordSources.h"
 #include "../ChordSuggest.h"
 #include "../Chords.h"
 #include "../ScaleModes.h"
@@ -76,12 +77,89 @@ ChordGenMenu::~ChordGenMenu()
     stopPreview(); // a suggestion left auditioning must not outlive the generator
 }
 
-bool ChordGenMenu::markovActive() const
+int ChordGenMenu::sourceIndex() const
 {
-    return (int) processor.apvts.getRawParameterValue("genSource")->load() == 1;
+    return juce::jlimit(0, 6, (int) processor.apvts.getRawParameterValue("genSource")->load());
 }
 
-bool ChordGenMenu::readsScaleSettings() const { return ! markovActive(); }
+bool ChordGenMenu::markovActive() const { return sourceIndex() == 1; }
+
+// Mode and Scale Compliance mean something only where a scale is being weighed. The Markov
+// brain walks a table of moves, and negative harmony and planing take the mode as the scale they
+// reflect or slide *through* rather than as a pool to comply with, so Compliance is dead to all
+// of them. Circle of fifths, Neo-Riemannian and Progressions do read the mode (it decides the
+// quality of each degree they land on), so they stay honest here.
+bool ChordGenMenu::readsScaleSettings() const { return sourceIndex() == 0; }
+
+// One door to five brains plus the original. Voice leading runs on the way out, which is the
+// point of it being a pass and not a source: whichever of these produced the chords, they arrive
+// at the caller already smoothed by however much the dial asks for.
+std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
+{
+    const auto& a = processor.apvts;
+    const int oct = currentOptions().octave;
+    const int root = genRoot(), mode = genMode();
+    std::vector<chordgen::Chord> out;
+
+    switch (sourceIndex())
+    {
+        case 2:
+            out = sources::circleOfFifths(root, mode, oct, count,
+                                          a.getRawParameterValue("genCircleDir")->load() > 0.5f ? 1 : -1, rng);
+            break;
+        case 3:
+            out = sources::neoRiemannian(root, mode, oct, count,
+                                         (int) a.getRawParameterValue("genPlrP")->load(),
+                                         (int) a.getRawParameterValue("genPlrL")->load(),
+                                         (int) a.getRawParameterValue("genPlrR")->load(), rng);
+            break;
+        case 4:
+            // The picker's entry 0 is "Random", which the table spells -1.
+            out = sources::progressions(root, mode, oct, count,
+                                        (int) a.getRawParameterValue("genProgression")->load() - 1, rng);
+            break;
+        case 5: out = sources::negativeHarmony(root, mode, oct, count, rng); break;
+        case 6:
+            out = sources::planing(root, mode, oct, count,
+                                   a.getRawParameterValue("genPlaningDiatonic")->load() > 0.5f, rng);
+            break;
+        default:
+            // Algorithmic, and the fallback for a source index this build does not know - a
+            // session from a later version could carry one, and the weighted pool is the safe
+            // thing to answer with.
+            out = chordgen::generate(root, mode, count, currentOptions(), lockedTypesOnPage(), rng);
+            break;
+    }
+
+    sources::applyVoiceLeading(out, a.getRawParameterValue("genSmooth")->load() * 0.01f);
+    return out;
+}
+
+// The same pass for Markov, which cannot go through generateChords: its chords carry a numeral
+// ChordGen has no field for, so they arrive already built as pads. Round-trips the notes through
+// a throwaway Chord vector rather than duplicating the algorithm, and copies only the notes back,
+// so the numeral and name survive. Voice leading never changes which pitch classes a chord holds,
+// only their register, so a name written before this runs is still right after it.
+void ChordGenMenu::smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const
+{
+    const float amount = processor.apvts.getRawParameterValue("genSmooth")->load() * 0.01f;
+    if (amount <= 0.0f || pads.size() < 2)
+        return;
+
+    std::vector<chordgen::Chord> tmp;
+    tmp.reserve(pads.size());
+    for (const auto& p : pads)
+    {
+        chordgen::Chord c;
+        c.rootPc = p.rootPc;
+        c.type = p.type;
+        c.notes = p.notes;
+        tmp.push_back(std::move(c));
+    }
+    sources::applyVoiceLeading(tmp, amount);
+    for (size_t i = 0; i < pads.size() && i < tmp.size(); ++i)
+        pads[i].notes = tmp[i].notes;
+}
 
 int ChordGenMenu::chainMode() const
 {
@@ -301,11 +379,11 @@ std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
             pad.numeral = c.numeral;
             out.push_back(std::move(pad));
         }
+        smoothPads(out); // the one pass every source gets, Markov included
         return out;
     }
 
-    for (const auto& c : chordgen::generate(genRoot(), genMode(), count, currentOptions(),
-                                            lockedTypesOnPage(), rng))
+    for (const auto& c : generateChords(count))
     {
         KeysProcessor::ChordPad pad;
         pad.notes = c.notes;
@@ -423,8 +501,7 @@ void ChordGenMenu::fillPage()
     if (targets.empty())
         return;
 
-    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(),
-                                           currentOptions(), lockedTypesOnPage(), rng);
+    const auto chords = generateChords((int) targets.size());
     for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
         writeChord(targets[(size_t) i], chords[(size_t) i]);
 }
@@ -445,8 +522,7 @@ void ChordGenMenu::regeneratePage()
     if (targets.empty())
         return;
 
-    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(),
-                                           currentOptions(), lockedTypesOnPage(), rng);
+    const auto chords = generateChords((int) targets.size());
     for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
         writeChord(targets[(size_t) i], chords[(size_t) i]);
 }
@@ -485,8 +561,7 @@ void ChordGenMenu::newChordFor(int slot)
         regeneratePadMarkov(slot);
         return;
     }
-    const auto generated = chordgen::generate(genRoot(), genMode(), 1, currentOptions(),
-                                              lockedTypesOnPage(), rng);
+    const auto generated = generateChords(1);
     if (! generated.empty())
         writeChord(slot, generated.front());
 }

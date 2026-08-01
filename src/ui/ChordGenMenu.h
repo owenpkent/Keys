@@ -128,6 +128,11 @@ public:
     // chains do transpose to it.
     bool readsScaleSettings() const;
 
+    // Which of the seven brains is up, as the raw `genSource` index. Public because the window
+    // shows a different band of settings per source and has to ask. The order is the parameter's,
+    // and appending is the only safe way to grow it (see the parameter's own comment).
+    int sourceIndex() const;
+
     // Mood and Start, the two picks that are not parameters (see the members). The window
     // drives them through here rather than holding them, so switching it off and on again does
     // not quietly reset what the next Fill will generate. Empty is the "Any" sentinel.
@@ -152,6 +157,16 @@ private:
     std::vector<int> regeneratablePadsOnPage() const;
     int genRoot() const;
     int genMode() const;
+
+    // Every source except Markov produces `chordgen::Chord`, so one call covers Algorithmic and
+    // the five that arrived on 2026-08-01, and every caller that used to reach straight for
+    // `chordgen::generate` goes through here instead. Voice leading is applied on the way out,
+    // because it is a pass over whatever a source produced rather than a source of its own.
+    // Markov keeps its own three paths: its chords carry a numeral that ChordGen has no field
+    // for, and regenerating one pad steps the chain from its left neighbour, which is behaviour
+    // worth more than the symmetry of folding it in here.
+    std::vector<chordgen::Chord> generateChords(int count);
+    void smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const; // the Markov half of that
 
     // The Markov source (Source: Markov). Same page mechanics, different brain.
     bool markovActive() const;

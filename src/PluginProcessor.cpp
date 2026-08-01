@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "ChordSources.h" // the Progression picker's item list is that table's own
 #include "PluginEditor.h"
 #include "ScaleModes.h"
 #include "mcp/KeysMcp.h"
@@ -123,8 +124,45 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
 
     // Second chord-generator source: Markov walks bundled progression tables instead of
     // weighting a candidate pool. Its settings only apply when the source is Markov.
+    // Seven brains now, and the five after Markov are `sources::` (2026-08-01). They are
+    // **appended**, which is what makes this safe for a session saved before them: APVTS stores a
+    // choice parameter's denormalised value, so a saved 1 is still Markov whatever the list grew
+    // to. Never reorder or insert into this list - that is what would silently reopen a session
+    // on the wrong brain, and there is no migration hook for it the way `migrateRateMode` covers
+    // the arp's clock.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genSource", 1 }, "Generator Source",
-                                                      juce::StringArray { "Algorithmic", "Markov" }, 0));
+                                                      juce::StringArray { "Algorithmic", "Markov",
+                                                                          "Circle of Fifths", "Neo-Riemannian",
+                                                                          "Progressions", "Negative Harmony",
+                                                                          "Planing" },
+                                                      0));
+
+    // Per-source settings. Each is dead under every source but its own, and the window hides it
+    // rather than greying it: a band that means nothing to the brain that is up says so more
+    // plainly by not being there (the same call applySource has always made for Markov).
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genCircleDir", 1 }, "Circle Direction",
+                                                      juce::StringArray { "Flat-ward (down a 5th)",
+                                                                          "Sharp-ward (up a 5th)" },
+                                                      0));
+    // How often each Neo-Riemannian transform is taken. Relative weights rather than
+    // probabilities, so all-zero is meaningless and the generator reads it as equal thirds.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genPlrP", 1 }, "PLR Parallel", 0, 100, 34));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genPlrL", 1 }, "PLR Leading-tone", 0, 100, 33));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genPlrR", 1 }, "PLR Relative", 0, 100, 33));
+    {
+        // Straight off the table in ChordSources.h, so the picker and the generator can never
+        // disagree about which progression index means what. Entry 0 is "Random".
+        juce::StringArray names;
+        for (const auto& n : sources::progressionNames())
+            names.add(n);
+        layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genProgression", 1 },
+                                                          "Progression", names, 0));
+    }
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genPlaningDiatonic", 1 },
+                                                    "Planing Diatonic", true));
+    // Voice leading is not a source: it is a pass over whatever a source produced, so it stays on
+    // screen under all seven. 0 leaves every voicing alone, 100 always takes the smoothest.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genSmooth", 1 }, "Voice Leading", 0, 100, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "markovMode", 1 }, "Markov Mode",
                                                       juce::StringArray { "Major", "Minor", "Modal" }, 0));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "markovTemp", 1 }, "Markov Temperature",
