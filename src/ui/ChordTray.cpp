@@ -167,17 +167,9 @@ void ChordTray::clear()
     repaint();
 }
 
-void ChordTray::refreshForSettings()
+bool ChordTray::settingsMovedSinceFill() const
 {
-    if (settingsSignature() == lastSignature)
-        return;
-    // Every cell, holes included. A settings change invalidates the candidates you have not
-    // taken *and* the reason a hole was worth keeping, since the hole only ever meant "you took
-    // this one under the old settings".
-    std::vector<int> all(numCells);
-    for (int i = 0; i < numCells; ++i)
-        all[(size_t) i] = i;
-    writeInto(all);
+    return hasFilledCells() && settingsSignature() != lastSignature;
 }
 
 void ChordTray::paint(juce::Graphics& g)

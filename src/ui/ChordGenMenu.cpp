@@ -84,12 +84,124 @@ int ChordGenMenu::sourceIndex() const
 
 bool ChordGenMenu::markovActive() const { return sourceIndex() == 1; }
 
-// Mode and Scale Compliance mean something only where a scale is being weighed. The Markov
-// brain walks a table of moves, and negative harmony and planing take the mode as the scale they
-// reflect or slide *through* rather than as a pool to comply with, so Compliance is dead to all
-// of them. Circle of fifths, Neo-Riemannian and Progressions do read the mode (it decides the
-// quality of each degree they land on), so they stay honest here.
+// Two different questions, and conflating them greyed Mode under five sources that read it.
+//
+//   * **Scale Compliance and Lock Influence** are the weighted pool's own dials: how far it may
+//     stray from the key, and how much it copies the families of your locked cards. Nothing else
+//     has a pool to weight, so they are dead to the other six;
+//   * **Mode** is read by everything except Markov. Circle of fifths takes each landing degree's
+//     quality from it, Neo-Riemannian picks its starting triad from it, Progressions resolves its
+//     degrees through it, and negative harmony and planing use it as the scale they reflect or
+//     slide through. A chain walk is the one brain with no scale in it at all.
 bool ChordGenMenu::readsScaleSettings() const { return sourceIndex() == 0; }
+bool ChordGenMenu::readsMode() const { return sourceIndex() != 1; }
+
+// Ranges rather than single values since 2026-08-01, and read with the ends swapped if they cross:
+// two independent parameters cannot police each other, and the alternative is a generator that
+// silently produces nothing whenever a min is dragged past its max.
+std::pair<int, int> ChordGenMenu::noteCountRange() const
+{
+    const int a = (int) processor.apvts.getRawParameterValue("genNotesMin")->load();
+    const int b = (int) processor.apvts.getRawParameterValue("genNotesMax")->load();
+    return { juce::jmin(a, b), juce::jmax(a, b) };
+}
+
+std::pair<int, int> ChordGenMenu::octaveRange() const
+{
+    const int a = (int) processor.apvts.getRawParameterValue("genOctave")->load();
+    const int b = (int) processor.apvts.getRawParameterValue("genOctaveMax")->load();
+    return { juce::jmin(a, b), juce::jmax(a, b) };
+}
+
+// Note count and register, applied to every chord whatever made it. These are post-passes for the
+// same reason voice leading is: they are facts about the *voicing* a chord arrives in, not about
+// which chord it is, so asking each of seven brains to honour them separately would be seven
+// places to get it wrong. Owen's ask was exactly this shape - "all of their options should have
+// the option for how many notes and what inversion".
+//
+// Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is still in
+// the key rather than a chromatic pile. Shrinking drops from the top, which keeps the root and the
+// third and therefore keeps the chord recognisable: a dyad off a major seventh should be the root
+// and its third, not the seventh and the ninth.
+void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
+{
+    const auto [minN, maxN] = noteCountRange();
+    const auto [minOct, maxOct] = octaveRange();
+    const auto& scale = modes::get(genMode()).intervals; // semitone offsets from the tonic
+    const int root = genRoot();
+    const auto inversions = currentOptions().inversions; // already defaulted to root if none ticked
+
+    for (auto& c : chords)
+    {
+        if (c.notes.empty())
+            continue;
+
+        const int want = minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
+        std::sort(c.notes.begin(), c.notes.end());
+
+        // Grow: keep stacking scale thirds above the top note. Stepping two scale degrees at a
+        // time is what "a third" means inside a mode, and it is why this stays diatonic where
+        // adding a flat 4 semitones would not.
+        while ((int) c.notes.size() < want)
+        {
+            const int top = c.notes.back();
+            int next = top + 3;
+            for (int i = 0; i < 12; ++i) // find the next scale tone at least a third above
+            {
+                const int pc = ((next + i) - root) % 12;
+                const int norm = (pc + 12) % 12;
+                if (std::find(scale.begin(), scale.end(), norm) != scale.end())
+                {
+                    next = next + i;
+                    break;
+                }
+            }
+            if (next > 127 || next <= top)
+                break; // off the keyboard, or the search found nothing: stop rather than loop
+            c.notes.push_back(next);
+        }
+
+        // Shrink: from the top, so the root and third survive.
+        if ((int) c.notes.size() > want && want >= 1)
+            c.notes.resize((size_t) want);
+
+        // Inversion, for every source rather than the weighted pool alone. Normalised to root
+        // position first and then inverted, so this *replaces* whatever rotation the chord
+        // arrived in rather than compounding with it: tick R alone and you get root position,
+        // even from a pool that had already inverted the chord itself.
+        if (! inversions.empty())
+        {
+            const int inv = inversions[(size_t) rng.nextInt((int) inversions.size())];
+            auto base = chordgen::rootPosition(c.notes, c.rootPc);
+            if (! base.empty())
+            {
+                auto voiced = chordgen::applyInversion(base, inv);
+                bool fits = true;
+                for (const int n : voiced)
+                    if (n < 0 || n > 127)
+                        fits = false;
+                if (fits)
+                    c.notes = std::move(voiced);
+            }
+        }
+
+        // Register: move the whole chord so its lowest note sits in an octave inside the range.
+        // The chord moves in one piece, so its shape and its voice leading are untouched.
+        const int wantOct = minOct + (maxOct > minOct ? rng.nextInt(maxOct - minOct + 1) : 0);
+        const int haveOct = c.notes.front() / 12;
+        const int shift = (wantOct - haveOct) * 12;
+        if (shift != 0)
+        {
+            bool fits = true;
+            for (const int n : c.notes)
+                if (n + shift < 0 || n + shift > 127)
+                    fits = false;
+            if (fits)
+                for (auto& n : c.notes)
+                    n += shift;
+        }
+    }
+}
 
 // One door to five brains plus the original. Voice leading runs on the way out, which is the
 // point of it being a pass and not a source: whichever of these produced the chords, they arrive
@@ -131,6 +243,10 @@ std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
             break;
     }
 
+    // Order matters: fit the voicing first, then smooth it. fitVoicing moves whole chords
+    // between octaves, so running it after the smoothing pass would undo exactly what that pass
+    // had just worked out.
+    fitVoicing(out);
     sources::applyVoiceLeading(out, a.getRawParameterValue("genSmooth")->load() * 0.01f);
     return out;
 }
@@ -140,6 +256,29 @@ std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
 // a throwaway Chord vector rather than duplicating the algorithm, and copies only the notes back,
 // so the numeral and name survive. Voice leading never changes which pitch classes a chord holds,
 // only their register, so a name written before this runs is still right after it.
+// fitVoicing for the Markov path, which arrives as pads rather than Chords. Round-trips through
+// a throwaway Chord vector exactly as smoothPads does, and copies back the notes plus the name,
+// because unlike smoothing this pass *does* change which notes a chord holds.
+void ChordGenMenu::fitPads(std::vector<KeysProcessor::ChordPad>& pads)
+{
+    std::vector<chordgen::Chord> tmp;
+    tmp.reserve(pads.size());
+    for (const auto& p : pads)
+    {
+        chordgen::Chord c;
+        c.rootPc = p.rootPc;
+        c.type = p.type;
+        c.notes = p.notes;
+        tmp.push_back(std::move(c));
+    }
+    fitVoicing(tmp);
+    for (size_t i = 0; i < pads.size() && i < tmp.size(); ++i)
+    {
+        pads[i].notes = tmp[i].notes;
+        pads[i].name = chords::detect(tmp[i].notes);
+    }
+}
+
 void ChordGenMenu::smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const
 {
     const float amount = processor.apvts.getRawParameterValue("genSmooth")->load() * 0.01f;
@@ -379,7 +518,8 @@ std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
             pad.numeral = c.numeral;
             out.push_back(std::move(pad));
         }
-        smoothPads(out); // the one pass every source gets, Markov included
+        fitPads(out);    // note count and register, every source including this one
+        smoothPads(out); // and then the smoothing, in that order for the reason fitVoicing gives
         return out;
     }
 

@@ -126,7 +126,8 @@ public:
     // The Pads bar and the generator's window both grey them on this one answer, so the same
     // setting is never live in one place and dead in the other. Key is not included: the
     // chains do transpose to it.
-    bool readsScaleSettings() const;
+    bool readsScaleSettings() const; // Scale Compliance and Lock Influence: the pool's own dials
+    bool readsMode() const;          // everything but Markov, which has no scale in it at all
 
     // Which of the seven brains is up, as the raw `genSource` index. Public because the window
     // shows a different band of settings per source and has to ask. The order is the parameter's,
@@ -166,6 +167,16 @@ private:
     // for, and regenerating one pad steps the chain from its left neighbour, which is behaviour
     // worth more than the symmetry of folding it in here.
     std::vector<chordgen::Chord> generateChords(int count);
+
+    // The two voicing post-passes, applied to every source for the reason voice leading is:
+    // how many notes a chord has and which register it sits in are facts about the voicing, not
+    // about which chord it is, so seven brains honouring them separately would be seven places to
+    // get it wrong (Owen, 2026-08-01: "all of their options should have the option for how many
+    // notes and what inversion"). Both read ranges, and both swap the ends if they cross.
+    std::pair<int, int> noteCountRange() const; // 2..11
+    std::pair<int, int> octaveRange() const;
+    void fitVoicing(std::vector<chordgen::Chord>& chords);
+    void fitPads(std::vector<KeysProcessor::ChordPad>& pads); // the Markov half of that
     void smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const; // the Markov half of that
 
     // The Markov source (Source: Markov). Same page mechanics, different brain.

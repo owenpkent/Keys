@@ -163,6 +163,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // Voice leading is not a source: it is a pass over whatever a source produced, so it stays on
     // screen under all seven. 0 leaves every voicing alone, 100 always takes the smoothest.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genSmooth", 1 }, "Voice Leading", 0, 100, 0));
+
+    // How many notes a chord has, and which registers it may sit in. Both are **ranges**, both
+    // are post-passes over whatever a source produced, and both therefore apply to all seven
+    // (Owen, 2026-08-01: "all of their options should have the option for how many notes and what
+    // inversion, and I'd actually like how many notes to go from two all the way up to 11, and an
+    // octave range").
+    //
+    // Two to eleven, not the 3/4/5 tick boxes these replace. Below three you get dyads, which are
+    // a real voicing and not a broken chord; above five the stack keeps climbing in thirds
+    // through the scale, so eleven is a chord covering every degree and then some. `genOctave`
+    // became a pair for the same reason: one octave puts sixteen chords in one register, and a
+    // range lets a page breathe. Nothing enforces min <= max here, because a parameter cannot see
+    // its sibling; the reader swaps them (see `noteCountRange` / `octaveRange`).
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 2, 11, 3));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 2, 11, 4));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctaveMax", 1 }, "Octave Max", 2, 6, 4));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "markovMode", 1 }, "Markov Mode",
                                                       juce::StringArray { "Major", "Minor", "Modal" }, 0));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "markovTemp", 1 }, "Markov Temperature",

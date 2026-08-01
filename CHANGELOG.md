@@ -5,6 +5,56 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the generator stops generating behind your back, and shows its working
+
+Four asks from Owen on 2026-08-01, in one pass.
+
+**Changing a setting no longer generates anything.** The tray rerolled itself whenever a setting
+moved, which meant sweeping Source to hear the seven of them threw the tray away six times on the
+way past. A control you cannot explore without destroying your work is a control you stop
+touching. The tray caption now just says *"settings changed since these were generated. Regen for
+new ones."* Generating is **Fill** and **Regen** and nothing else.
+
+**Source and Direction are always-visible buttons**, not dropdowns: one click instead of two, and
+seven answers on screen instead of six hidden behind the first. They write the same parameters the
+combo boxes did, so nothing underneath changed.
+
+**Scale Compliance is back on screen under every source**, on a fixed row with Lock Influence,
+greying where a source does not read them rather than vanishing. **Notes and Inversions moved to
+that row too**, which fixed a deeper mistake: both are facts about the *voicing* rather than about
+which chord it is, so they were never the weighted pool's property. They are now post-passes the
+generator applies to whatever any of the seven produced.
+
+**Notes is a range from 2 to 11**, replacing the 3/4/5 tick boxes. Below three you get dyads;
+above five the stack keeps climbing in thirds **through the mode**, so eleven is a chord covering
+every degree and still in the key. **Octave is a range too**, so a page can spread across
+registers instead of stacking up in one. Both are steppers rather than sliders: a slider is a drag
+target, and steppers are the click-only path to every value.
+
+**Voice Leading is now "Smooth Voicing"** (Owen: "I don't understand what the voice reading
+does"). The name was the problem. It keeps consecutive chords close together on the keyboard:
+C-E-G then F-A-C becomes C-E-G then C-F-A, the same two chords with less jumping. It never changes
+which chords you get or which notes they contain, only which octave each note sits in.
+
+### Added: a diagram of what each source is doing
+
+`SourceViz` draws the current source under the buttons that choose it, and highlights the walk
+that produced whatever is in the tray. A circle-of-fifths wheel with the walk traced round it, the
+Neo-Riemannian P/L/R triangle with the actual sequence of transforms as chips, a mirror axis and
+reflection pairs for Negative Harmony, a numeral strip for Progressions and Markov, degree bars
+for Algorithmic, sliding note-stacks for Planing. Every one still draws its static figure with an
+empty tray, so the picture explains the source before you have generated anything.
+
+It is a picture and nothing else: click-through, takes no input, writes nothing.
+
+### Fixed: small text was too dark to read
+
+`skin::textDim` and `skin::textFaint` were chosen by eye against `skin::text`, which is the wrong
+comparison. Almost everything wearing them is 9 to 11 px uppercase with letter spacing (the
+section captions, the note list under every chord name), and small letterforms need far more
+contrast than large ones to read at the same effort. Both lifted; `skin::text` is unchanged
+because it was never the problem.
+
 ### Added: the chord generator opens with sixteen chords you can hear before you keep one
 
 Owen: "when you open the chord generator page, it should open up. I have four by four pad where

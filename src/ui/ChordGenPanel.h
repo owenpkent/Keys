@@ -3,6 +3,7 @@
 #include "../PluginProcessor.h"
 #include "ChordGenMenu.h"
 #include "ChordTray.h"
+#include "SourceViz.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
 #include <functional>
@@ -131,8 +132,18 @@ private:
     juce::Slider octaveSlider, complianceSlider, lockInfluenceSlider;
     juce::Label octaveLabel, complianceLabel, lockInfluenceLabel;
 
-    juce::Label notesLabel, invLabel;
-    juce::ToggleButton triadsButton { "3" }, seventhsButton { "4" }, ninthsButton { "5" };
+    // Notes and Inversions are always on screen from 2026-08-01 (Owen: "all of their options
+    // should have the option for how many notes and what inversion"). They were the head of the
+    // Algorithmic band and went off screen under the other six, which was wrong twice over: the
+    // note count and the register are facts about the *voicing*, so they were never the weighted
+    // pool's property in the first place, and the generator now applies both as post-passes over
+    // whatever any of the seven produced.
+    //
+    // The 3/4/5 tick boxes became a min/max pair spanning 2 to 11. Below three you get dyads, and
+    // above five the stack keeps climbing in thirds through the mode. Three tick boxes could not
+    // have carried ten values without becoming ten targets.
+    juce::Label notesLabel, invLabel, octaveMaxLabel;
+    juce::Slider notesMinSlider, notesMaxSlider, octaveMaxSlider;
     juce::ToggleButton inv0Button { "R" }, inv1Button { "1st" }, inv2Button { "2nd" }, inv3Button { "3rd" };
 
     // The tray's three actions. They read Fill / Regen / Clear rather than the Fill Page / Regen
@@ -144,6 +155,12 @@ private:
     // rest of this class rather than an exception to it: a tray card is not state, so throwing
     // the sixteen away with the window costs nothing. Mood and Start live on the brain because
     // losing *them* would silently change what the next generation produces.
+    // The picture of what the current source is doing, under the row of source buttons so it
+    // explains the one you just pressed. Read-only and click-through: it is a diagram, and it
+    // takes no input at all. Fed from the timer, because everything it draws (the source, the
+    // key, the tray's contents) can move without this class being told.
+    SourceViz viz;
+
     ChordTray tray;
     juce::Label trayLabel;
 
@@ -162,8 +179,21 @@ private:
     // the band shows whichever set is live rather than reserving a row that is dead half the
     // time. Sharing the rect makes the visibility swap load-bearing rather than cosmetic:
     // applySource() owns it, and the two sets are never on screen together.
-    juce::ComboBox sourceBox, chainBox, moodBox, startBox;
-    juce::Label sourceLabel, chainLabel, moodLabel, startLabel;
+    // Source is seven buttons on a row of their own, not a combo box (Owen, 2026-08-01: "maybe
+    // instead of the source being a drop down and the direction being a drop down, maybe those
+    // can be, like, always visible"). A combo costs two clicks and hides six of the seven answers
+    // behind the first, which for a setting whose whole point is comparison is the wrong shape.
+    // Laid out by `sourceButtons()`, and each one writes `genSource` through the same parameter
+    // the Pads bar reads, so there is still exactly one source of truth.
+    std::array<juce::TextButton, 7> sourceButtons;
+    juce::Label sourceLabel;
+    std::array<juce::TextButton, 2> circleDirButtons; // same treatment, same reason
+    void setSourceParam(int index);
+    void setCircleDirParam(int index);
+    void refreshRadioStates(); // the tick marks, polled with everything else
+
+    juce::ComboBox chainBox, moodBox, startBox;
+    juce::Label chainLabel, moodLabel, startLabel;
     juce::Slider tempSlider, lengthSlider;
     juce::Label tempLabel, lengthLabel;
 
@@ -171,7 +201,7 @@ private:
     // it reflects the key about the axis between tonic and dominant, and Key, Mode and Octave in
     // row A are the whole of what that needs, so an empty row B is the honest answer rather than
     // a control invented to fill it.
-    juce::ComboBox circleDirBox, progressionBox;
+    juce::ComboBox progressionBox;
     juce::Label circleDirLabel, progressionLabel;
     juce::Slider plrPSlider, plrLSlider, plrRSlider;
     juce::Label plrPLabel, plrLLabel, plrRLabel;
@@ -183,11 +213,17 @@ private:
     juce::Slider smoothSlider;
     juce::Label smoothLabel;
 
-    std::unique_ptr<ComboAtt> rootAtt, modeAtt, sourceAtt, chainAtt;
-    std::unique_ptr<ComboAtt> circleDirAtt, progressionAtt;
+    // No attachment for Source or Circle Direction: both are button rows now, and a row of
+    // buttons on one choice parameter is a thing JUCE has no attachment for. They write the
+    // parameter in setSourceParam / setCircleDirParam and read it back in refreshRadioStates,
+    // which the timer runs. That is hand-syncing, which this class otherwise never does, and it
+    // is confined to those three functions on purpose.
+    std::unique_ptr<ComboAtt> rootAtt, modeAtt, chainAtt;
+    std::unique_ptr<ComboAtt> progressionAtt;
     std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt, tempAtt, lengthAtt;
     std::unique_ptr<SliderAtt> plrPAtt, plrLAtt, plrRAtt, smoothAtt;
-    std::unique_ptr<ButtonAtt> triadsAtt, seventhsAtt, ninthsAtt, planingDiatonicAtt;
+    std::unique_ptr<SliderAtt> notesMinAtt, notesMaxAtt, octaveMaxAtt;
+    std::unique_ptr<ButtonAtt> planingDiatonicAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;
 
     int lastChainMode = -1; // rebuild the Mood list when the chain mode changes
