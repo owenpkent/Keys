@@ -140,7 +140,10 @@ public:
     void moveChordPad(int from, int to); // swap two slots
     void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive
     void releaseChordPad(int i);         // stop it, unless Sustain is holding
-    void stopAllChordPads();
+    // Every chord source at once: the pads, the live card and the chord held into each arp
+    // line. `includeArpHolds` false leaves the lines alone and stops only the pads and the live
+    // card - see holdArpChordNow, the one caller that passes it, and the reason it exists.
+    void stopAllChordPads(bool includeArpHolds = true);
 
     // The live card's chord: whatever the keyboard is holding, fired as one gesture so it
     // is heard strummed and humanized the way a pad plays it, rather than as the sum of

@@ -241,6 +241,16 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   this back into Sync - an absent parameter keeps the live instance's current value rather than
   resetting it, so without that a Hz session would reopen in Sync at whatever division it
   happened to hold, silently.
+- **Exclusive does not reach across arp lines** (2026-08-02, Owen: "I want each arpeggiator to
+  play different chords"). `stopAllChordPads()` releases every chord source including every
+  line's hold, and `holdArpChordNow` called it, so handing B a chord took A's away and the
+  second drag undid the first. It now passes `includeArpHolds = false`: the pads and the live
+  card still give way in both directions, and the line's *own* previous hold still goes
+  (`releaseArpChord(line)`, unconditional, just above it). The old reading - one chord at a
+  time whichever surface started it - was right while the lines were something you switched
+  between and wrong once they are two instruments you feed side by side. Nothing collides:
+  each line's chord is fired into that line's own queue (`dest` is line + 1) and `noteRefs` is
+  per destination stream. Every other caller of `stopAllChordPads()` still means all of it.
 - **A chord card sounds on release, never on press** (2026-08-02, Owen: "the chord shouldn't
   play right away when you click it. You should be able to drag it"). `ChordPads::mouseDown` is
   now silent and does nothing but remember where the press landed; `mouseUp` decides which

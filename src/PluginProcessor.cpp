@@ -647,7 +647,7 @@ void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag, int dest)
     sounding.clear();
 }
 
-void KeysProcessor::stopAllChordPads()
+void KeysProcessor::stopAllChordPads(bool includeArpHolds)
 {
     for (int i = 0; i < numChordPads; ++i)
         stopChordPad(i);
@@ -656,8 +656,9 @@ void KeysProcessor::stopAllChordPads()
     // chord held into the arp as well, or a lit Exclusive quietly does nothing in one
     // direction and the chords pile up.
     releaseLiveChord(true);
-    for (int n = 0; n < numArpLines; ++n)
-        releaseArpChord(n);
+    if (includeArpHolds)
+        for (int n = 0; n < numArpLines; ++n)
+            releaseArpChord(n);
 }
 
 void KeysProcessor::pressChordPad(int i)
@@ -1593,11 +1594,22 @@ void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::S
     if (notes.empty())
         return;
     // Exclusive works in both directions or it does not work: handing a card to the arp has
-    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold. It
-    // chokes the other two lines with it, which is what "one chord at a time, whichever
-    // surface started it" has to mean once there are three surfaces that can hold one.
+    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold.
+    //
+    // **It does not reach the other arp lines** (2026-08-02, Owen: "I want each arpeggiator to
+    // play different chords"). It used to, on the reading that Exclusive means one chord at a
+    // time whichever surface started it - which was right while the lines were something you
+    // switched between, and is wrong now that they are two instruments you feed side by side.
+    // Handing B a chord silently took A's away, so the second drag undid the first and a
+    // polyrhythm could not be built at all: the feature and the rule wanted opposite things,
+    // and the feature is the reason the lines exist.
+    //
+    // Nothing collides by allowing it. Each line's chord is fired into that line's own queue
+    // (`dest` is line + 1) and `noteRefs` is per destination stream, so two lines holding the
+    // same pitch are two independent references and neither release touches the other. This
+    // line's own previous hold is already gone: releaseArpChord(line), above, is unconditional.
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
-        stopAllChordPads();
+        stopAllChordPads(/*includeArpHolds*/ false);
     auto& ln = lines[(size_t) line];
     ln.chordName = name;
     // Fired into this line's own queue, not the track output: only its engine sees it. Note

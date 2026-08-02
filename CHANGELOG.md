@@ -23,6 +23,13 @@ the arp panel is 66 px shorter than it was.
 - The A/B tabs still open a line's deep controls: the step lanes and the twelve slots are
   per-line and have nowhere to live in a macro row.
 
+**Each line holds its own chord.** Exclusive no longer reaches across the arp lines: handing a
+chord to B used to silently take A's away, so the second drag undid the first and a polyrhythm
+could not be built at all. It still chokes the pads and the live card in both directions, and a
+line's own previous hold still goes when you hand it a new one. Nothing collides by allowing it
+- each line's chord is fired into that line's own queue, and `noteRefs` is per destination
+stream, so two lines holding the same pitch are two independent references.
+
 **A chord card sounds when you let go of it, not when you press it.** Every gesture that starts
 on a card now begins silently, and the release decides what it was:
 
