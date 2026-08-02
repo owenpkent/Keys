@@ -118,8 +118,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   replace rather than compound, but it also collapses repeated pitch classes and restacks what is
   left inside one octave. It ran *after* the grow loop for a few hours, which quietly threw the
   grow loop away - stacking thirds through a seven-note mode comes back to the root's own pitch
-  class on the eighth note, so every count above seven returned seven (five under a pentatonic
-  mode) and the two-octave stack returned a one-octave cluster.
+  class on the eighth note, so every count above seven returned seven and the two-octave stack
+  returned a one-octave cluster. The ceiling is the number of distinct pitch classes the stack
+  *visits*, which is not the mode's size: the +3-and-search step skips the degrees a third does
+  not land on, so a pentatonic mode caps at **three**, not five. `ChordSourceTests.cpp` pins that,
+  since `fitVoicing` is private to a class needing a live processor.
   **Changing a setting generates nothing** (Owen, same day: "I don't want it to auto generate when
   you change a source"). `settingsMovedSinceFill()` only makes the tray caption say so. The tray
   rerolled on any settings change for part of that day, which threw it away six times while you

@@ -9,7 +9,7 @@ All notable changes to Keys are documented here. Format follows
 
 The Notes range advertises 2 to 11 and the tooltip promises that above five "the stack keeps
 climbing in thirds through the mode, so 11 covers every degree". It did not: every count above
-seven came back as seven, and under a pentatonic mode as five, with the two-octave stack
+seven came back as seven, and under a pentatonic mode as *three*, with the two-octave stack
 flattened into a one-octave cluster.
 
 `fitVoicing` grew the chord and *then* normalised it to root position for the inversion pass.
