@@ -5,6 +5,43 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the two lines sit side by side, and VEL actually gets quiet
+
+The follow-up to the entry below, both Owen's calls on the same day ("I was at negative 96,
+and it was still pretty loud", "I'd like to consider having the arpeggiators parallel to each
+other instead of one on top of the other").
+
+**Side by side.** Each line is now a card - rate and shape on top, the eight knobs under
+their own headings, Dot / Trip / Anchor with the held chord along the bottom - and the two
+cards share the panel's width. Two parallel instruments that read as such, each a drop target
+half the panel wide, and the view is another ~30 px shorter. Every card carries its own knob
+headings now; "written once on the top row" only worked while the rows stacked.
+
+**Three fixes under the VEL knob, one complaint.** -96 was still plainly audible because
+three things compounded:
+
+- **The curve was linear and hearing is not.** The multiplier is now squared
+  (`((100+VEL)/100)^2`), so halfway down plays a quarter of the velocity, which *sounds*
+  about half as loud, and the travel spends its change evenly instead of cramming it into
+  the last few degrees.
+- **The floor pinned the bottom.** The engine's 0.05 audibility floor (there to keep a
+  Velocity lane at 0 or a hard H.VEL draw from turning into silence) used to sit *after*
+  the level control, so everything from about -90 down emitted identical velocity-6 notes.
+  The fader now multiplies after the floor and bottoms out at MIDI velocity 1.
+- **The input was being re-randomized.** A chord handed to a line went through the
+  keyboard's own Humanize velocity range on the way in, so VEL's "as played" reference
+  wandered per note. A note bound for a line's queue now skips that replacement - the line
+  has H.VEL for randomness and VEL for level; what you play on the keybed keeps Humanize,
+  because that is playing.
+
+`migrateVelTrim` now folds an old session's Volume through the curve
+(`trim = 100*(sqrt(volume%) - 1)`), still level-exact to within the 1/127 velocity quantum.
+One cohort moves: VEL values set under the few-hours-old linear build (dev machines only)
+now play quieter than they did, since the same number means less under the squared curve.
+And past all of it: how loud MIDI velocity 1 *sounds* is the synth patch's decision - a
+preset with no velocity sensitivity flattens every velocity control Keys has, and only the
+-100 mute cuts through that.
+
 ### Changed: the All view is the two lines and their header, and the level/humanize knobs reworked
 
 Owen, on the macro view: "Your arpeggiator needs some work ... we need to make the window

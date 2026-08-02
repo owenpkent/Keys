@@ -1026,14 +1026,23 @@ public:
             }
             expect(sawQuieter, "full H.VEL actually moved something");
 
+            // The trim's curve is squared - hearing is logarithmic, and the linear version
+            // spent nearly all its audible change at the very end of the travel - and it
+            // multiplies *after* the 0.05 audibility floor, so a deep cut reaches MIDI
+            // velocity 1 instead of pinning at 6 from -90 down.
             const auto half = velsWith(0, 0, -50);
             for (size_t i = 0; i < half.size() && i < base.size(); ++i)
-                expectWithinAbsoluteError(half[i], base[i] * 0.5f, 0.02f,
-                                          "trim at -50 plays at half velocity");
-            const auto doubled = velsWith(0, 0, 100);
-            for (size_t i = 0; i < doubled.size() && i < base.size(); ++i)
-                expectWithinAbsoluteError(doubled[i], juce::jmin(1.0f, base[i] * 2.0f), 0.02f,
-                                          "trim at +100 doubles, into the 1.0 ceiling");
+                expectWithinAbsoluteError(half[i], base[i] * 0.25f, 0.02f,
+                                          "trim at -50 plays at quarter velocity (half as loud)");
+            const auto boosted = velsWith(0, 0, 100);
+            for (size_t i = 0; i < boosted.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(boosted[i], juce::jmin(1.0f, base[i] * 4.0f), 0.02f,
+                                          "trim at +100 quadruples, into the 1.0 ceiling");
+            const auto deep = velsWith(0, 0, -96);
+            expect(! deep.empty(), "a deep cut still plays");
+            for (const float v : deep)
+                expectWithinAbsoluteError(v, 1.0f / 127.0f, 0.012f,
+                                          "-96 reaches the bottom MIDI step, not the old velocity-6 pin");
             expect(velsWith(0, 0, -100).empty(), "full-left trim is a mute, exactly as VOL 0 was");
         }
 

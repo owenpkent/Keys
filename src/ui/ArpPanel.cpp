@@ -20,12 +20,16 @@ namespace
 
     constexpr const char* clockDivNames[3] = { "1x", "1/2", "1/4" };
 
-    // The strip at the bottom of a macro row holding the rate's Dot / Trip / Anchor. Declared
-    // up here rather than with the other macro-view heights further down, because MacroRow's
-    // own resized() is defined above that block and needs it; the block down there builds
-    // arpMacroRow out of it, and an anonymous namespace is one namespace however many times it
-    // is opened. See arpMacroRow for why the modifiers earned a strip of their own.
-    constexpr int arpMacroSubRow = 36;
+    // One control line inside a macro card: 40 px of knob plus its 15 px readout, the same
+    // spend the old single-line row made. Declared up here rather than with the other
+    // macro-view heights further down, because MacroRow's own resized() is defined above that
+    // block and needs it; the block down there builds arpMacroCard out of it, and an
+    // anonymous namespace is one namespace however many times it is opened.
+    constexpr int arpMacroLine = 55;
+    // ...and the card's other two strips: the rate's Dot / Trip / Anchor keep the full 34 px
+    // hit height, under an 11 px heading strip for the knob columns.
+    constexpr int arpMacroMods = 34;
+    constexpr int arpMacroHeads = 11;
 
     // Show or hide a whole group of controls in one line. The parameter type is what makes it
     // work: a braced list of mixed component types cannot deduce its own element type, but it
@@ -944,16 +948,16 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
     okstudio::ui::makeMouseOnly(*this);
     const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
     const auto id = [n](KeysProcessor::ArpParam w) { return KeysProcessor::arpParamId(n, w); };
-    // Headings are written once, on the top row; every row still reserves the strip so the
-    // columns stay aligned down the view.
+    // Every card carries its own headings since the cards went side by side (2026-08-02):
+    // "written once on the top row" only worked while the rows stacked and B's columns sat
+    // exactly under A's.
     const auto heading = [this](juce::Label& l, const char* text)
     {
         l.setText(text, juce::dontSendNotification);
         l.setJustificationType(juce::Justification::centred);
         l.setFont(skin::micro(9.0f));
         l.setColour(juce::Label::textColourId, skin::textFaint);
-        l.setVisible(line == 0);
-        addChildComponent(l);
+        addAndMakeVisible(l);
     };
 
     onButton.setButtonText(letter);
@@ -1233,100 +1237,75 @@ void ArpPanel::MacroRow::paint(juce::Graphics& g)
         g.drawRoundedRectangle(b, skin::radius, 2.0f);
         return; // the hairline would only fight the outline
     }
-    // A hairline under every row, so three rows read as three lines rather than as one block
-    // of controls.
+    // Two cards sit side by side (2026-08-02), so each needs its own edge: a faint outline
+    // where the stacked rows used a hairline underneath.
     g.setColour(skin::text.withAlpha(0.06f));
-    g.fillRect(0.0f, (float) getHeight() - 1.0f, (float) getWidth(), 1.0f);
+    g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), skin::radius, 1.0f);
 }
 
 void ArpPanel::MacroRow::resized()
 {
-    auto full = getLocalBounds().withTrimmedBottom(2);
-    // Every row gives up the same strip to the column headings, whether or not it draws them,
-    // so the columns line up down the view.
-    const auto headStrip = full.removeFromTop(11);
-    // ...and the same strip at the bottom for the rate's three modifiers. Taken before the main
-    // line is laid out, so adding them cannot squeeze anything above: the main line keeps every
-    // pixel it had, and the row is taller by exactly this strip (see arpMacroRow).
-    auto subRow = full.removeFromBottom(arpMacroSubRow);
-    auto r = full;
-    const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
+    // Three lines inside one card (2026-08-02, Owen: "having the arpeggiators parallel to
+    // each other instead of one on top of the other"): what the line plays (On, rate,
+    // shape), the eight knobs under their own heading strip, and the rate's modifiers with
+    // the held chord. Stacked *inside* the card because two cards now share the panel's
+    // width, and the old single line needed more width than half the panel has. The heights
+    // here are arpMacroLine / arpMacroHeads / arpMacroMods; arpMacroCard is their sum and
+    // has to agree with this function exactly.
+    auto full = getLocalBounds().reduced(8, 4);
     // The single-height controls sit centred against the knobs beside them.
     const auto centred = [](juce::Rectangle<int> c) { return c.withSizeKeepingCentre(c.getWidth(), 26); };
 
-    onButton.setBounds(centred(take(40)));
-
-    ratePrev.setBounds(centred(take(26)));
-    rateKnob.setBounds(take(58));
-    rateNext.setBounds(centred(take(26)));
-    rateModeButton.setBounds(centred(take(42)));
-    // Where the rate group starts, so its modifiers below line up under it rather than under
-    // the left edge of the row. Read from the control, not from a second copy of the sums.
-    const int rateGroupX = ratePrev.getX();
-
-    // The held chord comes off the right...
-    chordLabel.setBounds(centred(r.removeFromRight(64)));
-    r.removeFromRight(6);
-
-    // ...then **Shape's whole cell is reserved first**, and the knobs share what is left.
-    //
-    // This used to be the other way round, with a term in the knob arithmetic standing in for
-    // Shape - and a reservation expressed as a subtraction inside a clamp is not a reservation
-    // at all. On Owen's window the knobs hit their 52 px floor, the clamp threw the subtraction
-    // away, the strip came out wider than the arithmetic had allowed for, and Shape got the
-    // 77 px that happened to remain. Two symptoms, one cause: the combo drew "Random Other" as
-    // "R..." (2026-08-02, Owen: "the pattern is cut off in the drop down") and `>` was starved
-    // to *zero width* by the same shortfall - a mouse-only stepper that was not on screen at
-    // all, which is the worse half and had no visible symptom to report.
-    //
-    // Reserving the fixed-size thing first is the ordering that cannot fail: Shape's cell is a
-    // constant, the knobs are the elastic ones, and an elastic control with a floor must never
-    // be asked to leave room for anything.
-    constexpr int shapeBoxW = 118;                        // fits the longest item plus the chevron
-    constexpr int shapeCellW = shapeBoxW + 26 + 26 + 6 * 3; // ...plus `<`, `>` and their gaps
-    auto shapeCell = r.removeFromLeft(juce::jmin(shapeCellW, r.getWidth()));
-    r.removeFromLeft(8);
-
-    // 38, not 52: the floor has to leave the row solvable at Owen's window width, and a 38 px
-    // knob is still over the 34 px mouse-only minimum. They stop growing at 96 as before.
-    const int each = juce::jlimit(38, 96, (r.getWidth() - 6 * (numKnobs - 1)) / numKnobs);
-    auto knobStrip = r.removeFromRight(each * numKnobs + 6 * (numKnobs - 1));
-
+    auto line1 = full.removeFromTop(arpMacroLine);
     {
-        // Shape's own three, inside the cell reserved for them, so a tight row shrinks the
-        // combo and never the steppers - they are targets and it is a readout.
-        const auto takeShape = [&shapeCell](int w)
-        { auto c = shapeCell.removeFromLeft(w); shapeCell.removeFromLeft(6); return c; };
-        shapePrev.setBounds(centred(takeShape(26)));
-        shapeBox.setBounds(centred(takeShape(juce::jmax(0, shapeCell.getWidth() - 32))));
-        shapeNext.setBounds(centred(takeShape(26)));
+        auto r = line1;
+        const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
+        onButton.setBounds(centred(take(40)));
+        ratePrev.setBounds(centred(take(26)));
+        rateKnob.setBounds(take(58));
+        rateNext.setBounds(centred(take(26)));
+        rateModeButton.setBounds(centred(take(42)));
+        // Shape's steppers are reserved before its combo takes the rest: they are targets
+        // and it is a readout, the same reserve-the-fixed-thing-first ordering the old
+        // single-line layout paid for twice (see the 2026-08-02 entries in CLAUDE.md).
+        shapePrev.setBounds(centred(r.removeFromLeft(26)));
+        r.removeFromLeft(6);
+        shapeNext.setBounds(centred(r.removeFromRight(26)));
+        r.removeFromRight(6);
+        shapeBox.setBounds(centred(r));
     }
 
+    const auto headStrip = full.removeFromTop(arpMacroHeads);
+    auto knobLine = full.removeFromTop(arpMacroLine);
+    // 38 keeps the card solvable at the editor's minimum width, where a column is ~430 px
+    // inside and eight knobs land at 48; they stop growing at 96 as before.
+    const int each = juce::jlimit(38, 96, (knobLine.getWidth() - 6 * (numKnobs - 1)) / numKnobs);
+    auto knobStrip = knobLine.removeFromLeft(each * numKnobs + 6 * (numKnobs - 1));
     for (int k = 0; k < numKnobs; ++k)
     {
         knobs[(size_t) k].setBounds(knobStrip.removeFromLeft(each));
         knobStrip.removeFromLeft(6);
     }
-
-    // The rate's modifiers, under the rate group they belong to. Full 34 px height - they are
-    // targets, and the sub-row exists precisely so they do not have to be squeezed - and wide
-    // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
-    // controls' worth of ambiguity in a row that already has eight unlabelled knobs.
-    {
-        auto s = subRow.withTrimmedLeft(rateGroupX - subRow.getX()).withTrimmedTop(2);
-        const auto takeMod = [&s](int w)
-        { auto c = s.removeFromLeft(w); s.removeFromLeft(8); return c; };
-        dotButton.setBounds(takeMod(62));
-        tripButton.setBounds(takeMod(66));
-        anchorButton.setBounds(takeMod(84));
-    }
-
-    // Headings are placed from the control they name, not by walking a second copy of the
+    // Headings are placed from the knob they name, not by walking a second copy of the
     // layout: one source of truth for where a column is, so they cannot drift apart.
     const auto headFor = [&headStrip](juce::Label& l, const juce::Component& c)
     { l.setBounds(c.getX(), headStrip.getY(), c.getWidth(), headStrip.getHeight()); };
     for (int k = 0; k < numKnobs; ++k)
         headFor(knobLabels[(size_t) k], knobs[(size_t) k]);
+
+    // The rate's modifiers keep their full 34 px hit height - they are targets, and wide
+    // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
+    // controls' worth of ambiguity in a card that already has eight unlabelled knobs. The
+    // held chord sits at the card's bottom-right corner, where a dropped card lands.
+    full.removeFromTop(2);
+    auto subRow = full.removeFromTop(arpMacroMods);
+    chordLabel.setBounds(centred(subRow.removeFromRight(64)));
+    subRow.removeFromRight(6);
+    const auto takeMod = [&subRow](int w)
+    { auto c = subRow.removeFromLeft(w); subRow.removeFromLeft(8); return c; };
+    dotButton.setBounds(takeMod(62));
+    tripButton.setBounds(takeMod(66));
+    anchorButton.setBounds(takeMod(84));
 }
 
 // ---------------------------------------------------------------------------
@@ -1992,21 +1971,14 @@ namespace
     // that is already the tallest thing in the editor.
     constexpr int arpBand2H = arpBandTop + arpBandRow + 4;
     constexpr int arpSlotsH = 58;
-    // The macro view: one row per line the UI shows, plus one shared row (tempo and quantize).
-    // It replaces the two band rows rather than joining them, which is what keeps the panel
-    // exactly as tall as it is on a shape - the whole point of a fourth tab rather than a fourth
-    // band. 11 for the column headings, 40 for the knob, 15 for its readout - the row is as tall
-    // as a knob needs and no taller.
-    //
-    // Two rows since 2026-08-02 (KeysProcessor::uiArpLines), so this view is now *shorter* than
-    // the band it replaces rather than the same height. That slack goes to the chord strip
-    // below, which is the surface these rows are dragged onto.
-    // 66 was the whole row until Dot / Trip / Anchor joined it (2026-08-02). They go on a strip
-    // of their own under the rate rather than into the main line, which at Owen's window width
-    // is already at every floor it has - two more 34 px targets in there would have driven the
-    // eight knobs under the mouse-only minimum. Two rows at 102 is 204 against the three at 66
-    // this view used to be, so it still costs the panel nothing it did not already have.
-    constexpr int arpMacroRow = 66 + arpMacroSubRow;
+    // The macro view: one *card* per line, side by side (2026-08-02, Owen: "having the
+    // arpeggiators parallel to each other instead of one on top of the other"), under the
+    // header strip that carries the tabs, BPM and Quantize. A card is three stacked lines -
+    // rate and shape, the eight knobs under their headings, the rate's modifiers with the
+    // held chord - because half the panel's width cannot hold the old single-line row, and
+    // side by side is the point: two parallel instruments, each a drop target half the panel
+    // wide. This sum has to agree with MacroRow::resized exactly.
+    constexpr int arpMacroCard = 4 + arpMacroLine + arpMacroHeads + arpMacroLine + 2 + arpMacroMods + 4;
     // The second 2026-08-02 pass (Owen: "we need to make the window shorter ... move the BPM
     // up into the title ... move the A B All into the title and remove everything on the
     // bottom"). The shared row is gone: the A/B/All tabs, the BPM cell and Quantize all sit
@@ -2015,8 +1987,7 @@ namespace
     // the per-line tabs now - so the view is the header and the two rows, full stop.
     constexpr int arpMacroHead = 34;    // tabs are the mouse-only 34, and set the strip
     constexpr int arpMacroHeadGap = 6;
-    constexpr int arpMacroH = arpBandTop + arpMacroHead + arpMacroHeadGap
-                              + arpMacroRow * KeysProcessor::uiArpLines + 2;
+    constexpr int arpMacroH = arpBandTop + arpMacroHead + arpMacroHeadGap + arpMacroCard + 2;
     constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
     // The gap under the block. The outer `reduced(12)` is shared with the band and Pattern
     // views, and this height has to agree with resized() exactly or the panel is the wrong
@@ -2150,10 +2121,19 @@ void ArpPanel::resized()
         const auto qCell = takeHead(juce::jmin(140, head.getWidth()));
         quantizeBox.setBounds(qCell.withSizeKeepingCentre(qCell.getWidth(), 28));
 
+        // The cards, side by side. Column count follows uiArpLines; at three, a column would
+        // be ~300 px and eight 38 px knobs need ~350, so bringing line C back means giving
+        // this layout a knob-width rethink, not just raising the constant.
+        auto cardsArea = inner.removeFromTop(arpMacroCard);
+        const int cardGap = 12;
+        const int cols = juce::jmax(1, KeysProcessor::uiArpLines);
+        const int colW = (cardsArea.getWidth() - cardGap * (cols - 1)) / cols;
         for (auto& row : macroRows)
         {
-            if (row != nullptr)
-                row->setBounds(inner.removeFromTop(arpMacroRow));
+            if (row == nullptr)
+                continue;
+            row->setBounds(cardsArea.removeFromLeft(colW));
+            cardsArea.removeFromLeft(cardGap);
         }
     }
 

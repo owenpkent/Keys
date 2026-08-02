@@ -93,11 +93,13 @@ public:
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
-    // One arpeggiator line, in one row: the four settings that decide how it sits against the
-    // other two, what it is holding, and a way to start it. Three of these are the **macro
-    // view**, which is what the fourth tab on the slot row selects (2026-08-01, Owen: "a fourth
-    // option for a simplified version that shows a little bit of all of them ... the goal is to
-    // be able to create complex polyrhythms from one view").
+    // One arpeggiator line, as one card: the settings that decide how it sits against the
+    // other line, what it is holding, and a way to start it. These cards are the **macro
+    // view**, which is what the fourth tab selects (2026-08-01, Owen: "a fourth option for a
+    // simplified version that shows a little bit of all of them ... the goal is to be able to
+    // create complex polyrhythms from one view"). Side by side since 2026-08-02 (Owen:
+    // "parallel to each other instead of one on top of the other"), which is why a card is
+    // three stacked lines: half the panel's width cannot hold the single row this used to be.
     //
     // Each row's attachments are bound to its own line for the row's whole life, unlike the
     // band above, which rebinds every time the tabs move. That is the point of the row: three
@@ -156,10 +158,9 @@ public:
         juce::TextButton rateModeButton { "Sync" };
         // The rate's three modifiers, the same three the band carries and greyed by the same
         // question (2026-08-02, Owen: "I need to have options for dots and triplets as well").
-        // They sit on a sub-row of their own rather than in the main line: at Owen's window
-        // width that line is already at every floor it has, and two more 34 px targets in it
-        // would have driven the eight knobs under the mouse-only minimum. The row got taller
-        // instead, which is affordable because dropping line C freed a whole row's worth.
+        // They sit on the card's bottom line with the held chord, at the full 34 px hit
+        // height: putting them beside the rate would drive the knobs under the mouse-only
+        // minimum, and height is the cheap axis inside a card.
         juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };

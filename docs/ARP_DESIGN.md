@@ -213,23 +213,30 @@ Owen: *"a fourth option for a simplified version that shows a little bit of all 
 goal is to be able to create complex polyrhythms from one view."*
 
 **All** sits after the line tabs and swaps the per-line band and the step editor for one
-`MacroRow` per line, under a 34 px header carrying the **A/B/All tabs**, the **BPM** cell and
+card per line, **side by side** (2026-08-02, Owen: *"parallel to each other instead of one on
+top of the other"*), under a 34 px header carrying the **A/B/All tabs**, the **BPM** cell and
 **Launch Quantize**. It is the view Keys opens in, and since the second 2026-08-02 pass (Owen:
 *"we need to make the window shorter"*) it is *all* the view holds: the twelve slots and the
 Copy / Clear / Stop / Chain action row belong to the per-line tabs, and the header carries the
-tabs because they are the way there. A row holds the line switch, a detented rate knob with
-`<` `>` and its Sync/Hz switch, the shape with steppers of its own, **eight knobs** -
-Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel - and the held chord, with the
-rate's **Dot / Trip / Anchor** on a strip beneath it. Owen's brief when the first cut carried
-three lines: *"what other knobs can we have? should be like regular arp settings."* The row
-carried Latch, PLAY and Chain for a day; all three still live with the line - Latch and
-**Play** on the band (Play beside Retrigger, the same `arpKeys`), Chain on the action row.
+tabs because they are the way there. A card is three stacked lines, because half the panel's
+width cannot hold what used to be one full-width row: the line switch, a detented rate knob
+with `<` `>` and its Sync/Hz switch, and the shape with steppers of its own; **eight knobs**
+under their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel; and the
+rate's **Dot / Trip / Anchor** with the held chord along the bottom. Owen's brief when the
+first cut carried three lines: *"what other knobs can we have? should be like regular arp
+settings."* The row carried Latch, PLAY and Chain for a day; all three still live with the
+line - Latch and **Play** on the band (Play beside Retrigger, the same `arpKeys`), Chain on
+the action row.
 
 Four of those knobs are not what the first cut had (both passes 2026-08-02). **Oct** is
 `arpOctShift`, a transpose centred at zero, not `arpOctaves`, which stacks copies upward and
 has no middle; the stacking range stays on the per-line tab beside Distance, the other half of
 the same feature. **Vel** is `arpVelTrim`, bipolar around "as played" (up boosts, down cuts,
-full left mutes); it replaced **Vol** (`arpVolume`, cut-only, misnamed for what it touched -
+full left mutes) and **squared** - `((100+VEL)/100)^2`, applied after the engine's 0.05
+audibility floor so a deep cut reaches MIDI velocity 1 rather than pinning at 6, and a chord
+handed to a line skips the keyboard Humanize range so the reference level holds still (all
+three 2026-08-02, Owen: "I was at negative 96, and it was still pretty loud"). It replaced
+**Vol** (`arpVolume`, cut-only, misnamed for what it touched -
 the parameter survives for old sessions and `migrateVelTrim` folds it in exactly), which had
 itself taken the place of **Ramp *and* Time** together - they are one feature between them,
 and a row carrying Time with no Ramp would be a control with nothing to time. **H.Time** and

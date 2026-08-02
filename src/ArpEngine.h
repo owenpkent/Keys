@@ -184,9 +184,13 @@ public:
         int volume = 100;         // 0..100
         // The control that replaced it on screen (2026-08-02, Owen: "it should start in the
         // middle so you can turn it up or down. But really, the volume is controlling
-        // velocity"). Bipolar so the middle means "as played": the multiplier is
-        // 1 + velTrim/100, so -100 mutes exactly as volume 0 does and +100 doubles, with the
-        // usual 1.0 velocity ceiling catching what doubling overshoots.
+        // velocity"). Bipolar so the middle means "as played", and the multiplier is
+        // *squared* - ((100+velTrim)/100)^2 - because hearing is logarithmic and the linear
+        // version spent nearly all of its audible change in the last few degrees (same day,
+        // Owen: "I was at negative 96, and it was still pretty loud"). Halfway down plays a
+        // quarter of the velocity, which sounds about half as loud; -100 mutes exactly as
+        // volume 0 does. Applied after the 0.05 audibility floor, not before it - see the
+        // emit loop - so a deep cut reaches MIDI velocity 1 instead of pinning at 6.
         int velTrim = 0;          // -100..+100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
         // The slot chords, for the Chord lane. Null means the lane does nothing, which is
@@ -722,9 +726,13 @@ private:
         const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
         const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
+        // The line's own fader (velTrim) is deliberately NOT in velScale: velScale feeds the
+        // 0.05 audibility floor below, which protects programmed dynamics, and the fader is
+        // applied after that floor precisely so it is not protected by it.
         const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale
-                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f)
-                             * (1.0f + (float) juce::jlimit(-100, 100, p.velTrim) / 100.0f);
+                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
+        const float trimT = (100.0f + (float) juce::jlimit(-100, 100, p.velTrim)) / 100.0f;
+        const float trimScale = trimT * trimT; // squared: see the Params comment
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
@@ -835,7 +843,15 @@ private:
                     const double amt = juce::jlimit(0, 100, p.humanVel) / 100.0;
                     vel *= (float) (1.0 - (double) (rng() % 1000u) / 1000.0 * 0.30 * amt);
                 }
-                vel = juce::jlimit(0.05f, 1.0f, vel);
+                // The 0.05 floor protects programmed dynamics: a Velocity lane at 0 or a
+                // hard H.VEL draw must stay audible rather than turn into a note-off. The
+                // line's fader multiplies *after* it, because turning a line down is
+                // supposed to approach silence - inside the floor it pinned at velocity 6
+                // from about -90 downward, which on a patch with a shallow velocity
+                // response was still plainly audible (2026-08-02). The final clamp bottoms
+                // at one MIDI step; zero would be a note-off in disguise.
+                vel = juce::jlimit(0.05f, 1.0f, vel) * trimScale;
+                vel = juce::jlimit(1.0f / 127.0f, 1.0f, vel);
 
                 // A ratchet subdivides one step, and a step is routinely longer than a buffer -
                 // at 1/16 and 120 bpm a step is 6000 samples against a 512-sample block - so every

@@ -186,15 +186,18 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   knobs on it. A drop sets the current line and never changes the view
   (`setEditLine(line, false)`): it is routing a chord, not navigating.
   **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
-  complex polyrhythms from one view"). It replaces the band and the step editor with rows, one
-  per line, under a 34 px header. A row carries the line switch, a detented rate knob with its
-  `<` `>` and Sync/Hz, the shape with its own steppers and its Dot / Trip / Anchor strip,
-  **eight knobs** (Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel - Oct is the *transpose*,
-  Vel is the bipolar level, and Humanize is split into its halves; all three are the 2026-08-02
-  entries below), and the held chord. It carried more for its first day - Latch, PLAY, Chain, a
-  shared BPM row below and the slot row under that - and the slim-down bullet below is where all
-  of it went. The knobs are the band's own rotary, not sliders, and each column heading
-  is written once on the top row while every row reserves the same strip so the columns align.
+  complex polyrhythms from one view"). It replaces the band and the step editor with one *card*
+  per line, side by side under a 34 px header (2026-08-02, Owen: "parallel to each other
+  instead of one on top of the other"). A card is three stacked lines - the line switch, a
+  detented rate knob with its `<` `>` and Sync/Hz, and the shape with its own steppers; then
+  **eight knobs** under their own headings (Oct, Gate, Chance, Swing, Offset, Vel, H.Time,
+  H.Vel - Oct is the *transpose*, Vel is the bipolar level, and Humanize is split into its
+  halves; all three are the 2026-08-02 entries below); then Dot / Trip / Anchor with the held
+  chord - because half the panel's width cannot hold what used to be one full-width row. It
+  carried more for its first day - Latch, PLAY, Chain, a shared BPM row below and the slot row
+  under that - and the slim-down bullet below is where all of it went. The knobs are the band's
+  own rotary, not sliders, and every card carries its own headings: "written once on the top
+  row" only worked while the rows stacked and B's columns sat exactly under A's.
   **It is a view, not a fourth line**: `editedLine` is untouched by it, so a chord card still has
   one target while all three are on screen, and the panel does not grow because the rows take the
   band's space rather than joining it. Each row's attachments bind to its own line for good,
@@ -235,6 +238,21 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   Time, Human Time, Human Vel), paid for with 4 points of group weight from SPREAD, which still
   fits its three cells exactly at the editor's minimum width. `ArpTests.cpp` pins the split and
   the trim, mute included.
+- **VEL is squared, floored last, and its input is clean** (2026-08-02, third pass, Owen: "I
+  was at negative 96, and it was still pretty loud. Is it passing it through the humanized
+  volume range?"). Three causes compounded and each got its fix. The multiplier is
+  `((100+VEL)/100)^2` - hearing is logarithmic, and the linear version crammed its audible
+  change into the last few degrees. The engine's 0.05 audibility floor protects *programmed*
+  dynamics (a Velocity lane at 0, a hard H.VEL draw) and used to sit after the level control,
+  pinning everything below about -90 at velocity 6; the fader now multiplies **after** the
+  floor and bottoms at MIDI velocity 1 - never 0, which is a note-off in disguise. And a note
+  bound for a line's queue (dest > 0 in `noteOn`) skips the keyboard Humanize range's velocity
+  replacement, which had been re-randomizing VEL's "as played" reference per note; the keybed's
+  own notes keep it, because that is playing, and they keep it even when a line lifts them.
+  `migrateVelTrim` folds Volume through the curve (`100*(sqrt(volume%)-1)`), still level-exact.
+  The honest limit, worth repeating to Owen when it comes up: velocity is all MIDI has, so a
+  patch with no velocity sensitivity flattens every velocity control in Keys, and only the
+  -100 mute (which emits nothing) cuts through that.
 - **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
   the setting Owen described and could not name: "if you start a new note or something that goes
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did

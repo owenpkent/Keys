@@ -864,7 +864,14 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     // dragged) notes stop landing perfectly quantized. Note-offs are never delayed, so
     // a note can never release before it has sounded. delaySeconds adds the strum offset.
     double when = nowSeconds() + delaySeconds;
-    if (apvts.getRawParameterValue("humanize")->load() > 0.5f)
+    // ...but never for a note bound for an arp line's queue (2026-08-02, Owen: "is it
+    // passing it through the humanized volume range? ... this might need its own separate
+    // thing"). A line has H.VEL for randomness and VEL for level now, and re-randomizing
+    // its input velocity here made VEL's "as played" reference wander per note. dest 0 is
+    // the track output - actually playing - and keeps the Humanize range as ever; what the
+    // keybed feeds a line keeps it too, because those notes pass through here as playing
+    // before runArpLines lifts them.
+    if (dest == 0 && apvts.getRawParameterValue("humanize")->load() > 0.5f)
     {
         const int a = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
         const int b = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
@@ -2317,7 +2324,13 @@ void KeysProcessor::migrateVelTrim(const juce::ValueTree& root)
         {
             if (auto* param = apvts.getParameter(trimId))
             {
-                const float trim = (float) juce::jlimit(-100.0, 100.0, savedVolume - 100.0);
+                // Through the knob's curve (scale = ((100+trim)/100)^2), so the old
+                // volume% lands at the trim that plays the same level: trim =
+                // 100*(sqrt(volume%) - 1). Rounding to the int parameter costs at most
+                // ~1% of velocity, under the 1/127 the velocity is quantized to anyway.
+                const double frac = juce::jlimit(0.0, 100.0, savedVolume) / 100.0;
+                const float trim = (float) juce::jlimit(-100.0, 100.0,
+                                                        std::round((std::sqrt(frac) - 1.0) * 100.0));
                 param->setValueNotifyingHost(param->convertTo0to1(trim));
             }
             if (auto* param = apvts.getParameter(volId))
