@@ -79,6 +79,11 @@ chips and two dials rather than three instances of the plugin.
 - **Cards go where you aim them.** A click on a chord card feeds the *current* line, shown as a
   letter chip on the Pads bar next to Fill and Regen (click to cycle A, B, C) and mirrored by
   the tabs. A card that is feeding a line wears that line's letter in its ring.
+- **Drag a chord card onto a line's row in the macro view** to hand it straight to that line -
+  a target the size of the row rather than the size of a tab, lighting anywhere on it, knobs
+  included. Three rows on screen with a different chord dropped on each is how a polyrhythm gets
+  built out of chord cards. The view does not move when you let go: you dropped onto the line
+  itself, and being thrown into that line's deep controls is not what the gesture asked for.
 - **Drag a chord card onto an arp slot to bind it there**, or onto a line tab to hand it over
   now. This is the left-click twin *Send to arp slot* has never had - that menu item was an
   owner-sanctioned exception because binding to one slot needs a target picker, and a drag is

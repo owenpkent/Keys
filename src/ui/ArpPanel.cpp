@@ -314,10 +314,18 @@ int ArpPanel::externalDropSlotAt(juce::Point<int> screenPos) const
 int ArpPanel::externalDropLineAt(juce::Point<int> screenPos) const
 {
     auto* hit = juce::Desktop::getInstance().findComponentAt(screenPos);
+    // Walking up from whatever is under the point is what makes the *whole* macro row a target
+    // including the knobs sitting on it: the knob is found first, and its parent is the line.
     for (auto* c = hit; c != nullptr; c = c->getParentComponent())
+    {
         for (int n = 0; n < (int) lineTabs.size(); ++n)
             if (c == lineTabs[(size_t) n].get())
                 return n;
+        if (macroView)
+            for (int n = 0; n < (int) macroRows.size(); ++n)
+                if (c == macroRows[(size_t) n].get())
+                    return n;
+    }
     return -1;
 }
 
@@ -329,6 +337,10 @@ void ArpPanel::setExternalDropTarget(int slot, int lineTab)
     for (int n = 0; n < (int) lineTabs.size(); ++n)
         if (lineTabs[(size_t) n] != nullptr)
             lineTabs[(size_t) n]->setDropTarget(n == lineTab);
+    // The macro rows answer the same question, so they light on the same answer.
+    for (int n = 0; n < (int) macroRows.size(); ++n)
+        if (macroRows[(size_t) n] != nullptr)
+            macroRows[(size_t) n]->setDropTarget(macroView && n == lineTab);
 }
 
 juce::String ArpPanel::paramId(KeysProcessor::ArpParam which) const
@@ -377,12 +389,14 @@ void ArpPanel::refreshMacro()
             row->refresh();
 }
 
-void ArpPanel::setEditLine(int line)
+void ArpPanel::setEditLine(int line, bool leaveMacroView)
 {
     line = juce::jlimit(0, KeysProcessor::numArpLines - 1, line);
     // A line tab always leaves the macro view, even when it names the line already current:
-    // clicking "B" while All is up plainly means "show me B".
-    const bool leavingMacro = macroView;
+    // clicking "B" while All is up plainly means "show me B". A *drop* passes false, because
+    // it is routing a chord rather than navigating, and in the macro view the line it landed
+    // on is already in front of you.
+    const bool leavingMacro = macroView && leaveMacroView;
     if (leavingMacro)
         setMacroView(false);
     if (line == editedLine)
@@ -1143,8 +1157,28 @@ void ArpPanel::MacroRow::refresh()
     chainButton.setToggleState(processor.chainRunning(line), juce::dontSendNotification);
 }
 
+void ArpPanel::MacroRow::setDropTarget(bool b)
+{
+    if (dropTarget == b)
+        return;
+    dropTarget = b;
+    repaint();
+}
+
 void ArpPanel::MacroRow::paint(juce::Graphics& g)
 {
+    // A chord card is over this row: the whole row lights, because the row *is* the line here
+    // and a target you can only hit by aiming at a 40 px tab is a target a single mouse fights.
+    if (dropTarget)
+    {
+        const auto accent = skin::accentOf(*this).base;
+        const auto b = getLocalBounds().toFloat().reduced(1.0f);
+        g.setColour(accent.withAlpha(0.10f));
+        g.fillRoundedRectangle(b, skin::radius);
+        g.setColour(accent);
+        g.drawRoundedRectangle(b, skin::radius, 2.0f);
+        return; // the hairline would only fight the outline
+    }
     // A hairline under every row, so three rows read as three lines rather than as one block
     // of controls.
     g.setColour(skin::text.withAlpha(0.06f));

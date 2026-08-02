@@ -103,10 +103,14 @@ thread owns; not attempted here.
 - **A letter chip on the Pads bar** says which line a chord-card click feeds, and cycles A-B-C.
   Same state as the tabs; it is on that bar because it is a fact about the cards, and because it
   has to be reachable with the arp folded shut.
-- **Drag a chord card onto a slot** to bind it there, **or onto a tab** to hand it over now.
-  Screen-position hit-testing through `Desktop::findComponentAt`, mediated by the editor, for
-  the reason the audition tray needs the same: mouse capture keeps the gesture on the strip and
-  the two surfaces can be in different windows.
+- **Drag a chord card onto a slot** to bind it there, **onto a tab**, or **onto a line's row in
+  the macro view**, to hand it over now. Screen-position hit-testing through
+  `Desktop::findComponentAt`, mediated by the editor, for the reason the audition tray needs the
+  same: mouse capture keeps the gesture on the strip and the two surfaces can be in different
+  windows. Walking *up* from whatever is under the point is what makes the whole macro row a
+  target including the knobs sitting on it - the knob is found first, and its parent is the
+  line. A drop sets the current line but never changes the view: it is routing a chord, not
+  navigating, and in the macro view the line it landed on is already in front of you.
 
 ### The macro view (the fourth tab)
 

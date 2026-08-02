@@ -62,7 +62,10 @@ public:
     // rather than the panel's, because a click on a chord card feeds the same line and the
     // Pads bar has to be able to say so with this panel folded away.
     int editLine() const;
-    void setEditLine(int line);
+    // `leaveMacroView` false sets the line without changing what is on screen. A drop passes
+    // false: it is routing a chord, not navigating, and in the macro view all three lines are
+    // in front of you already, so there is nothing to switch to.
+    void setEditLine(int line, bool leaveMacroView = true);
     // The macro view: all three lines at once, in place of the band and the step editor. It is
     // a *view*, not a fourth line - the current line stays whatever it was, so a chord card
     // click still has one unambiguous target while all three are on screen.
@@ -106,6 +109,9 @@ public:
         // Readouts that no attachment drives: the rate text (it spans two parameters and two
         // units), the shape, and the chord this line is holding. Called by the panel's timer.
         void refresh();
+        // Lit while a chord card dragged out of the pad strip is over this row. The row is the
+        // line here, laid out large, so it is a far easier target than the tab that names it.
+        void setDropTarget(bool);
 
         // The eight knobs a row carries, left to right. One table so the labels, the
         // parameters and the layout cannot drift apart; the headings are drawn once, on the
@@ -142,6 +148,7 @@ public:
         std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
         int lastRateFree = -1;      // -1 = no attachment installed yet
         bool rateDragging = false;  // an open gesture; the swap defers until it closes
+        bool dropTarget = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MacroRow)
     };

@@ -614,9 +614,11 @@ KeysEditor::KeysEditor(KeysProcessor& p)
             if (line >= 0 && ! pad.notes.empty())
             {
                 // Straight into that line, and it becomes the current one: you aimed at it, so
-                // the next card click should follow the same aim.
+                // the next card click should follow the same aim. The view does not move with
+                // it - in the macro view you dropped onto the line itself, and being thrown
+                // into that line's deep controls is not what the gesture asked for.
                 processor.holdArpChordFromPad(chordPads.draggedSlot(), line);
-                arpPanel->setEditLine(line);
+                arpPanel->setEditLine(line, /*leaveMacroView*/ false);
                 refreshArpTargetButton();
                 return true; // suppresses the strip's drag-off-to-clear
             }

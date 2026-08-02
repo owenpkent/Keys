@@ -724,6 +724,12 @@ differently, which is the whole reason there are four.
 - **Drag a chord card onto a line's tab.** It goes to *that* line, whichever one the chip
   says, and that line becomes the current one — you aimed at it, so the next click should
   follow the same aim.
+- **Drag a chord card onto a line's row in the macro view.** The same thing, with a target the
+  size of the row rather than the size of a tab: the whole row lights while the card is over
+  it, anywhere on it, knobs included. This is the way to build a polyrhythm out of chord cards
+  — three rows on screen, drop a different chord on each. The view does not move when you let
+  go; you dropped onto the line itself, and being thrown into that line's deep controls is not
+  what the gesture asked for.
 - **Drag a chord card onto a slot card.** It binds the chord to that slot, in whichever line
   the tabs are showing, ready to launch later. This is the left-click way to do what **Send to
   arp slot** does from the menu, and it exists because a drag is a target picker and a click

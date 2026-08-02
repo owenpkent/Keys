@@ -126,7 +126,12 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   unchanged; a tab change rebuilds every APVTS attachment against the new ids, the same move
   `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** saying which
   line a chord-card click feeds. **Dragging a chord card onto an arp slot binds it there**, or
-  onto a tab to hand it over now - the left-click twin *Send to arp slot* never had.
+  onto a tab - or onto a line's **row in the macro view**, which is the same target the size of
+  a row rather than the size of a tab - to hand it over now. The left-click twin *Send to arp
+  slot* never had. `externalDropLineAt` walks *up* from whatever `Desktop::findComponentAt`
+  returns, which is what makes the whole macro row a target including the knobs on it. A drop
+  sets the current line and never changes the view (`setEditLine(line, false)`): it is routing a
+  chord, not navigating.
   **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
   complex polyrhythms from one view"). It replaces the band and the step editor with three rows,
   one per line, over a shared row holding the BPM knob and Launch Quantize. A row carries the
