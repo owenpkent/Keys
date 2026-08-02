@@ -228,7 +228,15 @@ public:
                     // Appended 2026-08-02, both defaulting to what the arp did without them.
                     // OctShift transposes the whole run and is centred at 0; Octaves beside it
                     // still *stacks* and still only widens - two questions, two controls.
-                    apOctShift, apVolume, numArpParams };
+                    apOctShift, apVolume,
+                    // Appended later the same day (Owen's macro-view pass). HumanVel is the
+                    // velocity half of Humanize, split out so timing and dynamics randomize
+                    // independently; Humanize itself is timing-only from here on. VelTrim is
+                    // the bipolar velocity control that replaced VOL on the macro row: centred
+                    // at 0 (as played), up boosts, down cuts. Volume stays registered - old
+                    // sessions carry it - but migrateVelTrim folds it into VelTrim on load and
+                    // nothing in the UI writes it any more.
+                    apHumanVel, apVelTrim, numArpParams };
     static const char* arpParamSuffix(int which);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
@@ -463,6 +471,11 @@ protected:
     // Same shape: puts the arp rate back in Sync when a session predates the Hz mode, since an
     // absent parameter keeps the live instance's current value rather than resetting.
     void migrateRateMode(const juce::ValueTree& root);
+    // Same shape again: a session saved before VelTrim existed carries its line levels in
+    // Volume. Fold each line's Volume into VelTrim (volume% == 1 + (volume-100)/100 exactly,
+    // so the session sounds identical) and put Volume back to 100, and write HumanVel's
+    // default explicitly so it does not inherit the live instance's value.
+    void migrateVelTrim(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);

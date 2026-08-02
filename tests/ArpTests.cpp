@@ -983,6 +983,60 @@ public:
             expect(sawLate, "something actually moved");
         }
 
+        beginTest("Humanize velocity is its own knob, and VEL trim is bipolar");
+        {
+            // One Humanize drove both halves until 2026-08-02; now `humanize` is the timing
+            // nudge alone and `humanVel` the velocity shave alone, and `velTrim` is the level
+            // control centred on "as played". Each question below fails if the split leaks.
+            const auto velsWith = [&](int human, int humanVel, int trim)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto sp = p;
+                sp.humanize = human;
+                sp.humanVel = humanVel;
+                sp.velTrim = trim;
+                std::vector<float> vels;
+                for (int i = 0; i < 8; ++i)
+                {
+                    juce::MidiBuffer out;
+                    clock.ppq = 0.25 * i;
+                    e.process(sp, clock, block, i == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                    for (const auto meta : out)
+                        if (meta.getMessage().isNoteOn())
+                            vels.push_back(meta.getMessage().getFloatVelocity());
+                }
+                return vels;
+            };
+
+            const auto base = velsWith(0, 0, 0);
+            expect(! base.empty(), "the reference run plays");
+
+            const auto timingOnly = velsWith(100, 0, 0);
+            for (size_t i = 0; i < timingOnly.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(timingOnly[i], base[i], 0.005f,
+                                          "full H.TIME leaves every velocity alone");
+
+            const auto velOnly = velsWith(0, 100, 0);
+            bool sawQuieter = false;
+            for (size_t i = 0; i < velOnly.size() && i < base.size(); ++i)
+            {
+                expect(velOnly[i] <= base[i] + 0.005f, "H.VEL only ever shaves, never louder");
+                sawQuieter = sawQuieter || velOnly[i] < base[i] - 0.005f;
+            }
+            expect(sawQuieter, "full H.VEL actually moved something");
+
+            const auto half = velsWith(0, 0, -50);
+            for (size_t i = 0; i < half.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(half[i], base[i] * 0.5f, 0.02f,
+                                          "trim at -50 plays at half velocity");
+            const auto doubled = velsWith(0, 0, 100);
+            for (size_t i = 0; i < doubled.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(doubled[i], juce::jmin(1.0f, base[i] * 2.0f), 0.02f,
+                                          "trim at +100 doubles, into the 1.0 ceiling");
+            expect(velsWith(0, 0, -100).empty(), "full-left trim is a mute, exactly as VOL 0 was");
+        }
+
         // ---------------------------------------------------------------------------------
         // Hz mode: the second timebase. `rateFree` swaps the beat grid for a free-running
         // frequency - process() pins the tempo to 60 so that one "beat" is one second and the

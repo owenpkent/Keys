@@ -186,13 +186,14 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   knobs on it. A drop sets the current line and never changes the view
   (`setEditLine(line, false)`): it is routing a chord, not navigating.
   **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
-  complex polyrhythms from one view"). It replaces the band and the step editor with three rows,
-  one per line, over a shared row holding the BPM knob and Launch Quantize. A row carries the
-  line switch, **Latch** and **Keys**, a detented rate knob with its `<` `>` and Sync/Hz, the
-  shape with its own steppers and its Dot / Trip / Anchor strip, **seven knobs** (Oct, Gate,
-  Chance, Swing, Offset, Vol, Human - Oct is the *transpose* and Vol replaced Ramp and Time
-  together, both 2026-08-02, see the entries above), the held chord and that line's Chain -
-  "like regular arp settings", Owen's ask when the first cut had three. The knobs are the band's own rotary, not sliders, and each column heading
+  complex polyrhythms from one view"). It replaces the band and the step editor with rows, one
+  per line, under a 34 px header. A row carries the line switch, a detented rate knob with its
+  `<` `>` and Sync/Hz, the shape with its own steppers and its Dot / Trip / Anchor strip,
+  **eight knobs** (Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel - Oct is the *transpose*,
+  Vel is the bipolar level, and Humanize is split into its halves; all three are the 2026-08-02
+  entries below), and the held chord. It carried more for its first day - Latch, PLAY, Chain, a
+  shared BPM row below and the slot row under that - and the slim-down bullet below is where all
+  of it went. The knobs are the band's own rotary, not sliders, and each column heading
   is written once on the top row while every row reserves the same strip so the columns align.
   **It is a view, not a fourth line**: `editedLine` is untouched by it, so a chord card still has
   one target while all three are on screen, and the panel does not grow because the rows take the
@@ -204,6 +205,36 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
   symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
   ruled box is drawn beside the band on every plain shape.
+- **The All view is the header and the two rows, nothing else** (2026-08-02, second pass, Owen:
+  "we need to make the window shorter ... remove the chain button, maybe the play and the
+  [latch] button, move the BPM up into the title ... and remove everything on the bottom. Copy,
+  clear, stop, chain"). The twelve slot cards and the Copy / Clear / Stop / Chain action row
+  left the view - they belong to the per-line tabs, where every one of those buttons still is -
+  and the A/B/All tabs moved up into the LINES header alongside the BPM cell and Launch
+  Quantize, whose shared row went with them. The tabs have to survive somewhere: they are the
+  route to the per-line tabs, and in this view the header is the "title" Owen pointed at. LTCH,
+  PLAY and Chain left the rows the same day. **Nothing lost its left-click path**: Latch was
+  already on the band, Chain on the action row, and PLAY grew a band home - **Play**, beside
+  Retrigger in PLAYBACK, reserved off the right end of the row *first* because Retrigger is the
+  elastic one (the Shape lesson, logged twice below). Entering the view also disarms a pending
+  Copy or Clear: an armed pick with no slots on screen would fire, tabs later, on a click the
+  user armed minutes ago. The view is ~110 px shorter, which is most of what the ask was about.
+  **VOL became VEL and HUMAN split into H.TIME and H.VEL the same day** (Owen: "the volume is
+  weird ... it should start in the middle", "maybe we could split it up into two knobs").
+  `arpVelTrim` is bipolar around "as played" (up boosts, down cuts, -100 mutes exactly as VOL 0
+  did) and `arpHumanVel` is the velocity shave, leaving `arpHumanize` timing-only. Both are
+  **appended** parameters; `migrateVelTrim` folds an old session's Volume into VelTrim exactly
+  (volume% == 1 + (volume-100)/100, no approximation) and writes the absent parameters' defaults
+  explicitly, the `migrateRateMode` shape. **That shape only works because the kit's
+  `state::load` now copies** (same day, kit `StateHelpers.h`): `replaceState` backfills a child
+  for every absent parameter into the tree it is handed, ValueTrees share nodes, and the shared
+  root reached `onExtra` with every absence erased - so every absence-detecting migration in
+  this file, the older two included, had been silently dead since they moved inside that
+  callback. If a migration ever no-ops on the exact session it was written for, check what the
+  root actually contains before trusting the tell. The per-line FEEL group is four sliders now (Ramp,
+  Time, Human Time, Human Vel), paid for with 4 points of group weight from SPREAD, which still
+  fits its three cells exactly at the editor's minimum width. `ArpTests.cpp` pins the split and
+  the trim, mute included.
 - **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
   the setting Owen described and could not name: "if you start a new note or something that goes
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
@@ -292,7 +323,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   questions and only the first has a middle - the macro row's OCT knob drives the new one, and
   Octaves stays on the per-line tab with Distance, the other half of the same feature. Volume is
   a plain per-line output level, folded into `velScale` beside the ramp. The macro row's VOL
-  replaced **both** Ramp and Time, which are one feature between them.
+  replaced **both** Ramp and Time, which are one feature between them. **Volume lasted a day on
+  screen**: the second 2026-08-02 pass replaced the knob with the bipolar `arpVelTrim` (see the
+  All-view bullet above). The parameter stays registered and the engine still multiplies it,
+  but nothing in the UI writes it and `migrateVelTrim` folds it back to 100 on every load.
 - **PLAY and Light keys are not the same word twice** (2026-08-02). `arpKeys` routes the keybed
   *into* a line; `layout.arpLights` only decides whether the keybed lights *up*. They were
   labelled KEYS and "Show notes" and read as one idea - Owen asked what the difference was. Ids
@@ -650,11 +684,13 @@ Four things will bite otherwise:
   the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
   `Arp target line`. Hold off is `Arp hold off`. The fourth tab is `Arp all tab`, and the macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
-  `Macro line A`, `Macro latch A`, `Macro keys A` (the switch labelled **PLAY** on screen - the
-  accessible name follows the parameter id, not the label), `Macro rate A`, `Macro rate mode A`,
-  `Macro shape A`, `Macro chain A`, `Macro dot A` / `Macro trip A` / `Macro anchor A`, and
-  `Macro OCT A` / `Macro GATE A` / ... one per knob heading. On the arp bar: `Arp all off` and
-  `Arp light keys`.
+  `Macro line A`, `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
+  `Macro dot A` / `Macro trip A` / `Macro anchor A`, and `Macro OCT A` / `Macro GATE A` /
+  `Macro VEL A` / `Macro H.TIME A` / `Macro H.VEL A` / ... one per knob heading.
+  `Macro latch A`, `Macro keys A` and `Macro chain A` went with the row controls on 2026-08-02;
+  the per-line band's Play toggle answers to `Arp play` (the parameter is still `arpKeys` - the
+  accessible name follows the label here because "keys" already means two other things in this
+  window). On the arp bar: `Arp all off` and `Arp light keys`.
 - **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
   applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
   the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that

@@ -414,6 +414,16 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // Volume: the plain output level an arpeggiator wants and this one never had. With two
     // lines running, balancing them used to mean playing one of them softer.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Volume"), 1 }, nm + " Volume", 0, 100, 100));
+    // The velocity half of Humanize, split out (Owen, 2026-08-02: "I don't know if we wanted
+    // to randomize velocity and timing. Maybe we could split it up into two knobs"). Humanize
+    // above is timing-only from the same day; a session saved before the split keeps its
+    // Humanize amount as the timing half and this defaults to none.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 100, 0));
+    // The bipolar velocity control that replaced VOL on the macro row (Owen, same day: "it
+    // should start in the middle so you can turn it up or down"). 0 plays velocities as they
+    // came, +100 doubles them, -100 mutes. Volume above stays registered for old sessions,
+    // which migrateVelTrim folds into this on load; nothing in the UI writes Volume now.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelTrim"), 1 }, nm + " Velocity", -100, 100, 0));
 }
 
 // The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
@@ -425,7 +435,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
-        "OctShift", "Volume"
+        "OctShift", "Volume", "HumanVel", "VelTrim"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1336,8 +1346,10 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.velRamp = (int) arpParam(n, apVelRamp);
         ap.rampBeats = (double) (int) arpParam(n, apRampBeats);
         ap.humanize = (int) arpParam(n, apHumanize);
+        ap.humanVel = (int) arpParam(n, apHumanVel);
         ap.octShift = (int) arpParam(n, apOctShift);
         ap.volume = (int) arpParam(n, apVolume);
+        ap.velTrim = (int) arpParam(n, apVelTrim);
         ap.chords = &l.chordTable; // what the Chord lane calls up, this line's slots
 
         // Distance: what each repeat past the first adds. The list names intervals rather
@@ -2166,6 +2178,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     // shaped belongs here, not in either override.
     migrateStrumRange(root);
     migrateRateMode(root);
+    migrateVelTrim(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -2262,6 +2275,54 @@ void KeysProcessor::migrateRateMode(const juce::ValueTree& root)
         if (! sawHz)
             if (auto* param = apvts.getParameter(hzId))
                 param->setValueNotifyingHost(param->getDefaultValue());
+    }
+}
+
+void KeysProcessor::migrateVelTrim(const juce::ValueTree& root)
+{
+    // VOL became VEL on 2026-08-02: "arpVelTrim" is bipolar, centred at 0, and the macro
+    // knob writes it where it used to write "arpVolume". A session saved before that carries
+    // its line levels in Volume and no VelTrim at all - and, as ever, an absent parameter
+    // keeps the live instance's current value rather than resetting (see migrateRateMode).
+    // The repair is exact, not approximate: volume% and 1 + (volume-100)/100 are the same
+    // multiplier, so VelTrim = Volume - 100 (and Volume back to its default 100) plays the
+    // session note-for-note identically. HumanVel gets its default written for the same
+    // absence reason; its old sessions' Humanize value stays as the timing half.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto trimId = arpParamId(line, apVelTrim);
+        const auto hVelId = arpParamId(line, apHumanVel);
+        const auto volId = arpParamId(line, apVolume);
+        bool sawTrim = false, sawHVel = false;
+        double savedVolume = 100.0; // the parameter's default, for sessions that predate it
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto child = params.getChild(i);
+            const auto id = child.getProperty("id").toString();
+            sawTrim = sawTrim || id == trimId;
+            sawHVel = sawHVel || id == hVelId;
+            if (id == volId)
+                savedVolume = (double) child.getProperty("value", 100.0);
+        }
+
+        if (! sawHVel)
+            if (auto* param = apvts.getParameter(hVelId))
+                param->setValueNotifyingHost(param->getDefaultValue());
+
+        if (! sawTrim)
+        {
+            if (auto* param = apvts.getParameter(trimId))
+            {
+                const float trim = (float) juce::jlimit(-100.0, 100.0, savedVolume - 100.0);
+                param->setValueNotifyingHost(param->convertTo0to1(trim));
+            }
+            if (auto* param = apvts.getParameter(volId))
+                param->setValueNotifyingHost(param->getDefaultValue());
+        }
     }
 }
 

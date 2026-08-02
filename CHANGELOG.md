@@ -5,6 +5,53 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the All view is the two lines and their header, and the level/humanize knobs reworked
+
+Owen, on the macro view: "Your arpeggiator needs some work ... we need to make the window
+shorter." Four calls, all his:
+
+**Humanize is two knobs.** One HUMAN knob randomized timing and velocity together; it is now
+**H.TIME** (the late-nudge, up to 25 ms) and **H.VEL** (the velocity shave, up to 30%), each its
+own random draw per hit. The per-line tab's FEEL group grew the same split: **Human Time** and
+**Human Vel** sliders where Human sat.
+
+**VOL became VEL, bipolar, centred on "as played".** VOL was 0-100 defaulting to 100, so it
+could only cut - and what it cut was velocity, which the old name never said. VEL runs -100 to
++100 around a neutral centre: right pushes the notes louder, left quieter, full left is a mute
+exactly as VOL 0 was.
+
+**Each line row slimmed to what you reach for while both lines run.** LTCH, PLAY and Chain left
+the rows; all three still live with the line - Latch on the per-line band as before, **Play**
+newly beside Retrigger in PLAYBACK (same `arpKeys` parameter the row's PLAY wrote), Chain on the
+action row under the slots.
+
+**The All view lost its bottom half.** The twelve slot cards and the Copy / Clear / Stop /
+Chain row belong to the per-line tabs now; the A/B/All tabs moved up into the LINES header
+alongside the BPM cell and Launch Quantize, whose shared row is gone with them. The view is a
+34 px header and the two line rows, which takes ~110 px off the window Keys opens in.
+
+**Parameter layout changed - loudly.** Two per-line parameters are appended: `arpHumanVel` /
+`arp2HumanVel` / `arp3HumanVel` (0-100, default 0) and `arpVelTrim` / `arp2VelTrim` /
+`arp3VelTrim` (-100..+100, default 0). Appended, so nothing existing moves. A session saved
+before this opens sounding identical: its Humanize value carries on as the timing half, and
+`migrateVelTrim` folds each line's old Volume into VelTrim exactly (volume% and
+1 + (trim)/100 are the same multiplier) before putting Volume back to 100. `arpVolume` stays
+registered and the engine still honours it, but nothing in the UI writes it any more.
+`ArpTests.cpp` pins all of it: H.TIME leaves velocities alone, H.VEL only shaves, -50 halves,
++100 doubles into the 1.0 ceiling, -100 emits nothing.
+
+**Writing that migration found every absence-detecting migration silently dead.** The kit's
+`okstudio::state::load` handed `apvts.replaceState()` the parameter child of the parsed root
+itself; ValueTrees share nodes, and replaceState synchronously backfills a child for every
+registered parameter the session did not carry - into that same shared tree - so by the time
+the `onExtra` callback (where `restoreSharedState` and all three migrations run) looked, every
+parameter existed and "absent" was unobservable. `migrateStrumRange` and `migrateRateMode`
+have been no-ops on every load since they moved into that callback; they worked when written
+because they then ran before `replaceState`. Fixed in the kit (`StateHelpers.h`): replaceState
+now gets `params.createCopy()`, so the root the callback receives stays exactly what the
+session saved. Found because `migrateVelTrim` no-opped on the exact session shape it was
+written for, with the tell being a VEL knob reading 0 over a line still playing at 38%.
+
 ### Changed: the chord drag is stock JUCE, and the ghost now follows your cursor between windows
 
 Every chord drag in Keys - a tray candidate onto a pad, a pad onto the reference box, a card onto

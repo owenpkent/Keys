@@ -844,8 +844,11 @@ Influence sit on the two fixed rows above every source's band.
 The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
 `arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`
 (Repeats) + `arpDistance`, `arpOffset`, `arpSwing`, `arpLatch`, `arpRetrigger` +
-`arpRetrigBars`, `arpGate`, `arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`,
-`arpLinkLanes`, and — from 2026-08-01 — `arpKeys` and `arpChannel`. The six after
+`arpRetrigBars`, `arpGate`, `arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`
+(timing-only since 2026-08-02, when `arpHumanVel` took the velocity half), `arpLinkLanes`,
+from 2026-08-01 `arpKeys` and `arpChannel`, and from 2026-08-02 `arpOctShift`, `arpVolume`
+(retained; folded into its replacement on every load by `migrateVelTrim`), `arpHumanVel` and
+`arpVelTrim` — every one of them appended. The six after
 `arpChance` arrived on 2026-07-30 and are appended; the rate's two arrived the same day and
 sit beside `arpRate` instead, which costs nothing, because what a session and an automation
 lane follow is a parameter's string id and not its position (JUCE hashes that id for VST3).

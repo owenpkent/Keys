@@ -122,16 +122,17 @@ public:
         void itemDragExit(const SourceDetails&) override;
         void itemDropped(const SourceDetails&) override;
 
-        // The eight knobs a row carries, left to right. One table so the labels, the
+        // The knobs a row carries, left to right. One table so the labels, the
         // parameters and the layout cannot drift apart; the headings are drawn once, on the
         // top row, and every row reserves the same strip so the columns line up.
-        // Seven since 2026-08-02, both changes Owen's. OCT is now the *transpose* (centred at
-        // zero, down as readily as up) rather than the upward-only stacking range, which stays
-        // on the per-line tab beside Distance, the rest of that same feature. VOL replaced Ramp
-        // *and* Time, which were one feature between them - a velocity ramp and how long it
-        // takes - and a row with Time in it and no Ramp would be a control with nothing to time.
-        // Both still live on the per-line tab.
-        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVol, kHuman,
+        // OCT is the *transpose* (centred at zero, down as readily as up) rather than the
+        // upward-only stacking range, which stays on the per-line tab beside Distance, the
+        // rest of that same feature. Eight since the second 2026-08-02 pass: VEL is the
+        // bipolar velocity trim that replaced VOL (centred, up boosts, down cuts), and
+        // Humanize is two knobs, H.TIME for the timing nudge and H.VEL for the velocity
+        // shave - Owen's split, so the two randomize independently. Ramp and Time still
+        // live on the per-line tab.
+        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVel, kHTime, kHVel,
                     numKnobs };
 
     private:
@@ -145,7 +146,11 @@ public:
         KeysProcessor& processor;
         int line;
 
-        juce::ToggleButton onButton, latchButton, keysButton;
+        // Just the line switch: LTCH, PLAY and Chain were on the row until 2026-08-02, when
+        // Owen had the rows slimmed to what you reach for while two lines are running. All
+        // three still live with the line - Latch and PLAY on its tab's band, Chain on the
+        // action row under its slots.
+        juce::ToggleButton onButton;
         okstudio::RotaryKnob rateKnob;
         juce::TextButton ratePrev { "<" }, rateNext { ">" };
         juce::TextButton rateModeButton { "Sync" };
@@ -160,11 +165,9 @@ public:
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
         std::array<juce::Slider, numKnobs> knobs;
         std::array<juce::Label, numKnobs> knobLabels;
-        juce::Label latchLabel, keysLabel;
         juce::Label chordLabel;
-        juce::TextButton chainButton { "Chain" };
 
-        std::unique_ptr<ButtonAtt> onAtt, latchAtt, keysAtt, rateModeAtt;
+        std::unique_ptr<ButtonAtt> onAtt, rateModeAtt;
         std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
@@ -419,13 +422,19 @@ private:
     juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
     juce::Label octavesLabel, swingLabel, gateLabel, chanceLabel;
     juce::ToggleButton latchButton { "Latch" };
+    // PLAY's home on the band since the macro rows slimmed down (2026-08-02): whether this
+    // line arpeggiates what you play on the keybed. Same parameter the macro rows carried
+    // (arpKeys); the word is Play because "Keys" collided with the bar's Light keys.
+    juce::ToggleButton keysBandButton { "Play" };
     // The second band row (2026-07-30). SPREAD is Repeats + Distance + Offset - how far the
     // chord is stacked and where the run starts; FEEL is the three that decide whether it
     // sounds played. Horizontal sliders rather than the band's rotaries: a knob column spans
     // both rows of a group and this row is one row tall, which is what keeps the panel from
     // growing by a whole band.
-    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider;
-    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel;
+    // humanSlider is the timing half and humanVelSlider the velocity half of what was one
+    // Humanize control until 2026-08-02; see the macro row's H.TIME / H.VEL pair.
+    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider, humanVelSlider;
+    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel, humanVelLabel;
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
     int selectedLane = (int) ArpEngine::laneNote;
@@ -480,12 +489,12 @@ private:
     void setArmed(Armed, int fromIndex = -1);
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, linkAtt, rateModeAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, keysBandAtt, linkAtt, rateModeAtt;
     std::unique_ptr<ComboAtt> distanceAtt;
     // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
     std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
-    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt;
+    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt, humanVelAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)
 };

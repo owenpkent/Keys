@@ -213,19 +213,29 @@ Owen: *"a fourth option for a simplified version that shows a little bit of all 
 goal is to be able to create complex polyrhythms from one view."*
 
 **All** sits after the line tabs and swaps the per-line band and the step editor for one
-`MacroRow` per line, over a shared row carrying the **BPM** knob and **Launch Quantize**. It is
-the view Keys opens in. A row holds the line switch, **Latch** and **PLAY**, a detented rate
-knob with `<` `>` and its Sync/Hz switch, the shape with steppers of its own, **seven knobs** -
-Oct, Gate, Chance, Swing, Offset, Vol, Human - the held chord, and that line's Chain, with the
+`MacroRow` per line, under a 34 px header carrying the **A/B/All tabs**, the **BPM** cell and
+**Launch Quantize**. It is the view Keys opens in, and since the second 2026-08-02 pass (Owen:
+*"we need to make the window shorter"*) it is *all* the view holds: the twelve slots and the
+Copy / Clear / Stop / Chain action row belong to the per-line tabs, and the header carries the
+tabs because they are the way there. A row holds the line switch, a detented rate knob with
+`<` `>` and its Sync/Hz switch, the shape with steppers of its own, **eight knobs** -
+Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel - and the held chord, with the
 rate's **Dot / Trip / Anchor** on a strip beneath it. Owen's brief when the first cut carried
-three: *"what other knobs can we have? should be like regular arp settings."*
+three lines: *"what other knobs can we have? should be like regular arp settings."* The row
+carried Latch, PLAY and Chain for a day; all three still live with the line - Latch and
+**Play** on the band (Play beside Retrigger, the same `arpKeys`), Chain on the action row.
 
-Three of those knobs are not what the first cut had (2026-08-02). **Oct** is
+Four of those knobs are not what the first cut had (both passes 2026-08-02). **Oct** is
 `arpOctShift`, a transpose centred at zero, not `arpOctaves`, which stacks copies upward and
 has no middle; the stacking range stays on the per-line tab beside Distance, the other half of
-the same feature. **Vol** is `arpVolume`, a plain per-line output level, and it took the place
-of **Ramp *and* Time** together - they are one feature between them, and a row carrying Time
-with no Ramp would be a control with nothing to time. Both still live on the per-line tab.
+the same feature. **Vel** is `arpVelTrim`, bipolar around "as played" (up boosts, down cuts,
+full left mutes); it replaced **Vol** (`arpVolume`, cut-only, misnamed for what it touched -
+the parameter survives for old sessions and `migrateVelTrim` folds it in exactly), which had
+itself taken the place of **Ramp *and* Time** together - they are one feature between them,
+and a row carrying Time with no Ramp would be a control with nothing to time. **H.Time** and
+**H.Vel** are Humanize split into its halves (`arpHumanize`, now timing-only, and
+`arpHumanVel`), so the late-nudge and the velocity shave randomize independently. Ramp, Time
+and the split Human pair all live on the per-line tab's FEEL group.
 
 The knobs are the band's own machined rotary rather than sliders, and each column heading is
 written once on the top row while every row reserves the same strip, so the columns line up

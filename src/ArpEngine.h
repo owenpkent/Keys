@@ -163,11 +163,13 @@ public:
         // it. 0 is off, and costs nothing.
         int velRamp = 0;          // -100..+100
         double rampBeats = 8.0;
-        // One knob's worth of "played, not programmed": nudges each hit late by up to
-        // 25 ms and takes up to 30% off its velocity, both scaled by this. The arp has never
-        // been humanized at all (Humanize lives in KeysProcessor::noteOn, which the arp path
-        // does not go through), so 0 leaves the engine bit-identical to before.
-        int humanize = 0;         // 0..100
+        // "Played, not programmed", split into its two halves on 2026-08-02 (Owen: "maybe we
+        // could split it up into two knobs"). `humanize` nudges each hit late by up to 25 ms;
+        // `humanVel` takes up to 30% off its velocity - each scaled by its own knob, each a
+        // different random draw per hit. Before the split one value drove both, so a session
+        // saved then keeps its amount as the timing half and gets 0 for the velocity half.
+        int humanize = 0;         // 0..100, timing only
+        int humanVel = 0;         // 0..100, velocity only
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
         // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
@@ -177,7 +179,15 @@ public:
         // Output level for the whole line, as a percentage of the velocity it would have
         // played. The plain volume control an arpeggiator wants and Keys never had: with two
         // lines running, balancing them was previously only possible by playing one softer.
+        // Kept for sessions saved before velTrim below; nothing in the UI writes it any more
+        // and KeysProcessor::migrateVelTrim folds it into velTrim on load.
         int volume = 100;         // 0..100
+        // The control that replaced it on screen (2026-08-02, Owen: "it should start in the
+        // middle so you can turn it up or down. But really, the volume is controlling
+        // velocity"). Bipolar so the middle means "as played": the multiplier is
+        // 1 + velTrim/100, so -100 mutes exactly as volume 0 does and +100 doubles, with the
+        // usual 1.0 velocity ceiling catching what doubling overshoots.
+        int velTrim = 0;          // -100..+100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
         // The slot chords, for the Chord lane. Null means the lane does nothing, which is
         // what every caller that has no slots (the tests) wants.
@@ -713,7 +723,8 @@ private:
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
         const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
         const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale
-                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
+                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f)
+                             * (1.0f + (float) juce::jlimit(-100, 100, p.velTrim) / 100.0f);
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
@@ -797,7 +808,7 @@ private:
         // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
         // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
         // the run up where it would have been rather than restarting it.
-        if (p.volume <= 0)
+        if (p.volume <= 0 || p.velTrim <= -100)
             hitCount = 0;
 
         for (int r = 0; r < ratchets; ++r)
@@ -812,14 +823,16 @@ private:
 
                 int on = at;
                 float vel = hit.vel;
-                if (p.humanize > 0)
+                // Late and quieter, never early and never louder: a nudge that can also
+                // rush is what Swing is for, and a velocity that can also rise makes an
+                // edited Velocity lane mean less than it says. Two knobs since 2026-08-02
+                // (humanize is the timing, humanVel the velocity), so each half only runs
+                // when its own knob is up.
+                if (maxLate > 0)
+                    on += (int) (rng() % (unsigned) (maxLate + 1));
+                if (p.humanVel > 0)
                 {
-                    // Late and quieter, never early and never louder: a nudge that can also
-                    // rush is what Swing is for, and a velocity that can also rise makes an
-                    // edited Velocity lane mean less than it says.
-                    if (maxLate > 0)
-                        on += (int) (rng() % (unsigned) (maxLate + 1));
-                    const double amt = juce::jlimit(0, 100, p.humanize) / 100.0;
+                    const double amt = juce::jlimit(0, 100, p.humanVel) / 100.0;
                     vel *= (float) (1.0 - (double) (rng() % 1000u) / 1000.0 * 0.30 * amt);
                 }
                 vel = juce::jlimit(0.05f, 1.0f, vel);

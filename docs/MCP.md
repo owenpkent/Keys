@@ -65,10 +65,14 @@ lands). Setting `arpQuantize` from a script is worth knowing about: with it on, 
 
 The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
 `arpRate`, `arpSwing` — and B repeats that whole list as `arp2*`: `arp2On`, `arp2Rate`,
-`arp2Direction`, and so on. Four ids are newer than the original arp and worth knowing:
+`arp2Direction`, and so on. Five ids are newer than the original arp and worth knowing:
 `arpKeys` (does this line arpeggiate what you play, or only the chords handed to it),
 `arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
-`arpOctaves`, which stacks copies upward) and `arpVolume` (0..100, this line's output level).
+`arpOctaves`, which stacks copies upward), `arpVelTrim` (-100..+100, this line's level as a
+velocity trim around "as played"; it replaced `arpVolume` on screen on 2026-08-02 — the old id
+still exists but every load folds it into `arpVelTrim` and resets it to 100, so scripts should
+write the new one), and `arpHumanVel` (0..100, the velocity half of Humanize; `arpHumanize` is
+the timing half alone since the same day).
 
 **A line that is off still takes chords in.** Handing a chord to a line that is not running
 makes no sound and is not lost: the engine holds it silently, and setting that line's `On`
