@@ -264,9 +264,9 @@ a drag target and those are the click-only path to every division.
 
 Four decisions worth keeping:
 
-1. **It is a view, not a fourth line.** `editedLine` is untouched by it, so a chord card click
+1. **It is a view, not a fourth line.** `editedLine` is untouched by it, so a chord card drag
    still has one unambiguous target while both lines are on screen. A "line D" that meant
-   "all of them" would have made that click ambiguous and the Pads bar's letter chip a lie.
+   "all of them" would have made that drag ambiguous and the arp bar's A/B tabs a lie.
 2. **The panel does not grow.** `arpMacroTotalH` replaces the two band rows rather than joining
    them. A fourth band would have taken Pattern shape past the default window height, which is
    the whole reason this is a tab and not a section.
@@ -688,7 +688,7 @@ line today is a **drag**, and that took the last of them off the left click 2026
   then fires, applying Exclusive to the new one - so dropping the same card on a line it is
   already feeding is a restrike and never a second owner of the same pitches.
 
-  **A click never does any of this any more** (2026-08-02, Owen: "when an arpeggiator's
+  **A click never feeds a line any more** (2026-08-02, Owen: "when an arpeggiator's
   running and you click on a pad, I don't want it to send it to the arpeggiator unless you
   drag it"). Until that day a plain click, while any line was on, handed the card to the
   **current** line the same way a drag does now, and a second click on the card already
@@ -805,14 +805,19 @@ Concrete remaps:
 ## UI placement (decided: a section of its own)
 
 The arp is a foldable **section**, between the Controls section and the chord pads, with its
-line switches (**A**, **B**, **C** - a single **On** until 2026-08-01), a **Hold off** chip
-and a **Detach** button on its own bar. Folding the section destroys the editor, never the
-arpeggiators, which is why the switches live on the bar rather than inside the panel, and why
-they and Hold off stay put when their section folds. They are not alone in that any more: the
-theme swatch on the Controls bar, and Fill, Regen, Generator, Key, Mode, Compliance and the
-arp's target-line letter on the Pads bar, all outlive their fold for the same kind of reason.
-What hides with a fold is what would be a control with nothing behind it - the pad pages,
-Knobs, Wheels. Detach hides with it too.
+line switches (**A**, **B** on screen - a single **On** until 2026-08-01, three lettered
+switches for a day after that, down to two when line C left the UI 2026-08-02), a **Hold off**
+chip, **All Off**, **Light keys**, **Launch Quantize** and a **Detach** button on its own bar.
+Folding the section destroys the editor, never the arpeggiators, which is why the switches live
+on the bar rather than inside the panel, and why they, Hold off and Quantize stay put when
+their section folds. They are not alone in that any more: the theme swatch, Tempo, Root,
+Scale, Scale Lock, Voices and MIDI Ch on the Controls bar, and Fill, Regen, Generator and Key
+on the Pads bar, all outlive their fold for the same kind of reason. **Mode**, **Scale
+Compliance** and the arp's old target-line letter chip left the Pads bar 2026-08-02 for the
+generator's window and the arp bar's own tabs respectively - the tabs are the one addition to
+this bar that does **not** outlive the fold, since they only say which line the (now hidden)
+panel below is showing. What hides with a fold is what would be a control with nothing behind
+it - the pad pages, Knobs, Wheels, and now the A/B tabs. Detach hides with it too.
 Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with every
 other section since 2026-07-27); a detached section takes no height in the main window, and
 the Re-dock button travels into the window with it.
@@ -844,10 +849,10 @@ Three ruled, captioned groups, after the hardware-arp arrangement Owen asked for
 | Group | Holds | Visible |
 |-------|-------|---------|
 | PATTERN  | Rate (dial, spans both rows), Shape + `<` `>`, Rate `<` `>`, Sync/Hz, Trip, Dot | always |
-| PLAYBACK | Swing, Gate, Chance (knobs), Retrigger, Latch, Anchor | always |
+| PLAYBACK | Swing, Gate, Chance (knobs), Retrigger, Play, Latch, Anchor | always |
 | STEPS    | Steps, Speed, Link | Pattern shape only |
 | SPREAD   | Repeats, Distance, Offset | always |
-| FEEL     | Ramp, Time, Human | always (the band only; the macro rows carry Vol instead) |
+| FEEL     | Ramp, Time, Human Time, Human Vel | always (the band only; the macro cards carry Vel and the two Human knobs) |
 
 The last two are a **second band row**, added 2026-07-30 with the controls above. It is one
 control row tall where the first band is two, which is what kept eight new controls to 64 px
@@ -855,7 +860,12 @@ of a panel that is already the tallest thing in the editor: a knob column spans 
 a group, so FEEL uses horizontal sliders instead. Anchor moved down beside Latch in the same
 change - Retrigger grew from a toggle into a list, and at 128 px next to Anchor's 83 the
 PLAYBACK group ran over and ellipsised the *toggle*, which is the one thing on the band with
-no width to lose.
+no width to lose. Two later arrivals paid for themselves the same way: **Play** (`arpKeys`,
+which came down from the macro rows on 2026-08-02) is reserved off Retrigger's right end
+*first*, because Retrigger is the elastic one and an elastic control with a floor must never
+be asked to leave room for anything; and **Human Vel**, the velocity half of the Humanize
+split the same day, cost FEEL four points of group weight from SPREAD, which still fits its
+three cells exactly at the editor's minimum width.
 
 The `<` `>` pairs matter more than they look: stepping to the next shape is the commonest
 thing you do to an arp and it used to cost a click, a travel down a menu and a second click.
