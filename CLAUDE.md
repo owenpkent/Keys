@@ -176,9 +176,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   still one button that releases both), **a tab per line on that same bar** choosing which
   line the panel edits (they lived at the left of the slot row until the fourth 2026-08-02
   pass; a tab change rebuilds every APVTS attachment against the new ids, the same move
-  `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** naming the
-  line *Send to arp slot* targets (it named what a card *click* feeds until clicks stopped
-  feeding, same pass). **Dragging a chord card onto an arp slot binds it there**, or
+  `refreshRateMode` makes for the rate dial). A letter chip on the Pads bar named the line
+  *Send to arp slot* targets until 2026-08-02; it went when a card click stopped feeding a
+  line at all, and those same tabs say it now. **Dragging a chord card onto an arp slot binds it there**, or
   onto a tab - or onto a line's **card in the macro view**, which is the same target the size
   of half the panel rather than the size of a tab - to hand it over now. The left-click twin
   *Send to arp slot* never had. The slot cards, the tabs and the macro cards are each a
@@ -303,6 +303,24 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   every value - this is the part of "just a number" Keys cannot copy from Ableton, which
   expects a keyboard for that field. Row B of the Controls band keeps the 170 px the old
   slider held.
+- **The keyboard's own settings ride the Controls bar too** (2026-08-02, sixth pass, Owen:
+  "add the scale, root and scale lock, voices and MIDI channel into the controls header").
+  Root, Scale, Scale Lock, Voices and MIDI Ch left the band for the bar beside the tempo, so
+  the band's first row is Size and Octave alone. Same never-hides rule as the tempo, and for a
+  sharper reason: folding the settings band away is exactly when you still want to change key.
+  **The group has two sizes and measures which one it can afford.** They did not fit at the
+  editor's floor, and Owen's call was "I think we can resize the elements down" rather than a
+  wider window - so `roomy` captions Root, Voices and CH (because "C", "Off" and "1" say
+  nothing alone) while `tight` drops every caption, and `resized()` picks by comparing the
+  bar's actual width against the roomy total. That test is not decoration: the **update
+  button** claims 170 px of this same bar the day a release lands, and without it that day
+  would starve the last combo to zero width - the 2026-08-02 Shape trap, which had no visible
+  symptom. Scale and Lock never get a caption in either set: "Major" and "Lock" are their own.
+  Two labels shrank to fit and both kept their real name where it matters - Scale Lock reads
+  **"Lock"** but its accessible name is still `Scale Lock`, and MIDI Ch reads **"CH"** with the
+  whole phrase in the tooltip. **Measure, do not assume**: `Voices` was built at 52 px and drew
+  `"..."`, because "Off" plus a chevron is wider than the digits either side of it in the list,
+  and a `juce::ComboBox` ellipsises rather than complaining.
 - **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
   the setting Owen described and could not name: "if you start a new note or something that goes
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
@@ -505,8 +523,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   quieter. The cost, accepted: auditioning stops a deliberately sustained chord and the arp hold. **The generator is a brain plus three surfaces,
   and it owns none of them**: `ChordGenMenu` is a plain value member the editor holds for its
   whole life, and it is reached from (1) three 24 px chips at the right end of the Pads *bar* -
-  Fill, Regen and **Generator**, which opens the window - plus three 24 px combo boxes beside
-  them (Key / Mode / Scale Compliance, APVTS attachments so bar and window are one state);
+  Fill, Regen and **Generator**, which opens the window - plus the **Key** combo beside them
+  (an APVTS attachment, so bar and window are one state; Mode and Scale Compliance sat there
+  too until 2026-08-02, when Owen had them off the bar and left them to the window);
   (2) **its own window** (`ChordGenPanel`, 2026-07-30, Owen's call), which holds every setting,
   the Markov chain controls, and Fill / Regen / **Clear page**; (3) two items on a pad's card
   menu, New chord and Next, through `addPadMenuItems` / `handlePadMenuChoice`. **The window is a
@@ -559,11 +578,13 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   the section it was reaching into. This **reverses the 2026-07-27 removal** of the same
   override; any doc still saying the whole bar is the target is describing that three-day
   window. **Detach hides with its section**, and so does every control that would be reaching
-  into content that is not on screen: the pad pages, Knobs, Wheels. What stays on a folded
+  into content that is not on screen: the pad pages, Knobs, Wheels, and the arp bar's A/B/All
+  *tabs* (which navigate a panel that is not there). What stays on a folded
   bar is what you reach for while playing or generating - the arp's A / B line switches, All Off,
-  Light keys and
-  Hold off, the Pads bar's Fill / Regen / Generator, its Key / Mode / Scale Compliance combos
-  and the arp target-line letter beside them, the Keyboard bar's Exclusive / Sustain / Latch /
+  Light keys, Hold off and Launch Quantize; the Controls bar's tempo, Root, Scale, Lock, Voices
+  and CH (2026-08-02: a settings band you have folded away is exactly when you still want to
+  change key); the Pads bar's Fill / Regen / Generator and its Key combo; the Keyboard bar's
+  Exclusive / Sustain / Latch /
   All Off - plus the theme swatch, which belongs to the plugin rather than to any one section. Open and folded bars are painted at different weights on
   purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
   or the caption ellipsises and the controls beside it shift as a section folds.
@@ -752,10 +773,15 @@ Four things will bite otherwise:
   chips are `Arp line A` / `B`, and the tabs *on the same bar* (since the fourth 2026-08-02
   pass; they hide when the section folds) are `Arp line A tab` and so on
   (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
-  the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
-  `Arp target line`. Hold off is `Arp hold off`, and the Quantize combo beside the tabs is
+  and the slot cards are `Arp slot 1`..`12`. (The Pads bar's cycling letter, `Arp target
+  line`, is **gone** since 2026-08-02 - do not look for it.)
+  Hold off is `Arp hold off`, and the Quantize combo beside the tabs is
   `Arp launch quantize`. The tempo is **`Tempo`, on the Controls bar** - it answered to
-  `Arp BPM` on the arp bar for one build. The fourth tab is `Arp all tab`, and the macro
+  `Arp BPM` on the arp bar for one build. Beside it on that bar, and reachable by their
+  *current text* the way every combo is, sit Root, Scale, Voices and the MIDI channel; Scale
+  Lock is a toggle whose on-screen word is **"Lock"** but whose accessible name is still
+  `Scale Lock`, so a script asks for the full phrase and a reader hears it. The fourth tab is
+  `Arp all tab`, and the macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
   `Macro line A`, `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
   `Macro dot A` / `Macro trip A` / `Macro anchor A`, and `Macro OCT A` / `Macro GATE A` /

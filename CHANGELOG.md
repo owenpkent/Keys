@@ -5,6 +5,35 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the keyboard's own settings ride the Controls bar, and the Pads bar sheds three
+
+Owen: "let's also add the scale, root and scale lock, voices and MIDI channel into the controls
+header. remove the scale and percentage and letter b from pads header."
+
+**Onto the Controls bar**, right of the tempo: **Root**, **Scale**, **Scale Lock** (shown as
+"Lock", accessible name unchanged), **Voices** and the **MIDI channel**. All five left the
+Controls band, whose first row is now just Size and Octave. Like the tempo beside them they
+never hide when the section folds, which is the point: these are what you set while playing,
+and the band they used to live in went away with the fold.
+
+They did not fit at the editor's minimum width, and Owen's call was "I think we can resize the
+elements down" rather than a wider window, so the group has **two sizes and measures which one
+it can afford**. The roomy set captions Root, Voices and CH, since "C", "Off" and "1" say
+nothing alone; Scale and Lock never get a caption because "Major" and "Lock" are their own. The
+tight set drops every caption and is what fits on the day an update notification claims 170 px
+of the same bar. Deciding by measurement rather than assumption is what keeps that day from
+starving the last control to zero width, which is the trap this layout has now paid for twice.
+
+**Off the Pads bar**: the generator's **Mode** and **Scale Compliance** combos, and the
+**arp target-line letter**. Both combos are still in the Generator window, which holds every
+setting the generator has, so nothing became unreachable; the **Key** stays on the bar as the
+one you change between fills. The letter had already lost its job earlier the same day, when a
+card click stopped feeding an arp line at all, and what remained (naming the target of the card
+menu's *Send to arp slot*) is what the A/B tabs on the arp bar say. `genModeBox`,
+`genComplianceBox`, `arpTargetButton`, `cycleArpTargetLine()` and `refreshArpTargetButton()`
+are deleted rather than hidden, along with the `StepComboBox` two-way wiring that only a
+Compliance box on a bar ever needed.
+
 ### Changed: the tempo is a plain number in the Controls header
 
 Owen: "I think the bpm should live in the controls header. I want it to be like the bpm in

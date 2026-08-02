@@ -10,7 +10,10 @@
 #include "ui/KnobBank.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
-#include "ui/StepComboBox.h"
+// StepComboBox.h went with the Pads bar's Scale Compliance box on 2026-08-02. The class is
+// still in the tree: it is the answer for any future value shown as coarse steps of a
+// continuous parameter, and the bug it documents (a ComboBoxAttachment swallowing a pick of
+// the item already showing) is worth keeping written down.
 #include <okstudio/Updater.h>
 #include <array>
 #include <memory>
@@ -294,17 +297,15 @@ private:
     // has to know the other exists - which is what makes "the bar is the fast path, the window
     // is the complete one" true rather than a promise.
     //
-    // Key and Mode are choice parameters, so a bar combo and the window's combo hold the same
-    // set of values and cannot read differently. **Compliance can**, and by design: the
-    // parameter is a continuous 0-100, the window's slider steps by 1, and the bar offers five
-    // steps of it - so the bar shows the *nearest* step and reads "50 %" at 60. That is a
-    // display rounding and not a disagreement about the value, and it is the reason this one
-    // box is a StepComboBox driven by an explicit write rather than a ComboBoxAttachment: an
-    // attachment made picking the step already showing a dead click (see StepComboBox.h).
-    juce::ComboBox genRootBox, genModeBox;
-    StepComboBox genComplianceBox;
-    std::unique_ptr<ComboAtt> genRootAtt, genModeAtt;
-    std::unique_ptr<juce::ParameterAttachment> genComplianceAtt;
+    // Key alone since 2026-08-02: Mode and Scale Compliance came off the Pads bar at Owen's
+    // ask and live only in the generator's window now, which holds every setting anyway. Key
+    // is a choice parameter, so this combo and the window's hold the same set of values and
+    // cannot read differently - which is why a plain ComboBoxAttachment is all it needs.
+    // Compliance was the one that could not have one (a continuous 0-100 shown as five steps,
+    // where an attachment made picking the step already showing a dead click - see
+    // StepComboBox.h), and that wiring went with it.
+    juce::ComboBox genRootBox;
+    std::unique_ptr<ComboAtt> genRootAtt;
 
     // Alive whenever the arp section is open, wherever that section currently is.
     std::unique_ptr<ArpPanel> arpPanel;
@@ -420,9 +421,8 @@ private:
     // belongs beside the cards. It is the same state as the A/B tabs inside the arp panel,
     // so either moves both - and it stays reachable with the arp section folded away, which
     // the tabs do not.
-    juce::TextButton arpTargetButton { "A" };
-    void cycleArpTargetLine();
-    void refreshArpTargetButton();
+    // The cycling letter that used to sit here is gone (2026-08-02): a card click no longer
+    // feeds a line at all, and the arp bar's A/B tabs name the current one.
     juce::TextButton wheelsButton { "Wheels" };
 
     // A second Size selector, for the detached keyboard window. The keybed's key count

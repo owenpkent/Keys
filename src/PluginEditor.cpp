@@ -17,27 +17,11 @@ namespace
 
     juce::StringArray sizeItems() { return { "25 keys", "49 keys", "61 keys", "73 keys", "76 keys", "88 keys" }; }
 
-    // The generator's mode names as a bar-width combo box can show them: the parenthetical
-    // alias is dropped, so "Natural Minor (Aeolian)" reads "Natural Minor" and the widest item
-    // becomes "Pentatonic Major". Same list, same order, same indices as modes::names() and so
-    // as the "genMode" parameter's own choices - only the alias goes, which is why this is not
-    // a second vocabulary to keep in step with the first. Spelling them out in full would want
-    // a 186 px combo for one mode's alias, on a bar with 300 px for three controls.
-    juce::StringArray barModeNames()
-    {
-        juce::StringArray out;
-        for (const auto& n : modes::names())
-            out.add(n.upToFirstOccurrenceOf(" (", false, false).trim());
-        return out;
-    }
-
-    // Scale Compliance is a continuous 0-100 parameter; on the bar it is these five steps. The
-    // card menu used to offer the same ladder, out of a ChordGenMenu::ladder helper; both went
-    // when the settings moved into the generator's own window on 2026-07-30, and the window has
-    // the whole range on a slider. So this is the only ladder left, and the bar shows the step
-    // nearest whatever the slider was last set to - see genComplianceBox for why that rounding
-    // costs the bar its ComboBoxAttachment.
-    juce::StringArray complianceItems() { return { "0 %", "25 %", "50 %", "75 %", "100 %" }; }
+    // A `barModeNames()` (the generator's mode names with the parenthetical alias dropped, so
+    // they fit a bar-width combo) and a five-step `complianceItems()` ladder lived here. Both
+    // went with the Mode and Scale Compliance combos when those left the Pads bar on
+    // 2026-08-02: the generator's window spells its modes out in full and puts the whole
+    // 0-100 range on a slider, so neither has a caller any more.
 
     // Fixed heights of the editor's bands, shared by idealHeight() and resized() so the
     // window the folds ask for and the layout they get can never drift apart.
@@ -234,11 +218,27 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     controlsHolder.addAndMakeVisible(title);
 
     addCombo(controlsHolder, sizeBox, sizeLabel, "Size", sizeItems(), "size", sizeAtt);
-    addCombo(controlsHolder, rootBox, rootLabel, "Root", okstudio::scales::noteNames(), "root", rootAtt);
-    addCombo(controlsHolder, scaleBox, scaleLabel, "Scale", okstudio::scales::names(), "scale", scaleAtt);
-    addCombo(controlsHolder, channelBox, channelLabel, "MIDI Ch", channelItems(), "channel", channelAtt);
-    addCombo(controlsHolder, polyphonyBox, polyphonyLabel, "Voices",
+    // Root, Scale, Voices and MIDI Ch ride the Controls *bar* (2026-08-02, Owen's ask), so
+    // they are the editor's children rather than the holder's: a holder travels into a
+    // detached window and these must stay on the bar in the main one, the theme swatch's
+    // rule. Scale Lock goes with them, below, for the same reason. Their labels are restyled
+    // to the bar's own micro-caps after this - `addCombo` writes the band's 10 px style.
+    addCombo(*this, rootBox, rootLabel, "Root", okstudio::scales::noteNames(), "root", rootAtt);
+    addCombo(*this, scaleBox, scaleLabel, "Scale", okstudio::scales::names(), "scale", scaleAtt);
+    addCombo(*this, channelBox, channelLabel, "MIDI Ch", channelItems(), "channel", channelAtt);
+    addCombo(*this, polyphonyBox, polyphonyLabel, "Voices",
              { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, "polyphony", polyphonyAtt);
+    // 9 px faint micro-caps, the weight every other caption riding a bar wears (BPM,
+    // QUANTIZE). The band's 10 px textDim is a size louder because a band has the room.
+    for (juce::Label* l : { &rootLabel, &scaleLabel, &channelLabel, &polyphonyLabel })
+    {
+        l->setFont(skin::micro(9.0f));
+        l->setColour(juce::Label::textColourId, skin::textFaint);
+        l->setJustificationType(juce::Justification::centredRight);
+    }
+    // "MIDI CH" does not fit the width this bar can spare; the tooltip on the combo says the
+    // whole of it, and "CH" beside a channel number is unambiguous in context.
+    channelLabel.setText("CH", juce::dontSendNotification);
 
     styleLabel(octaveLabel, "Octave");
     controlsHolder.addAndMakeVisible(octaveLabel);
@@ -248,9 +248,16 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     controlsHolder.addAndMakeVisible(octaveSlider);
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "octave", octaveSlider);
 
-    // Scale Lock and Humanize belong to the Controls section; Sustain and Exclusive ride on
-    // the Keyboard bar, outside every fold, because they are what you reach for while playing.
-    controlsHolder.addAndMakeVisible(scaleLockButton);
+    // Scale Lock rides the Controls bar beside the Scale it locks to (2026-08-02); Humanize
+    // stays in the band. Sustain and Exclusive ride the Keyboard bar, outside every fold,
+    // because they are what you reach for while playing.
+    //
+    // "Lock", not "Scale Lock": the bar cannot spare the width for both words, and it sits
+    // immediately right of the Scale box it belongs to. The accessible name keeps the full
+    // phrase so the capture script and a screen reader still hear the control's real name.
+    scaleLockButton.setButtonText("Lock");
+    scaleLockButton.setTitle("Scale Lock");
+    addAndMakeVisible(scaleLockButton);
     controlsHolder.addAndMakeVisible(humanizeButton);
     addAndMakeVisible(sustainButton);
     addAndMakeVisible(latchButton);
@@ -419,17 +426,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Lock Influence, the Markov chains and the audition tray, in a window of their own. A second
     // click while it is already up raises it rather than building another - there is exactly
     // one of these, and a window you cannot find is worse than one that is shut.
-    // Where a clicked chord card goes. Not a combo: a handful of values, and a chip that cycles
-    // is one click where a combo is a click, a travel and a second click - the same argument the
-    // < > steppers beside Shape are made of.
-    genChip(arpTargetButton, "Arp target line",
-            "The current arpeggiator line: the one a card's Send to arp slot menu item "
-            "targets, and the one the arp panel's per-line view edits. Click to cycle A, B. "
-            "Kept here so it is reachable with the arp folded away. A click on a card never "
-            "feeds a line any more - drag the card onto a line's card or its letter tab "
-            "instead, which aims without changing what this says.",
-            [this] { cycleArpTargetLine(); });
-    refreshArpTargetButton();
+    //
+    // There was a fourth chip here, a cycling letter naming the arp line a card fed. It went on
+    // 2026-08-02 with Mode and Compliance ("remove the scale and percentage and letter b from
+    // pads header"), and it had already lost most of its job earlier the same day, when a card
+    // click stopped feeding a line at all: what remained was naming the target of the card
+    // menu's *Send to arp slot*, which the A/B tabs on the arp bar say just as well.
     genChip(chordGenButton, "Chord generator window",
             "Open the chord generator: every setting it has, plus a tray of chords to audition. "
             "It is a window of its own, so it can sit beside the plugin while you audition.",
@@ -461,41 +463,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
              "The key the chord generator writes in. Separate from the Root that drives Scale "
              "Lock; also on a pad's right-click menu.",
              okstudio::scales::noteNames(), "genRoot", genRootAtt);
-    genCombo(genModeBox, "Generator mode",
-             "The mode the chord generator writes in, which decides the quality of every "
-             "degree. Also on a pad's right-click menu, where each mode carries its character.",
-             barModeNames(), "genMode", genModeAtt);
-    // Compliance is the odd one out on this bar and takes no ComboBoxAttachment. Its parameter
-    // is a continuous 0-100 while this box is five steps of it, so the box shows the nearest
-    // step: at 60, set from the window's slider, it reads "50 %". An attachment then made
-    // picking "50 %" do nothing at all - juce::ComboBox swallows a pick of the item already
-    // showing, so the write never happened and 50 was unreachable from the bar (see
-    // StepComboBox.h). So the two directions are wired separately: a plain ParameterAttachment
-    // reads the parameter back onto the box, and onPick writes it. setValueAsCompleteGesture is
-    // one begin/set/end, so no pick can leave a host automation gesture open, and a move on the
-    // window's slider still lands here through the attachment.
-    genComplianceBox.addItemList(complianceItems(), 1);
-    genComplianceBox.setTitle("Scale compliance");
-    genComplianceBox.setTooltip("How far outside the key the generator may wander: 100 % is "
-                                "diatonic only, and each step down lets in borrowed chords, "
-                                "secondary dominants, then chromatic ones. Five steps of a "
-                                "continuous setting: the generator window has the fine control, "
-                                "and this shows the step nearest to it.");
-    addAndMakeVisible(genComplianceBox);
-    if (auto* complianceParam = processor.apvts.getParameter("genCompliance"))
-    {
-        const float steps = (float) (complianceItems().size() - 1);
-        genComplianceAtt = std::make_unique<juce::ParameterAttachment>(
-            *complianceParam,
-            [this, steps](float v)
-            {
-                const int i = juce::jlimit(0, (int) steps, juce::roundToInt(v / 100.0f * steps));
-                genComplianceBox.setSelectedItemIndex(i, juce::dontSendNotification);
-            });
-        genComplianceBox.onPick = [this, steps](int id)
-        { genComplianceAtt->setValueAsCompleteGesture(100.0f * (float) (id - 1) / steps); };
-        genComplianceAtt->sendInitialUpdate();
-    }
+    // Mode and Scale Compliance sat here beside it until 2026-08-02 (Owen: "remove the scale
+    // and percentage and letter b from pads header"). Both are still in the Generator window,
+    // which holds every setting the generator has, so nothing became unreachable; the Key
+    // stays because it is the one you change between fills. The StepComboBox dance Compliance
+    // needed on a bar - a ParameterAttachment reading and `onPick` writing, because a
+    // ComboBoxAttachment made picking the step already showing a no-op - went with it; the
+    // window drives that parameter with a plain slider and never needed it.
 
     // On rides on the Arp *bar*, not inside the section, so folding the editor away does not
     // take the arp's power switch with it. Same reasoning as Sustain and All Off living on
@@ -574,11 +548,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         tab->onClick = [this, n]
         {
             if (arpPanel != nullptr)
-                arpPanel->setEditLine(n); // fires onEditLineChanged -> both refreshes below
+                arpPanel->setEditLine(n); // fires onEditLineChanged -> refreshArpBarTabs
             else
             {
                 processor.setArpCurrentLine(n);
-                refreshArpTargetButton();
                 refreshArpBarTabs();
             }
         };
@@ -879,26 +852,9 @@ void KeysEditor::refreshSectionPanels()
     refreshArpPanel();
 }
 
-void KeysEditor::cycleArpTargetLine()
-{
-    const int next = (processor.arpCurrentLine() + 1) % KeysProcessor::uiArpLines;
-    processor.setArpCurrentLine(next);
-    // Through the panel when it is open, so its attachments and step lanes move with the
-    // chip. `leaveMacroView` false: the chip is routing state (which line Send to arp slot
-    // targets), not navigating, and cycling it out of the All view would be the drop-on-a-
-    // card rule broken from a different button.
-    if (arpPanel != nullptr)
-        arpPanel->setEditLine(next, /*leaveMacroView*/ false);
-    refreshArpTargetButton();
-    refreshArpBarTabs();
-    chordPads.repaint(); // the corner marks say which line each card was last sent to
-}
-
-void KeysEditor::refreshArpTargetButton()
-{
-    const int line = processor.arpCurrentLine();
-    arpTargetButton.setButtonText(juce::String::charToString((juce::juce_wchar) ('A' + line)));
-}
+// cycleArpTargetLine() and refreshArpTargetButton() lived here until 2026-08-02, when the
+// Pads bar's cycling letter came off. The arp bar's A/B tabs are the one surface that names
+// the current line now, and refreshArpBarTabs() is what keeps them honest.
 
 // ---------------------------------------------------------------------------
 // The arp bar's A/B/All tabs (2026-08-02). TextButtons like every other bar chip, with the
@@ -951,7 +907,6 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
         {
             owner.processor.holdArpChordFromPad(p->index, line);
             owner.processor.setArpCurrentLine(line);
-            owner.refreshArpTargetButton();
             owner.refreshArpBarTabs();
         }
         p->taken = true;
@@ -1033,10 +988,9 @@ void KeysEditor::refreshArpPanel()
 
     arpPanel = std::make_unique<ArpPanel>(processor);
     arpPanel->setInlineMode(true);
-    // The bar tabs and the Pads-bar chip are each a view of the same processor state, so
-    // every path that moves it has to refresh both. This is the panel's half (drops on cards
-    // land here); cycleArpTargetLine is the chip's, and the tabs' own clicks do it directly.
-    arpPanel->onEditLineChanged = [this] { refreshArpTargetButton(); refreshArpBarTabs(); };
+    // The bar tabs are a view of the processor's current line, so every path that moves it
+    // has to say so. This is the panel's half - a chord dropped on a macro card lands here.
+    arpPanel->onEditLineChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -1529,13 +1483,11 @@ void KeysEditor::layoutControlsHolder()
         ctl.setBounds(c.withTrimmedTop(14));
     };
 
+    // Root, Scale, Scale Lock, Voices and MIDI Ch left this row for the bar on 2026-08-02,
+    // which is why it is down to two cells. They are not laid out here at all any more: a
+    // control has one home, and a second setBounds would fight the bar's.
     cell(rowA, 88, sizeLabel, sizeBox);
-    cell(rowA, 70, rootLabel, rootBox);
-    cell(rowA, 150, scaleLabel, scaleBox);
     cell(rowA, 120, octaveLabel, octaveSlider);
-    toggleCell(rowA, 110, scaleLockButton);
-    cell(rowA, 90, polyphonyLabel, polyphonyBox);
-    cell(rowA, 70, channelLabel, channelBox);
 
     toggleCell(rowB, 96, humanizeButton);
     cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
@@ -1680,15 +1632,11 @@ void KeysEditor::timerCallback()
         arpHoldOffButton.setEnabled(anyHold);
     }
 
-    // Mode and Scale Compliance are the generator's, and the Markov brain reads neither: it
-    // walks a table of transitions instead of a scale. The generator's window already hides
-    // them under Source: Markov, so the bar greys them or the same setting is live in one
-    // place and dead in the other. A control that accepts the click and changes nothing reads as broken, which
-    // is the Octavium behaviour this generator was written not to repeat. Key stays live, since
-    // the chains do transpose to it.
-    const bool scaleDriven = chordGen.readsScaleSettings();
-    genModeBox.setEnabled(scaleDriven);
-    genComplianceBox.setEnabled(scaleDriven);
+    // Mode and Scale Compliance used to be greyed here whenever the source read neither (the
+    // Markov brain walks a table of transitions instead of a scale). Both left this bar on
+    // 2026-08-02 and only the generator's window draws them now, which does its own greying;
+    // Key, which is still here, stays live under every source, since even the chains transpose
+    // to it.
 
     // Each chip says whether it would do anything, which is also the clearest statement of
     // which of the two is which: Fill lights only while there is a blank to fill, Regen only
@@ -1873,7 +1821,58 @@ void KeysEditor::resized()
         bpmField.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
         bar.removeFromLeft(3);
         bpmNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
-        bar.removeFromLeft(10);
+        bar.removeFromLeft(14);
+
+        // Root, Scale, Lock, Voices and MIDI Ch (2026-08-02, Owen's ask - and "I think we can
+        // resize the elements down" when they would not fit at his window width). Two sizes,
+        // and which one is used is decided by measuring, never assumed: at the editor's floor
+        // this bar has ~506 px free here, the roomy set needs 462, and the *update* button
+        // takes 170 of it the day a release lands. Rather than let that day starve the last
+        // control to nothing (the 2026-08-02 Shape trap, which had no visible symptom), the
+        // labels are what give way first - the combos keep full-size targets either way.
+        //
+        // Root, Voices and CH keep a caption in the roomy set because "C", "Off" and "1" say
+        // nothing on their own. Scale and Lock never get one: "Major" and "Lock" are their
+        // own labels.
+        {
+            constexpr int gap = 8, lblGap = 4;
+            struct Cell { int label, box; };
+            // Voices is the widest of the small boxes because "Off" plus a chevron is wider
+            // than the digits either side of it in the list - measured, not guessed: at 52 it
+            // drew "..." while every other value fitted, which is the failure a combo makes
+            // instead of complaining.
+            constexpr Cell roomy[] = { { 34, 48 }, { 0, 96 }, { 0, 62 }, { 44, 68 }, { 26, 48 } };
+            constexpr Cell tight[] = { {  0, 44 }, { 0, 76 }, { 0, 56 }, {  0, 62 }, {  0, 44 } };
+            const auto widthOf = [](const Cell (&cells)[5])
+            {
+                int w = gap * 4;
+                for (const auto& c : cells)
+                    w += c.box + (c.label > 0 ? c.label + lblGap : 0);
+                return w;
+            };
+            const bool roomForLabels = bar.getWidth() >= widthOf(roomy);
+            const auto& cells = roomForLabels ? roomy : tight;
+
+            const auto place = [&bar](const Cell& c, juce::Label* lab, juce::Component& ctl)
+            {
+                if (lab != nullptr && c.label > 0)
+                {
+                    lab->setBounds(bar.removeFromLeft(c.label).withSizeKeepingCentre(c.label, 24));
+                    bar.removeFromLeft(lblGap);
+                }
+                ctl.setBounds(bar.removeFromLeft(c.box).withSizeKeepingCentre(c.box, 24));
+                bar.removeFromLeft(gap);
+            };
+            scaleLabel.setVisible(false); // "Major" is its own caption, in both sets
+            for (juce::Label* l : { &rootLabel, &polyphonyLabel, &channelLabel })
+                l->setVisible(roomForLabels);
+            place(cells[0], &rootLabel, rootBox);
+            place(cells[1], nullptr, scaleBox);
+            place(cells[2], nullptr, scaleLockButton);
+            place(cells[3], &polyphonyLabel, polyphonyBox);
+            place(cells[4], &channelLabel, channelBox);
+        }
+        bar.removeFromLeft(6);
         section(secControls).caption = bar;
     }
     if (const int h = sectionHeight(secControls); h > 0)
@@ -1968,25 +1967,16 @@ void KeysEditor::resized()
         // behind them would be off the screen.
         bar.removeFromRight(6);
         chordGenButton.setBounds(bar.removeFromRight(90).withSizeKeepingCentre(88, 24));
-        // The target line, left of the generator's three: it belongs to what a card *click*
-        // does rather than to what generation does, and putting it at the far end would leave
-        // the two groups indistinguishable.
-        bar.removeFromRight(8);
-        arpTargetButton.setBounds(bar.removeFromRight(38).withSizeKeepingCentre(36, 24));
-        // Key, Mode and Compliance, left of the three chips and reading in that order, which is
-        // the order the generator's window lists them in. Same end of the bar and the same
-        // unconditional placement as Fill and Regen, for the same two reasons: they outlive
-        // the fold, and the left end is where the hole appears when the page buttons go.
+        // The generator's Key, alone now. Mode, Scale Compliance and the arp target letter
+        // left this bar on 2026-08-02 (Owen: "remove the scale and percentage and letter b
+        // from pads header"): both combos are still in the Generator window, which holds
+        // every setting it has, and the current arp line is chosen by the A/B tabs on the arp
+        // bar. Key stays because it is the one generator setting you reach for between fills.
         //
         // 24 px like everything on a bar that acts rather than folds, so the whole group is
         // one height. What the bar spends, at its floor and above, is worked out in
-        // minWidthForView() - these three, and the Generator chip above them, are why that
-        // floor moved from 1010 to 1070.
+        // minWidthForView().
         bar.removeFromRight(10);
-        genComplianceBox.setBounds(bar.removeFromRight(74).withSizeKeepingCentre(72, 24));
-        bar.removeFromRight(6);
-        genModeBox.setBounds(bar.removeFromRight(148).withSizeKeepingCentre(146, 24));
-        bar.removeFromRight(6);
         genRootBox.setBounds(bar.removeFromRight(58).withSizeKeepingCentre(56, 24));
         // The page buttons ride on the Pads bar, where they used to sit in a row of their
         // own under the strip. One click still reaches any page, and the section keeps its

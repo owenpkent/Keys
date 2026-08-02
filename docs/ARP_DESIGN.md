@@ -60,7 +60,8 @@ came out, and the count now lives in one place, `KeysProcessor::uiArpLines`.
   counting it, Hold off greys correctly. A session saved with C running opens with C silent,
   which is the right trade against an arpeggiator no control on screen can stop.
 - **`arpCurrentLine()` clamps to `uiArpLines`**, so a session saved with C current opens on B -
-  a current line the letter chip cannot name is a card click with nowhere to go.
+  a current line nothing on screen can point at would leave the arp bar's A/B tabs (and a pad's
+  **Send to arp slot** menu item) with no line to default to.
 - **`layout.arpMacro` defaults true**, so a fresh instance opens with both lines on screen over
   the strip you drag from. The A/B tabs are still how you reach a line's step lanes and twelve
   slots, which are per-line and have nowhere to live in a row.
@@ -186,14 +187,19 @@ Two things this deliberately does not change:
   releases every line and every chain. Beside it since 2026-08-02: **All Off**, which switches
   every line off *and* lets go of everything, and **Light keys**, a display toggle - see their
   own sections below.
-- **A tab per line at the left of the slot row** selects which line the panel edits - band, step
-  lanes, the twelve slots, Bars, Chain. They cost no height: 34 px inside a row already 58 tall.
-  Changing the tab tears down every APVTS attachment and rebuilds it against the new line's ids,
-  which is the same move `refreshRateMode` has always made for the rate dial's two units, guard
-  against swapping under an open drag included.
-- **A letter chip on the Pads bar** says which line a chord-card click feeds, and cycles A-B.
-  Same state as the tabs; it is on that bar because it is a fact about the cards, and because it
-  has to be reachable with the arp folded shut.
+- **A tab per line** selects which line the panel edits - band, step lanes, the twelve slots,
+  Bars, Chain. They started on the slot row and moved onto the **Arp section bar** 2026-08-02
+  (see **The macro view (the fourth tab)** below), and unlike the bar's A/B switches they hide
+  when the section folds: a tab only says which line the panel is showing, and there is nothing
+  to point at once the panel is off screen. Changing the tab tears down every APVTS attachment
+  and rebuilds it against the new line's ids, which is the same move `refreshRateMode` has
+  always made for the rate dial's two units, guard against swapping under an open drag included.
+- **The Pads bar's letter chip, which used to say which line a chord-card click fed, is gone**
+  (2026-08-02, same pass that moved the tabs). A click stopped feeding a line at all earlier the
+  same day (see **A click never feeds a line** below), which left the chip naming nothing but a
+  right-click menu's default target - Owen asked for it removed along with Mode and Scale
+  Compliance ("remove the scale and percentage and letter b from pads header"). The current line
+  is the arp bar's own A/B tabs now.
 - **Drag a chord card onto a slot** to bind it there, **onto a tab**, or **onto a line's row in
   the macro view**, to hand it over now. Stock `juce::DragAndDropTarget` on each of the three
   (2026-08-02): the slot cards, the line tabs and the macro rows take the drop themselves, and
@@ -387,10 +393,13 @@ math was adversarially refuted as a pattern to copy. Requirements:
   `tests/ArpTests.cpp` pin the timebase, including this one.
 - **Transport stopped / standalone:** fall back to an internal clock so the arp keeps
   sounding while auditioning. Cthulhu goes silent with the transport stopped and that is a
-  known annoyance. (Decided by Owen, 2026-07-19.) The fallback is the **BPM** parameter
-  (40..240, default 120, a slider in the Controls section) since 2026-07-27; it used to be
-  the host's last-known tempo, which the standalone never has and nothing could change. A
-  host that is *playing* still wins.
+  known annoyance. (Decided by Owen, 2026-07-19.) The fallback is the **`bpm`** parameter
+  (40..240, default 120) since 2026-07-27; it used to be the host's last-known tempo, which the
+  standalone never has and nothing could change. A host that is *playing* still wins. On
+  screen it was a labelled slider in the Controls section's band until 2026-08-02, when it
+  became **Tempo**, a plain draggable number with `<` `>` steppers on the *Controls bar* itself
+  (Owen: "the bpm should live in the controls header. I want it to be like the bpm in ableton,
+  just a number") - it stays reachable with that section folded now, where the slider did not.
 - Engine is a pure class (`ArpEngine.h`, UI-free, unit-tested like ChordGen):
   inputs = sounding-note set + params + (ppq, bpm, numSamples); output = timestamped
   note events.
@@ -668,22 +677,28 @@ MCP-addressable. Slots 9-12 read as empty in a session saved with eight.
 
 The engine has always taken its input from the block's merged MIDI stream, so a chord pad
 already fed the arp - but the arp was a centre view and picking it put the pads away, and a
-pad was momentary anyway. Two paths close that, both added 2026-07-25 (the section move
-closed the first half):
+pad was momentary anyway. Paths that close that were added from 2026-07-25 on; what feeds a
+line today is a **drag**, and that took the last of them off the left click 2026-08-02.
 
-- **A click on a chord card, while the arp is on.** It calls
-  `KeysProcessor::holdArpChordFromPad`, which emits the note-ons and never the note-offs
-  until the next call.
+- **A drag onto a line's card in the macro view, its tab on the Arp bar, or a slot.** Each
+  calls `KeysProcessor::holdArpChordFromPad` (through `ArpPanel::takeChordOnLine` for the
+  first two), which emits the note-ons and never the note-offs until the next call.
+  `holdArpChordFromPad` goes through `holdArpChord`, which releases the previous hold first
+  (`releaseNotes` on `arpChordTag`, so the refcounts and the arp's held set both unwind) and
+  then fires, applying Exclusive to the new one - so dropping the same card on a line it is
+  already feeding is a restrike and never a second owner of the same pitches.
 
-  **A second click on the card already feeding the arp retriggers it** (2026-07-30); it used
-  to toggle the hold off. `holdArpChordFromPad` goes through `holdArpChord`, which releases
-  the previous hold first (`releaseNotes` on `arpChordTag`, so the refcounts and the arp's
-  held set both unwind) and then fires, applying Exclusive to the new one, so re-playing the
-  holder is a restrike and never a second owner of the same pitches. That makes a chord card
-  behave like a beat pad in both modes: a second press re-fires it. The one exception is a
-  card that was **cleared** while still holding the arp. It wears the ring with no notes
-  behind it, there is nothing to re-play, so the click calls `releaseArpChord()` instead:
-  that is the ring's own way out, and the reason it is drawn on an empty card at all.
+  **A click never does any of this any more** (2026-08-02, Owen: "when an arpeggiator's
+  running and you click on a pad, I don't want it to send it to the arpeggiator unless you
+  drag it"). Until that day a plain click, while any line was on, handed the card to the
+  **current** line the same way a drag does now, and a second click on the card already
+  feeding it was the restrike described above; `ChordPads::mouseUp` dropped that branch
+  entirely; a click now auditions the pad exactly as it would with every line off; see **A
+  chord card sounds on release, never on press** in `CLAUDE.md` for the audition side of the
+  same change. One click-only case survives, because a drag cannot reach it: a card that was
+  **cleared** while still feeding a line wears the ring with no notes behind it, there is
+  nothing left to audition, so a click on it calls `releaseArpChord()` instead - that is the
+  ring's own way out, and the reason a cleared card is still drawn with one.
 
   Stopping a *filled* card's hold outright is **Hold off** on the arp bar (below).
 
@@ -709,15 +724,17 @@ closed the first half):
   launched is still left alone deliberately: its lit card is on screen and still releases it.
 - **Send to arp slot**, in the pad's card menu, which copies the chord into a slot for
   later. A copy and not a reference, so regenerating the pad page cannot silently rewrite
-  what a slot plays.
+  what a slot plays. It is the aimless twin of dragging a card onto a slot directly - no
+  target to drag onto, so it goes to the slot machinery without one.
 - **Dragging a chord card onto a slot card** (2026-08-01), which is the same thing with a
   target picker instead of a submenu, and is what retired that menu item's status as a
-  right-click-only path. **Dragging onto a line tab** hands the chord to that line there and
-  then, without going through a slot at all.
+  right-click-only path. **Dragging onto a line's tab, or its card in the macro view**, hands
+  the chord to that line there and then, without going through a slot at all.
 
-Every one of these names a line. A click and the two menu items go to the **current** line
-(`arpCurrentLine`, shown on the Pads bar and by the panel's tabs); a drag goes to the line
-whose tab or slot it landed on, and makes that line current, because you aimed at it.
+Every one of these names a line. The two menu items go to the **current** line
+(`arpCurrentLine`, shown by the Arp bar's A/B tabs - it left the Pads bar with the letter chip
+2026-08-02); a drag goes to the line whose tab, macro card or slot it landed on, and makes
+that line current, because you aimed at it.
 
 The held chord is tagged `arpChordTag - line` (-3, -4, -5) so it never collides with pad or
 live-card scheduling *or with another line's hold* - each is released independently, and
