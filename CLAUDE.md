@@ -241,6 +241,27 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   this back into Sync - an absent parameter keeps the live instance's current value rather than
   resetting it, so without that a Hz session would reopen in Sync at whatever division it
   happened to hold, silently.
+- **The arp bar carries All Off and Show notes** (2026-08-02, Owen's ask). **All Off**
+  (`allArpOff()`) switches every line off *and* releases every hold, chain and pending launch.
+  Switching off is the load-bearing half: release without it and the engines pick straight back
+  up on whatever the keybed holds, so it would silence the room for a sixteenth note. It is
+  always enabled, unlike Hold off, because a stop button you have to read before trusting is
+  one you cannot reach for in the moment. **Show notes** (`layout.arpLights`) lights the keybed
+  for the notes the arp is *playing*. `arpNoteOn` is a flag per pitch written on the audio
+  thread off each line's `out` buffer - never off the merged stream, where the arp's notes are
+  indistinguishable from the pass-through, and never off `in`, which `noteRefs` already lights.
+  **`arpNoteLit()` is deliberately not folded into `isNoteSounding()`**: that answer feeds the
+  live chord card too, and an arpeggio is a run of single notes, so folding it in would rewrite
+  the "current chord" as whichever note the arp is on. Only `NoteSurface` asks it.
+- **Reserve the fixed-size control first, always** (2026-08-02). `MacroRow::resized` expressed
+  Shape's width as a subtraction inside the knobs' `jlimit(52, 96, ...)`, which is not a
+  reservation: on Owen's window the knobs hit their floor, the clamp discarded the subtraction,
+  and Shape got the ~77 px left over. Two symptoms, one cause - the combo drew "Random Other" as
+  "R...", *and* the `>` stepper beside it was starved to zero width, a mouse-only target simply
+  not on screen with nothing to see. An elastic control with a floor must never be asked to
+  leave room for anything; take the constant-size cell out first and let the elastic one have
+  the rest. This is the same family as the 2026-08-01 trap logged above, which is why it is
+  worth two entries.
 - **Exclusive does not reach across arp lines** (2026-08-02, Owen: "I want each arpeggiator to
   play different chords"). `stopAllChordPads()` releases every chord source including every
   line's hold, and `holdArpChordNow` called it, so handing B a chord took A's away and the

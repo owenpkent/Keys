@@ -23,6 +23,26 @@ the arp panel is 66 px shorter than it was.
 - The A/B tabs still open a line's deep controls: the step lanes and the twelve slots are
   per-line and have nowhere to live in a macro row.
 
+**All Off on the arp bar**, beside Hold off. Both lines off, every held chord let go, every
+chain stopped, every quantized launch dropped - one click. Switching the lines off is what makes
+it different from Hold off: release the chords without it and the engines simply pick back up on
+whatever the keybed is holding, so the button would have silenced the room for a sixteenth note.
+
+**Show notes**, also on the arp bar: the keyboard at the bottom lights up for the notes the
+arpeggiator is *playing*, as it plays them. The chord you hand a line lights it either way; this
+is the run itself. On by default, and one click turns it off when a 1/16 run is not what you
+want to be watching. It is a view toggle, not a parameter - nothing about it is heard - and it
+is deliberately kept out of the "current chord" card, which must keep naming the chord rather
+than whichever note of it the arp is on.
+
+**Fixed: the shape name was cut off in the macro rows**, and the `>` stepper beside it was
+missing entirely. Both had one cause: Shape's width was expressed as a subtraction inside the
+knob-size clamp, and on a narrower window the knobs hit their floor, the clamp threw the
+subtraction away, and Shape got whatever happened to be left - about 77 px, enough for "Up" and
+not for "Random Other". The stepper was starved to zero width by the same shortfall, which is
+the worse half: a mouse-only control that was not on screen at all. Shape's cell is now reserved
+first and the knobs take what remains, which is the ordering that cannot fail.
+
 **Each line holds its own chord.** Exclusive no longer reaches across the arp lines: handing a
 chord to B used to silently take A's away, so the second drag undid the first and a polyrhythm
 could not be built at all. It still chokes the pads and the live card in both directions, and a

@@ -44,7 +44,11 @@ std::set<int> NoteSurface::externallySounding() const
     std::set<int> out;
     for (int note = 0; note < 128; ++note)
     {
-        if (own.count(note) > 0 || ! processor.isNoteSounding(note))
+        // arpNoteLit is a second question, not part of the first: it answers for the notes the
+        // arpeggiator is *playing*, which isNoteSounding has never counted (they never pass
+        // through noteOn). It is the keybed's alone - the live chord card asks isNoteSounding
+        // and must keep getting the chord, not whichever note of it the arp is on.
+        if (own.count(note) > 0 || ! (processor.isNoteSounding(note) || processor.arpNoteLit(note)))
             continue;
         const int drawn = drawnForOutputNote(note);
         if (drawn >= 0)

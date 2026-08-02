@@ -93,6 +93,18 @@ public:
     // the chord under their hands. Display only, and a flag per pitch rather than a count:
     // a missed note-off would leak a refcount into a key lit forever.
     std::vector<int> inputNotes() const; // sorted, message thread
+
+    // Which pitch the arpeggiator is sounding *right now*, so the keybed can light up as it
+    // runs (2026-08-02, Owen: "another option for showing it when it's actually playing on the
+    // keyboard on the bottom"). Answers false with the option off, which is the whole of what
+    // the option does - the flags are kept either way, since they cost one atomic store per
+    // note event and a toggle that has to wait for the next note to take effect reads as broken.
+    //
+    // **Deliberately not part of isNoteSounding.** That answer feeds the live chord card as
+    // well, and an arpeggio is a run of single notes: folded in there it would rewrite the
+    // "current chord" as whichever note the arp is on. Only the keybed asks this one.
+    bool arpNoteLit(int midiNote) const;
+
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
@@ -272,6 +284,17 @@ public:
     // rather than in whichever surface happens to own the button.
     void releaseArpHold();
 
+    // **All Off, for the arpeggiator** (2026-08-02, Owen: "we need an all off button in the
+    // arpeggiator section as well"). Switches every line off, then lets go of everything:
+    // holds released, chains stopped, pending quantized launches dropped.
+    //
+    // Switching the lines off is what makes it "off" rather than a second Hold off. Releasing
+    // without switching off does not stop an arpeggiator - the engine is still running, so it
+    // picks straight back up on whatever the keybed is holding, and the button would silence
+    // the room for a sixteenth note. The line switches are what "off" means on this bar, so
+    // that is what it turns off.
+    void allArpOff();
+
     // Empty when nothing is held. Hold off reads this - together with chainRunning(), since a
     // chain about to fire the next chord is something to let go of too - to grey itself out.
     const std::vector<int>& arpHeldNotes(int line = 0) const;
@@ -396,6 +419,13 @@ public:
         // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
         // slots, which are per-line and have nowhere to live in a row.
         bool arpMacro = true;
+        // Whether the keybed lights up for the notes the arp is *playing*, as opposed to the
+        // chord it was handed (which lights it either way, through noteRefs). Layout state and
+        // not a parameter: it changes what is drawn and nothing that is heard, so there is
+        // nothing here for a host to automate. On by default - it is the thing Owen asked to
+        // be able to see - and one click on the arp bar turns it off when the flicker of a
+        // 1/16 run is not what you want to be looking at.
+        bool arpLights = true;
 
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
@@ -543,6 +573,15 @@ private:
     std::array<std::atomic<bool>, 128> inputNoteOn {};
     void watchInputNotes(const juce::MidiBuffer&); // audio thread, before anything consumes it
     void clearInputNotes();
+
+    // The same trick for what the arp *engines* emit (see arpNoteLit). Watched off each line's
+    // `out` buffer rather than off the merged stream, because by the time everything is merged
+    // the arp's notes are indistinguishable from the pass-through beside them - and a chord
+    // held into a line already lights the keybed through noteRefs, so counting the merged
+    // stream would light it twice and never put it out.
+    std::array<std::atomic<bool>, 128> arpNoteOn {};
+    void watchArpNotes(const juce::MidiBuffer&); // audio thread, on one line's output
+    void clearArpNotes();
 
     // Everything one arpeggiator line owns. Three of these; every arp entry point above takes
     // the index that picks one, and line 0 is the arpeggiator Keys has always had.

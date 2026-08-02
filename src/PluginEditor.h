@@ -328,6 +328,17 @@ private:
     // no on-screen release for just the held chord in the default layout. Disabled while
     // nothing is held, which makes it a state display as well as a button.
     juce::TextButton arpHoldOffButton { "Hold off" };
+    // The Keyboard bar's All Off, for the arpeggiator (2026-08-02, Owen's ask). Switches both
+    // lines off and lets go of everything - see KeysProcessor::allArpOff for why switching off
+    // is the part that makes it different from Hold off beside it. Always enabled, unlike Hold
+    // off: a stop button that greys itself out is one you have to read before you can trust it,
+    // and this one is reached in the moment you want the noise to end.
+    juce::TextButton arpAllOffButton { "All Off" };
+    // Whether the keybed lights up for the notes the arp is playing. A view toggle over
+    // layout.arpLights, not a parameter - see the member. It rides this bar rather than the
+    // Keyboard bar because it is a fact about the arp: it is the arp's notes it shows, and it
+    // is meaningless with both lines off.
+    juce::ToggleButton arpLightsButton;
     // Which arp line a click on a chord card feeds, shown as its letter and cycled A->B->C by
     // clicking. It rides the *Pads* bar, next to Fill / Regen / Generator, because it is a
     // fact about the cards rather than about the arp: the control that says where a card goes

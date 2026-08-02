@@ -925,6 +925,53 @@ bool KeysProcessor::isNoteSounding(int midiNote) const
     return inputNoteOn[(size_t) midiNote].load();
 }
 
+bool KeysProcessor::arpNoteLit(int midiNote) const
+{
+    if (midiNote < 0 || midiNote > 127 || ! layout.arpLights)
+        return false;
+    return arpNoteOn[(size_t) midiNote].load();
+}
+
+// Audio thread, on one arp line's output buffer just before it is merged. Same shape as
+// watchInputNotes and for the same reasons: a flag per pitch rather than a count, because a
+// missed note-off would leak a refcount into a key lit forever, and a `changed` bump so the
+// surface repaints only when something actually moved.
+//
+// Two lines sounding the same pitch collapse to one flag, which is right: this answers "is
+// the arp on this note", not "how many of it". The last note-off wins and the key goes out
+// slightly early in that case - a display artefact on one pitch, against a refcount that
+// would have to be unwound perfectly across the flush, bypass and channel-change paths.
+void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi)
+{
+    bool changed = false;
+    const auto set = [&](int note, bool on)
+    {
+        if (note < 0 || note > 127 || arpNoteOn[(size_t) note].load() == on)
+            return;
+        arpNoteOn[(size_t) note].store(on);
+        changed = true;
+    };
+
+    for (const auto meta : midi)
+    {
+        const auto m = meta.getMessage();
+        if (m.isNoteOn())
+            set(m.getNoteNumber(), true);
+        else if (m.isNoteOff())
+            set(m.getNoteNumber(), false);
+    }
+
+    if (changed)
+        soundingGen.fetch_add(1);
+}
+
+void KeysProcessor::clearArpNotes()
+{
+    for (auto& f : arpNoteOn)
+        f.store(false);
+    soundingGen.fetch_add(1);
+}
+
 void KeysProcessor::watchInputNotes(const juce::MidiBuffer& midi)
 {
     // Audio thread, and deliberately the first thing processBlock does: after the collector
@@ -1013,6 +1060,9 @@ void KeysProcessor::allNotesOff()
     // go, but if a note-off went missing the lit key it left behind is exactly the kind of
     // stuck thing this button exists to clear; the next key they press lights again.
     clearInputNotes();
+    // ...and the arp's own lights, for the same reason: the engine is about to be silenced
+    // from under them, so whatever they are showing is already not true.
+    clearArpNotes();
 
     // The chord held into the arp is the one thing here that outlives a note-off, so a
     // panic has to forget it too - otherwise All Off silences it while the launched slot
@@ -1205,6 +1255,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         if (channel != l.lastChannel)
         {
             l.engine.flushInto(l.out);
+            watchArpNotes(l.out);
             mergeArpOut(midi, l.out, l.lastChannel);
             l.out.clear();
             l.lastChannel = channel;
@@ -1215,6 +1266,10 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             // Off: whatever was handed to this line simply sustains, which is the honest
             // reading of holding a chord into an arpeggiator that is not running. Its own
             // queue passes straight through; it never saw the keybed.
+            // `l.out` only: `l.in` is the chord handed to this line, and that already lights
+            // the keybed through noteRefs. Watching it here would light it a second time and
+            // leave it lit, since noteRefs and these flags go out on different events.
+            watchArpNotes(l.out);
             mergeArpOut(midi, l.in, channel);
             mergeArpOut(midi, l.out, channel);
             continue;
@@ -1298,6 +1353,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // whole of the routing. Its output goes into midi with everything the other lines and
         // the pass-through left there, so three lines at three rates simply sum.
         l.engine.process(ap, hc, numSamples, l.in, l.out);
+        watchArpNotes(l.out);
         mergeArpOut(midi, l.out, channel);
     }
 }
@@ -1649,6 +1705,28 @@ void KeysProcessor::releaseArpHold()
         // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
         releaseArpChord(n);
     }
+}
+
+void KeysProcessor::allArpOff()
+{
+    // The switches first, then the letting go. This order is what makes one click enough:
+    // with a line still on, releasing its chord only hands the engine back to whatever the
+    // keybed is holding, and the run carries on under a button that said Off. Switched off
+    // first, the engine is flushed by runArpLines on the very next block (the arpOn edge in
+    // there calls flushInto), so nothing is left ringing to release.
+    for (int n = 0; n < uiArpLines; ++n)
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*>(
+                apvts.getParameter(arpParamId(n, arpParamSuffix(apOn)))))
+        {
+            p->beginChangeGesture();
+            *p = false;
+            p->endChangeGesture();
+        }
+
+    // ...and everything a line was holding on to, which the switch alone does not undo: a
+    // chord handed over by a card, a chain mid-progression, a launch still waiting out
+    // Launch Quantize. This is Hold off's whole job, so it is Hold off that does it.
+    releaseArpHold();
 }
 
 const std::vector<int>& KeysProcessor::arpHeldNotes(int line) const
@@ -2163,6 +2241,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
+    tree.setProperty("arpLights", layout.arpLights, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -2196,6 +2275,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
     layout.arpMacro = flag("arpMacro", true);
+    layout.arpLights = flag("arpLights", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

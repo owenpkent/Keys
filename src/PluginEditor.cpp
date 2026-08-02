@@ -543,6 +543,30 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     arpHoldOffButton.onClick = [this] { processor.releaseArpHold(); };
     addAndMakeVisible(arpHoldOffButton);
 
+    // All Off for the arp, beside Hold off and doing strictly more: the lines go off too, so
+    // the run actually ends instead of picking straight back up on whatever the keybed holds.
+    arpAllOffButton.setTitle("Arp all off"); // "All Off" alone collides with the Keyboard bar's
+    arpAllOffButton.setTooltip("Stop the arpeggiator: both lines off, every held chord let go, "
+                               "every chain stopped. Hold off beside it lets go of the chords "
+                               "and leaves the lines running.");
+    arpAllOffButton.onClick = [this] { processor.allArpOff(); };
+    addAndMakeVisible(arpAllOffButton);
+
+    // Light the keybed for what the arp is playing. Not an APVTS attachment: it changes what is
+    // drawn and nothing that is heard, so it is layout state and the button drives it directly.
+    arpLightsButton.setButtonText("Show notes");
+    arpLightsButton.setTitle("Arp show notes");
+    arpLightsButton.setTooltip("Light the keyboard at the bottom for the notes the arpeggiator "
+                               "is playing, as it plays them. The chord you hand a line lights "
+                               "it either way; this is the run itself.");
+    arpLightsButton.setToggleState(processor.layout.arpLights, juce::dontSendNotification);
+    arpLightsButton.onClick = [this]
+    {
+        processor.layout.arpLights = arpLightsButton.getToggleState();
+        keyboard.repaint(); // the flags did not move, so nothing else will ask for this frame
+    };
+    addAndMakeVisible(arpLightsButton);
+
     themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
     themeButton.onClick = [this] { showThemeMenu(); };
@@ -1732,6 +1756,12 @@ void KeysEditor::resized()
         }
         bar.removeFromRight(6);
         arpHoldOffButton.setBounds(bar.removeFromRight(88).withSizeKeepingCentre(86, 24));
+        bar.removeFromRight(4);
+        arpAllOffButton.setBounds(bar.removeFromRight(84).withSizeKeepingCentre(82, 24));
+        bar.removeFromRight(10);
+        // Show notes last, so the two stop buttons sit together at the right end where the
+        // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
+        arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
         section(secArp).caption = bar;
     }
     if (const int h = sectionHeight(secArp); h > 0)

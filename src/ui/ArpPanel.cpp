@@ -1211,18 +1211,39 @@ void ArpPanel::MacroRow::resized()
     chordLabel.setBounds(centred(r.removeFromRight(64)));
     r.removeFromRight(6);
 
-    // ...then the knob strip is **reserved** out of what is left, before Shape takes its cut.
-    // Laying the knobs last and giving the final one "whatever remains" starved it to nothing
-    // the moment the row got tight: eight of them were drawn as seven, silently. Shape absorbs
-    // the slack instead, because a narrower combo is a combo and a zero-width knob is a bug.
-    const int each = juce::jlimit(52, 96,
-                                  (r.getWidth() - 6 * (numKnobs - 1) - 140) / numKnobs);
-    auto knobStrip = r.removeFromRight(each * numKnobs + 6 * (numKnobs - 1));
-    r.removeFromRight(8);
+    // ...then **Shape's whole cell is reserved first**, and the knobs share what is left.
+    //
+    // This used to be the other way round, with a term in the knob arithmetic standing in for
+    // Shape - and a reservation expressed as a subtraction inside a clamp is not a reservation
+    // at all. On Owen's window the knobs hit their 52 px floor, the clamp threw the subtraction
+    // away, the strip came out wider than the arithmetic had allowed for, and Shape got the
+    // 77 px that happened to remain. Two symptoms, one cause: the combo drew "Random Other" as
+    // "R..." (2026-08-02, Owen: "the pattern is cut off in the drop down") and `>` was starved
+    // to *zero width* by the same shortfall - a mouse-only stepper that was not on screen at
+    // all, which is the worse half and had no visible symptom to report.
+    //
+    // Reserving the fixed-size thing first is the ordering that cannot fail: Shape's cell is a
+    // constant, the knobs are the elastic ones, and an elastic control with a floor must never
+    // be asked to leave room for anything.
+    constexpr int shapeBoxW = 118;                        // fits the longest item plus the chevron
+    constexpr int shapeCellW = shapeBoxW + 26 + 26 + 6 * 3; // ...plus `<`, `>` and their gaps
+    auto shapeCell = r.removeFromLeft(juce::jmin(shapeCellW, r.getWidth()));
+    r.removeFromLeft(8);
 
-    shapePrev.setBounds(centred(take(26)));
-    shapeBox.setBounds(centred(take(juce::jmax(72, r.getWidth() - 32))));
-    shapeNext.setBounds(centred(take(26)));
+    // 38, not 52: the floor has to leave the row solvable at Owen's window width, and a 38 px
+    // knob is still over the 34 px mouse-only minimum. They stop growing at 96 as before.
+    const int each = juce::jlimit(38, 96, (r.getWidth() - 6 * (numKnobs - 1)) / numKnobs);
+    auto knobStrip = r.removeFromRight(each * numKnobs + 6 * (numKnobs - 1));
+
+    {
+        // Shape's own three, inside the cell reserved for them, so a tight row shrinks the
+        // combo and never the steppers - they are targets and it is a readout.
+        const auto takeShape = [&shapeCell](int w)
+        { auto c = shapeCell.removeFromLeft(w); shapeCell.removeFromLeft(6); return c; };
+        shapePrev.setBounds(centred(takeShape(26)));
+        shapeBox.setBounds(centred(takeShape(juce::jmax(0, shapeCell.getWidth() - 32))));
+        shapeNext.setBounds(centred(takeShape(26)));
+    }
 
     for (int k = 0; k < numKnobs; ++k)
     {
