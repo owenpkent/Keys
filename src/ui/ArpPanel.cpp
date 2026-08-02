@@ -20,6 +20,13 @@ namespace
 
     constexpr const char* clockDivNames[3] = { "1x", "1/2", "1/4" };
 
+    // The strip at the bottom of a macro row holding the rate's Dot / Trip / Anchor. Declared
+    // up here rather than with the other macro-view heights further down, because MacroRow's
+    // own resized() is defined above that block and needs it; the block down there builds
+    // arpMacroRow out of it, and an anonymous namespace is one namespace however many times it
+    // is opened. See arpMacroRow for why the modifiers earned a strip of their own.
+    constexpr int arpMacroSubRow = 36;
+
     // Show or hide a whole group of controls in one line. The parameter type is what makes it
     // work: a braced list of mixed component types cannot deduce its own element type, but it
     // converts to this one happily, so the call sites stay readable.
@@ -949,11 +956,33 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     heading(latchLabel, "LTCH");
 
     keysButton.setTitle("Macro keys " + letter);
-    keysButton.setTooltip("Does this line arpeggiate what you play, or only the chords you hand "
-                          "it? Off makes it a card player, independent of the keybed.");
+    keysButton.setTooltip("Does this line arpeggiate what you play on the keyboard at the "
+                          "bottom? On, the keys you hold feed it. Off, it ignores the keybed "
+                          "entirely and plays only the chord cards you hand it. Nothing to do "
+                          "with Show notes on the bar, which only decides whether those keys "
+                          "light up.");
     addAndMakeVisible(keysButton);
     keysAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apKeys), keysButton);
     heading(keysLabel, "KEYS");
+
+    // The rate's three modifiers, on the sub-row under it. Same three the band carries, same
+    // parameters, and greyed by the same question - see refreshRateMode.
+    dotButton.setTitle("Macro dot " + letter);
+    dotButton.setTooltip("Dotted: each step lasts half again as long, so 1/8 becomes a dotted "
+                         "1/8. Greyed with the rate in Hz, where there is no beat to dot.");
+    tripButton.setTitle("Macro trip " + letter);
+    tripButton.setTooltip("Triplets: three steps in the space of two, so 1/8 becomes an 1/8 "
+                          "triplet. Greyed with the rate in Hz, where there is no beat to "
+                          "divide. Run one line straight and the other in triplets and you have "
+                          "the polyrhythm this view is for.");
+    anchorButton.setTitle("Macro anchor " + letter);
+    // Anchor's tooltip is written by refreshRateMode, beside its enablement: it says something
+    // different in Hz, where there is no bar grid to anchor to. Same split as the band's.
+    for (auto* b : { &dotButton, &tripButton, &anchorButton })
+        addAndMakeVisible(*b);
+    dotAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apDot), dotButton);
+    tripAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apTrip), tripButton);
+    anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apAnchor), anchorButton);
 
     // Rate: the same detented dial the band uses, so a division is a detent and the readout
     // under it says which one. The steppers beside it are the click-only path to every value,
@@ -1045,6 +1074,21 @@ void ArpPanel::MacroRow::refreshRateMode()
     const bool free = processor.apvts.getRawParameterValue(
                           KeysProcessor::arpParamId(line, KeysProcessor::apRateFree))->load() > 0.5f;
     rateModeButton.setButtonText(free ? "Hz" : "Sync");
+
+    // Dot, Trip and Anchor all subdivide or align against a *beat*, and in Hz there is no beat:
+    // the engine ignores all three there, so they grey out rather than sitting lit and doing
+    // nothing. Same rule and the same words as the band's - see ArpPanel::refreshRateMode.
+    // Outside the early-out below, which only guards the attachment swap: these have to be
+    // right on the first call too, when lastRateFree is still -1 and a Hz session has just
+    // been restored.
+    dotButton.setEnabled(! free);
+    tripButton.setEnabled(! free);
+    anchorButton.setEnabled(! free);
+    anchorButton.setTooltip(free ? "Nothing to anchor to in Hz: a free-running rate follows no "
+                                   "bar grid. Switch the rate to Sync to lock the steps to one."
+                                 : "Anchored: locked to the host bar grid. Free: never jumps, "
+                                   "may drift.");
+
     if (lastRateFree == (int) free)
         return;
     if (rateDragging)
@@ -1191,6 +1235,10 @@ void ArpPanel::MacroRow::resized()
     // Every row gives up the same strip to the column headings, whether or not it draws them,
     // so the columns line up down the view.
     const auto headStrip = full.removeFromTop(11);
+    // ...and the same strip at the bottom for the rate's three modifiers. Taken before the main
+    // line is laid out, so adding them cannot squeeze anything above: the main line keeps every
+    // pixel it had, and the row is taller by exactly this strip (see arpMacroRow).
+    auto subRow = full.removeFromBottom(arpMacroSubRow);
     auto r = full;
     const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
     // The single-height controls sit centred against the knobs beside them.
@@ -1204,6 +1252,9 @@ void ArpPanel::MacroRow::resized()
     rateKnob.setBounds(take(58));
     rateNext.setBounds(centred(take(26)));
     rateModeButton.setBounds(centred(take(42)));
+    // Where the rate group starts, so its modifiers below line up under it rather than under
+    // the left edge of the row. Read from the control, not from a second copy of the sums.
+    const int rateGroupX = ratePrev.getX();
 
     // Chain and the chord come off the right...
     chainButton.setBounds(centred(r.removeFromRight(60)));
@@ -1249,6 +1300,19 @@ void ArpPanel::MacroRow::resized()
     {
         knobs[(size_t) k].setBounds(knobStrip.removeFromLeft(each));
         knobStrip.removeFromLeft(6);
+    }
+
+    // The rate's modifiers, under the rate group they belong to. Full 34 px height - they are
+    // targets, and the sub-row exists precisely so they do not have to be squeezed - and wide
+    // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
+    // controls' worth of ambiguity in a row that already has eight unlabelled knobs.
+    {
+        auto s = subRow.withTrimmedLeft(rateGroupX - subRow.getX()).withTrimmedTop(2);
+        const auto takeMod = [&s](int w)
+        { auto c = s.removeFromLeft(w); s.removeFromLeft(8); return c; };
+        dotButton.setBounds(takeMod(62));
+        tripButton.setBounds(takeMod(66));
+        anchorButton.setBounds(takeMod(84));
     }
 
     // Headings are placed from the control they name, not by walking a second copy of the
@@ -1894,7 +1958,12 @@ namespace
     // Two rows since 2026-08-02 (KeysProcessor::uiArpLines), so this view is now *shorter* than
     // the band it replaces rather than the same height. That slack goes to the chord strip
     // below, which is the surface these rows are dragged onto.
-    constexpr int arpMacroRow = 66;
+    // 66 was the whole row until Dot / Trip / Anchor joined it (2026-08-02). They go on a strip
+    // of their own under the rate rather than into the main line, which at Owen's window width
+    // is already at every floor it has - two more 34 px targets in there would have driven the
+    // eight knobs under the mouse-only minimum. Two rows at 102 is 204 against the three at 66
+    // this view used to be, so it still costs the panel nothing it did not already have.
+    constexpr int arpMacroRow = 66 + arpMacroSubRow;
     constexpr int arpMacroShared = 56; // the shared row: a knob needs more height than a slider
     constexpr int arpMacroH = arpBandTop + arpMacroRow * KeysProcessor::uiArpLines + 10
                               + arpMacroShared + 4;

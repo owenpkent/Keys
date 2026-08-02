@@ -23,6 +23,16 @@ the arp panel is 66 px shorter than it was.
 - The A/B tabs still open a line's deep controls: the step lanes and the twelve slots are
   per-line and have nowhere to live in a macro row.
 
+**Dot, Trip and Anchor on every macro row** (Owen: "I need to have options for dots and triplets
+as well"). The same three the band carries, the same parameters, greyed by the same question -
+in Hz there is no beat to dot or divide and no bar grid to anchor to. Run one line straight and
+the other in triplets and you have the polyrhythm this view is for.
+
+They sit on a strip of their own under the rate rather than in the main line, because that line
+is already at every floor it has: two more 34 px targets in it would have driven the eight knobs
+under the mouse-only minimum. The row is taller by exactly that strip, which the view can afford
+- two rows at 102 against the three at 66 it used to be.
+
 **All Off on the arp bar**, beside Hold off. Both lines off, every held chord let go, every
 chain stopped, every quantized launch dropped - one click. Switching the lines off is what makes
 it different from Hold off: release the chords without it and the engines simply pick back up on

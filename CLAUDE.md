@@ -271,6 +271,15 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   a screen shorter than that content is the same bug by another route. `KeysEditor::idealHeight`
   went public for it, next to `minWidthForView`, which was made public in 2026-07-30 for exactly
   the same reason: a host that embeds the editor must *ask* it for its size and never copy it.
+- **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip
+  and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
+  window width, so two more 34 px targets in it would have driven the eight knobs under the
+  mouse-only minimum - the row took a `arpMacroSubRow` strip at the bottom instead, removed
+  *before* the main line is laid out so nothing above it moved. Height is the cheap axis in this
+  view since line C went; width is the expensive one. Note **Keys and Show notes are unrelated
+  controls with similar names**: `arpKeys` routes the keybed *into* a line, `layout.arpLights`
+  only decides whether the keybed lights *up*. Owen asked what the difference was, which is why
+  the Keys tooltip now names Show notes and says it is not that.
 - **Reserve the fixed-size control first, always** (2026-08-02). `MacroRow::resized` expressed
   Shape's width as a subtraction inside the knobs' `jlimit(52, 96, ...)`, which is not a
   reservation: on Owen's window the knobs hit their floor, the clamp discarded the subtraction,
