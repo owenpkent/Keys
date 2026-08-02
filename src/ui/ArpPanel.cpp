@@ -917,7 +917,10 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
         addAndMakeVisible(*b);
 
     // Gate, Chance and Swing: the three that decide whether two lines interlock or fight.
-    // Horizontal sliders, because a row is one control tall and a rotary is two.
+    // The skin's machined rotary, exactly as the band above draws the same three - a row of
+    // linear sliders here read as a different panel bolted on (Owen, 2026-08-01: "I was
+    // thinking more knobs rather than slider"). The column heading is drawn once, on the top
+    // row only, but every row reserves the same strip so the three knobs stay aligned.
     struct SliderSpec { juce::Slider& s; juce::Label& l; KeysProcessor::ArpParam p; const char* name; const char* tip; };
     const SliderSpec specs[] = {
         { gateSlider, gateLabel, KeysProcessor::apGate, "GATE",
@@ -930,14 +933,18 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     };
     for (const auto& spec : specs)
     {
-        spec.s.setSliderStyle(juce::Slider::LinearHorizontal);
-        spec.s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 18);
+        spec.s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+        // Read-only text box, like every other knob in this panel: the value belongs under the
+        // knob, and an editable box is a keyboard target on a surface that has none.
+        spec.s.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 46, 14);
         spec.s.setTooltip(spec.tip);
         addAndMakeVisible(spec.s);
         spec.l.setText(spec.name, juce::dontSendNotification);
+        spec.l.setJustificationType(juce::Justification::centred);
         spec.l.setFont(skin::micro(9.0f));
         spec.l.setColour(juce::Label::textColourId, skin::textFaint);
-        addAndMakeVisible(spec.l);
+        spec.l.setVisible(line == 0); // one heading for the column, not one per row
+        addChildComponent(spec.l);
     }
     gateAtt = std::make_unique<SliderAtt>(processor.apvts, id(KeysProcessor::apGate), gateSlider);
     chanceAtt = std::make_unique<SliderAtt>(processor.apvts, id(KeysProcessor::apChance), chanceSlider);
@@ -1085,8 +1092,13 @@ void ArpPanel::MacroRow::paint(juce::Graphics& g)
 
 void ArpPanel::MacroRow::resized()
 {
-    auto r = getLocalBounds().withTrimmedBottom(2);
+    auto full = getLocalBounds().withTrimmedBottom(2);
+    // Every row gives up the same strip to the column headings, whether or not it draws them,
+    // so the three knob columns line up down the view.
+    auto heads = full.removeFromTop(11);
+    auto r = full;
     const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
+    // The single-height controls sit centred against the knobs beside them.
     const auto centred = [](juce::Rectangle<int> c) { return c.withSizeKeepingCentre(c.getWidth(), 26); };
 
     onButton.setBounds(centred(take(44)));
@@ -1097,23 +1109,28 @@ void ArpPanel::MacroRow::resized()
     shapePrev.setBounds(centred(take(28)));
     shapeBox.setBounds(centred(take(juce::jlimit(90, 128, r.getWidth() / 5))));
     shapeNext.setBounds(centred(take(28)));
+    heads.removeFromLeft(full.getWidth() - r.getWidth()); // the headings start where the knobs do
 
-    // Chain and the chord come off the right, so the three sliders share whatever is left and
+    // Chain and the chord come off the right, so the three knobs share whatever is left and
     // the row degrades by squeezing them rather than by pushing controls off the end.
     chainButton.setBounds(centred(r.removeFromRight(64)));
+    heads.removeFromRight(64 + 6);
     r.removeFromRight(6);
     chordLabel.setBounds(centred(r.removeFromRight(72)));
+    heads.removeFromRight(72 + 6);
     r.removeFromRight(6);
 
-    const int each = juce::jmax(60, (r.getWidth() - 12) / 3);
-    juce::Slider* sliders[] = { &gateSlider, &chanceSlider, &swingSlider };
+    const int each = juce::jmax(56, (r.getWidth() - 12) / 3);
+    juce::Slider* knobs[] = { &gateSlider, &chanceSlider, &swingSlider };
     juce::Label* labels[] = { &gateLabel, &chanceLabel, &swingLabel };
     for (int i = 0; i < 3; ++i)
     {
-        auto c = r.removeFromLeft(i == 2 ? r.getWidth() : each);
+        const int w = i == 2 ? r.getWidth() : each;
+        auto c = r.removeFromLeft(w);
         r.removeFromLeft(6);
-        labels[i]->setBounds(c.removeFromTop(11));
-        sliders[i]->setBounds(c.withSizeKeepingCentre(c.getWidth(), juce::jmin(c.getHeight(), 24)));
+        labels[i]->setBounds(heads.removeFromLeft(w));
+        heads.removeFromLeft(6);
+        knobs[i]->setBounds(c);
     }
 }
 
@@ -1655,7 +1672,7 @@ void ArpPanel::buildControls()
     // version that shows a little bit of all of them" - which is why it is a tab in the row
     // that already selects lines rather than a window or a fifth section.
     macroTab = std::make_unique<LineTab>(processor, *this, -1);
-    macroTab->onClick = [this] { setMacroView(! macroView); };
+    macroTab->onClick = [this] { setMacroView(true); };
     macroTab->setTooltip("All three lines at once: rate, shape, gate, chance and swing for each, "
                          "with the tempo and Launch Quantize they share. The place to build a "
                          "polyrhythm; the line tabs beside it are where you go deep on one.");
@@ -1736,7 +1753,9 @@ namespace
     // The macro view: three line rows plus one shared row (tempo and quantize). It replaces
     // the two band rows rather than joining them, which is what keeps the panel exactly as
     // tall as it is on a shape - the whole point of a fourth tab rather than a fourth band.
-    constexpr int arpMacroRow = 40;
+    // 11 for the column headings, 40 for the knob, 15 for its readout - the row is as tall as
+    // a knob needs and no taller, which is what keeps three of them under the Pattern view.
+    constexpr int arpMacroRow = 66;
     constexpr int arpMacroShared = 56; // the shared row: a knob needs more height than a slider
     constexpr int arpMacroH = arpBandTop + arpMacroRow * 3 + 10 + arpMacroShared + 4;
     constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
@@ -1896,6 +1915,9 @@ void ArpPanel::resized()
         groups[4].caption = "Feel";
         for (int i = 0; i < (int) groups.size(); ++i)
             groups[(size_t) i].visible = true;
+        // ...except STEPS, which belongs to the step editor and follows Shape. Restoring it
+        // unconditionally drew an empty ruled box beside the band on every plain shape.
+        groups[2].visible = patternMode();
     }
 
     // Inside a group: past the caption rule, then two rows of controls, or the full height

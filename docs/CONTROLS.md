@@ -543,13 +543,17 @@ the step editor with **three rows, one per line**, each holding:
 | **A / B / C** | that line on or off |
 | **< rate >** and **Sync / Hz** | its rate, stepped one value at a time. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
 | **< shape >** | its shape, including Pattern (whose step editor is on that line's own tab) |
-| **Gate** | how much of each step its notes fill. Short gates let another line through |
-| **Chance** | how often a step fires at all. Thin one line out and the other two show through |
-| **Swing** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
+| **Gate** | knob. How much of each step its notes fill. Short gates let another line through |
+| **Chance** | knob. How often a step fires at all. Thin one line out and the other two show through |
+| **Swing** | knob. Shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
 | **Chain** | start that line's progression. Three chains at three rates is the point of the view |
 
 Under the three rows sits what they share: the **BPM** knob and **Quantize**.
+
+The three knobs are the same rotary the band above uses for the same three settings, with the
+column heading written once at the top. Clicking **All** selects the view; you leave it by
+clicking A, B or C, because a tab selects rather than toggles.
 
 **All is a view, not a fourth line.** The current line stays whatever it was, so clicking a
 chord card still has one unambiguous target while all three are on screen; clicking A, B or C

@@ -21,8 +21,15 @@ and **Launch Quantize**.
   goes back to that line's deep controls.
 - **The panel does not grow.** The macro rows take the band's space rather than joining it.
 - Rate is a readout between two steppers rather than a dial, because this row exists to be
-  read three at a time and nudged with single clicks.
+  read three at a time and nudged with single clicks. Gate, Chance and Swing *are* knobs, the
+  same machined rotary the band above draws them as, with the column heading written once at
+  the top rather than three times down the side.
+- Clicking **All** selects the view; you leave it by clicking A, B or C. A tab selects, it does
+  not toggle.
 - The view you left is remembered, like the line you left.
+
+Fixed on the way: an empty **STEPS** box was ruled beside the band on any plain shape, because
+coming back from the macro view restored every group instead of leaving STEPS to follow Shape.
 
 ### Added: Launch Quantize, so a chord can only land on the grid
 
