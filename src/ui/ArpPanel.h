@@ -116,7 +116,13 @@ public:
         // The eight knobs a row carries, left to right. One table so the labels, the
         // parameters and the layout cannot drift apart; the headings are drawn once, on the
         // top row, and every row reserves the same strip so the columns line up.
-        enum Knob { kOctaves = 0, kGate, kChance, kSwing, kOffset, kRamp, kRampTime, kHuman,
+        // Seven since 2026-08-02, both changes Owen's. OCT is now the *transpose* (centred at
+        // zero, down as readily as up) rather than the upward-only stacking range, which stays
+        // on the per-line tab beside Distance, the rest of that same feature. VOL replaced Ramp
+        // *and* Time, which were one feature between them - a velocity ramp and how long it
+        // takes - and a row with Time in it and no Ramp would be a control with nothing to time.
+        // Both still live on the per-line tab.
+        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVol, kHuman,
                     numKnobs };
 
     private:

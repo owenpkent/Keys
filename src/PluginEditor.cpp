@@ -554,11 +554,15 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 
     // Light the keybed for what the arp is playing. Not an APVTS attachment: it changes what is
     // drawn and nothing that is heard, so it is layout state and the button drives it directly.
-    arpLightsButton.setButtonText("Show notes");
-    arpLightsButton.setTitle("Arp show notes");
-    arpLightsButton.setTooltip("Light the keyboard at the bottom for the notes the arpeggiator "
-                               "is playing, as it plays them. The chord you hand a line lights "
-                               "it either way; this is the run itself.");
+    // "Light keys", not "Show notes": this only ever changes what is *drawn*, and the verb has
+    // to say so, because the arp panel's per-line PLAY switch is a routing control sitting a few
+    // pixels away. They read as one idea until each label names what it touches (2026-08-02).
+    arpLightsButton.setButtonText("Light keys");
+    arpLightsButton.setTitle("Arp light keys");
+    arpLightsButton.setTooltip("Display only, changes nothing you hear: lights the keyboard at "
+                               "the bottom for the notes the arpeggiator is playing, as it plays "
+                               "them. The chord you hand a line lights it either way; this is the "
+                               "run itself. For what a line *plays*, see PLAY on its row.");
     arpLightsButton.setToggleState(processor.layout.arpLights, juce::dontSendNotification);
     arpLightsButton.onClick = [this]
     {

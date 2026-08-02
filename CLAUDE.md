@@ -271,6 +271,28 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   a screen shorter than that content is the same bug by another route. `KeysEditor::idealHeight`
   went public for it, next to `minWidthForView`, which was made public in 2026-07-30 for exactly
   the same reason: a host that embeds the editor must *ask* it for its size and never copy it.
+- **A line that is off still takes chords in; `enabled` gates only firing** (2026-08-02, Owen:
+  "when you drag your chord onto an arp, I don't want it to play the chord sound when you
+  release" and "when you turn on the arp, it should start playing whatever card is loaded").
+  `runArpLines` **has no bypass branch any more**. It used to merge a disabled line's `in`
+  straight to the output, so a dropped chord sustained like a pad *and* the engine never saw it
+  - one cause, both symptoms. `ArpEngine::process` consumes note-ons in `noteArrived` outside
+  the `p.enabled` gate, so passing `ap.enabled = arpOn` and always running it makes a disabled
+  line a silent holder. The off→on edge calls **`restart()`, not `hardReset()`** - the new one
+  is hardReset minus the held set, and hardReset there was what threw the waiting chord away.
+  The keybed is unaffected: `listens[n]` is false with the line off, so notes you play are never
+  lifted out of the stream. Playing the instrument is never gated on an arp switch.
+- **`arpOctShift` and `arpVolume`, appended 2026-08-02.** OctShift **is not Octaves**: it
+  transposes the whole run and is centred at 0, while `arpOctaves` beside it *stacks* copies
+  upward and can only widen. "How high does it sit" and "how far does it reach" are different
+  questions and only the first has a middle - the macro row's OCT knob drives the new one, and
+  Octaves stays on the per-line tab with Distance, the other half of the same feature. Volume is
+  a plain per-line output level, folded into `velScale` beside the ramp. The macro row's VOL
+  replaced **both** Ramp and Time, which are one feature between them.
+- **PLAY and Light keys are not the same word twice** (2026-08-02). `arpKeys` routes the keybed
+  *into* a line; `layout.arpLights` only decides whether the keybed lights *up*. They were
+  labelled KEYS and "Show notes" and read as one idea - Owen asked what the difference was. Ids
+  unchanged, labels renamed: a label names what the control touches.
 - **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip
   and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
   window width, so two more 34 px targets in it would have driven the eight knobs under the

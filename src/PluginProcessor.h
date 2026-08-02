@@ -224,7 +224,11 @@ public:
     enum ArpParam { apOn = 0, apRate, apRateFree, apRateHz, apDot, apTrip, apAnchor,
                     apDirection, apPattern, apLinkLanes, apOctaves, apSwing, apLatch,
                     apRetrigger, apGate, apChance, apDistance, apOffset, apRetrigBars,
-                    apVelRamp, apRampBeats, apHumanize, apKeys, apChannel, numArpParams };
+                    apVelRamp, apRampBeats, apHumanize, apKeys, apChannel,
+                    // Appended 2026-08-02, both defaulting to what the arp did without them.
+                    // OctShift transposes the whole run and is centred at 0; Octaves beside it
+                    // still *stacks* and still only widens - two questions, two controls.
+                    apOctShift, apVolume, numArpParams };
     static const char* arpParamSuffix(int which);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }

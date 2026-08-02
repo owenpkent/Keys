@@ -23,6 +23,33 @@ the arp panel is 66 px shorter than it was.
 - The A/B tabs still open a line's deep controls: the step lanes and the twelve slots are
   per-line and have nowhere to live in a macro row.
 
+**A line that is off now remembers its chord silently, and starts on the switch.** Dropping a
+card on a line that is not running used to sustain the chord like a pad - so the drop made a
+noise - and the engine never saw it, so switching that line on sat silent until you dropped
+another card. Both were the same cause: the off case merged the line's input straight to the
+output instead of handing it to the engine. The engine now runs every block and its `enabled`
+flag gates only whether it *fires*; taking notes in was never gated. So a drop is silent, and
+the switch starts the chord that is already there. Playing the keyboard is untouched - a line
+that is off never takes the keybed, exactly as before.
+
+**OCT is now a transpose, centred at zero** (Owen: "the octave should start in the middle so you
+can go up or down"). Nothing at 12 o'clock, three octaves down to the left, three up to the
+right. The old OCT was the *stacking range*, which only ever widened the run upward and had no
+middle; it stays on the per-line tab beside Distance, the rest of that same feature.
+
+**VOL replaces RAMP and TIME in the macro rows.** A plain output level per line, 0 to 100 - the
+way to balance two lines against each other without playing one of them softer. Ramp and Time
+were one feature between them and both stay on the per-line tab; a row with Time in it and no
+Ramp would be a control with nothing to time.
+
+**PLAY, was KEYS; Light keys, was Show notes.** Two unrelated controls that read as one idea:
+PLAY routes the keybed *into* a line, Light keys only decides whether the keybed lights *up*.
+Each label now names what it touches. The parameter id is unchanged.
+
+**A tightening pass over the macro view.** The shared row was 56 px for a knob that needs 44,
+and three separate gaps stacked into one band of nothing between the lines and the slot cards.
+Only slack moved - no target got smaller, and the 34 px floor still decides that.
+
 **Dot, Trip and Anchor on every macro row** (Owen: "I need to have options for dots and triplets
 as well"). The same three the band carries, the same parameters, greyed by the same question -
 in Hz there is no beat to dot or divide and no bar grid to anchor to. Run one line straight and

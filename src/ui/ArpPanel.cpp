@@ -892,12 +892,14 @@ void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
 
 namespace
 {
-    // The eight knobs a macro row carries, in the order they are laid out. Heading, parameter
-    // and tooltip in one place so the columns cannot drift out of step with what they set.
+    // The knobs a macro row carries, in the order they are laid out. Heading, parameter and
+    // tooltip in one place so the columns cannot drift out of step with what they set.
     struct MacroKnobSpec { KeysProcessor::ArpParam param; const char* heading; const char* tip; };
     const MacroKnobSpec macroKnobSpecs[] = {
-        { KeysProcessor::apOctaves, "OCT",
-          "How many times this line stacks the chord up the keyboard. The classic arp range." },
+        { KeysProcessor::apOctShift, "OCT",
+          "Moves this whole line up or down whole octaves. Centred: nothing at 12 o'clock, down "
+          "to the left, up to the right. Put one line an octave under the other and they stop "
+          "fighting for the same register." },
         { KeysProcessor::apGate, "GATE",
           "How much of each step this line's notes fill. Short gates let another line through." },
         { KeysProcessor::apChance, "CHANCE",
@@ -908,12 +910,9 @@ namespace
         { KeysProcessor::apOffset, "OFFSET",
           "Starts this line's pattern from a different foot. Two lines on the same rate and "
           "different offsets are out of phase rather than in unison." },
-        { KeysProcessor::apVelRamp, "RAMP",
-          "Over Time, this line's velocity moves toward this much of what you played. Negative "
-          "fades a held chord out, positive swells it." },
-        { KeysProcessor::apRampBeats, "TIME",
-          "How long that ramp takes, in beats - or in seconds while this line's rate is in Hz, "
-          "because there is no beat to count there." },
+        { KeysProcessor::apVolume, "VOL",
+          "How loud this line plays, as a share of the velocity it would have. The way to "
+          "balance two lines against each other without playing one of them softer." },
         { KeysProcessor::apHumanize, "HUMAN",
           "Nudges each hit a little late and a little quieter, by a different amount every "
           "time. At 0 the line is dead on the grid." },
@@ -956,14 +955,19 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     heading(latchLabel, "LTCH");
 
     keysButton.setTitle("Macro keys " + letter);
-    keysButton.setTooltip("Does this line arpeggiate what you play on the keyboard at the "
+    keysButton.setTooltip("PLAY: does this line arpeggiate what you play on the keyboard at the "
                           "bottom? On, the keys you hold feed it. Off, it ignores the keybed "
-                          "entirely and plays only the chord cards you hand it. Nothing to do "
-                          "with Show notes on the bar, which only decides whether those keys "
-                          "light up.");
+                          "entirely and plays only the chord cards you hand it - which is what "
+                          "lets one line follow your hands while the other runs a card.");
     addAndMakeVisible(keysButton);
     keysAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apKeys), keysButton);
-    heading(keysLabel, "KEYS");
+    // **PLAY, not KEYS** (2026-08-02, Owen: "I don't understand what the keys button does",
+    // then "maybe you can make it a little bit more clear"). The parameter id stays `arpKeys` -
+    // ids are never renamed - but "KEYS" as a column heading collided head-on with **Show
+    // notes** on the bar, which is about the keybed *lighting up* and changes nothing you hear.
+    // Two controls, one word, and no way to tell from the labels which was which. This one is
+    // about what the line plays, so it says so.
+    heading(keysLabel, "PLAY");
 
     // The rate's three modifiers, on the sub-row under it. Same three the band carries, same
     // parameters, and greyed by the same question - see refreshRateMode.
@@ -995,7 +999,7 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     rateKnob.onDragStart = [this] { rateDragging = true; };
     rateKnob.onDragEnd = [this] { rateDragging = false; refreshRateMode(); };
     addAndMakeVisible(rateKnob);
-    heading(knobLabels[kOctaves], macroKnobSpecs[kOctaves].heading); // laid out with the rest
+    heading(knobLabels[kOctShift], macroKnobSpecs[kOctShift].heading); // laid out with the rest
 
     ratePrev.onClick = [this] { stepRate(-1); };
     rateNext.onClick = [this] { stepRate(1); };
@@ -1038,7 +1042,7 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
         knob.setTooltip(macroKnobSpecs[(size_t) k].tip);
         knob.setTitle("Macro " + juce::String(macroKnobSpecs[(size_t) k].heading) + " " + letter);
         addAndMakeVisible(knob);
-        if (k != kOctaves) // its heading is already made, above
+        if (k != kOctShift) // its heading is already made, above
             heading(knobLabels[(size_t) k], macroKnobSpecs[(size_t) k].heading);
         knobAtts[(size_t) k] = std::make_unique<SliderAtt>(
             processor.apvts, id(macroKnobSpecs[(size_t) k].param), knob);
@@ -1964,11 +1968,22 @@ namespace
     // eight knobs under the mouse-only minimum. Two rows at 102 is 204 against the three at 66
     // this view used to be, so it still costs the panel nothing it did not already have.
     constexpr int arpMacroRow = 66 + arpMacroSubRow;
-    constexpr int arpMacroShared = 56; // the shared row: a knob needs more height than a slider
-    constexpr int arpMacroH = arpBandTop + arpMacroRow * KeysProcessor::uiArpLines + 10
-                              + arpMacroShared + 4;
+    // A tightening pass over this view, 2026-08-02 (Owen: "we just need to do a UI pass, make it
+    // a little bit tighter"). The shared row was 56 for a knob that needs 44, and the gap above
+    // it was 10 where the rows below the hairline already read as separate. Everything here is
+    // slack between blocks, never a target: the 34 px floor is what decides how small a control
+    // may be, and none of these numbers is one.
+    constexpr int arpMacroShared = 48;   // was 56; the BPM knob and Quantize both fit in it
+    constexpr int arpMacroSharedGap = 4; // was 10
+    constexpr int arpMacroH = arpBandTop + arpMacroRow * KeysProcessor::uiArpLines
+                              + arpMacroSharedGap + arpMacroShared + 2;
     constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
-    constexpr int arpMacroTotalH = 12 + (arpMacroH + 12) + (arpSlotsH + 8) + 34 + 12;
+    // ...and the gap under the block, 12 to 8. Only the macro-specific numbers move in this
+    // pass: the outer `reduced(12)` and the slot row's own padding are shared with the band and
+    // Pattern views, and this height has to agree with resized() exactly or the panel is the
+    // wrong size with nothing to say so.
+    constexpr int arpMacroBelow = 8; // was 12
+    constexpr int arpMacroTotalH = 12 + (arpMacroH + arpMacroBelow) + (arpSlotsH + 8) + 34 + 12;
     constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10);
 
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
@@ -2063,7 +2078,7 @@ void ArpPanel::resized()
     if (macroView)
     {
         auto block = area.removeFromTop(arpMacroH);
-        area.removeFromTop(12);
+        area.removeFromTop(arpMacroBelow);
         groups[0].bounds = block;
         groups[0].caption = "Lines";
         for (int i = 1; i < (int) groups.size(); ++i)
@@ -2075,7 +2090,7 @@ void ArpPanel::resized()
             if (row != nullptr)
                 row->setBounds(inner.removeFromTop(arpMacroRow));
         }
-        inner.removeFromTop(10);
+        inner.removeFromTop(arpMacroSharedGap);
 
         // The shared row, under the three: one tempo and one quantize, laid out from the left
         // so they read as belonging to all of it rather than to the last line above them.
