@@ -22,6 +22,18 @@ namespace
     // minimum is the Keys editor's own (four bars and the margins, see absMinKeysHeight).
     constexpr int minKeysHeight = 620;
     constexpr int absMinKeysHeight = 150;
+    constexpr int fallbackMaxHeight = 1700; // when there is no display to measure
+
+    // How tall this window may be. The display's work area less a strip for the title bar and
+    // the taskbar, so a window sized to its content still has its own chrome on screen. Asked
+    // rather than assumed: 1700 was a literal, and a literal ceiling on a machine whose screen
+    // is shorter than it is a window that opens with its bottom off the display.
+    int maxWindowHeight()
+    {
+        if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            return juce::jmax(barHeight + absMinKeysHeight, d->userArea.getHeight() - 48);
+        return fallbackMaxHeight;
+    }
 
     juce::File defaultVst3Folder()
     {
@@ -400,12 +412,7 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     // editor needs, and the window follows it in both directions: minimizing a section should
     // actually make the window smaller, which is the whole point of being able to fold
     // one. Width is left alone - it is the keybed's, and Owen sets it deliberately.
-    keysEditor.onIdealHeightChanged = [this](int wanted)
-    {
-        const int needed = juce::jlimit(barHeight + absMinKeysHeight, 1700, barHeight + wanted);
-        if (needed != getHeight())
-            setSize(getWidth(), needed);
-    };
+    keysEditor.onIdealHeightChanged = [this](int wanted) { fitToKeysHeight(wanted); };
 
     host.onInstrumentWillChange = [this] { closeInstrumentEditor(); };
     host.addChangeListener(this);
@@ -416,10 +423,15 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     // host window narrower than the editor it embeds carves controls off the right-hand end of
     // that bar with nothing to say so.
     const int keysMinWidth = keysEditor.minWidthForView();
-    setResizeLimits(keysMinWidth, barHeight + absMinKeysHeight, 2600, 1700);
-    // Owen resizes to the minimum every time anyway - open there.
-    setSize(keysMinWidth, barHeight + minKeysHeight);
-    juce::ignoreUnused(keysHeight);
+    setResizeLimits(keysMinWidth, barHeight + absMinKeysHeight, 2600, maxWindowHeight());
+    // **Open at what the editor actually needs**, not at a literal. This was
+    // `barHeight + minKeysHeight` - a constant 620 that no longer had anything to do with the
+    // content, so the window opened too short for it and the keyboard was simply carved off the
+    // bottom with nothing on screen to say so (2026-08-02, Owen: "when we open the window, the
+    // keyboard is cut off on the bottom"). Adding the arp's macro view as the default view is
+    // what pushed it over, but the literal was the bug: any section that ever grows re-opens it.
+    fitToKeysHeight(keysEditor.idealHeight());
+    juce::ignoreUnused(keysHeight, minKeysHeight);
     openInstrumentEditor(); // reflects "no instrument" too (label + bar state)
 }
 
@@ -619,6 +631,31 @@ void KeysHostEditor::updateBar()
 void KeysHostEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     openInstrumentEditor();
+}
+
+// The one answer to "how tall should this window be", used by the initial size and by every
+// fold. Two fail-safes live here, and both exist because the keyboard is the *last* section
+// laid out: anything the window is short by comes off the bottom of it, silently.
+//
+//  1. **The minimum tracks the content.** The floor used to be a literal 194, so the window
+//     could sit - or be restored by the standalone wrapper, which remembers its size - well
+//     below what was in it. The Keys editor has done it this way since it grew folds
+//     ("The content's own size *is* the minimum", PluginEditor::applyLayout); this is the same
+//     rule for the window that embeds it.
+//  2. **Nothing is asked for that the screen cannot show.** A window sized to its content on a
+//     display shorter than that content is the same cut-off keyboard by another route, so the
+//     ceiling is measured (maxWindowHeight) rather than assumed. When the screen genuinely
+//     cannot fit every section, the honest answer is to fold one - and the floor being real
+//     means the fold now visibly shrinks the window instead of taking up slack.
+void KeysHostEditor::fitToKeysHeight(int keysWanted)
+{
+    const int ceiling = maxWindowHeight();
+    const int needed = juce::jlimit(barHeight + absMinKeysHeight, ceiling, barHeight + keysWanted);
+    // jmax on the max: JUCE asserts, and then misbehaves, if a minimum is ever above a maximum,
+    // and `needed` is already clamped to the ceiling so the two can only meet, never cross.
+    setResizeLimits(keysEditor.minWidthForView(), needed, 2600, juce::jmax(needed, ceiling));
+    if (needed != getHeight())
+        setSize(getWidth(), needed);
 }
 
 void KeysHostEditor::paint(juce::Graphics& g)

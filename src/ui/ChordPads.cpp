@@ -63,6 +63,13 @@ ChordPads::ChordPads(KeysProcessor& p) : processor(p)
     okstudio::ui::makeMouseOnly(*this);
 }
 
+// See the header. ~Timer stops the timer, but stopping the timer is not releasing the chord -
+// the note-ons are the processor's and would simply stay on, reachable only by All Off.
+ChordPads::~ChordPads()
+{
+    endAudition();
+}
+
 juce::Rectangle<float> ChordPads::cardBounds() const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
@@ -639,6 +646,12 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // Any left click on this strip ends an audition still ringing from the last one, before it
+    // is even known what this click means. First, so that every early return below inherits it:
+    // the edit tick used to clear `playing` by hand, which now would strand the note it stands
+    // for rather than release it.
+    endAudition();
+
     // The tick on the pad being edited ends the edit, and is checked before anything else
     // a click on that pad could mean: on this one card, in this one state, the right-hand
     // end is a button and not the pad. Nothing is set up for a drag or a press, so the
@@ -651,7 +664,6 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         {
             dragging = false;
             dragSource = -1;
-            playing = -1;
             if (onEditToggle)
                 onEditToggle(editingSlot); // toggling the slot that is already editing ends it
             repaint();
@@ -664,72 +676,38 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     // of the card from playing, dragging and feeding the arp, and every one of those is a
     // gesture the whole surface is supposed to answer. Lock is a right-click item now, and only
     // that; the card paints a dot when it is set, which is a mark and not a target.
+    // Press does nothing but remember where it landed. Every meaning this gesture can have -
+    // play the chord, hand it to an arp line, drag it onto a pad, a slot or a line's row - is
+    // decided in mouseUp, because the two families are told apart by whether the mouse moved,
+    // and that is not knowable yet (2026-08-02; see the note on the class).
+    //
     downPos = e.position;
     dragPos = e.position;
     dragging = false;
-    playing = -1;
     dragSource = cellAt(e.position);
+    repaint();
+}
 
-    // Arp On: a filled pad hands its chord to the arpeggiator and it stays there. Not a
-    // beat-pad press, so `playing` stays -1 and mouseUp has nothing to release; a second
-    // click on the pad already feeding the arp re-plays it, the way a second press on a
-    // beat pad re-fires it. Checked before the beat-pad branch because in this mode the
-    // click means something else entirely.
-    //
-    // The `arpHeldPad()` half of the test is not redundant with the notes test: a card can
-    // be cleared while it is still the one feeding the arp, and then it wears the ring with
-    // no notes behind it. Without that clause the click falls past every branch below and
-    // does nothing at all, which is a dead click on a lit target.
-    if (toArp() && dragSource >= 0
-        && (! processor.chordPad(dragSource).notes.empty()
-            || processor.arpLineHoldingPad(dragSource) >= 0))
+// Stop an audition still sounding from an earlier click, if there is one. Safe to call at any
+// time and on any path - it is how a click, a drag and the timer all end the same state.
+void ChordPads::endAudition()
+{
+    stopTimer();
+    if (playingLive)
     {
-        if (processor.chordPad(dragSource).notes.empty())
-        {
-            // Ringed but empty: there is nothing to re-play, so the click means the only
-            // other thing it can mean. This is the ring's own way out, and the reason it is
-            // drawn on a cleared card at all.
-            processor.releaseArpChord();
-        }
-        else
-        {
-            // Re-playing the holder is a retrigger, never a second owner on the same
-            // pitches: holdArpChordFromPad goes through holdArpChord, which releases the
-            // previous hold (releaseNotes on arpChordTag, so the refs and the arp's held set
-            // both unwind) before it fires, and applies Exclusive to the new one. Stopping a
-            // filled card's hold outright is the Hold off button on the arp bar.
-            processor.holdArpChordFromPad(dragSource, processor.arpCurrentLine());
-        }
+        processor.releaseLiveChord(); // Sustain holds it, exactly as the old mouse-up did
+        playingLive = false;
+    }
+    if (playing >= 0)
+    {
+        processor.releaseChordPad(playing);
+        playing = -1;
+    }
+}
 
-        dragSource = -1; // and it is not a drag handle in this mode either
-        repaint();
-        return;
-    }
-
-    // The live "current chord" card is a chord card too, and the mode's tooltip says so.
-    if (toArp() && dragSource == -2 && isChord(currentNotes))
-    {
-        processor.holdArpChord(currentNotes, currentName);
-        dragSource = -1;
-        repaint();
-        return;
-    }
-
-    // Beat-pad: a filled pad fires the instant you press it (release stops it below).
-    if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
-    {
-        processor.pressChordPad(dragSource);
-        playing = dragSource;
-    }
-    else if (dragSource == -2 && isChord(currentNotes))
-    {
-        // The live card plays too. Holding a chord on the keyboard sounds the keys you
-        // are holding; clicking the card fires the same notes as one chord, so you hear
-        // it strummed and humanized the way a pad would play it. A drag still captures
-        // (mouseDrag stops this the moment the mouse actually moves).
-        processor.pressLiveChord(currentNotes);
-        playingLive = true;
-    }
+void ChordPads::timerCallback()
+{
+    endAudition(); // which stops this timer
     repaint();
 }
 
@@ -738,26 +716,16 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
     dragPos = e.position;
     if (! dragging && e.position.getDistanceFrom(downPos) > 6.0f)
     {
-        if (playing >= 0)
-        {
-            // A press that turns into a drag becomes a rearrange: stop the note first.
-            processor.releaseChordPad(playing);
-            playing = -1;
-            dragging = true; // dragSource is already this pad
-        }
+        // Nothing to silence here any more: the press never sounded. What a drag has to decide
+        // is only whether there was something under it worth carrying, and a *filled* pad is the
+        // test - dragging an empty cell has never meant anything. The arp branch used to clear
+        // dragSource before this ran, which is what made a card undraggable with a line on.
+        if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
+            dragging = true;
         else if (dragSource == -2 && isChord(currentNotes))
-        {
-            if (playingLive)
-            {
-                processor.releaseLiveChord(true); // a press that became a drag is a capture
-                playingLive = false;
-            }
             dragging = true; // dragging the live card to capture it
-        }
         else
-        {
             dragSource = -1; // nothing grabbable under the press
-        }
     }
     if (dragging)
     {
@@ -772,17 +740,7 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
 
 void ChordPads::mouseUp(const juce::MouseEvent& e)
 {
-    if (playingLive)
-    {
-        processor.releaseLiveChord(); // Sustain holds it, same as a pad
-        playingLive = false;
-    }
-    else if (playing >= 0)
-    {
-        processor.releaseChordPad(playing); // beat-pad: release stops it (Sustain holds it)
-        playing = -1;
-    }
-    else if (dragging)
+    if (dragging)
     {
         const int target = cellAt(e.position);
         if (dragSource == -2 && target >= 0 && isChord(currentNotes))
@@ -814,6 +772,65 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
             // itself stays allowed, because moveChordPad only swaps two slots and a locked
             // card still has to be arrangeable; the ghost fades over the refusal so the card
             // says which of the two it is doing.
+        }
+    }
+    else
+    {
+        // A click: the mouse went down on a card and came back up without travelling. This is
+        // where everything the press used to do now happens, in the same order it used to be
+        // tested in, so only the *timing* changed and not which branch a given card takes.
+
+        // Arp On: a filled pad hands its chord to the arpeggiator and it stays there. Not an
+        // audition, so `playing` stays -1 and no timer is started - held means held. A second
+        // click on the pad already feeding the arp re-plays it. Checked before the audition
+        // branch because in this mode the click means something else entirely.
+        //
+        // The `arpLineHoldingPad()` half of the test is not redundant with the notes test: a
+        // card can be cleared while it is still the one feeding the arp, and then it wears the
+        // ring with no notes behind it. Without that clause the click falls past every branch
+        // below and does nothing at all, which is a dead click on a lit target.
+        if (toArp() && dragSource >= 0
+            && (! processor.chordPad(dragSource).notes.empty()
+                || processor.arpLineHoldingPad(dragSource) >= 0))
+        {
+            if (processor.chordPad(dragSource).notes.empty())
+            {
+                // Ringed but empty: there is nothing to re-play, so the click means the only
+                // other thing it can mean. This is the ring's own way out, and the reason it is
+                // drawn on a cleared card at all.
+                processor.releaseArpChord();
+            }
+            else
+            {
+                // Re-playing the holder is a retrigger, never a second owner on the same
+                // pitches: holdArpChordFromPad goes through holdArpChord, which releases the
+                // previous hold (releaseNotes on arpChordTag, so the refs and the arp's held set
+                // both unwind) before it fires, and applies Exclusive to the new one. Stopping a
+                // filled card's hold outright is the Hold off button on the arp bar.
+                processor.holdArpChordFromPad(dragSource, processor.arpCurrentLine());
+            }
+        }
+        // The live "current chord" card is a chord card too, and the mode's tooltip says so.
+        else if (toArp() && dragSource == -2 && isChord(currentNotes))
+        {
+            processor.holdArpChord(currentNotes, currentName);
+        }
+        // No line listening: the click auditions the chord. It sounds now and the timer lets it
+        // go, because the button is already up and nothing else is coming to end it.
+        else if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
+        {
+            processor.pressChordPad(dragSource);
+            playing = dragSource;
+            startTimer(auditionMs);
+        }
+        else if (dragSource == -2 && isChord(currentNotes))
+        {
+            // The live card plays too. Holding a chord on the keyboard sounds the keys you are
+            // holding; clicking the card fires the same notes as one chord, so you hear it
+            // strummed and humanized the way a pad would play it.
+            processor.pressLiveChord(currentNotes);
+            playingLive = true;
+            startTimer(auditionMs);
         }
     }
     // Whatever the gesture turned out to be, the drag is over: tell whoever lit up for it. This

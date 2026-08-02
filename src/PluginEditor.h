@@ -49,6 +49,13 @@ public:
     // went stale the first time a control joined that bar.
     int minWidthForView() const;
 
+    // Total height the current folds add up to. Public for exactly the same reason as the
+    // width beside it: Keys Host embeds one of these, and it has to open its window at the
+    // content's height and floor it there. It held a literal 620 instead until 2026-08-02,
+    // and a literal goes stale the first time a section grows - the symptom being the
+    // keyboard, which is laid out last, carved off the bottom with nothing to say so.
+    int  idealHeight() const;
+
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -82,7 +89,6 @@ private:
     void syncSectionControls();        // toggle states + visibility from processor.layout
     int  arpHeight() const;            // height the arp section asks for, 0 if folded
     int  sectionHeight(SectionId) const; // 0 when the section is folded or in its own window
-    int  idealHeight() const;          // total height with the current folds
     void applyLayout();                // resize to fit the folds (unless embedded), then resized()
 
     void setSectionDetached(SectionId, bool); // move a section in or out of its own window
@@ -328,10 +334,21 @@ private:
     // no on-screen release for just the held chord in the default layout. Disabled while
     // nothing is held, which makes it a state display as well as a button.
     juce::TextButton arpHoldOffButton { "Hold off" };
+    // The Keyboard bar's All Off, for the arpeggiator (2026-08-02, Owen's ask). Switches both
+    // lines off and lets go of everything - see KeysProcessor::allArpOff for why switching off
+    // is the part that makes it different from Hold off beside it. Always enabled, unlike Hold
+    // off: a stop button that greys itself out is one you have to read before you can trust it,
+    // and this one is reached in the moment you want the noise to end.
+    juce::TextButton arpAllOffButton { "All Off" };
+    // Whether the keybed lights up for the notes the arp is playing. A view toggle over
+    // layout.arpLights, not a parameter - see the member. It rides this bar rather than the
+    // Keyboard bar because it is a fact about the arp: it is the arp's notes it shows, and it
+    // is meaningless with both lines off.
+    juce::ToggleButton arpLightsButton;
     // Which arp line a click on a chord card feeds, shown as its letter and cycled A->B->C by
     // clicking. It rides the *Pads* bar, next to Fill / Regen / Generator, because it is a
     // fact about the cards rather than about the arp: the control that says where a card goes
-    // belongs beside the cards. It is the same state as the A/B/C tabs inside the arp panel,
+    // belongs beside the cards. It is the same state as the A/B tabs inside the arp panel,
     // so either moves both - and it stays reachable with the arp section folded away, which
     // the tabs do not.
     juce::TextButton arpTargetButton { "A" };

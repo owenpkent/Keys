@@ -116,7 +116,13 @@ public:
         // The eight knobs a row carries, left to right. One table so the labels, the
         // parameters and the layout cannot drift apart; the headings are drawn once, on the
         // top row, and every row reserves the same strip so the columns line up.
-        enum Knob { kOctaves = 0, kGate, kChance, kSwing, kOffset, kRamp, kRampTime, kHuman,
+        // Seven since 2026-08-02, both changes Owen's. OCT is now the *transpose* (centred at
+        // zero, down as readily as up) rather than the upward-only stacking range, which stays
+        // on the per-line tab beside Distance, the rest of that same feature. VOL replaced Ramp
+        // *and* Time, which were one feature between them - a velocity ramp and how long it
+        // takes - and a row with Time in it and no Ramp would be a control with nothing to time.
+        // Both still live on the per-line tab.
+        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVol, kHuman,
                     numKnobs };
 
     private:
@@ -134,6 +140,13 @@ public:
         okstudio::RotaryKnob rateKnob;
         juce::TextButton ratePrev { "<" }, rateNext { ">" };
         juce::TextButton rateModeButton { "Sync" };
+        // The rate's three modifiers, the same three the band carries and greyed by the same
+        // question (2026-08-02, Owen: "I need to have options for dots and triplets as well").
+        // They sit on a sub-row of their own rather than in the main line: at Owen's window
+        // width that line is already at every floor it has, and two more 34 px targets in it
+        // would have driven the eight knobs under the mouse-only minimum. The row got taller
+        // instead, which is affordable because dropping line C freed a whole row's worth.
+        juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
         std::array<juce::Slider, numKnobs> knobs;
@@ -143,6 +156,7 @@ public:
         juce::TextButton chainButton { "Chain" };
 
         std::unique_ptr<ButtonAtt> onAtt, latchAtt, keysAtt, rateModeAtt;
+        std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         // Exactly one of these is ever non-null; refreshRateMode owns that invariant.
         std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;

@@ -20,6 +20,13 @@ namespace
 
     constexpr const char* clockDivNames[3] = { "1x", "1/2", "1/4" };
 
+    // The strip at the bottom of a macro row holding the rate's Dot / Trip / Anchor. Declared
+    // up here rather than with the other macro-view heights further down, because MacroRow's
+    // own resized() is defined above that block and needs it; the block down there builds
+    // arpMacroRow out of it, and an anonymous namespace is one namespace however many times it
+    // is opened. See arpMacroRow for why the modifiers earned a strip of their own.
+    constexpr int arpMacroSubRow = 36;
+
     // Show or hide a whole group of controls in one line. The parameter type is what makes it
     // work: a braced list of mixed component types cannot deduce its own element type, but it
     // converts to this one happily, so the call sites stay readable.
@@ -289,7 +296,7 @@ ArpPanel::~ArpPanel()
 
 int ArpPanel::editLine() const
 {
-    return juce::jlimit(0, KeysProcessor::numArpLines - 1, editedLine);
+    return juce::jlimit(0, KeysProcessor::uiArpLines - 1, editedLine);
 }
 
 // A chord card dragged out of the pad strip, in screen coordinates. Mouse capture keeps the
@@ -391,7 +398,7 @@ void ArpPanel::refreshMacro()
 
 void ArpPanel::setEditLine(int line, bool leaveMacroView)
 {
-    line = juce::jlimit(0, KeysProcessor::numArpLines - 1, line);
+    line = juce::jlimit(0, KeysProcessor::uiArpLines - 1, line);
     // A line tab always leaves the macro view, even when it names the line already current:
     // clicking "B" while All is up plainly means "show me B". A *drop* passes false, because
     // it is routing a chord rather than navigating, and in the macro view the line it landed
@@ -885,12 +892,14 @@ void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
 
 namespace
 {
-    // The eight knobs a macro row carries, in the order they are laid out. Heading, parameter
-    // and tooltip in one place so the columns cannot drift out of step with what they set.
+    // The knobs a macro row carries, in the order they are laid out. Heading, parameter and
+    // tooltip in one place so the columns cannot drift out of step with what they set.
     struct MacroKnobSpec { KeysProcessor::ArpParam param; const char* heading; const char* tip; };
     const MacroKnobSpec macroKnobSpecs[] = {
-        { KeysProcessor::apOctaves, "OCT",
-          "How many times this line stacks the chord up the keyboard. The classic arp range." },
+        { KeysProcessor::apOctShift, "OCT",
+          "Moves this whole line up or down whole octaves. Centred: nothing at 12 o'clock, down "
+          "to the left, up to the right. Put one line an octave under the other and they stop "
+          "fighting for the same register." },
         { KeysProcessor::apGate, "GATE",
           "How much of each step this line's notes fill. Short gates let another line through." },
         { KeysProcessor::apChance, "CHANCE",
@@ -901,12 +910,9 @@ namespace
         { KeysProcessor::apOffset, "OFFSET",
           "Starts this line's pattern from a different foot. Two lines on the same rate and "
           "different offsets are out of phase rather than in unison." },
-        { KeysProcessor::apVelRamp, "RAMP",
-          "Over Time, this line's velocity moves toward this much of what you played. Negative "
-          "fades a held chord out, positive swells it." },
-        { KeysProcessor::apRampBeats, "TIME",
-          "How long that ramp takes, in beats - or in seconds while this line's rate is in Hz, "
-          "because there is no beat to count there." },
+        { KeysProcessor::apVolume, "VOL",
+          "How loud this line plays, as a share of the velocity it would have. The way to "
+          "balance two lines against each other without playing one of them softer." },
         { KeysProcessor::apHumanize, "HUMAN",
           "Nudges each hit a little late and a little quieter, by a different amount every "
           "time. At 0 the line is dead on the grid." },
@@ -949,11 +955,38 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     heading(latchLabel, "LTCH");
 
     keysButton.setTitle("Macro keys " + letter);
-    keysButton.setTooltip("Does this line arpeggiate what you play, or only the chords you hand "
-                          "it? Off makes it a card player, independent of the keybed.");
+    keysButton.setTooltip("PLAY: does this line arpeggiate what you play on the keyboard at the "
+                          "bottom? On, the keys you hold feed it. Off, it ignores the keybed "
+                          "entirely and plays only the chord cards you hand it - which is what "
+                          "lets one line follow your hands while the other runs a card.");
     addAndMakeVisible(keysButton);
     keysAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apKeys), keysButton);
-    heading(keysLabel, "KEYS");
+    // **PLAY, not KEYS** (2026-08-02, Owen: "I don't understand what the keys button does",
+    // then "maybe you can make it a little bit more clear"). The parameter id stays `arpKeys` -
+    // ids are never renamed - but "KEYS" as a column heading collided head-on with **Show
+    // notes** on the bar, which is about the keybed *lighting up* and changes nothing you hear.
+    // Two controls, one word, and no way to tell from the labels which was which. This one is
+    // about what the line plays, so it says so.
+    heading(keysLabel, "PLAY");
+
+    // The rate's three modifiers, on the sub-row under it. Same three the band carries, same
+    // parameters, and greyed by the same question - see refreshRateMode.
+    dotButton.setTitle("Macro dot " + letter);
+    dotButton.setTooltip("Dotted: each step lasts half again as long, so 1/8 becomes a dotted "
+                         "1/8. Greyed with the rate in Hz, where there is no beat to dot.");
+    tripButton.setTitle("Macro trip " + letter);
+    tripButton.setTooltip("Triplets: three steps in the space of two, so 1/8 becomes an 1/8 "
+                          "triplet. Greyed with the rate in Hz, where there is no beat to "
+                          "divide. Run one line straight and the other in triplets and you have "
+                          "the polyrhythm this view is for.");
+    anchorButton.setTitle("Macro anchor " + letter);
+    // Anchor's tooltip is written by refreshRateMode, beside its enablement: it says something
+    // different in Hz, where there is no bar grid to anchor to. Same split as the band's.
+    for (auto* b : { &dotButton, &tripButton, &anchorButton })
+        addAndMakeVisible(*b);
+    dotAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apDot), dotButton);
+    tripAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apTrip), tripButton);
+    anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apAnchor), anchorButton);
 
     // Rate: the same detented dial the band uses, so a division is a detent and the readout
     // under it says which one. The steppers beside it are the click-only path to every value,
@@ -966,7 +999,7 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     rateKnob.onDragStart = [this] { rateDragging = true; };
     rateKnob.onDragEnd = [this] { rateDragging = false; refreshRateMode(); };
     addAndMakeVisible(rateKnob);
-    heading(knobLabels[kOctaves], macroKnobSpecs[kOctaves].heading); // laid out with the rest
+    heading(knobLabels[kOctShift], macroKnobSpecs[kOctShift].heading); // laid out with the rest
 
     ratePrev.onClick = [this] { stepRate(-1); };
     rateNext.onClick = [this] { stepRate(1); };
@@ -1009,7 +1042,7 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
         knob.setTooltip(macroKnobSpecs[(size_t) k].tip);
         knob.setTitle("Macro " + juce::String(macroKnobSpecs[(size_t) k].heading) + " " + letter);
         addAndMakeVisible(knob);
-        if (k != kOctaves) // its heading is already made, above
+        if (k != kOctShift) // its heading is already made, above
             heading(knobLabels[(size_t) k], macroKnobSpecs[(size_t) k].heading);
         knobAtts[(size_t) k] = std::make_unique<SliderAtt>(
             processor.apvts, id(macroKnobSpecs[(size_t) k].param), knob);
@@ -1020,8 +1053,8 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     addAndMakeVisible(chordLabel);
 
     chainButton.setTitle("Macro chain " + letter);
-    chainButton.setTooltip("Play this line's slots that hold a chord, one after another. Three "
-                           "chains at three rates is the whole point of the view.");
+    chainButton.setTooltip("Play this line's slots that hold a chord, one after another. Two "
+                           "chains at two rates is the whole point of the view.");
     chainButton.onClick = [this]
     {
         if (processor.chainRunning(line))
@@ -1045,6 +1078,21 @@ void ArpPanel::MacroRow::refreshRateMode()
     const bool free = processor.apvts.getRawParameterValue(
                           KeysProcessor::arpParamId(line, KeysProcessor::apRateFree))->load() > 0.5f;
     rateModeButton.setButtonText(free ? "Hz" : "Sync");
+
+    // Dot, Trip and Anchor all subdivide or align against a *beat*, and in Hz there is no beat:
+    // the engine ignores all three there, so they grey out rather than sitting lit and doing
+    // nothing. Same rule and the same words as the band's - see ArpPanel::refreshRateMode.
+    // Outside the early-out below, which only guards the attachment swap: these have to be
+    // right on the first call too, when lastRateFree is still -1 and a Hz session has just
+    // been restored.
+    dotButton.setEnabled(! free);
+    tripButton.setEnabled(! free);
+    anchorButton.setEnabled(! free);
+    anchorButton.setTooltip(free ? "Nothing to anchor to in Hz: a free-running rate follows no "
+                                   "bar grid. Switch the rate to Sync to lock the steps to one."
+                                 : "Anchored: locked to the host bar grid. Free: never jumps, "
+                                   "may drift.");
+
     if (lastRateFree == (int) free)
         return;
     if (rateDragging)
@@ -1191,6 +1239,10 @@ void ArpPanel::MacroRow::resized()
     // Every row gives up the same strip to the column headings, whether or not it draws them,
     // so the columns line up down the view.
     const auto headStrip = full.removeFromTop(11);
+    // ...and the same strip at the bottom for the rate's three modifiers. Taken before the main
+    // line is laid out, so adding them cannot squeeze anything above: the main line keeps every
+    // pixel it had, and the row is taller by exactly this strip (see arpMacroRow).
+    auto subRow = full.removeFromBottom(arpMacroSubRow);
     auto r = full;
     const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
     // The single-height controls sit centred against the knobs beside them.
@@ -1204,6 +1256,9 @@ void ArpPanel::MacroRow::resized()
     rateKnob.setBounds(take(58));
     rateNext.setBounds(centred(take(26)));
     rateModeButton.setBounds(centred(take(42)));
+    // Where the rate group starts, so its modifiers below line up under it rather than under
+    // the left edge of the row. Read from the control, not from a second copy of the sums.
+    const int rateGroupX = ratePrev.getX();
 
     // Chain and the chord come off the right...
     chainButton.setBounds(centred(r.removeFromRight(60)));
@@ -1211,23 +1266,57 @@ void ArpPanel::MacroRow::resized()
     chordLabel.setBounds(centred(r.removeFromRight(64)));
     r.removeFromRight(6);
 
-    // ...then the knob strip is **reserved** out of what is left, before Shape takes its cut.
-    // Laying the knobs last and giving the final one "whatever remains" starved it to nothing
-    // the moment the row got tight: eight of them were drawn as seven, silently. Shape absorbs
-    // the slack instead, because a narrower combo is a combo and a zero-width knob is a bug.
-    const int each = juce::jlimit(52, 96,
-                                  (r.getWidth() - 6 * (numKnobs - 1) - 140) / numKnobs);
-    auto knobStrip = r.removeFromRight(each * numKnobs + 6 * (numKnobs - 1));
-    r.removeFromRight(8);
+    // ...then **Shape's whole cell is reserved first**, and the knobs share what is left.
+    //
+    // This used to be the other way round, with a term in the knob arithmetic standing in for
+    // Shape - and a reservation expressed as a subtraction inside a clamp is not a reservation
+    // at all. On Owen's window the knobs hit their 52 px floor, the clamp threw the subtraction
+    // away, the strip came out wider than the arithmetic had allowed for, and Shape got the
+    // 77 px that happened to remain. Two symptoms, one cause: the combo drew "Random Other" as
+    // "R..." (2026-08-02, Owen: "the pattern is cut off in the drop down") and `>` was starved
+    // to *zero width* by the same shortfall - a mouse-only stepper that was not on screen at
+    // all, which is the worse half and had no visible symptom to report.
+    //
+    // Reserving the fixed-size thing first is the ordering that cannot fail: Shape's cell is a
+    // constant, the knobs are the elastic ones, and an elastic control with a floor must never
+    // be asked to leave room for anything.
+    constexpr int shapeBoxW = 118;                        // fits the longest item plus the chevron
+    constexpr int shapeCellW = shapeBoxW + 26 + 26 + 6 * 3; // ...plus `<`, `>` and their gaps
+    auto shapeCell = r.removeFromLeft(juce::jmin(shapeCellW, r.getWidth()));
+    r.removeFromLeft(8);
 
-    shapePrev.setBounds(centred(take(26)));
-    shapeBox.setBounds(centred(take(juce::jmax(72, r.getWidth() - 32))));
-    shapeNext.setBounds(centred(take(26)));
+    // 38, not 52: the floor has to leave the row solvable at Owen's window width, and a 38 px
+    // knob is still over the 34 px mouse-only minimum. They stop growing at 96 as before.
+    const int each = juce::jlimit(38, 96, (r.getWidth() - 6 * (numKnobs - 1)) / numKnobs);
+    auto knobStrip = r.removeFromRight(each * numKnobs + 6 * (numKnobs - 1));
+
+    {
+        // Shape's own three, inside the cell reserved for them, so a tight row shrinks the
+        // combo and never the steppers - they are targets and it is a readout.
+        const auto takeShape = [&shapeCell](int w)
+        { auto c = shapeCell.removeFromLeft(w); shapeCell.removeFromLeft(6); return c; };
+        shapePrev.setBounds(centred(takeShape(26)));
+        shapeBox.setBounds(centred(takeShape(juce::jmax(0, shapeCell.getWidth() - 32))));
+        shapeNext.setBounds(centred(takeShape(26)));
+    }
 
     for (int k = 0; k < numKnobs; ++k)
     {
         knobs[(size_t) k].setBounds(knobStrip.removeFromLeft(each));
         knobStrip.removeFromLeft(6);
+    }
+
+    // The rate's modifiers, under the rate group they belong to. Full 34 px height - they are
+    // targets, and the sub-row exists precisely so they do not have to be squeezed - and wide
+    // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
+    // controls' worth of ambiguity in a row that already has eight unlabelled knobs.
+    {
+        auto s = subRow.withTrimmedLeft(rateGroupX - subRow.getX()).withTrimmedTop(2);
+        const auto takeMod = [&s](int w)
+        { auto c = s.removeFromLeft(w); s.removeFromLeft(8); return c; };
+        dotButton.setBounds(takeMod(62));
+        tripButton.setBounds(takeMod(66));
+        anchorButton.setBounds(takeMod(84));
     }
 
     // Headings are placed from the control they name, not by walking a second copy of the
@@ -1296,11 +1385,13 @@ void ArpPanel::LineTab::paintButton(juce::Graphics& g, bool over, bool down)
                      : juce::String::charToString((juce::juce_wchar) ('A' + line)),
                area.removeFromTop(17.0f), juce::Justification::centred, false);
 
-    // What this line is holding, so three tabs read as three arpeggiators rather than three
-    // letters. Faint and small: it is a status line, not the card's own name.
+    // What this line is holding, so the tabs read as arpeggiators rather than as letters. Faint
+    // and small: it is a status line, not the card's own name. The All tab counts the lines
+    // instead, off uiArpLines rather than off a literal - it said "3 lines" beside two of them
+    // for one build.
     g.setColour(on ? accent.withAlpha(0.85f) : skin::textFaint);
     g.setFont(skin::micro(9.0f));
-    const auto sub = macro ? juce::String("3 lines")
+    const auto sub = macro ? juce::String(KeysProcessor::uiArpLines) + " lines"
                            : (processor.arpHeldName(line).isNotEmpty() ? processor.arpHeldName(line)
                                                                        : juce::String(on ? "on" : "off"));
     g.drawText(sub, area, juce::Justification::centredTop, false);
@@ -1710,20 +1801,23 @@ void ArpPanel::buildControls()
         addAndMakeVisible(*b);
     }
 
-    // The three line tabs, at the left of the slot row. Clicking one moves the whole panel to
-    // that line - band, step lanes, the twelve slots, Bars and Chain - which is what keeps one
-    // row of controls in front of three arpeggiators without the panel growing at all.
-    // Three macro rows, hidden until the fourth tab asks for them. Built once and kept, so
+    // The line tabs, at the left of the slot row. Clicking one moves the whole panel to that
+    // line - band, step lanes, the twelve slots, Bars and Chain - which is what keeps one row of
+    // controls in front of every arpeggiator without the panel growing at all.
+    // One macro row per line, hidden until the All tab asks for them. Built once and kept, so
     // their attachments never churn: each one is bound to its own line for good.
-    for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+    //
+    // uiArpLines, not numArpLines: the arrays stay numArpLines long and their tail stays null,
+    // which is why every loop over them already null-checks. Nothing else has to know.
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
     {
         auto row = std::make_unique<MacroRow>(processor, n);
         addChildComponent(*row);
         macroRows[(size_t) n] = std::move(row);
     }
 
-    // The two things all three lines share, and the reason the macro view is more than three
-    // rows side by side. BPM is the tempo they run at when there is no transport to follow -
+    // The two things both lines share, and the reason the macro view is more than a stack of
+    // rows. BPM is the tempo they run at when there is no transport to follow -
     // always in the standalone, and whenever the host is stopped; a rolling host still wins.
     bpmLabel.setText("BPM", juce::dontSendNotification);
     bpmLabel.setFont(skin::micro(9.0f));
@@ -1732,7 +1826,7 @@ void ArpPanel::buildControls()
     bpmKnob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
     bpmKnob.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 18);
     bpmKnob.setTitle("Arp BPM");
-    bpmKnob.setTooltip("The tempo all three lines run at when there is no transport to follow: "
+    bpmKnob.setTooltip("The tempo both lines run at when there is no transport to follow: "
                        "always in the standalone, and whenever the host is stopped. A host that "
                        "is playing always wins, and a line whose rate is in Hz follows neither.");
     addChildComponent(bpmKnob);
@@ -1762,26 +1856,29 @@ void ArpPanel::buildControls()
     addChildComponent(quantizeBox);
     quantizeAtt = std::make_unique<ComboAtt>(processor.apvts, "arpQuantize", quantizeBox);
 
-    for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
     {
         auto tab = std::make_unique<LineTab>(processor, *this, n);
         tab->onClick = [this, n] { setEditLine(n); };
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
         tab->setTooltip("Arpeggiator line " + letter + ". Click to edit it here, and to send it "
                         "the next chord card you click. Each line has its own rate, shape, "
-                        "pattern and twelve slots, so three of them make a polyrhythm.");
+                        "pattern and twelve slots, so the two of them make a polyrhythm.");
         addAndMakeVisible(*tab);
         lineTabs[(size_t) n] = std::move(tab);
     }
 
-    // The fourth: all three at once. Owen's shape for this - "a fourth option for a simplified
-    // version that shows a little bit of all of them" - which is why it is a tab in the row
-    // that already selects lines rather than a window or a fifth section.
+    // The last one: both lines at once, and the view Keys now opens in. Owen's shape for this -
+    // "a fourth option for a simplified version that shows a little bit of all of them" - which
+    // is why it is a tab in the row that already selects lines rather than a window or a fifth
+    // section. It kept its place at the right of the tabs when line C went, so the two that
+    // remain are still where they were.
     macroTab = std::make_unique<LineTab>(processor, *this, -1);
     macroTab->onClick = [this] { setMacroView(true); };
-    macroTab->setTooltip("All three lines at once: rate, shape, gate, chance and swing for each, "
-                         "with the tempo and Launch Quantize they share. The place to build a "
-                         "polyrhythm; the line tabs beside it are where you go deep on one.");
+    macroTab->setTooltip("Both lines at once: rate, shape, gate, chance and swing for each, with "
+                         "the tempo and Launch Quantize they share. Drag a chord card up from the "
+                         "strip below onto a row to hand that line the chord. The place to build "
+                         "a polyrhythm; the line tabs beside it are where you go deep on one.");
     addAndMakeVisible(*macroTab);
 
     buildAttachments();
@@ -1856,16 +1953,37 @@ namespace
     // that is already the tallest thing in the editor.
     constexpr int arpBand2H = arpBandTop + arpBandRow + 4;
     constexpr int arpSlotsH = 58;
-    // The macro view: three line rows plus one shared row (tempo and quantize). It replaces
-    // the two band rows rather than joining them, which is what keeps the panel exactly as
-    // tall as it is on a shape - the whole point of a fourth tab rather than a fourth band.
-    // 11 for the column headings, 40 for the knob, 15 for its readout - the row is as tall as
-    // a knob needs and no taller, which is what keeps three of them under the Pattern view.
-    constexpr int arpMacroRow = 66;
-    constexpr int arpMacroShared = 56; // the shared row: a knob needs more height than a slider
-    constexpr int arpMacroH = arpBandTop + arpMacroRow * 3 + 10 + arpMacroShared + 4;
+    // The macro view: one row per line the UI shows, plus one shared row (tempo and quantize).
+    // It replaces the two band rows rather than joining them, which is what keeps the panel
+    // exactly as tall as it is on a shape - the whole point of a fourth tab rather than a fourth
+    // band. 11 for the column headings, 40 for the knob, 15 for its readout - the row is as tall
+    // as a knob needs and no taller.
+    //
+    // Two rows since 2026-08-02 (KeysProcessor::uiArpLines), so this view is now *shorter* than
+    // the band it replaces rather than the same height. That slack goes to the chord strip
+    // below, which is the surface these rows are dragged onto.
+    // 66 was the whole row until Dot / Trip / Anchor joined it (2026-08-02). They go on a strip
+    // of their own under the rate rather than into the main line, which at Owen's window width
+    // is already at every floor it has - two more 34 px targets in there would have driven the
+    // eight knobs under the mouse-only minimum. Two rows at 102 is 204 against the three at 66
+    // this view used to be, so it still costs the panel nothing it did not already have.
+    constexpr int arpMacroRow = 66 + arpMacroSubRow;
+    // A tightening pass over this view, 2026-08-02 (Owen: "we just need to do a UI pass, make it
+    // a little bit tighter"). The shared row was 56 for a knob that needs 44, and the gap above
+    // it was 10 where the rows below the hairline already read as separate. Everything here is
+    // slack between blocks, never a target: the 34 px floor is what decides how small a control
+    // may be, and none of these numbers is one.
+    constexpr int arpMacroShared = 48;   // was 56; the BPM knob and Quantize both fit in it
+    constexpr int arpMacroSharedGap = 4; // was 10
+    constexpr int arpMacroH = arpBandTop + arpMacroRow * KeysProcessor::uiArpLines
+                              + arpMacroSharedGap + arpMacroShared + 2;
     constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
-    constexpr int arpMacroTotalH = 12 + (arpMacroH + 12) + (arpSlotsH + 8) + 34 + 12;
+    // ...and the gap under the block, 12 to 8. Only the macro-specific numbers move in this
+    // pass: the outer `reduced(12)` and the slot row's own padding are shared with the band and
+    // Pattern views, and this height has to agree with resized() exactly or the panel is the
+    // wrong size with nothing to say so.
+    constexpr int arpMacroBelow = 8; // was 12
+    constexpr int arpMacroTotalH = 12 + (arpMacroH + arpMacroBelow) + (arpSlotsH + 8) + 34 + 12;
     constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10);
 
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
@@ -1960,7 +2078,7 @@ void ArpPanel::resized()
     if (macroView)
     {
         auto block = area.removeFromTop(arpMacroH);
-        area.removeFromTop(12);
+        area.removeFromTop(arpMacroBelow);
         groups[0].bounds = block;
         groups[0].caption = "Lines";
         for (int i = 1; i < (int) groups.size(); ++i)
@@ -1972,7 +2090,7 @@ void ArpPanel::resized()
             if (row != nullptr)
                 row->setBounds(inner.removeFromTop(arpMacroRow));
         }
-        inner.removeFromTop(10);
+        inner.removeFromTop(arpMacroSharedGap);
 
         // The shared row, under the three: one tempo and one quantize, laid out from the left
         // so they read as belonging to all of it rather than to the last line above them.
@@ -2179,17 +2297,22 @@ void ArpPanel::resized()
     auto slotRow = area.removeFromBottom(arpSlotsH);
     area.removeFromBottom(12);
     {
-        // The three line tabs first, then All, at the left end of the row. They take a cell
-        // each out of the same width the slots share, which is what makes them cost no height
-        // at all: the row is already arpSlotsH tall and a tab is the mouse-only 34 centred in
-        // it. Four tabs and twelve slots is sixteen cells.
-        const int n = (int) slotCards.size() + (int) lineTabs.size() + 1;
+        // The line tabs first, then All, at the left end of the row. They take a cell each out
+        // of the same width the slots share, which is what makes them cost no height at all:
+        // the row is already arpSlotsH tall and a tab is the mouse-only 34 centred in it. Three
+        // tabs and twelve slots is fifteen cells.
+        //
+        // Counted from uiArpLines rather than from the array, which is still numArpLines long
+        // with its tail left null: a null tab has to take no cell *and no gap*, or the row pays
+        // 4 px for a tab that is not there and the slots drift left of the cards above them.
+        const int n = (int) slotCards.size() + KeysProcessor::uiArpLines + 1;
         const int gap = 4;
         const int w = juce::jmax(46, (slotRow.getWidth() - gap * (n - 1)) / n);
         for (auto& t : lineTabs)
         {
-            if (t != nullptr)
-                t->setBounds(slotRow.removeFromLeft(w).withSizeKeepingCentre(w, 34));
+            if (t == nullptr)
+                continue;
+            t->setBounds(slotRow.removeFromLeft(w).withSizeKeepingCentre(w, 34));
             slotRow.removeFromLeft(gap);
         }
         if (macroTab != nullptr)

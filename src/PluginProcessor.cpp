@@ -212,7 +212,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "uiLayout", 1 }, "Layout",
                                                       StringArray { "Classic", "Performer" }, 0));
 
-    // Arpeggiator globals, three lines' worth (docs/ARP_DESIGN.md). See addArpLineParams.
+    // Arpeggiator globals, every line's worth (docs/ARP_DESIGN.md). See addArpLineParams.
     for (int line = 0; line < numArpLines; ++line)
         addArpLineParams(layout, line);
 
@@ -220,10 +220,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // "if you start a new note or something that goes into the next sequence, so it sounds good
     // always"). Off fires a chord the instant you click it, which is what Keys has always done.
     // Anything else holds the click until the next boundary, so a card can only ever land on
-    // the grid - which is what makes three lines at three rates performable rather than a race
+    // the grid - which is what makes two lines at two rates performable rather than a race
     // against your own mouse.
     //
-    // **Global, not per line.** The whole value of it is that the three lines land *together*;
+    // **Global, not per line.** The whole value of it is that the lines land *together*;
     // three separate quantize settings would be three ways to miss each other.
     //
     // It quantizes the gestures that *fire* something - a chord card, a slot launch, a drag
@@ -393,7 +393,7 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Keys"), 1 }, nm + " Keys", true));
     // Where this line's notes go. Global is the old behaviour and the one to keep for a
     // single instrument downstream; naming a channel is for a multitimbral rack, where the
-    // three lines can drive three different sounds. Note this buys nothing in Keys Host until
+    // the lines can drive different sounds. Note this buys nothing in Keys Host until
     // the hosted instrument is itself multitimbral - it is for the DAW case.
     {
         StringArray channels { "Global" };
@@ -402,6 +402,18 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
         layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Channel"), 1 },
                                                           nm + " Channel", channels, 0));
     }
+
+    // Appended 2026-08-02, both defaulting to what the arp did before them.
+    //
+    // Octave: transposes the whole run, centred at 0 so it goes down as readily as up. This is
+    // *not* Octaves, which stacks copies of the chord upward and can only ever widen the run -
+    // "how high does it sit" and "how far does it reach" are different questions, and only the
+    // first one has a middle. It is what the macro row's OCT knob drives; Octaves stays on the
+    // per-line tab, where the rest of the stacking controls (Distance) already live.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("OctShift"), 1 }, nm + " Octave", -3, 3, 0));
+    // Volume: the plain output level an arpeggiator wants and this one never had. With two
+    // lines running, balancing them used to mean playing one of them softer.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Volume"), 1 }, nm + " Volume", 0, 100, 100));
 }
 
 // The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
@@ -412,7 +424,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
     static const char* const suffixes[numArpParams] = {
         "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
-        "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel"
+        "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
+        "OctShift", "Volume"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -445,6 +458,14 @@ const ArpEngine& KeysProcessor::arpLine(int line) const
 
 bool KeysProcessor::arpLineOn(int line) const
 {
+    // The one choke point for "does this line exist". A line the UI does not show has no way to
+    // be switched off either, so it must not be able to sound: a session saved while line C was
+    // running would otherwise arpeggiate forever with no control anywhere on screen. Answering
+    // false here makes it inert everywhere at once - runArpLines skips its engine and its keys,
+    // cardsFeedArp stops counting it, and the bar's Hold off greys correctly - while its stored
+    // parameter keeps whatever value it had, ready for the day uiArpLines goes back to three.
+    if (line < 0 || line >= uiArpLines)
+        return false;
     return apvts.getRawParameterValue(arpParamId(line, "On"))->load() > 0.5f;
 }
 
@@ -458,12 +479,14 @@ bool KeysProcessor::cardsFeedArp() const
 
 int KeysProcessor::arpCurrentLine() const
 {
-    return juce::jlimit(0, numArpLines - 1, layout.arpLine);
+    // Clamped to what the UI shows, not to what exists: a session saved with C current has to
+    // come back pointing at a line the letter chip can name and a card click can reach.
+    return juce::jlimit(0, uiArpLines - 1, layout.arpLine);
 }
 
 void KeysProcessor::setArpCurrentLine(int line)
 {
-    layout.arpLine = juce::jlimit(0, numArpLines - 1, line);
+    layout.arpLine = juce::jlimit(0, uiArpLines - 1, line);
 }
 
 KeysProcessor::KeysProcessor()
@@ -637,7 +660,7 @@ void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag, int dest)
     sounding.clear();
 }
 
-void KeysProcessor::stopAllChordPads()
+void KeysProcessor::stopAllChordPads(bool includeArpHolds)
 {
     for (int i = 0; i < numChordPads; ++i)
         stopChordPad(i);
@@ -646,8 +669,9 @@ void KeysProcessor::stopAllChordPads()
     // chord held into the arp as well, or a lit Exclusive quietly does nothing in one
     // direction and the chords pile up.
     releaseLiveChord(true);
-    for (int n = 0; n < numArpLines; ++n)
-        releaseArpChord(n);
+    if (includeArpHolds)
+        for (int n = 0; n < numArpLines; ++n)
+            releaseArpChord(n);
 }
 
 void KeysProcessor::pressChordPad(int i)
@@ -914,6 +938,69 @@ bool KeysProcessor::isNoteSounding(int midiNote) const
     return inputNoteOn[(size_t) midiNote].load();
 }
 
+bool KeysProcessor::keybedLit(int midiNote) const
+{
+    if (midiNote < 0 || midiNote > 127)
+        return false;
+    // The track output and the MIDI input are what they are, whatever the arp is doing.
+    if (noteRefs[0][(size_t) midiNote].load() > 0 || inputNoteOn[(size_t) midiNote].load())
+        return true;
+    // A chord handed to an arp line: lit unless that line is running it with Light keys on,
+    // in which case it is the run's input and showing it would drown the run. See the header.
+    for (int n = 0; n < numArpLines; ++n)
+        if (noteRefs[(size_t) (1 + n)][(size_t) midiNote].load() > 0
+            && ! (layout.arpLights && arpLineOn(n)))
+            return true;
+    return arpNoteLit(midiNote);
+}
+
+bool KeysProcessor::arpNoteLit(int midiNote) const
+{
+    if (midiNote < 0 || midiNote > 127 || ! layout.arpLights)
+        return false;
+    return arpNoteOn[(size_t) midiNote].load();
+}
+
+// Audio thread, on one arp line's output buffer just before it is merged. Same shape as
+// watchInputNotes and for the same reasons: a flag per pitch rather than a count, because a
+// missed note-off would leak a refcount into a key lit forever, and a `changed` bump so the
+// surface repaints only when something actually moved.
+//
+// Two lines sounding the same pitch collapse to one flag, which is right: this answers "is
+// the arp on this note", not "how many of it". The last note-off wins and the key goes out
+// slightly early in that case - a display artefact on one pitch, against a refcount that
+// would have to be unwound perfectly across the flush, bypass and channel-change paths.
+void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi)
+{
+    bool changed = false;
+    const auto set = [&](int note, bool on)
+    {
+        if (note < 0 || note > 127 || arpNoteOn[(size_t) note].load() == on)
+            return;
+        arpNoteOn[(size_t) note].store(on);
+        changed = true;
+    };
+
+    for (const auto meta : midi)
+    {
+        const auto m = meta.getMessage();
+        if (m.isNoteOn())
+            set(m.getNoteNumber(), true);
+        else if (m.isNoteOff())
+            set(m.getNoteNumber(), false);
+    }
+
+    if (changed)
+        soundingGen.fetch_add(1);
+}
+
+void KeysProcessor::clearArpNotes()
+{
+    for (auto& f : arpNoteOn)
+        f.store(false);
+    soundingGen.fetch_add(1);
+}
+
 void KeysProcessor::watchInputNotes(const juce::MidiBuffer& midi)
 {
     // Audio thread, and deliberately the first thing processBlock does: after the collector
@@ -1002,11 +1089,14 @@ void KeysProcessor::allNotesOff()
     // go, but if a note-off went missing the lit key it left behind is exactly the kind of
     // stuck thing this button exists to clear; the next key they press lights again.
     clearInputNotes();
+    // ...and the arp's own lights, for the same reason: the engine is about to be silenced
+    // from under them, so whatever they are showing is already not true.
+    clearArpNotes();
 
     // The chord held into the arp is the one thing here that outlives a note-off, so a
     // panic has to forget it too - otherwise All Off silences it while the launched slot
     // still paints as playing and the next launch tries to release notes already gone.
-    // All three lines: a panic that left B holding is a panic that did not happen.
+    // Every line: a panic that left B holding is a panic that did not happen.
     for (auto& l : lines)
     {
         l.chordOn.clear();
@@ -1083,7 +1173,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     // track's MIDI (a clip, another device) is left in place and passes through.
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
 
-    // Arp stage: three lines, each consuming its own note stream and emitting its own; CCs
+    // Arp stage: one engine per line, each consuming its own note stream and emitting its own; CCs
     // pass through. The engines read the host playhead (the one deliberate exception to Keys'
     // old never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-run on an internal
     // clock at the last-known tempo when the transport is stopped.
@@ -1183,7 +1273,14 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         {
             l.lastOn = arpOn;
             if (arpOn)
-                l.engine.hardReset();
+                // restart(), not hardReset(): the chord handed to this line while it was off
+                // is sitting in the engine's held set, and it is the whole reason there is
+                // something to play the instant the switch goes on (2026-08-02, Owen: "when
+                // you turn on the arp, it should start playing whatever card is loaded ...
+                // right now it only plays when you drop a new line on"). hardReset() threw
+                // that chord away, which is exactly what made a freshly switched-on line sit
+                // there silent.
+                l.engine.restart();
             else
                 l.engine.flushInto(l.out); // nothing may ring after bypassing
         }
@@ -1194,23 +1291,30 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         if (channel != l.lastChannel)
         {
             l.engine.flushInto(l.out);
+            watchArpNotes(l.out);
             mergeArpOut(midi, l.out, l.lastChannel);
             l.out.clear();
             l.lastChannel = channel;
         }
 
-        if (! arpOn)
-        {
-            // Off: whatever was handed to this line simply sustains, which is the honest
-            // reading of holding a chord into an arpeggiator that is not running. Its own
-            // queue passes straight through; it never saw the keybed.
-            mergeArpOut(midi, l.in, channel);
-            mergeArpOut(midi, l.out, channel);
-            continue;
-        }
-
+        // **There is no bypass branch.** The engine runs every block and `ap.enabled` decides
+        // only whether it *fires* steps - `noteArrived` is outside that gate, so a line that is
+        // off still takes the chord in and remembers it. That one fact answers both halves of
+        // what Owen asked for on 2026-08-02: dropping a card on a line that is off makes no
+        // sound ("I don't want it to play the chord sound when you release"), because those
+        // note-ons are consumed by the engine instead of passing through to the output; and
+        // switching that line on starts it arpeggiating what it is already holding.
+        //
+        // What this replaces: an `if (! arpOn)` branch that merged `l.in` straight into the
+        // output, so the chord sustained like a pad and the engine never saw it. That was the
+        // honest reading while a line was a thing you switched *between*; with two of them fed
+        // by dragging cards on, "hand it over now, start it when I say" is the gesture.
+        //
+        // The keybed is unaffected either way: `listens[n]` is false with the line off, so
+        // notes you play are never lifted out of the merged stream and sound as they always
+        // have. Playing the instrument is never gated on an arp switch.
         ArpEngine::Params ap;
-        ap.enabled = true;
+        ap.enabled = arpOn;
         ap.rateIndex = (int) arpParam(n, apRate);
         // Free: the rate is a frequency and the engine free-runs at it whatever the transport
         // is doing. Both read every block like every other arp global, so the mode can be
@@ -1232,6 +1336,8 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.velRamp = (int) arpParam(n, apVelRamp);
         ap.rampBeats = (double) (int) arpParam(n, apRampBeats);
         ap.humanize = (int) arpParam(n, apHumanize);
+        ap.octShift = (int) arpParam(n, apOctShift);
+        ap.volume = (int) arpParam(n, apVolume);
         ap.chords = &l.chordTable; // what the Chord lane calls up, this line's slots
 
         // Distance: what each repeat past the first adds. The list names intervals rather
@@ -1285,8 +1391,9 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
 
         // The engine's input is this line's buffer alone, never the merged stream: that is the
         // whole of the routing. Its output goes into midi with everything the other lines and
-        // the pass-through left there, so three lines at three rates simply sum.
+        // the pass-through left there, so two lines at two rates simply sum.
         l.engine.process(ap, hc, numSamples, l.in, l.out);
+        watchArpNotes(l.out);
         mergeArpOut(midi, l.out, channel);
     }
 }
@@ -1583,11 +1690,22 @@ void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::S
     if (notes.empty())
         return;
     // Exclusive works in both directions or it does not work: handing a card to the arp has
-    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold. It
-    // chokes the other two lines with it, which is what "one chord at a time, whichever
-    // surface started it" has to mean once there are three surfaces that can hold one.
+    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold.
+    //
+    // **It does not reach the other arp lines** (2026-08-02, Owen: "I want each arpeggiator to
+    // play different chords"). It used to, on the reading that Exclusive means one chord at a
+    // time whichever surface started it - which was right while the lines were something you
+    // switched between, and is wrong now that they are two instruments you feed side by side.
+    // Handing B a chord silently took A's away, so the second drag undid the first and a
+    // polyrhythm could not be built at all: the feature and the rule wanted opposite things,
+    // and the feature is the reason the lines exist.
+    //
+    // Nothing collides by allowing it. Each line's chord is fired into that line's own queue
+    // (`dest` is line + 1) and `noteRefs` is per destination stream, so two lines holding the
+    // same pitch are two independent references and neither release touches the other. This
+    // line's own previous hold is already gone: releaseArpChord(line), above, is unconditional.
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
-        stopAllChordPads();
+        stopAllChordPads(/*includeArpHolds*/ false);
     auto& ln = lines[(size_t) line];
     ln.chordName = name;
     // Fired into this line's own queue, not the track output: only its engine sees it. Note
@@ -1627,6 +1745,28 @@ void KeysProcessor::releaseArpHold()
         // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
         releaseArpChord(n);
     }
+}
+
+void KeysProcessor::allArpOff()
+{
+    // The switches first, then the letting go. This order is what makes one click enough:
+    // with a line still on, releasing its chord only hands the engine back to whatever the
+    // keybed is holding, and the run carries on under a button that said Off. Switched off
+    // first, the engine is flushed by runArpLines on the very next block (the arpOn edge in
+    // there calls flushInto), so nothing is left ringing to release.
+    for (int n = 0; n < uiArpLines; ++n)
+        if (auto* p = dynamic_cast<juce::AudioParameterBool*>(
+                apvts.getParameter(arpParamId(n, arpParamSuffix(apOn)))))
+        {
+            p->beginChangeGesture();
+            *p = false;
+            p->endChangeGesture();
+        }
+
+    // ...and everything a line was holding on to, which the switch alone does not undo: a
+    // chord handed over by a card, a chain mid-progression, a launch still waiting out
+    // Launch Quantize. This is Hold off's whole job, so it is Hold off that does it.
+    releaseArpHold();
 }
 
 const std::vector<int>& KeysProcessor::arpHeldNotes(int line) const
@@ -2141,6 +2281,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
+    tree.setProperty("arpLights", layout.arpLights, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -2173,7 +2314,8 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // Absent before there were three lines, and line A is the right answer for those: it is
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
-    layout.arpMacro = flag("arpMacro", false);
+    layout.arpMacro = flag("arpMacro", true);
+    layout.arpLights = flag("arpLights", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

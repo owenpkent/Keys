@@ -93,6 +93,30 @@ public:
     // the chord under their hands. Display only, and a flag per pitch rather than a count:
     // a missed note-off would leak a refcount into a key lit forever.
     std::vector<int> inputNotes() const; // sorted, message thread
+
+    // Which pitch the arpeggiator is sounding *right now*, so the keybed can light up as it
+    // runs (2026-08-02, Owen: "another option for showing it when it's actually playing on the
+    // keyboard on the bottom"). Answers false with the option off, which is the whole of what
+    // the option does - the flags are kept either way, since they cost one atomic store per
+    // note event and a toggle that has to wait for the next note to take effect reads as broken.
+    //
+    // **Deliberately not part of isNoteSounding.** That answer feeds the live chord card as
+    // well, and an arpeggio is a run of single notes: folded in there it would rewrite the
+    // "current chord" as whichever note the arp is on. Only the keybed asks this one.
+    bool arpNoteLit(int midiNote) const;
+
+    // What the on-screen keybed should light, which is deliberately **not** the same question
+    // as isNoteSounding. With Light keys on and a line running, the chord handed to that line
+    // is not lit: it is the *input* to the run, so every pitch the arp is chewing stays on and
+    // the arpeggio moving inside it is invisible. That is exactly how the option looked when it
+    // first landed - "it just shows the chords that are being played" - and hiding the input is
+    // what makes the output visible. With the option off, or with the line not running, the
+    // held chord lights as it always has.
+    //
+    // Only NoteSurface asks this. Everything else - the live chord card above all - keeps
+    // asking isNoteSounding, which must keep naming the chord.
+    bool keybedLit(int midiNote) const;
+
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 
@@ -140,7 +164,10 @@ public:
     void moveChordPad(int from, int to); // swap two slots
     void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive
     void releaseChordPad(int i);         // stop it, unless Sustain is holding
-    void stopAllChordPads();
+    // Every chord source at once: the pads, the live card and the chord held into each arp
+    // line. `includeArpHolds` false leaves the lines alone and stops only the pads and the live
+    // card - see holdArpChordNow, the one caller that passes it, and the reason it exists.
+    void stopAllChordPads(bool includeArpHolds = true);
 
     // The live card's chord: whatever the keyboard is holding, fired as one gesture so it
     // is heard strummed and humanized the way a pad plays it, rather than as the sum of
@@ -162,6 +189,19 @@ public:
     // chain. Line 0 is the arpeggiator that has always been here, down to its parameter IDs,
     // and with lines 1 and 2 off nothing about it is different.
     static constexpr int numArpLines = 3;
+    // How many of them the product actually has: **two**, by Owen's call on 2026-08-02 ("I only
+    // wanna view two arpeggiators in this window"). Three rows fit, but two fit *comfortably*,
+    // and the point of the view is dragging a chord card up from the strip below onto either
+    // line - a target you have to aim at is a target he cannot use.
+    //
+    // Two constants rather than one because line C's *parameters* stay registered. Dropping them
+    // from the layout is what breaks every saved session (the invariant in CLAUDE.md), so the
+    // storage, the engines and the `arp3*` ids all stay exactly where they were and nothing
+    // reaches them: `arpLineOn` answers false above this bound, which makes line C inert at the
+    // one place the audio stage asks, and the UI builds no chip, tab or row for it. Raising this
+    // back to `numArpLines` is all it takes to bring C back.
+    static constexpr int uiArpLines = 2;
+    static_assert(uiArpLines <= numArpLines, "the UI cannot show a line that has no engine");
     ArpEngine& arpLine(int line);
     const ArpEngine& arpLine(int line) const;
 
@@ -184,7 +224,11 @@ public:
     enum ArpParam { apOn = 0, apRate, apRateFree, apRateHz, apDot, apTrip, apAnchor,
                     apDirection, apPattern, apLinkLanes, apOctaves, apSwing, apLatch,
                     apRetrigger, apGate, apChance, apDistance, apOffset, apRetrigBars,
-                    apVelRamp, apRampBeats, apHumanize, apKeys, apChannel, numArpParams };
+                    apVelRamp, apRampBeats, apHumanize, apKeys, apChannel,
+                    // Appended 2026-08-02, both defaulting to what the arp did without them.
+                    // OctShift transposes the whole run and is centred at 0; Octaves beside it
+                    // still *stacks* and still only widens - two questions, two controls.
+                    apOctShift, apVolume, numArpParams };
     static const char* arpParamSuffix(int which);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
@@ -256,6 +300,17 @@ public:
     // rather than in whichever surface happens to own the button.
     void releaseArpHold();
 
+    // **All Off, for the arpeggiator** (2026-08-02, Owen: "we need an all off button in the
+    // arpeggiator section as well"). Switches every line off, then lets go of everything:
+    // holds released, chains stopped, pending quantized launches dropped.
+    //
+    // Switching the lines off is what makes it "off" rather than a second Hold off. Releasing
+    // without switching off does not stop an arpeggiator - the engine is still running, so it
+    // picks straight back up on whatever the keybed is holding, and the button would silence
+    // the room for a sixteenth note. The line switches are what "off" means on this bar, so
+    // that is what it turns off.
+    void allArpOff();
+
     // Empty when nothing is held. Hold off reads this - together with chainRunning(), since a
     // chain about to fire the next chord is something to let go of too - to grey itself out.
     const std::vector<int>& arpHeldNotes(int line = 0) const;
@@ -279,12 +334,12 @@ public:
     // doing nothing whenever the arp happened to be off. Every surface that shows a chord
     // card asks here rather than caching a mode of its own, which is what keeps the answer
     // the same wherever a card is drawn.
-    // With three lines the question is "is any line on", and the answer to "which one gets
+    // With more than one line the question is "is any line on", and the answer to "which one gets
     // the chord" is the current line (below) rather than a second mode.
     bool cardsFeedArp() const;
 
     // The current line: which one the arp panel edits, and which one a click on a chord card
-    // hands its chord to. One piece of state behind three surfaces - the A/B/C tabs on the
+    // hands its chord to. One piece of state behind three surfaces - the A/B tabs on the
     // slot row, the letter chip on the Pads bar, and the corner mark a card wears once it has
     // been sent somewhere. It lives with the layout because it is the same kind of thing: not
     // a parameter (it changes no note by itself), message thread only, and Owen should get it
@@ -374,7 +429,19 @@ public:
         // ...and whether it is showing the macro view instead of that line's own controls.
         // Same kind of state and the same reason it lives here: the panel is destroyed every
         // time the section folds, and Owen should get back the view he left.
-        bool arpMacro = false;
+        //
+        // **Default true from 2026-08-02**, which is what "view two arpeggiators" means in
+        // practice: a fresh instance opens with both lines on screen as rows, over the chord
+        // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
+        // slots, which are per-line and have nowhere to live in a row.
+        bool arpMacro = true;
+        // Whether the keybed lights up for the notes the arp is *playing*, as opposed to the
+        // chord it was handed (which lights it either way, through noteRefs). Layout state and
+        // not a parameter: it changes what is drawn and nothing that is heard, so there is
+        // nothing here for a host to automate. On by default - it is the thing Owen asked to
+        // be able to see - and one click on the arp bar turns it off when the flicker of a
+        // 1/16 run is not what you want to be looking at.
+        bool arpLights = true;
 
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
@@ -523,6 +590,15 @@ private:
     void watchInputNotes(const juce::MidiBuffer&); // audio thread, before anything consumes it
     void clearInputNotes();
 
+    // The same trick for what the arp *engines* emit (see arpNoteLit). Watched off each line's
+    // `out` buffer rather than off the merged stream, because by the time everything is merged
+    // the arp's notes are indistinguishable from the pass-through beside them - and a chord
+    // held into a line already lights the keybed through noteRefs, so counting the merged
+    // stream would light it twice and never put it out.
+    std::array<std::atomic<bool>, 128> arpNoteOn {};
+    void watchArpNotes(const juce::MidiBuffer&); // audio thread, on one line's output
+    void clearArpNotes();
+
     // Everything one arpeggiator line owns. Three of these; every arp entry point above takes
     // the index that picks one, and line 0 is the arpeggiator Keys has always had.
     //
@@ -588,7 +664,7 @@ private:
     Heartbeat heartbeat;
     void heartbeatTick();
 
-    // The whole arp stage: split the merged stream, run the three lines, merge them back.
+    // The whole arp stage: split the merged stream, run the lines, merge them back.
     // Audio thread; see the definition for the routing rules.
     void runArpLines(juce::MidiBuffer& midi, int numSamples);
     void advanceChainClock(int numSamples); // audio thread; raises chainAdvance, never launches

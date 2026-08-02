@@ -232,7 +232,7 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("arpVelRamp", text("arpVelRamp"));
         obj->setProperty("arpHumanize", text("arpHumanize"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
-        // All three lines, so a client can see the whole polyrhythm rather than line A of it.
+        // Every line, so a client can see the whole polyrhythm rather than line A of it.
         {
             juce::Array<juce::var> arpLines;
             for (int n = 0; n < KeysProcessor::numArpLines; ++n)
@@ -685,7 +685,7 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                      "editor); with slot, reads that stored pattern (0..11) without "
                      "disturbing what's live.";
     t.params = { { "slot", "integer", "Pattern slot 0..11. Omit to read the live lanes.", false },
-                 { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line Keys has always had.", false } };
+                 { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has always had.", false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
@@ -745,7 +745,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "refreshes the live lanes too if that slot happens to be the active one.";
     t.params = {
         { "slot", "integer", "Pattern slot 0..11 to write. Omit to write the live lanes.", false },
-        { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line Keys has always had.", false },
+        { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has always had.", false },
         { "note", "array", "Per-step note lane (-1..8).", false },
         { "octave", "array", "Per-step octave lane (-3..3).", false },
         { "velocity", "array", "Per-step velocity lane (10..200).", false },
@@ -845,7 +845,7 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
                      "clicking its pattern button. Snapshots the current live lanes into "
                      "their slot first, so nothing being edited is lost.";
     t.params = { { "slot", "integer", "Pattern slot 0..11 to make active.", true },
-                 { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line Keys has always had.", false } };
+                 { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has always had.", false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
@@ -868,7 +868,7 @@ okstudio::mcp::Tool KeysMcp::toolStoreArpPattern()
     t.description = "Snapshot the live lanes (whatever is currently playing/being edited) "
                      "into the active pattern slot, same as what happens automatically "
                      "just before the editor switches patterns.";
-    t.params = { { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line "
+    t.params = { { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line "
                                       "Keys has always had.", false } };
     t.run = [this](const juce::var& args, juce::String&) -> juce::var
     {

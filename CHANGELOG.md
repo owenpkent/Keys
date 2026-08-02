@@ -5,7 +5,125 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: two arpeggiator lines, both on screen, and cards that sound on release
+
+Owen: "I only wanna view two arpeggiators in this window, and I wanna be able to drag a chord
+from below to each one. So the chord shouldn't play right away when you click it. You should be
+able to drag it."
+
+**Two lines, A and B.** The C line, its chip, its tab and its macro row are gone. Keys now opens
+in the **All** view, so both lines are in front of you over the chord strip you drag from, and
+the arp panel is 66 px shorter than it was.
+
+- **No saved session breaks.** Line C's parameters (`arp3*`) are still registered and still
+  written, exactly where they were; nothing reaches them. A session that had C switched on opens
+  with C silent rather than arpeggiating something no control on screen can stop, and a session
+  that had C as the current line opens on B. One constant, `KeysProcessor::uiArpLines`, is the
+  whole of it.
+- The A/B tabs still open a line's deep controls: the step lanes and the twelve slots are
+  per-line and have nowhere to live in a macro row.
+
+**A line that is off now remembers its chord silently, and starts on the switch.** Dropping a
+card on a line that is not running used to sustain the chord like a pad - so the drop made a
+noise - and the engine never saw it, so switching that line on sat silent until you dropped
+another card. Both were the same cause: the off case merged the line's input straight to the
+output instead of handing it to the engine. The engine now runs every block and its `enabled`
+flag gates only whether it *fires*; taking notes in was never gated. So a drop is silent, and
+the switch starts the chord that is already there. Playing the keyboard is untouched - a line
+that is off never takes the keybed, exactly as before.
+
+**OCT is now a transpose, centred at zero** (Owen: "the octave should start in the middle so you
+can go up or down"). Nothing at 12 o'clock, three octaves down to the left, three up to the
+right. The old OCT was the *stacking range*, which only ever widened the run upward and had no
+middle; it stays on the per-line tab beside Distance, the rest of that same feature.
+
+**VOL replaces RAMP and TIME in the macro rows.** A plain output level per line, 0 to 100 - the
+way to balance two lines against each other without playing one of them softer. Ramp and Time
+were one feature between them and both stay on the per-line tab; a row with Time in it and no
+Ramp would be a control with nothing to time. **VOL at 0 stops the line**, which it did not at
+first: the engine floors every note's velocity at 5% so a Velocity lane at 0 or a hard Humanize
+draw cannot turn a note-on into a note-off, and the line's own level was landing under that
+floor and coming out quiet instead of silent. The run keeps walking while it is muted, so
+turning VOL back up picks it up where it would have been rather than restarting it.
+
+**PLAY, was KEYS; Light keys, was Show notes.** Two unrelated controls that read as one idea:
+PLAY routes the keybed *into* a line, Light keys only decides whether the keybed lights *up*.
+Each label now names what it touches. The parameter id is unchanged.
+
+**A tightening pass over the macro view.** The shared row was 56 px for a knob that needs 44,
+and three separate gaps stacked into one band of nothing between the lines and the slot cards.
+Only slack moved - no target got smaller, and the 34 px floor still decides that.
+
+**Dot, Trip and Anchor on every macro row** (Owen: "I need to have options for dots and triplets
+as well"). The same three the band carries, the same parameters, greyed by the same question -
+in Hz there is no beat to dot or divide and no bar grid to anchor to. Run one line straight and
+the other in triplets and you have the polyrhythm this view is for.
+
+They sit on a strip of their own under the rate rather than in the main line, because that line
+is already at every floor it has: two more 34 px targets in it would have driven the eight knobs
+under the mouse-only minimum. The row is taller by exactly that strip, which the view can afford
+- two rows at 102 against the three at 66 it used to be.
+
+**All Off on the arp bar**, beside Hold off. Both lines off, every held chord let go, every
+chain stopped, every quantized launch dropped - one click. Switching the lines off is what makes
+it different from Hold off: release the chords without it and the engines simply pick back up on
+whatever the keybed is holding, so the button would have silenced the room for a sixteenth note.
+
+**Show notes**, also on the arp bar: the keyboard at the bottom lights up for the notes the
+arpeggiator is *playing*, as it plays them. On by default, and one click turns it off when a
+1/16 run is not what you want to be watching. It is a view toggle, not a parameter - nothing
+about it is heard - and it is deliberately kept out of the "current chord" card, which must keep
+naming the chord rather than whichever note of it the arp is on.
+
+With it on, **the chord handed to a running line is no longer lit**. That chord is the run's
+input, so lighting it held down every pitch the arp was chewing and the arpeggio moving inside
+it was invisible - "it just shows the chords that are being played". Hiding the input is what
+makes the output visible. Turn Show notes off, or the line, and the held chord lights as before.
+
+**Fixed: Keys Host opened too short and cut the keyboard off the bottom.** The window opened at
+a hardcoded height that had nothing to do with what the editor contained, and its resize floor
+was a separate literal, so nothing stopped the window sitting shorter than its own content. The
+keyboard is the last section laid out, so every missing pixel came off it, silently. Two
+fail-safes now: the window opens at the content's height and the resize floor tracks it, so it
+can never be left or restored shorter than what is in it; and the ceiling is measured from the
+display's work area rather than assumed, so a window sized to its content still fits the screen
+it has to live on. On a display too short for every section, fold one - the floor being real
+means folding now visibly shrinks the window instead of quietly taking up slack.
+
+**Fixed: the shape name was cut off in the macro rows**, and the `>` stepper beside it was
+missing entirely. Both had one cause: Shape's width was expressed as a subtraction inside the
+knob-size clamp, and on a narrower window the knobs hit their floor, the clamp threw the
+subtraction away, and Shape got whatever happened to be left - about 77 px, enough for "Up" and
+not for "Random Other". The stepper was starved to zero width by the same shortfall, which is
+the worse half: a mouse-only control that was not on screen at all. Shape's cell is now reserved
+first and the knobs take what remains, which is the ordering that cannot fail.
+
+**Each line holds its own chord.** Exclusive no longer reaches across the arp lines: handing a
+chord to B used to silently take A's away, so the second drag undid the first and a polyrhythm
+could not be built at all. It still chokes the pads and the live card in both directions, and a
+line's own previous hold still goes when you hand it a new one. Nothing collides by allowing it
+- each line's chord is fired into that line's own queue, and `noteRefs` is per destination
+stream, so two lines holding the same pitch are two independent references.
+
+**A chord card sounds when you let go of it, not when you press it.** Every gesture that starts
+on a card now begins silently, and the release decides what it was:
+
+- **Click** a card and it auditions for 800 ms - the same length, and now the same gesture, as
+  the generator tray's own audition. Exclusive, Sustain and Latch apply exactly as before.
+- **Drag** a card and it makes no sound at all. Onto another pad to rearrange, onto an arp slot
+  to bind it there, onto a line's row or tab to hand that line the chord, off the strip to
+  clear it.
+- With an arp line switched on, a click still hands the card to that line and holds it there.
+  **This is the fix that matters**: that path used to fire on press *and* cancel the drag, so a
+  card could not be dragged at all in the one mode where dragging it onto a line is the point.
+- An audition never outlives the strip that started it. The 800 ms runs with the button already
+  up, unlike the press-and-hold it replaced, so closing the window or folding the section inside
+  it used to leave the chord sounding with nothing left owning the notes - reachable only by All
+  Off. The strip releases what it started on its way out.
+
 ### Added: a macro view, so a polyrhythm is built from one screen
+
+> **Superseded in part by "two arpeggiator lines" above, in this same unreleased batch.** Line C came out on 2026-08-02 and the macro rows changed which knobs they carry. Both entries are kept because they describe one release between them, and the machinery below is still what runs.
 
 Owen: "I want a poly arp view where you can view the rate and shape of all three arpeggiators
 at once ... the goal is to be able to create complex polyrhythms from one view."
@@ -60,6 +178,8 @@ there is no transport to follow - always in the standalone, and whenever the hos
 A host that is *playing* always wins, and a line whose rate is in Hz follows neither.
 
 ### Added: three arpeggiators, so Keys can hold a polyrhythm
+
+> **Superseded in part by "two arpeggiator lines" above, in this same unreleased batch.** Line C came out on 2026-08-02 and the macro rows changed which knobs they carry. Both entries are kept because they describe one release between them, and the machinery below is still what runs.
 
 Owen: "I had the idea of having three arpeggiators so we can get polyrhythms and keep keeping
 what we currently have, but having three of them, and then being able to feed cards into

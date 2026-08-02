@@ -168,6 +168,16 @@ public:
         // been humanized at all (Humanize lives in KeysProcessor::noteOn, which the arp path
         // does not go through), so 0 leaves the engine bit-identical to before.
         int humanize = 0;         // 0..100
+        // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
+        // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
+        // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
+        // can go up or down"). It folds into the Octave lane's own shift, so a lane that
+        // already moves a step keeps doing it relative to wherever this put the run.
+        int octShift = 0;         // -3..+3, in octaves
+        // Output level for the whole line, as a percentage of the velocity it would have
+        // played. The plain volume control an arpeggiator wants and Keys never had: with two
+        // lines running, balancing them was previously only possible by playing one softer.
+        int volume = 100;         // 0..100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
         // The slot chords, for the Chord lane. Null means the lane does nothing, which is
         // what every caller that has no slots (the tests) wants.
@@ -198,6 +208,29 @@ public:
             out.addEvent(juce::MidiMessage::noteOff(active[(size_t) i].channel, active[(size_t) i].note), 0);
         activeCount = 0;
         pendingCount = 0; // un-fired ratchet hits must not survive a bypass or a transport jump
+    }
+
+    // Start the run over without forgetting what is held. This is hardReset() minus the held
+    // set, and it is what switching a line *on* wants (2026-08-02): a chord handed to a line
+    // while it was off is remembered silently by noteArrived - `enabled` gates only the firing
+    // below, never the input - and is the whole reason there is something to play the moment
+    // the switch goes on. hardReset() there would have thrown that chord away, which is what
+    // made a line switched on sit silent until you dropped a new card on it.
+    void restart()
+    {
+        activeCount = 0;
+        pendingCount = 0;
+        stepCounter = 0;
+        dirCursor = 0;
+        stepBase = 0;
+        lastRetrigWindow = std::numeric_limits<long long>::min();
+        pendingRetrig = false;
+        heldBeats = 0.0;
+        rampScale = 1.0f;
+        lastPicked = -1;
+        permDirty = true;   // permCount stays: the walk is rebuilt from the held set, not cleared
+        freePhaseBeats = 0.0;
+        havePrevPpq = false;
     }
 
     void hardReset()
@@ -671,11 +704,16 @@ private:
                                                 : nextDirectionIndex(p);
         }
 
-        const int octaveShift = 12 * juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep));
+        // The Octave lane's per-step shift plus the line's own, both in octaves. Summed rather
+        // than one overriding the other: the knob says where the run sits, the lane says how a
+        // particular step departs from that, and they are different questions.
+        const int octaveShift = 12 * (juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep))
+                                      + juce::jlimit(-3, 3, p.octShift));
         const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
         const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
-        const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale;
+        const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale
+                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
@@ -749,6 +787,18 @@ private:
                 }
             }
         }
+
+        // Volume 0 is a mute, and a mute emits nothing. The 0.05 floor below exists so a
+        // Velocity lane at 0, or a hard Humanize draw, stays audible rather than turning a
+        // note-on into a note-off - but it must not also make the line's own level
+        // un-silenceable, and it did: VOL at the bottom of its travel played the line quietly
+        // instead of stopping it, which is the one thing a control called VOL has to do.
+        //
+        // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
+        // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
+        // the run up where it would have been rather than restarting it.
+        if (p.volume <= 0)
+            hitCount = 0;
 
         for (int r = 0; r < ratchets; ++r)
         {

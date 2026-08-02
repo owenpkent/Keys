@@ -44,7 +44,11 @@ std::set<int> NoteSurface::externallySounding() const
     std::set<int> out;
     for (int note = 0; note < 128; ++note)
     {
-        if (own.count(note) > 0 || ! processor.isNoteSounding(note))
+        // keybedLit, not isNoteSounding: this surface is the one place that wants the arp's
+        // *output* rather than everything that is sounding, and with Light keys on it wants the
+        // chord handed to a running line left out. The live chord card still asks
+        // isNoteSounding and still gets the chord. See KeysProcessor::keybedLit.
+        if (own.count(note) > 0 || ! processor.keybedLit(note))
             continue;
         const int drawn = drawnForOutputNote(note);
         if (drawn >= 0)
