@@ -617,61 +617,18 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // were offered only while the Chords view was up once, and that is the exact bug this
     // arrangement exists to prevent. Everything about the page or the settings is in the
     // generator's window instead (chordGenButton, above).
-    // A card leaving the strip is offered to the generator's reference box, when that window is
-    // open. Guarded on the panel existing rather than wired and unwired as it opens: the strip
-    // outlives every window, and a hook that had to be taken back down on close is a hook that
-    // gets left dangling one day.
-    // ...and to the arp panel, which is the left-click twin "Send to arp slot" never had: a
-    // drag is a target picker, which is the whole reason that menu item was allowed to be
-    // right-click-only. Drop on a slot to bind the chord there; drop on a line tab to hand it
-    // to that line now. Both live here rather than in either surface because the editor is the
-    // one object that holds both, and either can be in a window of its own.
-    chordPads.onDragOutside = [this](juce::Point<int> p)
-    {
-        if (chordGenPanel)
-            chordGenPanel->showReferenceDropTarget(p);
-        if (arpPanel)
-            arpPanel->setExternalDropTarget(arpPanel->externalDropSlotAt(p),
-                                            arpPanel->externalDropLineAt(p));
-    };
-    chordPads.onDropOutside = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
-    {
-        if (arpPanel != nullptr)
-        {
-            arpPanel->setExternalDropTarget(-1, -1);
-            const int line = arpPanel->externalDropLineAt(p);
-            if (line >= 0 && ! pad.notes.empty())
-            {
-                // Straight into that line, and it becomes the current one: you aimed at it, so
-                // the next card click should follow the same aim. The view does not move with
-                // it - in the macro view you dropped onto the line itself, and being thrown
-                // into that line's deep controls is not what the gesture asked for.
-                processor.holdArpChordFromPad(chordPads.draggedSlot(), line);
-                arpPanel->setEditLine(line, /*leaveMacroView*/ false);
-                refreshArpTargetButton();
-                return true; // suppresses the strip's drag-off-to-clear
-            }
-            if (const int slot = arpPanel->externalDropSlotAt(p); slot >= 0 && ! pad.notes.empty())
-            {
-                processor.setArpSlotChord(slot, pad.notes, pad.name, arpPanel->editLine());
-                arpPanel->repaint();
-                return true;
-            }
-        }
-        return chordGenPanel != nullptr && chordGenPanel->offerReferenceDrop(p, pad);
-    };
-    // And the other end of it, for **both** takers. onDragOutside lights the reference box and a
-    // line tab or slot; only a drop that lands off the row reaches onDropOutside to put them out
-    // again. Drag out over either, change your mind and drop back onto a pad or the live card,
-    // and the highlight stayed on with no drag in progress. The tray's own drag has had this half
-    // since it was built (onCandidateDragEnd, below); this is the same half for the strip's.
-    chordPads.onDragEnd = [this]
-    {
-        if (chordGenPanel)
-            chordGenPanel->clearReferenceDropTarget();
-        if (arpPanel)
-            arpPanel->setExternalDropTarget(-1, -1);
-    };
+    // A card leaving the strip is offered to the generator's reference box and to the arp
+    // panel's slots, tabs and macro rows, and **none of that is wired here any more**
+    // (2026-08-02). Each of those is a `juce::DragAndDropTarget` and JUCE delivers to it
+    // directly, across a window boundary or not; the editor used to be the one object holding
+    // both ends, forwarding screen positions between them in three `std::function`s, because the
+    // code believed the framework could not do this. It can - see ChordDrag.h.
+    //
+    // Two bug classes went with the plumbing. Every target now gets `itemDragExit` on every path
+    // a drag can end, so a highlight lit on the way out cannot be left glowing at nothing (drag
+    // out over the reference box, change your mind, drop back on a pad); and a target whose
+    // window is closed mid-drag simply stops being found, which is what the explicit cleanup
+    // below setChordGenWindowOpen used to have to do by hand.
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
@@ -1265,17 +1222,11 @@ void KeysEditor::setChordGenWindowOpen(bool open)
         };
         chordGenPanel->onClose = close;
 
-        // The audition tray's drag reaches the pad strip through here, and only through here.
-        // The tray is in this window's *sibling*, so JUCE keeps the whole gesture on the tray
-        // and neither component can see the other; the editor is the one object that holds
-        // both, which is what makes it the place the two ends meet. Screen coordinates all the
-        // way across - see ChordTray. ChordPads owns the hit test, the refusals and the paint.
-        chordGenPanel->onCandidateDragOver = [this](juce::Point<int> p)
-        { chordPads.setExternalDropSlot(chordPads.externalDropSlotAt(p)); };
-        chordGenPanel->onCandidateDropped = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
-        { return chordPads.dropExternalChord(p, pad); };
-        chordGenPanel->onCandidateDragEnd = [this] { chordPads.setExternalDropSlot(-1); };
-        // And the same crossing for the card menu's aimless commit.
+        // The audition tray's drag needs nothing from this class. It leaves the tray as a stock
+        // JUCE drag with the drag image on the desktop and lands on whichever target is under
+        // the cursor - a pad in this window, or the reference box beside it - so the editor is
+        // no longer the place the two ends have to meet. What still crosses here is the *menu*
+        // item, because a menu item has no target to hit and no drop to deliver.
         chordGenPanel->onCandidateToFirstEmptyPad = [this](const KeysProcessor::ChordPad& pad)
         { return chordPads.sendChordToFirstEmptyPad(pad); };
         chordGenPanel->onPageHasEmptyPad = [this] { return chordPads.firstEmptyPadOnPage() >= 0; };
@@ -1290,9 +1241,10 @@ void KeysEditor::setChordGenWindowOpen(bool open)
         rememberChordGenBounds();
         chordGenWindow.reset(); // clears its content first, so the panel is unparented
         chordGenPanel.reset();
-        // Close it mid-drag and the tray never gets to run its own cleanup, so the pad it was
-        // hovering would stay lit with nothing left to drop on it.
-        chordPads.setExternalDropSlot(-1);
+        // Closing this window mid-drag used to need a line here putting the pad strip's hover
+        // highlight back out, because the tray never got to run its own cleanup. JUCE does it:
+        // the drag image is a mouse listener on the source, the source dies with the window, and
+        // `~DragImageComponent` sends `itemDragExit` to whatever it was last over.
     }
 
     chordGenButton.setToggleState(open, juce::dontSendNotification);

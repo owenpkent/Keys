@@ -621,10 +621,11 @@ coming back:
   "I think we should have another box for the reference chord where we can drag in something
   from the main window or one of the other chords. So when you regenerate everything, it
   doesn't erase your reference chord"). It fills from a **tray card** dropped on it, or from a
-  **pad in the main window** dropped on it - the latter is why `ChordPads` grew `onDragOutside`
-  / `onDropOutside`: a drop on the reference card **copies**, and `onDropOutside` returning
-  true suppresses the ordinary "drag off the strip clears the pad" behaviour, so reaching for
-  the reference box can never delete the chord you were trying to keep. Left-click auditions it
+  **pad in the main window** dropped on it. `ChordRefCard` is a `juce::DragAndDropTarget` and
+  takes both directly. A drop on it **copies**: it sets `taken` on the payload and never
+  `consumed`, which suppresses the ordinary "drag off the strip clears the pad" behaviour for a
+  pad and leaves a tray candidate in its cell, so reaching for the reference box can never
+  delete the chord you were trying to keep. Left-click auditions it
   the same as a tray card. Beside it, **Similar** and **Could follow** call
   `ChordGenMenu::similarTo` / `couldFollow` with the reference chord as seed and write a fresh
   trayful (`similarTo` keeps the root and varies the colour; `couldFollow` reuses
@@ -673,19 +674,50 @@ coming back:
   Send to first empty pad is the drag with the aim taken out (`ChordPads::firstEmptyPadOnPage` /
   `sendChordToFirstEmptyPad`), and it is the one *placing* item, greyed by `onPageHasEmptyPad`
   when the current page has no room.
-- **The drag crosses two top-level windows**, which JUCE gives nothing for: a
-  `DragAndDropContainer` only ever sees a drop inside its own window, and the tray lives in
-  the generator's `DetachedWindow` while the pads live in the main editor or a `DetachedWindow`
-  of their own. `ChordGenPanel::onCandidateDragOver` / `onCandidateDropped` /
-  `onCandidateDragEnd` hand the editor a **screen** position - the one space the two windows
-  share - and the editor forwards it to `ChordPads::externalDropSlotAt(screenPos)` /
-  `setExternalDropSlot(slot)` / `dropExternalChord(screenPos, pad)`. The hit test is
-  `juce::Desktop::findComponentAt`, so a generator window sitting over the strip reads as "not
-  over a pad," and a folded Pads section finds nothing at all - occlusion is the target's
-  problem, same as every other drag in Keys. A drop **refuses a locked pad** (the lock that
-  protects a chord from generation protects it from a stray drag too) and calls
-  `clearChordPad` before `setChordPad`, so a sounding or arp-held pad releases its old notes
-  properly instead of having the chord swapped out from under them.
+- **The drag crosses two top-level windows, and JUCE gives that for free** (2026-08-02). It was
+  hand-rolled on `mouseDown` / `mouseDrag` / `mouseUp` plus `juce::Desktop::findComponentAt`
+  until then, on the stated belief that a `DragAndDropContainer` only ever sees a drop inside
+  its own window. **That belief was false and this document asserted it as settled fact.**
+  `DragAndDropContainer::startDragging` takes a fourth parameter,
+  `allowDraggingToOtherJuceWindows`, defaulting to false; pass **true** and the drag image is
+  added to the *desktop* instead of to the container, which makes `getParentComponent()` null
+  inside JUCE's own `findTarget` and routes the lookup through `findDesktopComponentBelow` -
+  every desktop component in z-order, walking up each parent chain for an interested
+  `DragAndDropTarget`. That is the same hit test the workaround was doing by hand, and it was
+  there the whole time (verified against JUCE 8.0.8; a docs PR is open upstream as
+  juce-framework/JUCE#1692). See `src/ui/ChordDrag.h`.
+  So: **the tray is an ordinary drag source and every taker is an ordinary
+  `DragAndDropTarget`.** The containers are `ChordGenPanel` (for the tray) and
+  `KeysEditor::Holder` (for the pad strip - the holder rather than the editor, because it is the
+  one ancestor a section keeps when it is popped out into a window of its own). The ghost now
+  follows the cursor out of one window and across the other, which the hand-rolled version
+  explicitly could not do. Occlusion, a folded Pads section and a detached one are all answered
+  by JUCE's search, better than before: the reference box used to light up through a window
+  sitting over it. A drop **refuses a locked pad** (the lock that protects a chord from
+  generation protects it from a stray drag too) and calls `clearChordPad` before `setChordPad`,
+  so a sounding or arp-held pad releases its old notes properly instead of having the chord
+  swapped out from under them.
+- **Two things JUCE has no opinion about ride on the payload** (`chorddrag::Payload`, a
+  `ReferenceCountedObject` boxed in the `var` that `startDragging` takes). Boxing rather than
+  passing an index is deliberate: a tray candidate belongs to no slot and is not in the session,
+  so there is no index the far end could look it up by.
+  - **`taken`** is the veto. Dragging a card off the pad strip clears it, and reaching for the
+    reference box *means* dragging a card off the strip, so without an answer the one gesture
+    that keeps a chord would be the one that deletes it. Every target sets it;
+    `ChordPads::itemDropped` sets it for any release that lands on the strip at all, refused or
+    not, because "landed here" and "did something" are different questions and only the first
+    decides whether the drag left the row.
+  - **`consumed`** is the *other* ownership answer, and it is why one flag is not enough. A tray
+    candidate dropped on a pad is committed and its cell goes empty; the same candidate dropped
+    on the reference box is copied and the cell stays, because a reference is a copy of a chord
+    you like. Same gesture, opposite outcome.
+  Both are read one message-loop turn after the button comes up
+  (`chorddrag::whenDragSettles`), not in `DragAndDropContainer::dragOperationEnded`. A source's
+  own `mouseUp` is too early - JUCE dispatches a component's `mouseUp` before its mouse
+  *listeners*, and the drag image is a listener, so `itemDropped` has not run yet - while
+  `dragOperationEnded` fires from `~DragImageComponent` after a 120 ms dismissal animation and a
+  timer, which is a third of a second of a card that still looks like it is there. Posting from
+  `mouseUp` lands after the same event's listener dispatch and before the next frame.
 - **The window is not a `Section`.** It never docks, so it has no bar, no fold, no caption and
   no Detach button, and every one of those is something `KeysEditor::sections` walks. What it
   does share is `DetachedWindow` (the skinned 38 px title bar with mouse-only-sized buttons,

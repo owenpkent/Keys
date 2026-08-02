@@ -180,10 +180,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   line a chord-card click feeds. **Dragging a chord card onto an arp slot binds it there**, or
   onto a tab - or onto a line's **row in the macro view**, which is the same target the size of
   a row rather than the size of a tab - to hand it over now. The left-click twin *Send to arp
-  slot* never had. `externalDropLineAt` walks *up* from whatever `Desktop::findComponentAt`
-  returns, which is what makes the whole macro row a target including the knobs on it. A drop
-  sets the current line and never changes the view (`setEditLine(line, false)`): it is routing a
-  chord, not navigating.
+  slot* never had. The slot cards, the tabs and the macro rows are each a
+  `juce::DragAndDropTarget` (2026-08-02, see the chord-drag bullet below); JUCE walks *up* from
+  whatever is under the point, which is what makes the whole macro row a target including the
+  knobs on it. A drop sets the current line and never changes the view
+  (`setEditLine(line, false)`): it is routing a chord, not navigating.
   **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
   complex polyrhythms from one view"). It replaces the band and the step editor with three rows,
   one per line, over a shared row holding the BPM knob and Launch Quantize. A row carries the
@@ -357,12 +358,20 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   audition (through `ChordGenMenu::auditionChord`, so the note path and the 800 ms timer stay on
   the brain and neither `ChordGenPanel` nor `ChordTray` ever calls `noteOn`), **drag onto a pad**
   to commit. The drag is the only gesture that can name a slot, which is why it and not a second
-  click is the commit. **It crosses two top-level windows and JUCE gives you nothing for that**:
-  no `DragAndDropContainer` spans them and mouse capture keeps the whole gesture on the tray, so
-  the editor - the one object holding both - passes a *screen* position to
-  `ChordPads::externalDropSlotAt`, which hit-tests with `Desktop::findComponentAt` so that the
-  generator window sitting over the strip means "not over a pad" and a folded Pads section means
-  nothing is found. A drop refuses a **locked** pad and calls `clearChordPad` before
+  click is the commit. **It crosses two top-level windows and JUCE does that for free**
+  (2026-08-02). This entry said the opposite for a day and a half - "no `DragAndDropContainer`
+  spans them" - and the whole cross-window protocol was hand-rolled on screen positions passed
+  through the editor because of it. `DragAndDropContainer::startDragging` takes a fourth
+  parameter, `allowDraggingToOtherJuceWindows`, defaulting to false; pass true and the drag image
+  goes on the desktop, which makes `getParentComponent()` null inside JUCE's `findTarget` and
+  routes it through `findDesktopComponentBelow` - every desktop component in z-order, walking up
+  for an interested target. Same hit test, already written. See `src/ui/ChordDrag.h`, which is
+  also where the two things JUCE has *no* opinion about live: `taken` (the veto that stops
+  reaching for the reference box from deleting the pad you reached with) and `consumed` (a tray
+  candidate committed to a pad empties its cell; the same one copied to the reference does not).
+  Both are read a message-loop turn after mouse-up, because a source's own `mouseUp` runs before
+  its listeners and so before `itemDropped`, while `dragOperationEnded` waits out a 120 ms
+  animation. A drop refuses a **locked** pad and calls `clearChordPad` before
   `setChordPad`, so a target left ringing by Sustain or feeding the arp gives its old notes up
   instead of stranding them; a drop that misses keeps the candidate and does nothing, because
   this gesture is the same shape as the strip's own drag-off-to-clear and must never lose work.
@@ -382,8 +391,8 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   Owen: "another box for the reference chord ... so when you regenerate everything, it doesn't
   erase your reference chord"). One chord that no tray action touches, filled by dragging a tray
   card *or* a pad from the main window onto it, with **Similar** and **Could follow** beside it.
-  A pad dropped there is **copied**: dragging a card off the strip normally clears it, so
-  `ChordPads::onDropOutside` returning true is what suppresses that clear, and a gesture that
+  A pad dropped there is **copied**: dragging a card off the strip normally clears it, so the
+  card setting `taken` on the drag payload is what suppresses that clear, and a gesture that
   reached for the reference and deleted a chord instead would be the worst bug in the window.
   **An audition takes the room.** `previewChord` calls `stopAllChordPads()` before it sounds
   anything. This is not optional politeness: Keys emits one note-on per pitch on the 0→1 refcount

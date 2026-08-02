@@ -5,6 +5,45 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the chord drag is stock JUCE, and the ghost now follows your cursor between windows
+
+Every chord drag in Keys - a tray candidate onto a pad, a pad onto the reference box, a card onto
+an arp slot, a tab or a macro row, a card off the row to clear it - was hand-rolled on
+`mouseDown` / `mouseDrag` / `mouseUp` plus `juce::Desktop::findComponentAt`, with the editor in
+the middle forwarding screen positions between two windows that could not see each other. It is
+now `juce::DragAndDropContainer` / `DragAndDropTarget`, which is what it should have been all
+along.
+
+- **The premise the workaround rested on was false.** The code and the docs asserted, as settled
+  fact, that no `DragAndDropContainer` can deliver a drop across two top-level windows.
+  `startDragging` takes a fourth parameter, `allowDraggingToOtherJuceWindows`, defaulting to
+  false; pass **true** and the drag image is added to the desktop rather than to the container,
+  which makes `getParentComponent()` null inside JUCE's own `findTarget` and routes target
+  lookup through `findDesktopComponentBelow` - every desktop component in z-order, walking up
+  each parent chain for an interested target. That is the same hit test the workaround performed
+  by hand. Verified against JUCE 8.0.8; a docs PR is open upstream as juce-framework/JUCE#1692.
+- **User-visible: the ghost crosses the window boundary.** It used to be an 84x26 chip painted at
+  the cursor inside whichever component owned the gesture, so it vanished at the window edge -
+  exactly where the drop you were aiming for lived. The card itself now travels, at full size, as
+  a window of its own. The dimmed hole it leaves behind stays, because that is what says which
+  card is in the air.
+- **Nothing else about any gesture changed.** A drop still refuses a locked pad, still calls
+  `clearChordPad` before `setChordPad` so a pad left ringing by Sustain or feeding the arp gives
+  its notes up properly, still keeps the candidate when it misses, and dragging a card off the
+  row still clears it *unless* something took it. That last one is the sharp edge: reaching for
+  the reference box means dragging a card off the strip, and JUCE has no opinion about it, so the
+  veto rides on the drag payload as `taken`. `consumed` is the separate answer for a tray
+  candidate - committed to a pad its cell empties, copied to the reference it does not.
+- **Two hit tests written twice are now written none.** `ChordPads::externalDropSlotAt` and
+  `ArpPanel::externalDropSlotAt` / `externalDropLineAt` are gone, along with `onDragOutside`,
+  `onDropOutside`, `onDragEnd`, `setExternalDropSlot`, `dropExternalChord`,
+  `setExternalDropTarget` and the three `onCandidate*` pass-throughs on `ChordGenPanel`.
+- **Two bug classes went with them.** A target's highlight is now put out by JUCE's own
+  `itemDragExit` on every path a drag can end, including the far window being closed mid-gesture,
+  which the editor used to have to remember by hand; and the reference box no longer lights up
+  through a window sitting on top of it, because z-order is now the framework's answer rather
+  than a bounds test.
+
 ### Changed: two arpeggiator lines, both on screen, and cards that sound on release
 
 Owen: "I only wanna view two arpeggiators in this window, and I wanna be able to drag a chord

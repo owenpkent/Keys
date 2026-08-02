@@ -299,55 +299,23 @@ int ArpPanel::editLine() const
     return juce::jlimit(0, KeysProcessor::uiArpLines - 1, editedLine);
 }
 
-// A chord card dragged out of the pad strip, in screen coordinates. Mouse capture keeps the
-// whole gesture on the strip - JUCE never tells these cards a drag is over them - and the two
-// surfaces can be in different top-level windows, so the editor that owns both hit-tests here
-// by screen position. Desktop::findComponentAt is what makes another window sitting over the
-// row read as "not over a slot", which is the answer you want.
-// Walking up from whatever the desktop says is under the point, rather than testing bounds,
-// is what makes another window over the row read as "not over a slot" - and it answers the
-// folded and detached cases for free, since a panel that is not on screen is never hit. Same
-// shape as ChordPads::externalDropSlotAt, deliberately.
-int ArpPanel::externalDropSlotAt(juce::Point<int> screenPos) const
+// A chord card dropped on one of the twelve slots binds that chord there. The slot keeps its
+// pattern; what it gains is the chord a launch will hold into the line.
+void ArpPanel::takeChordOnSlot(int slot, const chorddrag::Payload& p)
 {
-    auto* hit = juce::Desktop::getInstance().findComponentAt(screenPos);
-    for (auto* c = hit; c != nullptr; c = c->getParentComponent())
-        for (int i = 0; i < (int) slotCards.size(); ++i)
-            if (c == slotCards[(size_t) i].get())
-                return i;
-    return -1;
+    processor.setArpSlotChord(slot, p.chord.notes, p.chord.name, editLine());
+    repaint();
 }
 
-int ArpPanel::externalDropLineAt(juce::Point<int> screenPos) const
+// A chord card dropped on a line - its tab, or its whole row in the macro view - goes straight
+// into that line, and the line becomes the current one: you aimed at it, so the next card click
+// should follow the same aim. The view does not move with it (`leaveMacroView` false); in the
+// macro view you dropped onto the line itself, and being thrown into that line's deep controls
+// is not what the gesture asked for.
+void ArpPanel::takeChordOnLine(int line, const chorddrag::Payload& p)
 {
-    auto* hit = juce::Desktop::getInstance().findComponentAt(screenPos);
-    // Walking up from whatever is under the point is what makes the *whole* macro row a target
-    // including the knobs sitting on it: the knob is found first, and its parent is the line.
-    for (auto* c = hit; c != nullptr; c = c->getParentComponent())
-    {
-        for (int n = 0; n < (int) lineTabs.size(); ++n)
-            if (c == lineTabs[(size_t) n].get())
-                return n;
-        if (macroView)
-            for (int n = 0; n < (int) macroRows.size(); ++n)
-                if (c == macroRows[(size_t) n].get())
-                    return n;
-    }
-    return -1;
-}
-
-void ArpPanel::setExternalDropTarget(int slot, int lineTab)
-{
-    for (int i = 0; i < (int) slotCards.size(); ++i)
-        if (slotCards[(size_t) i] != nullptr)
-            slotCards[(size_t) i]->setDropTarget(i == slot);
-    for (int n = 0; n < (int) lineTabs.size(); ++n)
-        if (lineTabs[(size_t) n] != nullptr)
-            lineTabs[(size_t) n]->setDropTarget(n == lineTab);
-    // The macro rows answer the same question, so they light on the same answer.
-    for (int n = 0; n < (int) macroRows.size(); ++n)
-        if (macroRows[(size_t) n] != nullptr)
-            macroRows[(size_t) n]->setDropTarget(macroView && n == lineTab);
+    processor.holdArpChordFromPad(p.index, line);
+    setEditLine(line, /*leaveMacroView*/ false);
 }
 
 juce::String ArpPanel::paramId(KeysProcessor::ArpParam which) const
@@ -861,8 +829,8 @@ void ArpPanel::refreshPatternButtons()
 // ---------------------------------------------------------------------------
 // SlotCard
 
-ArpPanel::SlotCard::SlotCard(KeysProcessor& p, const ArpPanel& o, int i)
-    : juce::Button("Arp slot " + juce::String(i + 1)), processor(p), owner(o), index(i)
+ArpPanel::SlotCard::SlotCard(ArpPanel& o, KeysProcessor& p, int i)
+    : juce::Button("Arp slot " + juce::String(i + 1)), owner(o), processor(p), index(i)
 {
     okstudio::ui::makeMouseOnly(*this);
     setTitle("Arp slot " + juce::String(i + 1)); // accessible name for the capture script
@@ -874,6 +842,28 @@ void ArpPanel::SlotCard::setDropTarget(bool b)
         return;
     dropTarget = b;
     repaint();
+}
+
+// Chords from the pad strip only. A tray candidate is not offered a slot today - the tray's drag
+// went to the pads and the reference box and nowhere else - and widening that is a feature, not
+// something to let in sideways because the framework now makes it free.
+bool ArpPanel::SlotCard::isInterestedInDragSource(const SourceDetails& details)
+{
+    auto* p = chorddrag::chordBeingDragged(details);
+    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+}
+
+void ArpPanel::SlotCard::itemDragEnter(const SourceDetails&) { setDropTarget(true); }
+void ArpPanel::SlotCard::itemDragExit(const SourceDetails&) { setDropTarget(false); }
+
+void ArpPanel::SlotCard::itemDropped(const SourceDetails& details)
+{
+    setDropTarget(false);
+    if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
+    {
+        owner.takeChordOnSlot(index, *p);
+        p->taken = true; // and the strip leaves the card it came from alone
+    }
 }
 
 void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
@@ -922,7 +912,7 @@ namespace
                   "every macro knob needs a heading and a parameter");
 } // namespace
 
-ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
+ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p), line(n)
 {
     okstudio::ui::makeMouseOnly(*this);
     const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
@@ -1213,6 +1203,28 @@ void ArpPanel::MacroRow::setDropTarget(bool b)
     repaint();
 }
 
+// Same source rule as a slot card, and one thing more that used to need saying by hand: a row
+// that is not on screen is never hit, so the `macroView` test the old screen hit-test carried
+// is now the row's own visibility.
+bool ArpPanel::MacroRow::isInterestedInDragSource(const SourceDetails& details)
+{
+    auto* p = chorddrag::chordBeingDragged(details);
+    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+}
+
+void ArpPanel::MacroRow::itemDragEnter(const SourceDetails&) { setDropTarget(true); }
+void ArpPanel::MacroRow::itemDragExit(const SourceDetails&) { setDropTarget(false); }
+
+void ArpPanel::MacroRow::itemDropped(const SourceDetails& details)
+{
+    setDropTarget(false);
+    if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
+    {
+        owner.takeChordOnLine(line, *p);
+        p->taken = true;
+    }
+}
+
 void ArpPanel::MacroRow::paint(juce::Graphics& g)
 {
     // A chord card is over this row: the whole row lights, because the row *is* the line here
@@ -1332,10 +1344,10 @@ void ArpPanel::MacroRow::resized()
 // ---------------------------------------------------------------------------
 // LineTab
 
-ArpPanel::LineTab::LineTab(KeysProcessor& p, const ArpPanel& o, int n)
+ArpPanel::LineTab::LineTab(ArpPanel& o, KeysProcessor& p, int n)
     : juce::Button(n < 0 ? juce::String("Arp macro view")
                          : "Arp line " + juce::String::charToString((juce::juce_wchar) ('A' + n))),
-      processor(p), owner(o), line(n)
+      owner(o), processor(p), line(n)
 {
     okstudio::ui::makeMouseOnly(*this);
     // Named for the capture script, and distinct from the A/B/C chips on the section bar:
@@ -1350,6 +1362,28 @@ void ArpPanel::LineTab::setDropTarget(bool b)
         return;
     dropTarget = b;
     repaint();
+}
+
+// The macro tab refuses everything: it selects a view, and there is no line behind it to hand a
+// chord to. That was true of the old hit test too, which walked `lineTabs` alone and never saw
+// this one, so nothing changed except where it is written down.
+bool ArpPanel::LineTab::isInterestedInDragSource(const SourceDetails& details)
+{
+    auto* p = chorddrag::chordBeingDragged(details);
+    return line >= 0 && p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+}
+
+void ArpPanel::LineTab::itemDragEnter(const SourceDetails&) { setDropTarget(true); }
+void ArpPanel::LineTab::itemDragExit(const SourceDetails&) { setDropTarget(false); }
+
+void ArpPanel::LineTab::itemDropped(const SourceDetails& details)
+{
+    setDropTarget(false);
+    if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
+    {
+        owner.takeChordOnLine(line, *p);
+        p->taken = true;
+    }
 }
 
 void ArpPanel::LineTab::paintButton(juce::Graphics& g, bool over, bool down)
@@ -1733,7 +1767,7 @@ void ArpPanel::buildControls()
     // beside the row.
     for (int i = 0; i < (int) slotCards.size(); ++i)
     {
-        auto card = std::make_unique<SlotCard>(processor, *this, i);
+        auto card = std::make_unique<SlotCard>(*this, processor, i);
         card->onClick = [this, i] { recallOrCopy(i); };
         card->onRightClick = [this, i] { showSlotMenu(i); };
         card->setTooltip("Launch slot " + juce::String(i + 1) + ": its pattern, its shape and "
@@ -1811,7 +1845,7 @@ void ArpPanel::buildControls()
     // which is why every loop over them already null-checks. Nothing else has to know.
     for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
     {
-        auto row = std::make_unique<MacroRow>(processor, n);
+        auto row = std::make_unique<MacroRow>(*this, processor, n);
         addChildComponent(*row);
         macroRows[(size_t) n] = std::move(row);
     }
@@ -1858,7 +1892,7 @@ void ArpPanel::buildControls()
 
     for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
     {
-        auto tab = std::make_unique<LineTab>(processor, *this, n);
+        auto tab = std::make_unique<LineTab>(*this, processor, n);
         tab->onClick = [this, n] { setEditLine(n); };
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
         tab->setTooltip("Arpeggiator line " + letter + ". Click to edit it here, and to send it "
@@ -1873,7 +1907,7 @@ void ArpPanel::buildControls()
     // is why it is a tab in the row that already selects lines rather than a window or a fifth
     // section. It kept its place at the right of the tabs when line C went, so the two that
     // remain are still where they were.
-    macroTab = std::make_unique<LineTab>(processor, *this, -1);
+    macroTab = std::make_unique<LineTab>(*this, processor, -1);
     macroTab->onClick = [this] { setMacroView(true); };
     macroTab->setTooltip("Both lines at once: rate, shape, gate, chance and swing for each, with "
                          "the tempo and Launch Quantize they share. Drag a chord card up from the "
