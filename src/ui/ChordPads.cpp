@@ -63,6 +63,13 @@ ChordPads::ChordPads(KeysProcessor& p) : processor(p)
     okstudio::ui::makeMouseOnly(*this);
 }
 
+// See the header. ~Timer stops the timer, but stopping the timer is not releasing the chord -
+// the note-ons are the processor's and would simply stay on, reachable only by All Off.
+ChordPads::~ChordPads()
+{
+    endAudition();
+}
+
 juce::Rectangle<float> ChordPads::cardBounds() const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);

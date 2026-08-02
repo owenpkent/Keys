@@ -788,6 +788,18 @@ private:
             }
         }
 
+        // Volume 0 is a mute, and a mute emits nothing. The 0.05 floor below exists so a
+        // Velocity lane at 0, or a hard Humanize draw, stays audible rather than turning a
+        // note-on into a note-off - but it must not also make the line's own level
+        // un-silenceable, and it did: VOL at the bottom of its travel played the line quietly
+        // instead of stopping it, which is the one thing a control called VOL has to do.
+        //
+        // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
+        // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
+        // the run up where it would have been rather than restarting it.
+        if (p.volume <= 0)
+            hitCount = 0;
+
         for (int r = 0; r < ratchets; ++r)
         {
             const int at = offset + (int) std::floor(subLen * r);

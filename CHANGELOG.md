@@ -40,7 +40,11 @@ middle; it stays on the per-line tab beside Distance, the rest of that same feat
 **VOL replaces RAMP and TIME in the macro rows.** A plain output level per line, 0 to 100 - the
 way to balance two lines against each other without playing one of them softer. Ramp and Time
 were one feature between them and both stay on the per-line tab; a row with Time in it and no
-Ramp would be a control with nothing to time.
+Ramp would be a control with nothing to time. **VOL at 0 stops the line**, which it did not at
+first: the engine floors every note's velocity at 5% so a Velocity lane at 0 or a hard Humanize
+draw cannot turn a note-on into a note-off, and the line's own level was landing under that
+floor and coming out quiet instead of silent. The run keeps walking while it is muted, so
+turning VOL back up picks it up where it would have been rather than restarting it.
 
 **PLAY, was KEYS; Light keys, was Show notes.** Two unrelated controls that read as one idea:
 PLAY routes the keybed *into* a line, Light keys only decides whether the keybed lights *up*.
@@ -112,6 +116,10 @@ on a card now begins silently, and the release decides what it was:
 - With an arp line switched on, a click still hands the card to that line and holds it there.
   **This is the fix that matters**: that path used to fire on press *and* cancel the drag, so a
   card could not be dragged at all in the one mode where dragging it onto a line is the point.
+- An audition never outlives the strip that started it. The 800 ms runs with the button already
+  up, unlike the press-and-hold it replaced, so closing the window or folding the section inside
+  it used to leave the chord sounding with nothing left owning the notes - reachable only by All
+  Off. The strip releases what it started on its way out.
 
 ### Added: a macro view, so a polyrhythm is built from one screen
 

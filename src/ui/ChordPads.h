@@ -51,6 +51,13 @@ class ChordPads : public juce::Component,
 {
 public:
     explicit ChordPads(KeysProcessor&);
+    // An audition sounds for 800 ms with the button already up, so unlike the press-and-hold
+    // it replaced there is a window in which this component can be destroyed - the window
+    // closed, the section folded - while a chord it started is still ringing. The processor
+    // outlives the editor and keeps playing, and nothing would be left owning those notes:
+    // one note-on per sounding pitch, released by the last owner, and the last owner has to
+    // still be here to do it. This is that owner leaving properly.
+    ~ChordPads() override;
 
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
