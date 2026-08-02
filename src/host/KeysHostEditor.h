@@ -115,6 +115,12 @@ public:
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 
+    // Size the window to what the embedded Keys editor needs, and move the resize *floor* with
+    // it so nothing can leave the window shorter than its content. The keyboard is the last
+    // section laid out, so every pixel the window is short by comes off the bottom of it with
+    // nothing on screen to say so. See the definition.
+    void fitToKeysHeight(int keysWanted);
+
     void openPicker();
     void closePicker();
     void loadAndReport(const juce::File&);

@@ -29,11 +29,25 @@ it different from Hold off: release the chords without it and the engines simply
 whatever the keybed is holding, so the button would have silenced the room for a sixteenth note.
 
 **Show notes**, also on the arp bar: the keyboard at the bottom lights up for the notes the
-arpeggiator is *playing*, as it plays them. The chord you hand a line lights it either way; this
-is the run itself. On by default, and one click turns it off when a 1/16 run is not what you
-want to be watching. It is a view toggle, not a parameter - nothing about it is heard - and it
-is deliberately kept out of the "current chord" card, which must keep naming the chord rather
-than whichever note of it the arp is on.
+arpeggiator is *playing*, as it plays them. On by default, and one click turns it off when a
+1/16 run is not what you want to be watching. It is a view toggle, not a parameter - nothing
+about it is heard - and it is deliberately kept out of the "current chord" card, which must keep
+naming the chord rather than whichever note of it the arp is on.
+
+With it on, **the chord handed to a running line is no longer lit**. That chord is the run's
+input, so lighting it held down every pitch the arp was chewing and the arpeggio moving inside
+it was invisible - "it just shows the chords that are being played". Hiding the input is what
+makes the output visible. Turn Show notes off, or the line, and the held chord lights as before.
+
+**Fixed: Keys Host opened too short and cut the keyboard off the bottom.** The window opened at
+a hardcoded height that had nothing to do with what the editor contained, and its resize floor
+was a separate literal, so nothing stopped the window sitting shorter than its own content. The
+keyboard is the last section laid out, so every missing pixel came off it, silently. Two
+fail-safes now: the window opens at the content's height and the resize floor tracks it, so it
+can never be left or restored shorter than what is in it; and the ceiling is measured from the
+display's work area rather than assumed, so a window sized to its content still fits the screen
+it has to live on. On a display too short for every section, fold one - the floor being real
+means folding now visibly shrinks the window instead of quietly taking up slack.
 
 **Fixed: the shape name was cut off in the macro rows**, and the `>` stepper beside it was
 missing entirely. Both had one cause: Shape's width was expressed as a subtraction inside the

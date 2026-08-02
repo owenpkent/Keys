@@ -49,6 +49,13 @@ public:
     // went stale the first time a control joined that bar.
     int minWidthForView() const;
 
+    // Total height the current folds add up to. Public for exactly the same reason as the
+    // width beside it: Keys Host embeds one of these, and it has to open its window at the
+    // content's height and floor it there. It held a literal 620 instead until 2026-08-02,
+    // and a literal goes stale the first time a section grows - the symptom being the
+    // keyboard, which is laid out last, carved off the bottom with nothing to say so.
+    int  idealHeight() const;
+
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -82,7 +89,6 @@ private:
     void syncSectionControls();        // toggle states + visibility from processor.layout
     int  arpHeight() const;            // height the arp section asks for, 0 if folded
     int  sectionHeight(SectionId) const; // 0 when the section is folded or in its own window
-    int  idealHeight() const;          // total height with the current folds
     void applyLayout();                // resize to fit the folds (unless embedded), then resized()
 
     void setSectionDetached(SectionId, bool); // move a section in or out of its own window

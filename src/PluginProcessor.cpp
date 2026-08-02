@@ -925,6 +925,22 @@ bool KeysProcessor::isNoteSounding(int midiNote) const
     return inputNoteOn[(size_t) midiNote].load();
 }
 
+bool KeysProcessor::keybedLit(int midiNote) const
+{
+    if (midiNote < 0 || midiNote > 127)
+        return false;
+    // The track output and the MIDI input are what they are, whatever the arp is doing.
+    if (noteRefs[0][(size_t) midiNote].load() > 0 || inputNoteOn[(size_t) midiNote].load())
+        return true;
+    // A chord handed to an arp line: lit unless that line is running it with Show notes on,
+    // in which case it is the run's input and showing it would drown the run. See the header.
+    for (int n = 0; n < numArpLines; ++n)
+        if (noteRefs[(size_t) (1 + n)][(size_t) midiNote].load() > 0
+            && ! (layout.arpLights && arpLineOn(n)))
+            return true;
+    return arpNoteLit(midiNote);
+}
+
 bool KeysProcessor::arpNoteLit(int midiNote) const
 {
     if (midiNote < 0 || midiNote > 127 || ! layout.arpLights)

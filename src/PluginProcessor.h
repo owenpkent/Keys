@@ -105,6 +105,18 @@ public:
     // "current chord" as whichever note the arp is on. Only the keybed asks this one.
     bool arpNoteLit(int midiNote) const;
 
+    // What the on-screen keybed should light, which is deliberately **not** the same question
+    // as isNoteSounding. With Show notes on and a line running, the chord handed to that line
+    // is not lit: it is the *input* to the run, so every pitch the arp is chewing stays on and
+    // the arpeggio moving inside it is invisible. That is exactly how the option looked when it
+    // first landed - "it just shows the chords that are being played" - and hiding the input is
+    // what makes the output visible. With the option off, or with the line not running, the
+    // held chord lights as it always has.
+    //
+    // Only NoteSurface asks this. Everything else - the live chord card above all - keeps
+    // asking isNoteSounding, which must keep naming the chord.
+    bool keybedLit(int midiNote) const;
+
     void sendCC(int controller, int value); // e.g. mod wheel = CC1
     void sendPitchBend(int value14);         // 0..16383, centre 8192
 

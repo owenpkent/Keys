@@ -250,9 +250,27 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   for the notes the arp is *playing*. `arpNoteOn` is a flag per pitch written on the audio
   thread off each line's `out` buffer - never off the merged stream, where the arp's notes are
   indistinguishable from the pass-through, and never off `in`, which `noteRefs` already lights.
-  **`arpNoteLit()` is deliberately not folded into `isNoteSounding()`**: that answer feeds the
-  live chord card too, and an arpeggio is a run of single notes, so folding it in would rewrite
-  the "current chord" as whichever note the arp is on. Only `NoteSurface` asks it.
+  **`keybedLit()` is the keybed's own question and not `isNoteSounding()`**: that answer feeds
+  the live chord card too, and an arpeggio is a run of single notes, so folding the arp into it
+  would rewrite the "current chord" as whichever note the arp is on. Only `NoteSurface` asks
+  `keybedLit`. It also **withholds the chord handed to a running line** while Show notes is on,
+  which is the difference between the option working and not: that chord is the run's *input*,
+  so lighting it holds down every pitch the arp is chewing and the arpeggio inside it is
+  invisible. Owen's report on the first cut was "it just shows the chords that are being
+  played". Hiding the input is what makes the output visible.
+- **A window opens at its content's height, and its resize floor tracks it** (2026-08-02, Owen:
+  "when we open the window, the keyboard is cut off on the bottom. We should add some fail safes
+  so that doesn't happen"). `KeysEditor::applyLayout` has done this since it grew folds - "the
+  content's own size *is* the minimum" - but **Keys Host did not**: it opened at a literal
+  `barHeight + 620` and floored itself at a separate literal, so the window could sit shorter
+  than what was in it. The keybed is the **last section laid out**, so every pixel short comes
+  off the bottom of it with nothing on screen to say so; making the arp's macro view the default
+  is merely what pushed it over. `KeysHostEditor::fitToKeysHeight` is now the one answer for both
+  the initial size and every fold, and the ceiling is **measured** off the display's work area
+  (`maxWindowHeight`) rather than the literal 1700 it was, since a window sized to its content on
+  a screen shorter than that content is the same bug by another route. `KeysEditor::idealHeight`
+  went public for it, next to `minWidthForView`, which was made public in 2026-07-30 for exactly
+  the same reason: a host that embeds the editor must *ask* it for its size and never copy it.
 - **Reserve the fixed-size control first, always** (2026-08-02). `MacroRow::resized` expressed
   Shape's width as a subtraction inside the knobs' `jlimit(52, 96, ...)`, which is not a
   reservation: on Owen's window the knobs hit their floor, the clamp discarded the subtraction,
