@@ -314,8 +314,12 @@ private:
     // card means: with it lit, a card hands its chord to the arp instead of playing it while
     // the button is down. That used to be a separate "To Arp" toggle on the Pads bar, which
     // did nothing visible whenever the arp was off (removed 2026-07-27, Owen's call).
-    juce::ToggleButton arpOnButton { "On" };
-    std::unique_ptr<ButtonAtt> arpOnAtt;
+    // Three of them since 2026-08-01, one per arpeggiator line: A, B, C. Each is that line's
+    // own power switch, so bringing a line in and out is one click on a bar that survives the
+    // section being folded - which is how a polyrhythm is actually performed. A is `arpOn`,
+    // the same parameter the single On always was.
+    std::array<juce::ToggleButton, KeysProcessor::numArpLines> arpOnButtons;
+    std::array<std::unique_ptr<ButtonAtt>, KeysProcessor::numArpLines> arpOnAtts;
     // Lets go of the chord being held into the arp, and nothing else. It rides the arp bar
     // beside On for the same reason On does: with the section folded it is the only way out
     // of a hold. A click on a chord card retriggers the hold rather than ending it, the arp's
@@ -324,6 +328,15 @@ private:
     // no on-screen release for just the held chord in the default layout. Disabled while
     // nothing is held, which makes it a state display as well as a button.
     juce::TextButton arpHoldOffButton { "Hold off" };
+    // Which arp line a click on a chord card feeds, shown as its letter and cycled A->B->C by
+    // clicking. It rides the *Pads* bar, next to Fill / Regen / Generator, because it is a
+    // fact about the cards rather than about the arp: the control that says where a card goes
+    // belongs beside the cards. It is the same state as the A/B/C tabs inside the arp panel,
+    // so either moves both - and it stays reachable with the arp section folded away, which
+    // the tabs do not.
+    juce::TextButton arpTargetButton { "A" };
+    void cycleArpTargetLine();
+    void refreshArpTargetButton();
     juce::TextButton wheelsButton { "Wheels" };
 
     // A second Size selector, for the detached keyboard window. The keybed's key count

@@ -83,6 +83,10 @@ public:
     // the strip, and a point inside these bounds but underneath that window is not a drop. That
     // is what makes this a Desktop hit test and not a bounds check.
     int externalDropSlotAt(juce::Point<int> screenPos) const; // absolute slot, or -1
+    // Which pad the drag in progress started from, or -1. Read by onDropOutside handlers that
+    // need to name the *card*, not just copy its notes - handing a chord to an arp line marks
+    // the card it came from, so the strip can ring it.
+    int draggedSlot() const { return dragSource; }
     void setExternalDropSlot(int slot);                       // hover feedback; -1 clears it
     bool dropExternalChord(juce::Point<int> screenPos, const KeysProcessor::ChordPad& pad);
 

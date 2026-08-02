@@ -140,6 +140,68 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   (`setInterceptsMouseClicks(false, false)`), writes no parameter and plays no note. It draws the
   current source and the walk that produced the tray. If it ever needs to *do* something, that is
   a different component.
+- **Three arpeggiator lines, A B C** (2026-08-01, Owen: "three arpeggiators so we can get
+  polyrhythms and keep keeping what we currently have ... and then being able to feed cards into
+  different lines"). Three `ArpEngine`s, each with its own rate, shape, step lanes, twelve slots,
+  chord and chain. **`ArpEngine.h` did not change**: it never knew how many of it there were, so
+  three of them cost a routing layer and no engine work. **Line 0 keeps every parameter id it has
+  ever had** (`arpRate`, `arpSwing`, ...); B and C are `arp2*` / `arp3*`, appended, defaulting to
+  off, so a session saved before this opens sounding identical. Two ids do appear on line A,
+  `arpKeys` and `arpChannel`, both defaulting to the old behaviour.
+  **Routing is a queue per line, never a pitch mask.** Each line has its own
+  `MidiMessageCollector`; a chord handed to it is fired through the ordinary note path (so
+  Exclusive, the Voices cap, Strum and the keybed lights all still apply) but queued there, and
+  only that engine drains it. `runArpLines` lifts the keybed's notes out of the merged stream for
+  the lines with **Keys** on, runs each enabled line into its own buffer, and merges them back;
+  a *disabled* line's input passes straight through, so a chord held to it sustains. A per-pitch
+  ownership mask races - the message thread can clear an owner before the matching note-off is
+  drained, stranding that note in an engine's held set forever - and that is why it is queues.
+  **`noteRefs` is per destination stream** for the same reason: "one note-on per sounding pitch"
+  is a statement about one stream, and a pitch held into line B must not suppress the same pitch
+  played to the output. On screen: **A/B/C on the arp bar** (one per line's On, and Hold off is
+  still one button that releases all three), **three tabs at the left of the slot row** choosing
+  which line the panel edits (34 px inside a row already 58 tall, so the panel's height is
+  unchanged; a tab change rebuilds every APVTS attachment against the new ids, the same move
+  `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** saying which
+  line a chord-card click feeds. **Dragging a chord card onto an arp slot binds it there**, or
+  onto a tab - or onto a line's **row in the macro view**, which is the same target the size of
+  a row rather than the size of a tab - to hand it over now. The left-click twin *Send to arp
+  slot* never had. `externalDropLineAt` walks *up* from whatever `Desktop::findComponentAt`
+  returns, which is what makes the whole macro row a target including the knobs on it. A drop
+  sets the current line and never changes the view (`setEditLine(line, false)`): it is routing a
+  chord, not navigating.
+  **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
+  complex polyrhythms from one view"). It replaces the band and the step editor with three rows,
+  one per line, over a shared row holding the BPM knob and Launch Quantize. A row carries the
+  line switch, **Latch** and **Keys**, a detented rate knob with its `<` `>` and Sync/Hz, the
+  shape with its own steppers, **eight knobs** (Oct, Gate, Chance, Swing, Offset, Ramp, Time,
+  Human), the held chord and that line's Chain - "like regular arp settings", Owen's ask when the
+  first cut had three. The knobs are the band's own rotary, not sliders, and each column heading
+  is written once on the top row while every row reserves the same strip so the columns align.
+  **It is a view, not a fourth line**: `editedLine` is untouched by it, so a chord card still has
+  one target while all three are on screen, and the panel does not grow because the rows take the
+  band's space rather than joining it. Each row's attachments bind to its own line for good,
+  unlike the band's, which rebind on every tab change - three lines at once cannot each be "the
+  current line". **A tab selects; it does not toggle** (clicking All while All is up means All).
+  Two layout traps already paid for: **the knob strip is reserved out of the row before Shape
+  takes its cut**, because laying the knobs last and giving the final one "whatever remains"
+  starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
+  symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
+  ruled box is drawn beside the band on every plain shape.
+- **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
+  the setting Owen described and could not name: "if you start a new note or something that goes
+  into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
+  - fires a chord the instant you click. Anything else holds the *gesture* until the next boundary
+  and then performs it whole, so a slot's pattern, shape, rate and chord land together on the grid.
+  Global rather than per line, because the value of it is that the three lines land together.
+  **It never delays the keybed**: playing a note is playing an instrument. The public
+  `holdArpChord` / `holdArpChordFromPad` / `launchArpSlot` defer; the `*Now` twins beside them are
+  the gesture with the wait already served, and are what the chain calls (it is on a bar line by
+  construction) and what a slot launch calls for its own chord (it has already waited). The
+  deadline is wall clock, computed from `arpBeats` - the beat position the audio thread publishes
+  each block, the host's own while it rolls and an internal count otherwise - and waited out on
+  the **1 ms strum timer**, not the 50 Hz heartbeat: 20 ms is a sixth of a 1/16 at 120 bpm, which
+  is the sloppiness the feature exists to remove. A panic and Hold off both clear what is pending.
 - **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
   chord, a shape and a rate; launching one installs all of it and holds the chord into the
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
@@ -280,10 +342,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   override; any doc still saying the whole bar is the target is describing that three-day
   window. **Detach hides with its section**, and so does every control that would be reaching
   into content that is not on screen: the pad pages, Knobs, Wheels. What stays on a folded
-  bar is what you reach for while playing or generating - arp On and Hold off, the Pads bar's
-  Fill / Regen / Generator and its Key / Mode / Scale Compliance combos, the Keyboard bar's
-  Exclusive / Sustain / Latch / All Off - plus the theme swatch, which belongs to the plugin
-  rather than to any one section. Open and folded bars are painted at different weights on
+  bar is what you reach for while playing or generating - the arp's A / B / C line switches and
+  Hold off, the Pads bar's Fill / Regen / Generator, its Key / Mode / Scale Compliance combos
+  and the arp target-line letter beside them, the Keyboard bar's Exclusive / Sustain / Latch /
+  All Off - plus the theme swatch, which belongs to the plugin rather than to any one section. Open and folded bars are painted at different weights on
   purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
   or the caption ellipsises and the controls beside it shift as a section folds.
 - **The knob bank is the bottom row of the Controls section**, not a band of its own:
@@ -357,11 +419,18 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      strip, and Fill and Regen on the bar are New chord in bulk - but the per-card edits are
      reached from this menu and nowhere else, because a card is all playing surface and there
      is nowhere left on it to put a button. Ending an edit is the exception that proves it: the
-     tick on the card being edited is a left click. The three paths below are the ones Owen
-     ruled on one at a time.
-  2. ***Send to arp slot* has no left-click twin** (2026-07-25). Binding a chord to one
-     particular slot needs a target picker. A left click on a card with the arp **On** is the
-     left-click way to get a chord *into* the arp, which is what keeps this to one item.
+     tick on the card being edited is a left click. The paths below are the ones Owen ruled on
+     one at a time; entry 2 has since been retired, and is kept because knowing why a rule
+     existed is what stops it being reinvented.
+  2. ***Send to arp slot* had no left-click twin* (2026-07-25), **and now it does** (2026-08-01).
+     The reason it was ever an exception is that binding a chord to one *particular* slot needs
+     a target picker; a drag is one, so **dragging a chord card onto a slot card** does the same
+     job and the exception is retired. The menu item stays as the accelerator it always was.
+     This is the one entry on this list that closed rather than opened, and it closed because
+     the thing it was waiting for got built, not because anybody changed their mind: do not
+     re-open it by removing the drag. A left click on a card with a line **On** is still the
+     left-click way to get a chord into the arp without naming a slot - it goes to the current
+     line, and a drag onto that line's tab is the aimed version of the same thing.
   3. ***Lock / Unlock has no left-click twin*** (2026-07-30, Owen: "I don't want the lock
      button to be visible. I only want it to be in right click"). This is the one path where a
      left-click twin was **built and then deliberately taken away**: a lock chip sat in the
@@ -458,6 +527,20 @@ Four things will bite otherwise:
   boxes are reachable by their *current* text (`-SetValues "Up=Pattern"`), but two combos
   can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
   match; set the other one out of the way first.
+- **The arp's own controls are named per line**, for the same first-match reason: the bar
+  chips are `Arp line A` / `B` / `C`, the panel's line tabs are `Arp line A tab` and so on
+  (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
+  the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
+  `Arp target line`. Hold off is `Arp hold off`. The fourth tab is `Arp all tab`, and the macro
+  view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
+  `Macro line A`, `Macro latch A`, `Macro keys A`, `Macro rate A`, `Macro rate mode A`,
+  `Macro shape A`, `Macro chain A`, and `Macro OCT A` / `Macro GATE A` / ... one per heading.
+- **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
+  applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
+  the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that
+  throws can leave the combo's popup open as a top-level window, after which every subsequent
+  lookup roots itself on that popup: the tell is a capture that comes out about 156x159, and
+  the only way back is to restart the app. Budget for it, or drive the parameter another way.
 - **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
   write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 

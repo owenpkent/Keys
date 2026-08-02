@@ -310,11 +310,18 @@ void ChordPads::paint(juce::Graphics& g)
         // sounding, and both can be true at once.
         // Not gated on `filled`: a card cleared while it was feeding the arp still owns the
         // sounding chord, and an invisible ring is a chord you cannot find or stop.
-        if (processor.arpHeldPad() == i)
+        if (const int heldBy = processor.arpLineHoldingPad(i); heldBy >= 0)
         {
             g.setColour(skin::accentOf(*this).hot);
             g.drawRoundedRectangle(b.reduced(1.0f), kRadius, 2.0f);
             skin::glowRect(g, b, kRadius, skin::accentOf(*this).hot, 0.8f);
+            // Which of the three lines has it. A letter in the ring rather than a colour per
+            // line: the skin has one accent by design (see the theme swatch), so three rings
+            // in three colours would be three colours this plugin does not own. Bottom-right,
+            // opposite the lock dot, so a locked card feeding line B says both.
+            g.setFont(skin::micro(9.0f));
+            g.drawText(juce::String::charToString((juce::juce_wchar) ('A' + heldBy)),
+                       b.reduced(5.0f).toNearestInt(), juce::Justification::bottomRight, false);
         }
 
         // Locked pads carry a corner dot, and only locked ones. It is an indicator and nothing
@@ -579,7 +586,8 @@ void ChordPads::rewritePadChord(int slot, const std::vector<int>& notes)
         return;
 
     const bool wasSounding = processor.chordPadActive(slot);
-    const bool wasHeld = processor.arpHeldPad() == slot;
+    const int heldByLine = processor.arpLineHoldingPad(slot);
+    const bool wasHeld = heldByLine >= 0;
 
     pad.notes = notes;
     pad.name = chords::detect(notes);
@@ -597,7 +605,7 @@ void ChordPads::rewritePadChord(int slot, const std::vector<int>& notes)
     // Exclusive off pressChordPad only re-triggers this one pad and leaves the hold alone.
     const bool exclusive = processor.apvts.getRawParameterValue("chordExclusive")->load() > 0.5f;
     if (wasHeld)
-        processor.holdArpChordFromPad(slot);
+        processor.holdArpChordFromPad(slot, heldByLine);
     if (wasSounding && ! (exclusive && wasHeld))
         processor.pressChordPad(slot);
     repaint();
@@ -673,7 +681,8 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     // no notes behind it. Without that clause the click falls past every branch below and
     // does nothing at all, which is a dead click on a lit target.
     if (toArp() && dragSource >= 0
-        && (! processor.chordPad(dragSource).notes.empty() || processor.arpHeldPad() == dragSource))
+        && (! processor.chordPad(dragSource).notes.empty()
+            || processor.arpLineHoldingPad(dragSource) >= 0))
     {
         if (processor.chordPad(dragSource).notes.empty())
         {
@@ -689,7 +698,7 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
             // previous hold (releaseNotes on arpChordTag, so the refs and the arp's held set
             // both unwind) before it fires, and applies Exclusive to the new one. Stopping a
             // filled card's hold outright is the Hold off button on the arp bar.
-            processor.holdArpChordFromPad(dragSource);
+            processor.holdArpChordFromPad(dragSource, processor.arpCurrentLine());
         }
 
         dragSource = -1; // and it is not a drag handle in this mode either

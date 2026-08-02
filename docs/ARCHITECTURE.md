@@ -22,8 +22,10 @@ src/
 │                             # (tests/ChordSourceTests.cpp). Wired to the UI since 2026-08-01:
 │                             # Source is seven choices now (Algorithmic, Markov and these five)
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
-│                             # reader in Keys, and only while its rate is in Sync
-│                             # (docs/ARP_DESIGN.md)
+│                             # reader in Keys, and only while its rate is in Sync.
+│                             # The processor holds *three* of these since 2026-08-01,
+│                             # one per line; the file itself never knew how many of it
+│                             # there were and did not change (docs/ARP_DESIGN.md)
 ├── ui/
 │   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
 │   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
@@ -44,7 +46,9 @@ src/
 │   │                         # touch; both belong to no pad and are thrown away when the
 │   │                         # window closes
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
-│   │                         # plus the control band and twelve launchable slots
+│   │                         # plus the control band and twelve launchable slots.
+│   │                         # A/B/C tabs at the left of that slot row choose which of
+│   │                         # the three lines everything on it edits
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── StepComboBox.h        # a combo that reports every pick, including one already
@@ -82,13 +86,20 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 - `PianoKeyboard` calls `KeysProcessor::noteOn/noteOff/allNotesOff`.
 - Those build a `juce::MidiMessage`, stamp it with `Time::getMillisecondCounterHiRes()`,
   and hand it to a `juce::MidiMessageCollector`.
-- **One note-on per sounding pitch.** `noteRefs` counts how many sources own each pitch,
-  and MIDI is emitted only on the 0→1 transition and released only on 1→0. Four sources
-  can want the same pitch at once (a chord pad, the live chord card, a chord held into the
-  arpeggiator, and the keybed); emitting a second note-on for a pitch already sounding
-  means one source's release ends it for everybody, which left keys lit with nothing
-  sounding and leaked the arpeggiator's held set. Any new chord source must go through
-  these two functions rather than the collector.
+- **One note-on per sounding pitch, per destination stream.** `noteRefs` counts how many
+  sources own each pitch, and MIDI is emitted only on the 0→1 transition and released only
+  on 1→0. Four sources can want the same pitch at once (a chord pad, the live chord card, a
+  chord held into an arpeggiator, and the keybed); emitting a second note-on for a pitch
+  already sounding means one source's release ends it for everybody, which left keys lit
+  with nothing sounding and leaked the arpeggiator's held set. Any new chord source must go
+  through these two functions rather than the collector.
+  The count is per *destination* since the three arp lines arrived (2026-08-01): the rule is
+  a statement about one stream, because downstream one note-off ends a pitch for everybody.
+  An arp line's input is a different stream with a different consumer — its engine, which
+  counts owners itself — so a pitch held into line B must not suppress the same pitch played
+  to the track output. With one shared counter it did, and the note vanished from the output
+  while the key lit up. `noteOn`/`noteOff` take a `dest` (0 = the track output, 1..3 = a
+  line's own queue) and `isNoteSounding` answers for any of them.
 - `processBlock` calls `collector.removeNextBlockOfMessages(midi, numSamples)`, which
   drops the queued events into the block at the right offsets. Any MIDI already on
   the track (a clip, another device) passes through untouched.
@@ -101,8 +112,13 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
   chord card can name what is under their hands. Added 2026-07-27.
 
 The audio thread does nothing else: `buffer.clear()` (silence), watch the input, drain the
-collector, and, with the arp on, run the arp stage over what came out (`docs/ARP_DESIGN.md`).
-No allocation, no locks.
+collector, and run the arp stage over what came out (`docs/ARP_DESIGN.md`). That stage is
+three lines now: it drains each line's own queue, hands the keybed's notes to the lines with
+**Keys** on, runs each enabled engine into its own buffer and merges them all back. Routing is
+a queue per line rather than a per-pitch ownership mask, because a mask lets the message thread
+clear a pitch's owner before the matching note-off is drained and strands that note in an
+engine's held set forever. No allocation, no locks: every buffer is sized in `prepareToPlay`
+and every parameter is read through a pointer cached at construction.
 
 ## Playing surface: one product, one piano
 
@@ -388,19 +404,43 @@ on the bar shifts when the section folds.
 The **arpeggiator is a section of its own** rather than a centre view (changed 2026-07-25).
 Competing with the knobs and the generator was backwards for a panel that runs while you
 play, and the arp is the one thing you want on screen *next to* a chord. Its bar carries the
-**On** toggle, the **Hold off** chip and a **Detach**; the first two survive folding the
-panel away, because folding it destroys the view and never the arpeggiator, and a chord held
-into a folded arp needs a way out that is still on screen (see `docs/ARP_DESIGN.md`).
+**A**, **B** and **C** toggles — one per arpeggiator line, where a single **On** sat until
+2026-08-01 — the **Hold off** chip and a **Detach**; everything but Detach survives folding
+the panel away, because folding it destroys the view and never the arpeggiator, and a chord
+held into a folded arp needs a way out that is still on screen (see `docs/ARP_DESIGN.md`).
+**Hold off is deliberately still one button**: it releases all three lines and stops all three
+chains, because a per-line release would leave two lines droning with nothing on a folded bar
+to stop them. Which line the *panel* edits is chosen by three tabs at the left of its slot
+row, and that same choice is mirrored by a letter chip on the Pads bar (below).
+
+A **fourth tab, All**, is the macro view: the band and the step editor give way to three rows,
+one per line, each with that line's switch, Latch and Keys, a detented rate knob, its shape and
+eight knobs (Oct, Gate, Chance, Swing, Offset, Ramp, Time, Human), over a shared row holding the
+BPM knob and Launch Quantize. It is a *view* rather than a fourth line - `editedLine` is
+untouched by it, so a chord card click keeps one unambiguous target - and it takes the band's
+space rather than adding to it, so the panel does not grow. Each row's attachments bind to its
+own line for the row's life, where the band's rebind on every tab change: three lines on screen
+at once cannot each be "the current line".
 
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
 chord) was also the one place you could not reach a chord. Their page buttons ride on the
 Pads bar from the left, and the generator's **Fill**, **Regen** and
-**Generator** chips and its **Key** / **Mode** / **Scale Compliance** combos come off the
-right end (the pages hide with the strip, that whole right-hand group never does). What a
-card click *means* is the arp's own On state (`KeysProcessor::cardsFeedArp`): with the arp
-running, a click hands that chord over and leaves it there instead of playing it while the
-button is down, and a click on the card *already* feeding the arp retriggers it.
+**Generator** chips, its **Key** / **Mode** / **Scale Compliance** combos and the arp's
+**target-line** chip come off the right end (the pages hide with the strip, that whole
+right-hand group never does). What a card click *means* is the arp's own On state
+(`KeysProcessor::cardsFeedArp`, true when *any* line is on): with the arp running, a click
+hands that chord over and leaves it there instead of playing it while the button is down, and
+a click on the card *already* feeding the arp retriggers it.
+
+**Which** line it goes to is the target chip: one letter, clicked to cycle A→B→C. It is the
+same state as the arp panel's tabs, so either moves both, and it lives on the Pads bar because
+it is a fact about the cards rather than about the arp — and because with the arp section
+folded the tabs are off the screen while the cards are not. A card feeding a line wears that
+line's letter inside its ring. Dragging a card onto an arp slot binds the chord there, and
+onto a line tab hands it over immediately; both are mediated by the editor in screen
+coordinates, the same machinery the audition tray needs, and both suppress the strip's
+drag-off-to-clear so a gesture aimed at the arp can never delete a chord.
 
 **Only the left end of a bar folds it** (2026-07-30, Owen's ask). `SectionBar::hitTest`
 narrows the button to `foldZone()`, the chevron and the caption, 92 px wide at the narrowest
@@ -483,9 +523,9 @@ the editor's. Every detached window carries the button that undoes the detach on
 the top, so the control that re-docks a section is never in the window you are not looking at.
 
 Controls that belong to the *editor* rather than to the content stay behind on the bar: the
-arp's **On** and **Hold off**, the pads' page buttons, the generator's **Fill** / **Regen** /
-**Generator** chips and its three combos, the Controls bar's **Knobs**
-chip and theme swatch. Paging a strip that is off in a window of its own is one click either
+arp's **A** / **B** / **C** line switches and **Hold off**, the pads' page buttons, the
+generator's **Fill** / **Regen** / **Generator** chips and its three combos, the arp's
+target-line chip beside them, the Controls bar's **Knobs** chip and theme swatch. Paging a strip that is off in a window of its own is one click either
 way, so the pages are no more the content's than the swatch is. A bar whose section is away
 says so, in the space its own controls did not use.
 
@@ -769,13 +809,35 @@ Influence sit on the two fixed rows above every source's band.
 The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
 `arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`
 (Repeats) + `arpDistance`, `arpOffset`, `arpSwing`, `arpLatch`, `arpRetrigger` +
-`arpRetrigBars`, `arpGate`, `arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`, and
-`arpLinkLanes`. The six after `arpChance` arrived on 2026-07-30 and are appended; the
-rate's two arrived the same day and sit beside `arpRate` instead, which costs nothing,
-because what a session and an automation lane follow is a parameter's string id and not its
-position (JUCE hashes that id for VST3). What is load-bearing is what lives *inside* a
-parameter (a choice's list of values, an int's range), and `arpRate`'s eleven divisions are
-byte-identical, so nothing about it moved.
+`arpRetrigBars`, `arpGate`, `arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`,
+`arpLinkLanes`, and — from 2026-08-01 — `arpKeys` and `arpChannel`. The six after
+`arpChance` arrived on 2026-07-30 and are appended; the rate's two arrived the same day and
+sit beside `arpRate` instead, which costs nothing, because what a session and an automation
+lane follow is a parameter's string id and not its position (JUCE hashes that id for VST3).
+What is load-bearing is what lives *inside* a parameter (a choice's list of values, an int's
+range), and `arpRate`'s eleven divisions are byte-identical, so nothing about it moved.
+
+**Two arp parameters are deliberately not per line**, because they are about the three of them
+together: `bpm` (the tempo they run at when there is no transport to follow) and `arpQuantize`
+(Launch Quantize - Off, or the boundary a chord card, a slot launch or a drag onto a line waits
+for before it lands). Three separate quantize settings would be three ways for the lines to miss
+each other, which is the opposite of what it is for.
+
+**That whole set exists three times**, once per arpeggiator line. `createLayout` calls
+`addArpLineParams` three times rather than writing it out three times, so a control cannot
+exist on one line and not another and the ranges and defaults are provably identical. **Line 0
+registers under the bare ids above** — `arpRate` is line A's rate and always was — and B and C
+take a digit: `arp2Rate`, `arp3Direction`. That is the entire session-compatibility story, and
+it is why the ids are built by `KeysProcessor::arpParamId(line, suffix)` from one table
+(`arpParamSuffix`) shared by the layout, the UI's attachments and the audio thread's cached
+pointers. The suffix strings *are* the ids: renaming one loses that setting out of every saved
+session. `arpKeys` and `arpChannel` are the only two an older session sees appear on line A,
+and both default to what Keys did before there were lines.
+
+The audio thread never builds one of those ids. Each line caches a
+`std::atomic<float>*` per parameter at construction (`ArpLine::param`, indexed by the
+`ArpParam` enum); resolving 24 ids by string on three lines every block would be seventy-odd
+`juce::String` allocations a block on the one thread that may not allocate at all.
 
 **The rate has two units.** `arpRateFree` picks between them and `arpRateHz` holds the
 second: 0.03125 to 32 Hz, mapped exponentially rather than skewed, which is exactly what the
@@ -790,7 +852,9 @@ not a reset**: APVTS creates the child on the spot and flushes whatever the live
 currently holding into it, so loading an old preset while the dial was in Hz left the arp
 free-running under a panel showing a division. `migrateRateMode` reads the incoming tree,
 spots the absence, and writes both defaults explicitly, which brings such a session back in
-Sync. `migrateStrumRange` repairs the same shape for the strum band.
+Sync. It loops over all three lines now, because B and C's rate parameters are absent from
+every session saved before the lines for exactly the same reason and want exactly the same
+repair. `migrateStrumRange` repairs the same shape for the strum band.
 
 Two pieces of arp state are deliberately **not** parameters. Lane data and the twelve slots
 live in the `arp` ValueTree beside the chord pads (they are arrays, not knobs); a slot
@@ -798,6 +862,13 @@ carries its chord, its shape and its rate, and since the rate gained a unit it c
 and the Hz value too, or launching one would drop you into Sync at whatever division it
 happened to hold. And the chain's running state is transient: it starts stopped, because a
 session that reopens already playing a progression is a session that surprises you.
+
+**All of that is per line too, and the tree says so by shape.** Line 0's twelve slots and its
+live lanes sit directly on the `arp` node, exactly where they always have; B and C hang off a
+`line` child each. So a session written here still loads into a build that predates the lines,
+and — the point that matters — every session written *by* those builds loads here with no
+migration at all: no `line` children means B and C keep their defaults, which with both
+switched off is precisely the arpeggiator that session was saved from.
 
 `bpm` (40..240, default 120) is registered last, though it stopped being the newest when the
 rate's two arrived. Last is tidiness and not compatibility: JUCE derives a VST3 parameter's

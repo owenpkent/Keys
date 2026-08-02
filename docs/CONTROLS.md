@@ -2,12 +2,10 @@
 
 Every control is operated with a single left-click, a drag, or the scroll wheel.
 Nothing needs the keyboard, a double-click, or a modifier key. The right-click gestures
-below are accelerators, and the work each of them does has a left-click path too, bar three
+below are accelerators, and the work each of them does has a left-click path too, bar two
 exceptions Owen signed off:
 
-- **Send to arp slot**, in a chord pad's menu, because binding a chord to one particular
-  slot needs a target picker.
-- **Lock**, in the same menu. It had a clickable chip in the card's corner for a few hours on
+- **Lock**, in a chord pad's menu. It had a clickable chip in the card's corner for a few hours on
   2026-07-30 and lost it at Owen's request: the chip took roughly a quarter of the card away
   from playing it, dragging it and feeding the arp. A locked card still *shows* a corner dot,
   so the state reads without opening the menu; the dot is a marking and not a target.
@@ -15,6 +13,11 @@ exceptions Owen signed off:
   click on a ringing key strikes it again, by design, so the second click cannot also be the
   release. Right-click is the only way to take that one note out. Under **Latch** the left
   click does release, so this exception is Sustain's alone.
+
+**Send to arp slot** was a third exception until 2026-08-01, on the grounds that binding a
+chord to one particular slot needs a target picker. It has one now: **dragging a chord card
+onto a slot card** does the same job, and a drag *is* a target picker. The menu item stays as
+the accelerator it always was.
 
 ## The keyboard
 
@@ -33,9 +36,9 @@ so the same key can be played over and over while the chord under it holds). Und
 a note at a time. A note the right button latched on releases to a plain left click too,
 so the right button is never the only way out of it.
 
-Right-click can only reach notes **this keyboard** is holding. Keys lit by a chord pad, the
-arpeggiator or MCP are owned elsewhere and are left alone: use the pad, **Hold off** on the
-arp bar, or **All Off**.
+Right-click can only reach notes **this keyboard** is holding. Keys lit by a chord pad, an
+arpeggiator line or MCP are owned elsewhere and are left alone: use the pad, **Hold off** on
+the arp bar, or **All Off**.
 
 ### Watching a physical keyboard
 
@@ -79,8 +82,8 @@ the window reads at a glance, before you have read a single caption.
 | Section | Bar | Folds away |
 |---------|-----|-----------|
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Humanize, Velocity, Strum, Dir, BPM, and the eight knobs in the row beneath them. **Knobs**, at the left end of this bar, folds just that knob row; the theme swatch at the right end stays put whatever you fold. |
-| **Arp** | below the controls | The arpeggiator. Its **On** toggle and the **Hold off** chip ride on the bar and stay there folded, so the arp can be switched on and made to let go of a chord with the panel shut. **Detach** rides on it too, but goes with the fold like every other section's. Folding it puts the editor away, never the arpeggiator. It starts folded, because open it is the tallest thing here. |
-| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips and its **Key**, **Mode** and **Scale Compliance** combo boxes ride at the right and never do. |
+| **Arp** | below the controls | The three arpeggiator lines. The **A**, **B** and **C** switches and the **Hold off** chip ride on the bar and stay there folded, so a line can be switched on and made to let go of a chord with the panel shut. **Detach** rides on it too, but goes with the fold like every other section's. Folding it puts the editor away, never the arpeggiators. It starts folded, because open it is the tallest thing here. |
+| **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips, its **Key**, **Mode** and **Scale Compliance** combo boxes, and the arp's target-line letter ride at the right and never do. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
 A bar is a real button, not a painted strip, so it carries an accessible name for screen
@@ -111,18 +114,20 @@ large as the screen allows. That window carries its own **Size** and **Wheels** 
 alongside Re-dock, because those belong to the keybed rather than to the editor.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
-arp's **On** toggle and **Hold off** chip, the pad page buttons, the generator's **Fill**,
-**Regen** and **Generator** chips with the **Key**, **Mode** and **Scale Compliance**
-combo boxes beside them, the **Knobs** chip, and the theme swatch. All of them keep working
-while the section they name is off in a window.
+arp's **A** / **B** / **C** line switches and **Hold off** chip, the pad page buttons, the
+generator's **Fill**, **Regen** and **Generator** chips with the **Key**, **Mode** and **Scale
+Compliance** combo boxes beside them, the arp's target-line letter next to those, the
+**Knobs** chip, and the theme swatch. All of them keep working while the section they name is
+off in a window.
 
 Folding is the other case, and a stricter one: a folded bar keeps only what still means
-something with the section gone. That is the arp's **On** and **Hold off** (so the
-arpeggiator runs on behind a closed panel, and can still be made to let go of a chord),
+something with the section gone. That is **A**, **B**, **C** and **Hold off** (so the
+arpeggiators run on behind a closed panel, and can still be made to let go of a chord),
 **Fill**, **Regen**, **Generator** and the three combos with them (the whole left-click path
 into the chord generator - generating into a folded strip is a fine thing to mean, and the
-settings must not fold away with the cards), and the theme swatch (it colours the whole
-plugin). Everything else goes with the section, Detach included.
+settings must not fold away with the cards), the target-line letter (with the arp folded it is
+the only thing left that says where a card click goes), and the theme swatch (it colours the
+whole plugin). Everything else goes with the section, Detach included.
 
 ## Playing surface
 
@@ -188,9 +193,9 @@ A single mouse can't hold several keys, so there are three ways to stack them:
 
 Right-click is also the one way to release a single note out of a chord the **pedal** is
 holding, because under Sustain the left click is a restrike by design. That is the one
-gesture in Keys with no left-click twin besides Send to arp slot, and Owen asked for it:
-without it, taking one wrong note out of a sustained chord meant lifting Sustain and losing
-the lot. **All Off** is still the blunt way out.
+gesture in Keys with no left-click twin besides Lock, and Owen asked for it: without it,
+taking one wrong note out of a sustained chord meant lifting Sustain and losing the lot.
+**All Off** is still the blunt way out.
 
 Sustain and Latch are two answers to the same question, which is how a note stops. Sustain is
 a pedal: it defers the release, and a repeated key is a repeated strike, so you can play a
@@ -259,13 +264,14 @@ separated by rules.
 | **Next voicing** | The same chord arranged differently: root position, first inversion, second, (third, on a four-note chord), then a spread with the root left in the bass, then round to root again. The item says which one the card is in now. Greyed while the card is linked to the keyboard, like Octave |
 | **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
 | **Next: could follow** | Four submenus of chords that could follow this one, described below. On a filled pad only, since there has to be a chord to follow |
-| **Send to arp slot** | Park a copy of this chord in one of the twelve arp slots, to launch later |
+| **Send to arp slot** | Park a copy of this chord in one of the current line's twelve arp slots, to launch later. Its left-click twin is dragging this card onto the slot you mean |
 
-**Two of these have no left-click twin**, and both are deliberate: **Send to arp slot**, since
-binding a chord to one particular slot needs a target picker, and **Lock**, which had a
-clickable chip in the card's corner for a few hours and lost it at Owen's request. The chip
-took roughly a quarter of the card, and every bit of that quarter had stopped playing the
-chord, starting a drag or feeding the arpeggiator. The whole card is the card again.
+**One of these has no left-click twin**, and it is deliberate: **Lock**, which had a clickable
+chip in the card's corner for a few hours and lost it at Owen's request. The chip took roughly
+a quarter of the card, and every bit of that quarter had stopped playing the chord, starting a
+drag or feeding the arpeggiator. The whole card is the card again. (**Send to arp slot** was
+the other until 2026-08-01; dragging the card onto a slot does the same job now, and a drag is
+the target picker the menu item existed to be.)
 
 **Octave** and **Next voicing** work on a locked pad too. A lock protects a chord from being
 *replaced or thrown away* — **Regen**, **Clear pad** and dropping the card off
@@ -563,17 +569,79 @@ sounding (keyboard, a held note, a chord pad) and plays it one note at a time. T
 pads sit directly below it, so a chord is always one click away, and the knobs stay on
 screen above.
 
-**On** and **Hold off** live on the Arp bar rather than inside the panel, so folding the
-panel away leaves the arpeggiator running, still switchable, and still able to let go of a
-chord. **Detach** is on that bar too, but it hides with the fold the way every other
-section's does. The section starts folded, so those two are usually all of it you can see.
+### Three lines
 
-**Hold off** releases the chord being held into the arp and stops the **Chain** if it is
-running. The arp itself keeps running and goes back to arpeggiating whatever you play. It is
-greyed out when there is nothing held and nothing chaining, and it is the way to stop a hold
-outright: clicking the lit pad restrikes the chord rather than letting it go. A running
-chain counts as something to let go of even in the gap where no chord happens to be
-sounding, because it will fire the next one at the coming bar line.
+There are **three arpeggiators**, A, B and C, and they run at once. Each has its own rate,
+shape, step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet against 1/4
+is a polyrhythm out of one plugin rather than three.
+
+**A, B and C on the Arp bar switch a line on**, one chip each. They live on the bar rather
+than inside the panel so folding it away leaves the arpeggiators running and still
+switchable. **B and C start off**, and with them off Keys behaves exactly as it did when
+there was one arpeggiator — which is also what a session saved before them does when you
+open it.
+
+**The panel edits one line at a time**, chosen by the **A / B / C tabs at the left of the
+slot row**. Everything on the panel follows that tab: the rate, the shape, the step lanes,
+the twelve slot cards, Bars and Chain. Each tab shows whether its line is on and the chord
+it is holding, so three tabs read as three arpeggiators at a glance. The panel is no taller
+for having them.
+
+### The macro view: all three at once
+
+The fourth tab, **All**, is where a polyrhythm gets built. It replaces the per-line band and
+the step editor with **three rows, one per line**, each holding:
+
+| | |
+|---|---|
+| **A / B / C** | that line on or off |
+| **LTCH** | Latch: keep that line arpeggiating after you let go, until a new chord arrives |
+| **KEYS** | does that line follow the keys you play, or only the chords you hand it? |
+| **Rate** | a knob, detented onto the divisions, with `<` `>` beside it and a **Sync / Hz** switch. A time division in Sync, a frequency in Hz. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
+| **< shape >** | its shape, including Pattern (whose step editor is on that line's own tab) |
+| **OCT** | Repeats: how many times it stacks the chord up the keyboard. The classic arp range |
+| **GATE** | how much of each step its notes fill. Short gates let another line through |
+| **CHANCE** | how often a step fires at all. Thin one line out and the other two show through |
+| **SWING** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
+| **OFFSET** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
+| **RAMP** and **TIME** | velocity ramp: over Time, that line moves toward Ramp per cent of what you played. Negative fades a held chord out, positive swells it |
+| **HUMAN** | nudges each hit a little late and a little quieter. At 0 the line is dead on the grid |
+| the chord | what that line is holding, or `...` while a quantized launch is waiting |
+| **Chain** | start that line's progression. Three chains at three rates is the point of the view |
+
+Eight knobs, two switches, a rate and a shape: every setting a regular arpeggiator has, three
+lines deep, on one screen.
+
+Under the three rows sits what they share: the **BPM** knob and **Quantize**.
+
+The knobs are the same rotary the band above uses for the same settings, with each column
+heading written once at the top rather than repeated down every row. Rate is a knob too, but it
+keeps its `<` `>` steppers: a knob is a drag target, and those are the click-only path to every
+division. Clicking **All** selects the view; you leave it by
+clicking A, B or C, because a tab selects rather than toggles.
+
+**All is a view, not a fourth line.** The current line stays whatever it was, so clicking a
+chord card still has one unambiguous target while all three are on screen; clicking A, B or C
+takes you back to that line's own controls. The panel is exactly as tall in this view as in
+any other, because the rows take the band's space rather than joining it.
+
+**The letter chip on the Pads bar says which line a chord card feeds**, and clicking it
+cycles A → B → C. It is the same choice as the tabs, so either moves both; it is on that bar
+because that is where the cards are, and because with the arp folded shut the tabs are off
+the screen while the cards are not. A card feeding a line wears that line's letter in its ring.
+
+**Detach** is on the Arp bar too, but it hides with the fold the way every other section's
+does. The section starts folded, so the line chips and Hold off are usually all of it you can
+see.
+
+**Hold off releases every line**, and stops every **Chain** that is running. It is one button
+on purpose: a release that only let go of the line the panel happened to be showing would
+leave the other two droning with nothing on a folded bar to stop them. The arpeggiators
+themselves keep running and go back to arpeggiating whatever you play. It is greyed out when
+nothing is held and nothing is chaining, and it is the way to stop a hold outright: clicking
+the lit pad restrikes the chord rather than letting it go. A running chain counts as something
+to let go of even in the gap where no chord happens to be sounding, because it will fire the
+next one at the coming bar line.
 
 **Shape decides how much of the panel exists.** The twelve shapes are plain arpeggios and
 show nothing but the controls below. The last entry, **Pattern**, opens the step editor and
@@ -597,7 +665,12 @@ in seconds instead.
 
 | Control | Group | What it does |
 |---------|-------|--------------|
-| **On** | header | Arp on or off. Everything else stays editable while it is off. |
+| **A** / **B** / **C** | bar | One per arpeggiator line: that line on or off. Everything else stays editable while a line is off. B and C default to off. |
+| **A / B / C tabs** | slot row | Which line the rest of the panel is editing. Each shows its line's on/off state and the chord it holds. |
+| **Keys** | Playback | Does this line arpeggiate what you *play*, or only the chords you hand it? On for all three by default. Turn it off and that line becomes a card player, independent of the keybed. |
+| **BPM** | All (macro) | The tempo the lines run at when there is no transport to follow: always in the standalone, and whenever the host is stopped. A host that is *playing* always wins, and a line whose rate is in Hz follows neither. The same tempo as the Controls section's BPM, not a second one. |
+| **Quantize** | All (macro) | **Off**, or 1/16, 1/8, 1/4, 1/2, 1 Bar, 2 Bars. Off fires a chord the instant you click it. Anything else holds the click until the next boundary, so a card can only ever land on the grid - Ableton's Quantization, for the arp. It holds the whole gesture: a slot's pattern, shape, rate and chord all arrive together. The line's row shows `...` while one is waiting. **It never delays the keys you play.** |
+| **Channel** | Playback | Where this line's notes go: **Global** (the plugin's own channel, and the old behaviour) or 1–16, for driving three different sounds in a multitimbral rack. It buys nothing in Keys Host until the hosted instrument is itself multitimbral. |
 | **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, **Random**, **Random Other** (never the same note twice running), **Random Once** (a shuffled order, kept for as long as the chord is held), **Chord** (every note of the chord on every step, so the arp plays rhythm instead of a run), or **Pattern** (opens the step editor). |
 | **Rate** | Pattern | A dial. In **Sync**, step length from 16 bars down to 1/64, detented onto the eleven divisions. In **Hz**, a free-running 0.031 to 32 Hz, which is the same span those divisions cover at 120 bpm. The Hz dial is exponential: ten octaves, a tenth of the travel each, so 1 Hz sits at the centre and a degree of the dial is the same *ratio* wherever you are on it. |
 | **Sync** / **Hz** | Pattern | Which unit the dial is in. Sync follows the host tempo and its bar grid; Hz ignores both and runs whether the transport rolls or not. The chip reads the live unit and lights in Hz. |
@@ -681,24 +754,43 @@ things and often belong to different slots.
 
 Right-clicking a slot offers Launch, Clear chord, Copy and Randomize, if you prefer a menu.
 
-### Getting a chord into the arp
+### Getting a chord into a line
 
-Two ways, both from the Pads section under the panel:
+Four ways, all from the Pads section under the panel. Each one answers "which line?"
+differently, which is the whole reason there are four.
 
-- **Click a chord card while the arp is on.** It hands that chord to the arp and leaves it
-  there, and the pad wears a bright ring while it is the one feeding it. Click **another**
-  card to swap. Clicking the **lit** one again **strikes the chord afresh**, the way a second
+- **Click a chord card while any line is on.** It hands that chord to the **current** line —
+  the letter on the Pads bar chip — and leaves it there, and the pad wears a bright ring with
+  that line's letter in it while it is the one feeding it. Click **another** card to swap that
+  line's chord. Clicking the **lit** one again **strikes the chord afresh**, the way a second
   press on a beat pad re-fires it: it is a retrigger, not a release, and it never doubles up
   on the notes it is already holding. To stop the hold outright, use **Hold off** on the arp
   bar (or **Stop** in the panel, which is the same button). The live chord card hands its
-  chord over the same way, and takes no ring. With the arp **off**, the pads play beat-pad
-  style exactly as they always have, and switching the arp off while a card is feeding it
+  chord over the same way, and takes no ring. With every line **off**, the pads play beat-pad
+  style exactly as they always have, and switching a line off while a card is feeding it
   releases that chord. (This used to need arming a separate **To Arp** toggle, which looked
   like it did nothing whenever the arp was off; it went on 2026-07-27.)
 
   One card does release rather than retrigger: a card you **cleared** while it was still the
-  one feeding the arp. It keeps the ring with no notes behind it, so there is nothing to
+  one feeding a line. It keeps the ring with no notes behind it, so there is nothing to
   re-play, and the click means the only other thing it can mean. That is the ring's own way
   out, and the reason a cleared card is still drawn with one.
+- **Drag a chord card onto a line's tab.** It goes to *that* line, whichever one the chip
+  says, and that line becomes the current one — you aimed at it, so the next click should
+  follow the same aim.
+- **Drag a chord card onto a line's row in the macro view.** The same thing, with a target the
+  size of the row rather than the size of a tab: the whole row lights while the card is over
+  it, anywhere on it, knobs included. This is the way to build a polyrhythm out of chord cards
+  — three rows on screen, drop a different chord on each. The view does not move when you let
+  go; you dropped onto the line itself, and being thrown into that line's deep controls is not
+  what the gesture asked for.
+- **Drag a chord card onto a slot card.** It binds the chord to that slot, in whichever line
+  the tabs are showing, ready to launch later. This is the left-click way to do what **Send to
+  arp slot** does from the menu, and it exists because a drag is a target picker and a click
+  is not.
 - **Send to arp slot**, in a pad's right-click menu, parks a copy of that chord in one of
   the twelve slots to launch later.
+
+Neither drag can lose a chord. Dragging a card off the strip normally clears it; a drop that
+lands on a tab or a slot **copies** instead, and a drop that misses everything leaves the card
+exactly where it was.

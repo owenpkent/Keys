@@ -5,6 +5,115 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a macro view, so a polyrhythm is built from one screen
+
+Owen: "I want a poly arp view where you can view the rate and shape of all three arpeggiators
+at once ... the goal is to be able to create complex polyrhythms from one view."
+
+A **fourth tab** joins A, B and C at the left of the slot row: **All**. It swaps the panel's
+per-line band and step editor for **three rows, one per line**, each carrying that line's
+switch, rate (with its Sync/Hz unit), shape, **gate**, **chance** and **swing**, the chord it
+is holding, and its own **Chain** button. Under them sits what all three share: a **BPM** knob
+and **Launch Quantize**.
+
+- **It is a view, not a fourth line.** The current line stays whatever it was, so a chord card
+  click still has one unambiguous target while all three are on screen. Clicking A, B or C
+  goes back to that line's deep controls.
+- **The panel does not grow.** The macro rows take the band's space rather than joining it.
+- **Eight knobs a row** - Oct, Gate, Chance, Swing, Offset, Ramp, Time, Human - plus **Latch**
+  and **Keys** switches: every setting a regular arpeggiator has, three lines deep, on one
+  screen. They are the same machined rotary the band above uses for the same parameters, with
+  each column heading written once at the top rather than repeated down every row.
+- Rate is a knob too, detented onto the divisions, but it keeps its `<` `>` steppers: a knob is
+  a drag target, and those are the click-only path to every division in both units.
+- Clicking **All** selects the view; you leave it by clicking A, B or C. A tab selects, it does
+  not toggle.
+- The view you left is remembered, like the line you left.
+
+Fixed on the way: an empty **STEPS** box was ruled beside the band on any plain shape, because
+coming back from the macro view restored every group instead of leaving STEPS to follow Shape.
+
+### Added: Launch Quantize, so a chord can only land on the grid
+
+Owen: "there's a setting in Ableton where the arpeggiator, if you start a new note or something
+that goes into the next sequence, so it sounds good always. I don't know what it's called."
+
+It is Ableton's transport-bar **Quantization**, and Keys has it now as `arpQuantize`:
+**Off / 1/16 / 1/8 / 1/4 / 1/2 / 1 Bar / 2 Bars**, in the macro view's shared row.
+
+With it set, a gesture that *fires* something - clicking a chord card, launching a slot,
+dragging a card onto a line tab - is held until the next boundary and then happens whole: the
+pattern, the shape, the rate and the chord all land together, on the grid. The line's row shows
+`...` while one is waiting. **Off is the default**, which is exactly what Keys did before.
+
+**It never delays the keys you play.** Playing a note is playing an instrument, and an
+instrument that waits half a bar before it sounds is broken. It is also global rather than
+per line: the whole value of it is that the three lines land *together*.
+
+Retrigger, the other half of "sounds good always", was already here - it restarts a line's
+*pattern* every N beats where Quantize decides when a new *chord* starts. It stays in the
+per-line Playback group.
+
+The **BPM knob** in the macro view is the same `bpm` parameter the Controls section has, not a
+second tempo. Worth knowing what it does and does not do: it is the tempo the lines run at when
+there is no transport to follow - always in the standalone, and whenever the host is stopped.
+A host that is *playing* always wins, and a line whose rate is in Hz follows neither.
+
+### Added: three arpeggiators, so Keys can hold a polyrhythm
+
+Owen: "I had the idea of having three arpeggiators so we can get polyrhythms and keep keeping
+what we currently have, but having three of them, and then being able to feed cards into
+different lines so we can really get some interesting things."
+
+Keys now runs **three independent arpeggiator lines, A, B and C**. Each has its own rate, shape,
+step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet against 1/4 is three
+chips and two dials rather than three instances of the plugin.
+
+- **The arp bar carries A, B and C** where a single On used to be. Each is that line's power
+  switch, and it stays on the bar so a line can be brought in or out with the section folded.
+  **Hold off is still one button** and still means "let go": it releases every line and stops
+  every chain, because a hold you cannot see is a hold you cannot find.
+- **Three tabs at the left of the slot row pick the line the panel edits.** The band, the step
+  lanes, the twelve slot cards, Bars and Chain all follow the tab. **The panel is exactly as
+  tall as it was** - a tab is 34 px inside a row that was already 58.
+- **Cards go where you aim them.** A click on a chord card feeds the *current* line, shown as a
+  letter chip on the Pads bar next to Fill and Regen (click to cycle A, B, C) and mirrored by
+  the tabs. A card that is feeding a line wears that line's letter in its ring.
+- **Drag a chord card onto a line's row in the macro view** to hand it straight to that line -
+  a target the size of the row rather than the size of a tab, lighting anywhere on it, knobs
+  included. Three rows on screen with a different chord dropped on each is how a polyrhythm gets
+  built out of chord cards. The view does not move when you let go: you dropped onto the line
+  itself, and being thrown into that line's deep controls is not what the gesture asked for.
+- **Drag a chord card onto an arp slot to bind it there**, or onto a line tab to hand it over
+  now. This is the left-click twin *Send to arp slot* has never had - that menu item was an
+  owner-sanctioned exception because binding to one slot needs a target picker, and a drag is
+  one. The menu item stays, as the accelerator it always was.
+- **Keys**, per line: whether that line arpeggiates what you play, or only the chords you hand
+  it. On by default for all three, so switching a line on and playing does something.
+- **Channel**, per line: Global, or 1-16, for driving three different sounds in a multitimbral
+  rack. It buys nothing in Keys Host until the hosted instrument is itself multitimbral.
+
+**Nothing about the arpeggiator you already have has changed.** Line A registers under exactly
+the parameter ids it always has - `arpRate`, `arpSwing`, `arpDirection` - so every saved session,
+every automation lane and every MCP script still lands on the arp it was written for. B and C are
+`arp2*` / `arp3*`, appended, and both start switched off: a session saved before this opens
+sounding identical. Its twelve slots still sit exactly where they did in the saved tree, with B
+and C's hanging off child nodes an older build simply ignores.
+
+**Two parameters do appear on line A**: `arpKeys` and `arpChannel`. Both default to what Keys did
+before there were lines (listen to the keys; use the global channel), so an older session is
+unaffected either way.
+
+`ArpEngine.h` is untouched. It never knew how many of it there were, which is why three of them
+cost a routing layer and no engine work. That layer is per-line MIDI queues rather than a
+per-pitch ownership mask: a mask lets the message thread clear a pitch's owner before the
+matching note-off has been drained, which strands that note in an engine's held set with nothing
+left that can release it. The `noteRefs` refcount is now per destination stream for the same
+reason - a pitch held into line B must not suppress the same pitch played to the track output.
+
+MCP: `get_arp_pattern`, `set_arp_pattern`, `recall_arp_pattern` and `store_arp_pattern` take an
+optional `line` (0-2), defaulting to 0, and `get_state` reports all three.
+
 ### Fixed: Notes now really does go to 11
 
 The Notes range advertises 2 to 11 and the tooltip promises that above five "the stack keeps

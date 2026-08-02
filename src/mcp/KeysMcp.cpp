@@ -232,6 +232,22 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         obj->setProperty("arpVelRamp", text("arpVelRamp"));
         obj->setProperty("arpHumanize", text("arpHumanize"));
         obj->setProperty("activeArpPattern", processor.arpActivePattern());
+        // All three lines, so a client can see the whole polyrhythm rather than line A of it.
+        {
+            juce::Array<juce::var> arpLines;
+            for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+            {
+                auto* l = new juce::DynamicObject();
+                l->setProperty("line", n);
+                l->setProperty("on", processor.arpLineOn(n));
+                l->setProperty("activePattern", processor.arpActivePattern(n));
+                l->setProperty("heldChord", processor.arpHeldName(n));
+                l->setProperty("launchedSlot", processor.arpLaunchedSlot(n));
+                l->setProperty("chaining", processor.chainRunning(n));
+                arpLines.add(juce::var(l));
+            }
+            obj->setProperty("arpLines", arpLines);
+        }
         // Progression mode: -1 when it is not running, else the slot it is playing.
         obj->setProperty("arpChainSlot", processor.chainSlot());
         obj->setProperty("padPage", processor.padPage());
@@ -668,9 +684,12 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                      "slot, reads the live lanes (what's currently playing/showing in the "
                      "editor); with slot, reads that stored pattern (0..11) without "
                      "disturbing what's live.";
-    t.params = { { "slot", "integer", "Pattern slot 0..11. Omit to read the live lanes.", false } };
+    t.params = { { "slot", "integer", "Pattern slot 0..11. Omit to read the live lanes.", false },
+                 { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line Keys has always had.", false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
+        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
+                                      (int) args.getProperty("line", 0));
         auto* obj = new juce::DynamicObject();
         if (args.hasProperty("slot"))
         {
@@ -680,7 +699,7 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                 error = "slot out of range 0..11";
                 return {};
             }
-            const auto& pat = processor.arpPatternSlot(slot);
+            const auto& pat = processor.arpPatternSlot(slot, line);
             writeArpPatternInto(*obj, pat.value, pat.length, pat.clockDiv);
         }
         else
@@ -690,13 +709,14 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
             for (int l = 0; l < ArpEngine::numLanes; ++l)
             {
                 for (int s = 0; s < ArpEngine::maxSteps; ++s)
-                    values[(size_t) l][(size_t) s] = processor.arp.lanes.value[(size_t) l][(size_t) s].load();
-                lengths[(size_t) l] = processor.arp.lanes.length[(size_t) l].load();
-                clockDivs[(size_t) l] = processor.arp.lanes.clockDiv[(size_t) l].load();
+                    values[(size_t) l][(size_t) s] = processor.arpLine(line).lanes.value[(size_t) l][(size_t) s].load();
+                lengths[(size_t) l] = processor.arpLine(line).lanes.length[(size_t) l].load();
+                clockDivs[(size_t) l] = processor.arpLine(line).lanes.clockDiv[(size_t) l].load();
             }
             writeArpPatternInto(*obj, values, lengths, clockDivs);
         }
-        obj->setProperty("active", processor.arpActivePattern());
+        obj->setProperty("active", processor.arpActivePattern(line));
+        obj->setProperty("line", line);
         return juce::var(obj);
     };
     return t;
@@ -725,6 +745,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "refreshes the live lanes too if that slot happens to be the active one.";
     t.params = {
         { "slot", "integer", "Pattern slot 0..11 to write. Omit to write the live lanes.", false },
+        { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line Keys has always had.", false },
         { "note", "array", "Per-step note lane (-1..8).", false },
         { "octave", "array", "Per-step octave lane (-3..3).", false },
         { "velocity", "array", "Per-step velocity lane (10..200).", false },
@@ -772,7 +793,9 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         }
 
         const bool hasSlot = args.hasProperty("slot");
-        const int slot = hasSlot ? (int) args.getProperty("slot", -1) : processor.arpActivePattern();
+        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
+                                      (int) args.getProperty("line", 0));
+        const int slot = hasSlot ? (int) args.getProperty("slot", -1) : processor.arpActivePattern(line);
         if (hasSlot && (slot < 0 || slot >= KeysProcessor::numArpPatterns))
         {
             error = "slot out of range 0..11";
@@ -781,7 +804,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
 
         if (hasSlot)
         {
-            auto pattern = processor.arpPatternSlot(slot); // copy
+            auto pattern = processor.arpPatternSlot(slot, line); // copy
             for (const auto& e : edits)
             {
                 for (size_t s = 0; s < e.values.size(); ++s)
@@ -790,22 +813,23 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             }
             for (const auto& cd : clockDivEdits)
                 pattern.clockDiv[(size_t) cd.first] = cd.second;
-            processor.setArpPatternSlot(slot, pattern);
+            processor.setArpPatternSlot(slot, pattern, line);
         }
         else
         {
             for (const auto& e : edits)
             {
                 for (size_t s = 0; s < e.values.size(); ++s)
-                    processor.arp.lanes.value[(size_t) e.lane][s].store(e.values[s]);
-                processor.arp.lanes.length[(size_t) e.lane].store((int) e.values.size());
+                    processor.arpLine(line).lanes.value[(size_t) e.lane][s].store(e.values[s]);
+                processor.arpLine(line).lanes.length[(size_t) e.lane].store((int) e.values.size());
             }
             for (const auto& cd : clockDivEdits)
-                processor.arp.lanes.clockDiv[(size_t) cd.first].store(cd.second);
+                processor.arpLine(line).lanes.clockDiv[(size_t) cd.first].store(cd.second);
         }
 
         auto* obj = new juce::DynamicObject();
         obj->setProperty("slot", slot);
+        obj->setProperty("line", line);
         obj->setProperty("lanesSet", (int) edits.size());
         obj->setProperty("clockDivsSet", (int) clockDivEdits.size());
         return juce::var(obj);
@@ -820,7 +844,8 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
     t.description = "Make a stored pattern (0..11) the active/live one, same as "
                      "clicking its pattern button. Snapshots the current live lanes into "
                      "their slot first, so nothing being edited is lost.";
-    t.params = { { "slot", "integer", "Pattern slot 0..11 to make active.", true } };
+    t.params = { { "slot", "integer", "Pattern slot 0..11 to make active.", true },
+                 { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line Keys has always had.", false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
@@ -829,7 +854,8 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
             error = "slot out of range 0..11";
             return {};
         }
-        processor.recallArpPattern(slot);
+        processor.recallArpPattern(slot, juce::jlimit(0, KeysProcessor::numArpLines - 1,
+                                                     (int) args.getProperty("line", 0)));
         return juce::var(true);
     };
     return t;
@@ -842,9 +868,12 @@ okstudio::mcp::Tool KeysMcp::toolStoreArpPattern()
     t.description = "Snapshot the live lanes (whatever is currently playing/being edited) "
                      "into the active pattern slot, same as what happens automatically "
                      "just before the editor switches patterns.";
-    t.run = [this](const juce::var&, juce::String&) -> juce::var
+    t.params = { { "line", "integer", "Arpeggiator line 0..2 (A, B, C). Omit for A, the line "
+                                      "Keys has always had.", false } };
+    t.run = [this](const juce::var& args, juce::String&) -> juce::var
     {
-        processor.storeActiveArpPattern();
+        processor.storeActiveArpPattern(juce::jlimit(0, KeysProcessor::numArpLines - 1,
+                                                    (int) args.getProperty("line", 0)));
         return juce::var(true);
     };
     return t;
