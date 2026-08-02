@@ -14,10 +14,13 @@ mute row appear between the band and the slots.
 
 ![The arpeggiator in Pattern shape](../assets/screenshots/arpeggiator.png)
 
-The **All** tab: three lines at once, over the tempo and the Launch Quantize they share. Same
-panel height as a shape, because the rows take the band's space rather than joining it.
+The **All** tab, and the view Keys opens in: both lines at once, over the tempo and the Launch
+Quantize they share. Shorter than a shape, because two rows take less than the band they
+replace, and that slack goes to the chord strip below.
 
-![The macro view, all three lines at once](../assets/screenshots/arpeggiator-macro.png)
+![The macro view, both lines at once](../assets/screenshots/arpeggiator-macro.png)
+
+> The screenshot above still shows three rows; it predates 2026-08-02. See **Two lines** below.
 
 ## Placement and contract
 
@@ -36,6 +39,31 @@ is exactly today's.
 ppqPosition, isPlaying). Keys historically never reads the playhead; the arp stage
 follows the Contour/Lattice model instead. `CLAUDE.md` carries the amendment: the
 arp is the only playhead consumer in Keys.
+
+## Two lines (2026-08-02)
+
+Owen: *"I only wanna view two arpeggiators in this window, and I wanna be able to drag a chord
+from below to each one."*
+
+**The section below describes three, and everything in it still holds - it is where the
+machinery is written down.** What changed a day later is how many of it the product has: line C
+came out, and the count now lives in one place, `KeysProcessor::uiArpLines`.
+
+- **Two constants, not one.** `numArpLines` is still 3: the engines, the storage and the `arp3*`
+  parameter ids are untouched, because dropping parameters from the layout is what breaks every
+  saved session. `uiArpLines` is 2 and is what the UI counts off - no chip, no tab, no macro row
+  is built for a line past it.
+- **`arpLineOn()` is the one gate.** It answers false above `uiArpLines`, which makes line C
+  inert everywhere at once: `runArpLines` skips its engine and its keys, `cardsFeedArp` stops
+  counting it, Hold off greys correctly. A session saved with C running opens with C silent,
+  which is the right trade against an arpeggiator no control on screen can stop.
+- **`arpCurrentLine()` clamps to `uiArpLines`**, so a session saved with C current opens on B -
+  a current line the letter chip cannot name is a card click with nowhere to go.
+- **`layout.arpMacro` defaults true**, so a fresh instance opens with both lines on screen over
+  the strip you drag from. The A/B tabs are still how you reach a line's step lanes and twelve
+  slots, which are per-line and have nowhere to live in a row.
+
+Raising `uiArpLines` back to 3 is all it would take to bring C back.
 
 ## Three lines (2026-08-01)
 

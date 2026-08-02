@@ -429,13 +429,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Lock Influence, the Markov chains and the audition tray, in a window of their own. A second
     // click while it is already up raises it rather than building another - there is exactly
     // one of these, and a window you cannot find is worse than one that is shut.
-    // Where a clicked chord card goes. Not a combo: three values, and a chip that cycles is
-    // one click where a combo is a click, a travel and a second click - the same argument the
+    // Where a clicked chord card goes. Not a combo: a handful of values, and a chip that cycles
+    // is one click where a combo is a click, a travel and a second click - the same argument the
     // < > steppers beside Shape are made of.
     genChip(arpTargetButton, "Arp target line",
-            "Which arpeggiator line a click on a chord card feeds. Click to cycle A, B, C. "
-            "The same choice as the A/B/C tabs in the arp panel, kept here so it is reachable "
-            "with the arp folded away.",
+            "Which arpeggiator line a click on a chord card feeds. Click to cycle A, B. The "
+            "same choice as the A/B tabs in the arp panel, kept here so it is reachable with "
+            "the arp folded away - or drag a card straight onto a line's row instead, which "
+            "aims without changing what this says.",
             [this] { cycleArpTargetLine(); });
     refreshArpTargetButton();
     genChip(chordGenButton, "Chord generator window",
@@ -512,17 +513,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // bar that is still there with the section folded. A is the switch that has always been
     // here, under the same parameter; B and C are new and start off, which is what makes a
     // session saved before them sound identical.
-    for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
     {
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
         auto& b = arpOnButtons[(size_t) n];
         b.setButtonText(letter);
-        // Distinct accessible names: three buttons reading "On" are three identical names to
+        // Distinct accessible names: two buttons reading "On" are two identical names to
         // UI Automation, which takes the first match (see the Detach buttons for the same rule).
         b.setTitle("Arp line " + letter);
         b.setTooltip("Arpeggiator line " + letter + ". Lit, it arpeggiates what you play and "
-                     "whatever chord card you send it. Three lines at three rates is the "
-                     "polyrhythm; Hold off, at the end of this bar, lets all three go.");
+                     "whatever chord card you send it. Two lines at two rates is the "
+                     "polyrhythm; Hold off, at the end of this bar, lets both go.");
         addAndMakeVisible(b);
         arpOnAtts[(size_t) n] = std::make_unique<ButtonAtt>(
             processor.apvts, KeysProcessor::arpParamId(n, KeysProcessor::apOn), b);
@@ -839,7 +840,7 @@ void KeysEditor::refreshSectionPanels()
 
 void KeysEditor::cycleArpTargetLine()
 {
-    const int next = (processor.arpCurrentLine() + 1) % KeysProcessor::numArpLines;
+    const int next = (processor.arpCurrentLine() + 1) % KeysProcessor::uiArpLines;
     processor.setArpCurrentLine(next);
     // Through the panel when it is open, so its tabs, its attachments and its step lanes all
     // move with the chip. setEditLine writes the processor too, which is harmlessly the value
@@ -1502,11 +1503,11 @@ void KeysEditor::timerCallback()
     // pattern and no chord lights its ring with nothing sounding and no chain running, and
     // releaseArpChord() is what clears it, so the click has work to do and the chip was
     // greying itself out in front of it.
-    // Across all three lines, because the button releases all three. One line holding is
-    // enough for there to be something to let go of.
+    // Across every line, because the button releases every line. One line holding is enough
+    // for there to be something to let go of.
     {
         bool anyHold = processor.anyArpHold();
-        for (int n = 0; n < KeysProcessor::numArpLines && ! anyHold; ++n)
+        for (int n = 0; n < KeysProcessor::uiArpLines && ! anyHold; ++n)
             anyHold = processor.arpLaunchedSlot(n) >= 0;
         arpHoldOffButton.setEnabled(anyHold);
     }
@@ -1718,10 +1719,13 @@ void KeysEditor::resized()
         // their section - the pad pages, Knobs - are still 22 (reduced(1, 2)).
         auto bar = layoutDetachRow(secArp, arpBar.contentArea(), true);
         bar.removeFromRight(6);
-        // Three line switches where one On used to be, C rightmost so they read A B C left to
-        // right. 40 px each rather than the old 68: a letter needs no more, and three of them
-        // plus Hold off is already most of what this end of the bar can hold.
-        for (int n = KeysProcessor::numArpLines - 1; n >= 0; --n)
+        // One line switch per line where a single On used to be, laid out from the right so
+        // they read A B left to right. 40 px each rather than the old 68: a letter needs no
+        // more, and the switches plus Hold off is already most of what this end of the bar can
+        // hold. Counted from uiArpLines, so a line the editor built no button for takes no
+        // width - the buttons are plain members rather than pointers, and an unbuilt one is
+        // simply never added to the editor.
+        for (int n = KeysProcessor::uiArpLines - 1; n >= 0; --n)
         {
             arpOnButtons[(size_t) n].setBounds(bar.removeFromRight(42).withSizeKeepingCentre(40, 24));
             bar.removeFromRight(2);

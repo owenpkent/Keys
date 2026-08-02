@@ -5,6 +5,36 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: two arpeggiator lines, both on screen, and cards that sound on release
+
+Owen: "I only wanna view two arpeggiators in this window, and I wanna be able to drag a chord
+from below to each one. So the chord shouldn't play right away when you click it. You should be
+able to drag it."
+
+**Two lines, A and B.** The C line, its chip, its tab and its macro row are gone. Keys now opens
+in the **All** view, so both lines are in front of you over the chord strip you drag from, and
+the arp panel is 66 px shorter than it was.
+
+- **No saved session breaks.** Line C's parameters (`arp3*`) are still registered and still
+  written, exactly where they were; nothing reaches them. A session that had C switched on opens
+  with C silent rather than arpeggiating something no control on screen can stop, and a session
+  that had C as the current line opens on B. One constant, `KeysProcessor::uiArpLines`, is the
+  whole of it.
+- The A/B tabs still open a line's deep controls: the step lanes and the twelve slots are
+  per-line and have nowhere to live in a macro row.
+
+**A chord card sounds when you let go of it, not when you press it.** Every gesture that starts
+on a card now begins silently, and the release decides what it was:
+
+- **Click** a card and it auditions for 800 ms - the same length, and now the same gesture, as
+  the generator tray's own audition. Exclusive, Sustain and Latch apply exactly as before.
+- **Drag** a card and it makes no sound at all. Onto another pad to rearrange, onto an arp slot
+  to bind it there, onto a line's row or tab to hand that line the chord, off the strip to
+  clear it.
+- With an arp line switched on, a click still hands the card to that line and holds it there.
+  **This is the fix that matters**: that path used to fire on press *and* cancel the drag, so a
+  card could not be dragged at all in the one mode where dragging it onto a line is the point.
+
 ### Added: a macro view, so a polyrhythm is built from one screen
 
 Owen: "I want a poly arp view where you can view the rate and shape of all three arpeggiators

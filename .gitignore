@@ -17,3 +17,9 @@ Thumbs.db
 # close_running and find_cmake), so importing it leaves a cache directory behind.
 __pycache__/
 *.pyc
+
+# Reference manuals for the hardware and plugins the design borrows from, dropped in the
+# repo root while reading them. They are third-party PDFs and they are large, so they are
+# research material sitting next to the code rather than part of it. Anything worth keeping
+# out of one belongs in docs/ as our own prose.
+*.pdf

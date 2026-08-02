@@ -445,6 +445,14 @@ const ArpEngine& KeysProcessor::arpLine(int line) const
 
 bool KeysProcessor::arpLineOn(int line) const
 {
+    // The one choke point for "does this line exist". A line the UI does not show has no way to
+    // be switched off either, so it must not be able to sound: a session saved while line C was
+    // running would otherwise arpeggiate forever with no control anywhere on screen. Answering
+    // false here makes it inert everywhere at once - runArpLines skips its engine and its keys,
+    // cardsFeedArp stops counting it, and the bar's Hold off greys correctly - while its stored
+    // parameter keeps whatever value it had, ready for the day uiArpLines goes back to three.
+    if (line < 0 || line >= uiArpLines)
+        return false;
     return apvts.getRawParameterValue(arpParamId(line, "On"))->load() > 0.5f;
 }
 
@@ -458,12 +466,14 @@ bool KeysProcessor::cardsFeedArp() const
 
 int KeysProcessor::arpCurrentLine() const
 {
-    return juce::jlimit(0, numArpLines - 1, layout.arpLine);
+    // Clamped to what the UI shows, not to what exists: a session saved with C current has to
+    // come back pointing at a line the letter chip can name and a card click can reach.
+    return juce::jlimit(0, uiArpLines - 1, layout.arpLine);
 }
 
 void KeysProcessor::setArpCurrentLine(int line)
 {
-    layout.arpLine = juce::jlimit(0, numArpLines - 1, line);
+    layout.arpLine = juce::jlimit(0, uiArpLines - 1, line);
 }
 
 KeysProcessor::KeysProcessor()
@@ -2173,7 +2183,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // Absent before there were three lines, and line A is the right answer for those: it is
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
-    layout.arpMacro = flag("arpMacro", false);
+    layout.arpMacro = flag("arpMacro", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

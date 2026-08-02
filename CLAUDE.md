@@ -140,6 +140,18 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   (`setInterceptsMouseClicks(false, false)`), writes no parameter and plays no note. It draws the
   current source and the walk that produced the tray. If it ever needs to *do* something, that is
   a different component.
+- **Two arpeggiator lines, A and B** (2026-08-02, Owen: "I only wanna view two arpeggiators in
+  this window, and I wanna be able to drag a chord from below to each one"). Everything in the
+  bullet below still describes the machinery; what changed is the count, and it lives in one
+  place. `numArpLines` stays **3** - the engines, the storage and the `arp3*` parameter ids are
+  untouched, because dropping parameters from the layout is what breaks saved sessions -
+  and **`uiArpLines` is 2**, which is what the UI counts off and what `arpLineOn()` gates on.
+  That one gate makes line C inert everywhere at once (no engine run, no keys, `cardsFeedArp`
+  stops counting it) rather than leaving an arpeggiator running that nothing on screen can stop.
+  `arpCurrentLine()` clamps to it too, so a session saved with C current opens on B.
+  **`layout.arpMacro` defaults true**: Keys opens in the macro view with both lines on screen
+  over the chord strip, because dragging a card up onto a line's row is the point of the view.
+  Raising `uiArpLines` back to 3 brings C back.
 - **Three arpeggiator lines, A B C** (2026-08-01, Owen: "three arpeggiators so we can get
   polyrhythms and keep keeping what we currently have ... and then being able to feed cards into
   different lines"). Three `ArpEngine`s, each with its own rate, shape, step lanes, twelve slots,
@@ -229,6 +241,18 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   this back into Sync - an absent parameter keeps the live instance's current value rather than
   resetting it, so without that a Hz session would reopen in Sync at whatever division it
   happened to hold, silently.
+- **A chord card sounds on release, never on press** (2026-08-02, Owen: "the chord shouldn't
+  play right away when you click it. You should be able to drag it"). `ChordPads::mouseDown` is
+  now silent and does nothing but remember where the press landed; `mouseUp` decides which
+  gesture it was, in the same order the press used to test in. A click auditions the chord for
+  `auditionMs` (800, the generator tray's own length, so hearing a chord is one gesture
+  everywhere); a drag makes no sound at all. **The bug this fixes is not the blurt.** With an
+  arp line on, the press branch handed the card to that line *and cleared `dragSource`*, so a
+  card could not be dragged in the one mode where dragging it onto a line is the whole point.
+  Sustain, Latch and Exclusive are untouched: the audition timer calls the same
+  `releaseChordPad` the old mouse-up did and they decide what it means. `endAudition()` is
+  called first thing on every left click, before any early return, so nothing is ever left
+  ringing with no owner.
 - **The chord pads and the arpeggiator are each a section of their own**, stacked above the
   keyboard, so a chord card is on screen whatever else is open. **There is no centre view**
   (2026-07-30): the arp stopped being one on 2026-07-25, Chords went the day the generator lost

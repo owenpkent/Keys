@@ -162,6 +162,19 @@ public:
     // chain. Line 0 is the arpeggiator that has always been here, down to its parameter IDs,
     // and with lines 1 and 2 off nothing about it is different.
     static constexpr int numArpLines = 3;
+    // How many of them the product actually has: **two**, by Owen's call on 2026-08-02 ("I only
+    // wanna view two arpeggiators in this window"). Three rows fit, but two fit *comfortably*,
+    // and the point of the view is dragging a chord card up from the strip below onto either
+    // line - a target you have to aim at is a target he cannot use.
+    //
+    // Two constants rather than one because line C's *parameters* stay registered. Dropping them
+    // from the layout is what breaks every saved session (the invariant in CLAUDE.md), so the
+    // storage, the engines and the `arp3*` ids all stay exactly where they were and nothing
+    // reaches them: `arpLineOn` answers false above this bound, which makes line C inert at the
+    // one place the audio stage asks, and the UI builds no chip, tab or row for it. Raising this
+    // back to `numArpLines` is all it takes to bring C back.
+    static constexpr int uiArpLines = 2;
+    static_assert(uiArpLines <= numArpLines, "the UI cannot show a line that has no engine");
     ArpEngine& arpLine(int line);
     const ArpEngine& arpLine(int line) const;
 
@@ -374,7 +387,12 @@ public:
         // ...and whether it is showing the macro view instead of that line's own controls.
         // Same kind of state and the same reason it lives here: the panel is destroyed every
         // time the section folds, and Owen should get back the view he left.
-        bool arpMacro = false;
+        //
+        // **Default true from 2026-08-02**, which is what "view two arpeggiators" means in
+        // practice: a fresh instance opens with both lines on screen as rows, over the chord
+        // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
+        // slots, which are per-line and have nowhere to live in a row.
+        bool arpMacro = true;
 
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 

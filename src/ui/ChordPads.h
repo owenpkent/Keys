@@ -37,7 +37,17 @@ namespace keys
 //
 // The pad definitions and playback live in the processor, so they persist with the session
 // and keep sounding independent of the editor. This is just the view/controller.
-class ChordPads : public juce::Component
+//
+// **A card sounds on release, never on press** (2026-08-02, Owen: "the chord shouldn't play
+// right away when you click it. You should be able to drag it"). Every gesture that starts on a
+// card - play it, hand it to an arp line, drag it onto a pad, an arp slot or an arp row - now
+// begins with a completely silent mouseDown, and mouseUp is where it is decided which of them
+// this one was. Pressing to play and releasing to stop was the older, more instrument-like
+// reading, and it cost too much: starting a drag blurted the chord every time, and with an arp
+// line switched on the press *consumed* the click and cleared `dragSource`, so a card could not
+// be dragged at all in the one mode where dragging it onto a line is the whole point.
+class ChordPads : public juce::Component,
+                  private juce::Timer
 {
 public:
     explicit ChordPads(KeysProcessor&);
@@ -149,10 +159,20 @@ private:
     std::vector<int> currentNotes;
     juce::String currentName;
 
+    // A click sounds the chord for a fixed length and then lets it go, because the button is
+    // already up by the time the note starts and there is no second event coming to end it.
+    // 800 ms is the generator's own audition length (ChordGenMenu), so hearing a chord is the
+    // same gesture and the same duration wherever you do it. Sustain and Latch still apply:
+    // this calls releaseChordPad, exactly as the old mouse-up did, and they decide what that
+    // means. Clicking anything else cuts a running audition short first.
+    static constexpr int auditionMs = 800;
+    void timerCallback() override;
+    void endAudition();
+
     int externalDropSlot = -1; // pad a cross-window drag is currently over, or -1
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
-    int playing = -1;      // pad held down and sounding (beat-pad momentary play)
-    bool playingLive = false; // the live card is held down and sounding its chord
+    int playing = -1;      // pad sounding out its audition, and lit while it does
+    bool playingLive = false; // the live card is sounding its chord
     bool dragging = false;
     juce::Point<float> downPos, dragPos;
 
