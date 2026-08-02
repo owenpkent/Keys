@@ -89,12 +89,26 @@ public:
     // Source setting still arrives through one door.
     void setAll(const std::vector<KeysProcessor::ChordPad>& candidates);
 
-    // Reroll only if a generator setting has moved since the last look. The panel's 15 Hz timer
-    // calls this; it is a poll rather than a listener because the settings are APVTS parameters
-    // and can move from the Pads bar, the host or a session load as well as from this window.
-    // The page's locked chords are deliberately *not* part of the signature: they feed Lock
-    // Influence, so including them would reroll the whole tray every time you committed a card.
-    void refreshForSettings();
+    // What is in the tray right now, for the source diagram to draw the walk that produced it.
+    // Read-only and by reference: SourceViz is a picture of this, never a second copy of it.
+    const std::vector<KeysProcessor::ChordPad>& candidates() const { return cells; }
+
+    // Whether a generator setting has moved since the tray was last filled, so the window can
+    // *say* the candidates are stale rather than acting on it.
+    //
+    // **Changing a setting generates nothing** (Owen, 2026-08-01: "I don't want it to auto
+    // generate when you change a source"). The tray rerolled itself on any settings change for
+    // part of that day, on the reasoning that sixteen answers to the old Key are worth nothing.
+    // That reasoning was right about the candidates and wrong about who decides: sweeping Source
+    // to read the seven of them threw away the tray six times on the way past, and a control you
+    // cannot explore without destroying your work is a control you stop touching. Generating is
+    // Fill and Regen and nothing else.
+    //
+    // A poll rather than a listener, because the settings are APVTS parameters and can move from
+    // the Pads bar, the host or a session load as well as from this window. The page's locked
+    // chords are deliberately *not* in the signature: they feed Lock Influence, so including them
+    // would mark the tray stale every time you committed a card.
+    bool settingsMovedSinceFill() const;
 
     // The drag's two ends plus its cleanup, all in *screen* coordinates - see the class comment
     // for why there is no other space these two windows share. Unset, the tray still auditions,

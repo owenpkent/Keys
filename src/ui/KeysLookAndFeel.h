@@ -88,9 +88,16 @@ namespace skin
     // not need to know who owns it. Falls back to cyan outside a Keys editor.
     Accent accentOf(const juce::Component&);
 
+    // Brightened on 2026-08-01 (Owen: "hard to read some text. too dark"). `textDim` was
+    // 0xff8a919c and `textFaint` 0xff5a6068, which are fine as *shades* and were chosen looking
+    // at them next to `text`. That is the wrong comparison: almost everything wearing them is
+    // 9 to 11 px uppercase with letter spacing - the section captions, the note list under every
+    // chord name - and small letterforms need far more contrast than large ones to read at the
+    // same effort. Judge these against the background at the size they are actually used, not
+    // against each other. `text` is unchanged; it was never the problem.
     const juce::Colour text      { 0xffe9ecf0 };
-    const juce::Colour textDim   { 0xff8a919c };
-    const juce::Colour textFaint { 0xff5a6068 };
+    const juce::Colour textDim   { 0xffb4bac4 };
+    const juce::Colour textFaint { 0xff8a919c };
 
     constexpr float radius = 6.0f;       // controls
     constexpr float panelRadius = 8.0f;  // panels / modules

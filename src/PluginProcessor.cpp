@@ -70,9 +70,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genMode", 1 }, "Generator Mode",
                                                       modes::names(), 0));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctave", 1 }, "Generator Octave", 2, 6, 4));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genTriads", 1 }, "Generate Triads", true));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genSevenths", 1 }, "Generate 7ths", true));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genNinths", 1 }, "Generate 9ths", false));
+    // genTriads / genSevenths / genNinths were here until 2026-08-01. They picked which chord
+    // *types* the weighted pool could draw from, by note count, and the three tick boxes that
+    // drove them became the Notes range. They are deleted rather than left unread: a parameter no
+    // control can reach but generation still obeys is the worst of both, and note count is now
+    // decided after the fact by `fitVoicing` for every source rather than by type filtering for
+    // one. An old session simply carries three entries nothing looks at, which APVTS ignores.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv0", 1 }, "Inversion Root", true));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv1", 1 }, "Inversion 1st", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv2", 1 }, "Inversion 2nd", false));
@@ -163,6 +166,41 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // Voice leading is not a source: it is a pass over whatever a source produced, so it stays on
     // screen under all seven. 0 leaves every voicing alone, 100 always takes the smoothest.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genSmooth", 1 }, "Voice Leading", 0, 100, 0));
+
+    // How many notes a chord has, and which registers it may sit in. Both are **ranges**, both
+    // are post-passes over whatever a source produced, and both therefore apply to all seven
+    // (Owen, 2026-08-01: "all of their options should have the option for how many notes and what
+    // inversion, and I'd actually like how many notes to go from two all the way up to 11, and an
+    // octave range").
+    //
+    // Two to eleven, not the 3/4/5 tick boxes these replace. Below three you get dyads, which are
+    // a real voicing and not a broken chord; above five the stack keeps climbing in thirds
+    // through the scale, so eleven is a chord covering every degree and then some. `genOctave`
+    // became a pair for the same reason: one octave puts sixteen chords in one register, and a
+    // range lets a page breathe. Nothing enforces min <= max here, because a parameter cannot see
+    // its sibling; the reader swaps them (see `noteCountRange` / `octaveRange`).
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 2, 11, 3));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 2, 11, 4));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctaveMax", 1 }, "Octave Max", 2, 6, 4));
+
+    // Lean the chords major or minor, whatever brain made them and whatever mode they are in.
+    // Zero is neutral and means "leave every third alone", which is why this one needs no tick
+    // box beside it: its off position is already a value on the dial.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genMajMin", 1 }, "Major / Minor", -100, 100, 0));
+
+    // The tick boxes (Owen, 2026-08-01: "check marks for the different sliders and options that
+    // enable or disable them for the generation process"). Ticked, the setting constrains
+    // generation; unticked, the generator is free and rolls that choice itself.
+    //
+    // Only the six settings where "free" is genuinely different from "zero" get one. Lock
+    // Influence, Smooth Voicing and Major/Minor already have an off position on their own dial,
+    // so a tick box beside them would be a second control for a thing the first one does.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseKey", 1 }, "Constrain Key", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseMode", 1 }, "Constrain Mode", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseOctave", 1 }, "Constrain Octave", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseNotes", 1 }, "Constrain Note Count", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseInversions", 1 }, "Constrain Inversions", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseCompliance", 1 }, "Constrain Scale Compliance", true));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "markovMode", 1 }, "Markov Mode",
                                                       juce::StringArray { "Major", "Minor", "Modal" }, 0));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "markovTemp", 1 }, "Markov Temperature",
@@ -1117,7 +1155,15 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             else
                 streamRest.addEvent(m, meta.samplePosition);
         }
-        midi.swapWith(streamRest);
+        // Copied back rather than swapped. `swapWith` is the cheaper move and was what this did,
+        // but it hands our `ensureSize`d storage to the host's buffer and keeps the host's in
+        // `streamRest` - so the one buffer prepareToPlay sized for this is the one we give away
+        // on the first block, and every block after that partitions into whatever capacity the
+        // host happened to have. `clear()` does not shrink, so it settles, but "settles" is not
+        // the guarantee the no-allocation-on-the-audio-thread rule asks for. The copy is of the
+        // non-note events alone (CCs, bend, clock), which is a handful of bytes a block.
+        midi.clear();
+        midi.addEvents(streamRest, 0, -1, 0);
         for (int n = 0; n < numArpLines; ++n)
             if (listens[(size_t) n])
                 lines[(size_t) n].in.addEvents(keyNotes, 0, numSamples, 0);

@@ -114,6 +114,135 @@ reason - a pitch held into line B must not suppress the same pitch played to the
 MCP: `get_arp_pattern`, `set_arp_pattern`, `recall_arp_pattern` and `store_arp_pattern` take an
 optional `line` (0-2), defaulting to 0, and `get_state` reports all three.
 
+### Fixed: Notes now really does go to 11
+
+The Notes range advertises 2 to 11 and the tooltip promises that above five "the stack keeps
+climbing in thirds through the mode, so 11 covers every degree". It did not: every count above
+seven came back as seven, and under a pentatonic mode as *three*, with the two-octave stack
+flattened into a one-octave cluster.
+
+`fitVoicing` grew the chord and *then* normalised it to root position for the inversion pass.
+`chordgen::rootPosition` collapses repeated pitch classes, and stacking thirds through a
+seven-note mode arrives back at the root's own pitch class on the eighth note, so notes 8 to 11
+were dropped every time and the register spread with them. The normalisation now runs first, the
+note count is fitted on root position (so shrinking still keeps the root and the third), and the
+inversion rotates the chord you actually asked for. Nothing about what the controls mean changed.
+
+### Fixed: the generator's reference box stayed lit after a drag that went elsewhere
+
+Dragging a pad off the strip lights the reference card so you can see where it would land. That
+highlight was only put back out by the drop itself, which runs only when the card is released
+*off* the row - so reaching for the reference box and then changing your mind, dropping back onto
+a pad or onto the live card, left the box glowing at nothing until the next drag. `ChordPads` now
+reports the end of every drag, whatever the gesture turned out to mean.
+
+Also fixed: a chord leaned by **Lean** kept the chord type it had before the third moved, so a
+major triad leaned minor still stored "Major" - the name under it is detected from the notes, so
+the two disagreed on the same card, and Next voicing and the suggestion table both read the stale
+one. And `sourceIndex()` clamped to a literal 6, which would have made an eighth generator source
+arrive silently reading as Planing; an unknown source now falls through to the weighted pool, as
+`generateChords` was always written to do.
+
+### Removed: genTriads / genSevenths / genNinths
+
+The three note-count tick boxes became the Notes range, which left their parameters unreachable
+from any control while generation still obeyed them: they filtered which chord *types* the
+weighted pool could draw from. That is the worst of both, so they are deleted rather than left
+unread. The pool now draws from every type and `fitVoicing` decides the note count afterwards,
+for every source rather than for one, which is also a wider pool: a request for five notes used
+to be answerable only by a type that already had five, and is now "any chord, grown to five". An
+old session carries three entries nothing reads, which APVTS ignores.
+
+**The tray's staleness check now watches every generator setting**, not the handful it was
+written against. It was still keyed on the three deleted parameters and had never been extended to
+the sources, the ranges, Lean or the tick boxes, so "settings changed since these were generated"
+was silent for most of what you can change.
+
+### Added: two character sliders, and tick boxes that let the generator off the leash
+
+**Brightness** sweeps the seven modes from brightest to darkest: Lydian, Major, Mixolydian,
+Dorian, Minor, Phrygian, Locrian. That is the circle-of-fifths ordering of the modes, where each
+step flattens exactly one more degree, which is what brighter and darker actually mean and why the
+axis is a line rather than a taste. Major and minor are two points on it, so sliding past either
+lands somewhere real. It is a **view onto `genMode`**, not a second parameter, because two
+parameters for one thing is how they end up disagreeing. It greys when Mode is one of the scales
+off that axis (harmonic minor, blues, the pentatonics) and keeps its last position rather than
+snapping to an end, because either end would be a lie about where you are.
+
+**Lean** is the other half of "a slider that goes between major and minor": it moves generated
+chords' **thirds** major or minor whatever mode you are in. The size of the lean is how often a
+chord gets pushed, so 40% colours a page without flattening it into one shade. Only the third
+moves, so a major ninth leaned minor is still a ninth.
+
+**Six tick boxes.** Ticked, the setting constrains generation. Unticked, the generator picks that
+one freely: an unticked Key wanders, an unticked Notes range rolls anywhere in 2 to 11, an
+unticked Scale Compliance strays by a different amount every time. Key and Mode roll **once per
+generation** rather than once per chord, because every source takes a single root and mode for a
+whole batch (a circle walk, a chain step, a progression transposed), so a per-chord roll would be
+sixteen unrelated one-chord walks rather than one wandering progression.
+
+Only six settings have a box, and the omissions are deliberate: **Lock Influence**, **Smooth
+Voicing** and **Lean** already have an off position on their own dial, so a box beside them would
+be a second control for what 0 already says.
+
+A tick box is 34 px wide and the full height of its cell. The mouse-only floor applies to a check
+box exactly as it does to a button, and a tick parked in the 14 px caption strip would be a target
+you cannot hit.
+
+**The band row collapses when a source has no band**, which is now Algorithmic (everything that
+was its own moved to the fixed rows) and Negative Harmony (a reflection needs only Key, Mode and
+Octave). The height goes to the tray, so the window does not resize as you switch source.
+
+### Changed: the generator stops generating behind your back, and shows its working
+
+Four asks from Owen on 2026-08-01, in one pass.
+
+**Changing a setting no longer generates anything.** The tray rerolled itself whenever a setting
+moved, which meant sweeping Source to hear the seven of them threw the tray away six times on the
+way past. A control you cannot explore without destroying your work is a control you stop
+touching. The tray caption now just says *"settings changed since these were generated. Regen for
+new ones."* Generating is **Fill** and **Regen** and nothing else.
+
+**Source and Direction are always-visible buttons**, not dropdowns: one click instead of two, and
+seven answers on screen instead of six hidden behind the first. They write the same parameters the
+combo boxes did, so nothing underneath changed.
+
+**Scale Compliance is back on screen under every source**, on a fixed row with Lock Influence,
+greying where a source does not read them rather than vanishing. **Notes and Inversions moved to
+that row too**, which fixed a deeper mistake: both are facts about the *voicing* rather than about
+which chord it is, so they were never the weighted pool's property. They are now post-passes the
+generator applies to whatever any of the seven produced.
+
+**Notes is a range from 2 to 11**, replacing the 3/4/5 tick boxes. Below three you get dyads;
+above five the stack keeps climbing in thirds **through the mode**, so eleven is a chord covering
+every degree and still in the key. **Octave is a range too**, so a page can spread across
+registers instead of stacking up in one. Both are steppers rather than sliders: a slider is a drag
+target, and steppers are the click-only path to every value.
+
+**Voice Leading is now "Smooth Voicing"** (Owen: "I don't understand what the voice reading
+does"). The name was the problem. It keeps consecutive chords close together on the keyboard:
+C-E-G then F-A-C becomes C-E-G then C-F-A, the same two chords with less jumping. It never changes
+which chords you get or which notes they contain, only which octave each note sits in.
+
+### Added: a diagram of what each source is doing
+
+`SourceViz` draws the current source under the buttons that choose it, and highlights the walk
+that produced whatever is in the tray. A circle-of-fifths wheel with the walk traced round it, the
+Neo-Riemannian P/L/R triangle with the actual sequence of transforms as chips, a mirror axis and
+reflection pairs for Negative Harmony, a numeral strip for Progressions and Markov, degree bars
+for Algorithmic, sliding note-stacks for Planing. Every one still draws its static figure with an
+empty tray, so the picture explains the source before you have generated anything.
+
+It is a picture and nothing else: click-through, takes no input, writes nothing.
+
+### Fixed: small text was too dark to read
+
+`skin::textDim` and `skin::textFaint` were chosen by eye against `skin::text`, which is the wrong
+comparison. Almost everything wearing them is 9 to 11 px uppercase with letter spacing (the
+section captions, the note list under every chord name), and small letterforms need far more
+contrast than large ones to read at the same effort. Both lifted; `skin::text` is unchanged
+because it was never the problem.
+
 ### Added: the chord generator opens with sixteen chords you can hear before you keep one
 
 Owen: "when you open the chord generator page, it should open up. I have four by four pad where
@@ -129,9 +258,12 @@ would play listed underneath.
   suggestion list has always used, so Humanize and the base velocity colour it exactly as a pad
   would. Nothing is written anywhere.
 - **Drag a card onto a pad to keep it.** The pad lights while the candidate is over it, and the
-  card you took is replaced by a fresh candidate on the spot, so the tray never grows holes.
-- **Reroll** replaces all sixteen. The tray also rerolls itself whenever a generator setting
-  moves, because sixteen answers to the old Key are worth nothing once the Key has changed.
+  cell it came from goes empty, which is how you see what you have already taken.
+- **Fill**, **Regen** and **Clear** act on the tray and on nothing else.
+
+(This entry described a **Reroll** button and a tray that rerolled itself on any settings change.
+Both were replaced later the same day by the two entries above, which is why they are described
+here in their final form rather than as they first shipped: nothing in between was ever released.)
 
 **A tray card is not on a pad, and that is the whole point.** These chords belong to no slot,
 are not in the session, and go away with the window. Until now the only way to hear what the

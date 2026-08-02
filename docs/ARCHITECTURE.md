@@ -39,6 +39,8 @@ src/
 │   │                         # outlives every view
 │   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
 │   │                         # when that window opens, destroyed when it closes
+│   ├── SourceViz.{h,cpp}     # read-only diagram of the current source, under its button
+│   │                         # row in that window (2026-08-01). Click-through, no state
 │   ├── ChordTray.{h,cpp}     # 4x4 grid of candidate chords inside that window (2026-08-01),
 │   │                         # plus ChordRefCard, one seed chord the tray's own actions cannot
 │   │                         # touch; both belong to no pad and are thrown away when the
@@ -262,7 +264,7 @@ per source — a pad and the keyboard each fit under it separately.
 ## Chord generation
 
 `ChordGen.h` builds a **weighted pool** of candidate chords for a key and mode, then
-samples it. That one idea carries both sliders in the generator:
+samples it. That one idea carries both sliders that are still the pool's own:
 
 - **Scale Compliance** decides which tiers enter the pool: diatonic (always, weight 1),
   then borrowed from parallel modes, then secondary dominants, then any chromatic root,
@@ -270,6 +272,25 @@ samples it. That one idea carries both sliders in the generator:
 - **Lock Influence** re-weights the whole pool toward the *families* (triad / seventh /
   sixth / add / extended) of the chords you locked — so regenerating keeps their
   character without copying them.
+
+Note count and inversions **used to be pool properties too, and are not any more**
+(2026-08-01, Owen: "all of their options should have the option for how many notes and
+what inversion"). Both are facts about the *voicing* a chord arrives in rather than about
+which chord it is, so `ChordGenMenu::fitVoicing` now applies them as a post-pass over
+whatever any of the seven sources produced. `fitPads` is the same pass for the Markov
+path, which arrives as pads rather than `chordgen::Chord`s.
+
+Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is
+still in key; shrinking one drops from the top, which keeps the root and the third (the
+part that makes a chord recognisable) however far it shrinks. Inversions **replace** the
+rotation a chord arrived in rather than compounding with it (root position first, then
+invert), so ticking only "R" gives root position even from a source that had already
+inverted one. `genNotesMin` / `genNotesMax` replaced the old 3/4/5 tick boxes with a
+2 to 11 range, and `genOctave` / `genOctaveMax` do the same for register.
+
+**`genMajMin` ("Lean")** runs before `fitVoicing`, biasing generated chords' thirds major
+or minor whatever the mode. Its magnitude is the *probability* that a given chord gets
+pushed, and it only ever touches the third, so a major ninth leaned minor is still a ninth.
 
 A fill seeds the plain diatonic chord on each degree in order, then weighted-samples the
 rest and shuffles only that tail. Each chord remembers the `degree` it came from, which
@@ -321,13 +342,37 @@ pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algo
 these five; Markov keeps its own three paths, because its chords carry a numeral these don't
 and its per-pad regeneration steps the chain from the left neighbour.
 
-Sitting over all seven is **Voice Leading** (`genSmooth`), a post-pass rather than a source
-of its own: each chord after the first has each pitch class placed in whichever octave sits
-closest to the previous chord, blended by the percentage. Blending in octave counts rather
-than raw semitones is deliberate — two notes sharing a pitch class are always a whole number
-of octaves apart, so every intermediate amount still lands on the source chord's own notes;
-it never changes which notes a chord contains, only which octave they sit in. `smoothPads()`
-runs it over the Markov path; the other six get it inline in `generateChords`.
+Sitting over all seven is **Smooth Voicing** (`genSmooth`, renamed from "Voice Leading"
+2026-08-01, Owen: "I don't understand what the voice reading does"; the parameter id
+did not move), a post-pass rather than a source of its own: each chord after the first
+has each pitch class placed in whichever octave sits closest to the previous chord,
+blended by the percentage. Blending in octave counts rather than raw semitones is
+deliberate, two notes sharing a pitch class are always a whole number of octaves apart,
+so every intermediate amount still lands on the source chord's own notes; it never
+chooses which chords you get or which notes they contain, only which octave each note
+sits in. `smoothPads()` runs it over the Markov path; the other six get it inline in
+`generateChords`.
+
+`ChordGenMenu::readsScaleSettings()` and `readsMode()` answer two different questions
+and are easy to conflate. **Scale Compliance and Lock Influence are the weighted pool's
+alone**, `readsScaleSettings()` is `sourceIndex() == 0`, true for Algorithmic only, since
+none of the other six weighs a pool against either dial. **Mode is read by every source
+except Markov**, `readsMode()` is `sourceIndex() != 1`, because Circle of Fifths,
+Neo-Riemannian, Progressions, Negative Harmony and Planing all still need a scale to read
+qualities off, walk within, mirror about or slide through; only a chain of bigram
+transitions has no scale in it at all. Mode does **not** grey outside Algorithmic.
+
+Six tick boxes (`genUseKey`, `genUseMode`, `genUseOctave`, `genUseNotes`,
+`genUseInversions`, `genUseCompliance`, all default true) let generation off the leash a
+setting at a time (2026-08-01, Owen: "check marks for the different sliders and options
+that enable or disable them"). Ticked, the setting constrains generation; unticked, the
+generator rolls that choice itself, `ChordGenMenu::constrains(paramId)` is the one
+predicate both `fitVoicing` and the pool read, and an absent parameter reads as ticked so
+a box that was never wired behaves as it always did. Key and Mode roll **once per
+generation, not per chord**, because every source takes a single root and mode for a
+whole batch; a free Mode picks only from the seven diatonic modes. Lock Influence, Smooth
+Voicing and Lean (`genMajMin`) have no box: each already has an off position on its own
+dial, so a box beside it would be a second control for what zero already says.
 
 The new sources are *appended* to the `genSource` list, and APVTS stores a choice
 parameter's plain index, so a session saved as Markov still reopens as Markov — the list must
@@ -434,6 +479,13 @@ Two things are easy to miss when adding a colour path. The kit bakes several JUC
 `ColourId`s from the accent at construction (tick marks, slider tracks, the popup
 highlight), so `setAccent` re-applies every one of them. And `wheelLnf` is a *second*
 LookAndFeel instance with its own copy, so it has to be re-tinted alongside `lnf`.
+
+**`skin::textDim` and `skin::textFaint` were brightened 2026-08-01** (Owen: "hard to read
+some text, too dark"). They had been picked by eye against `skin::text`, which is the
+wrong comparison: nearly everything wearing them is 9-11 px letter-spaced uppercase (the
+section captions, the note list under every chord card), and small letterforms need far
+more contrast than large ones to read at the same effort. `skin::text` itself is
+unchanged - it was never the problem.
 
 This replaced full-editor overlays that dimmed and covered everything, including the
 keyboard. Editing an arp while unable to play a note was backwards for an instrument you
@@ -546,12 +598,19 @@ coming back:
   row, replace the **Reroll** button that used to sit there: Fill writes the empty cells only,
   Regen rerolls the ones that already carry a candidate, Clear empties the tray outright, and
   none of the three can lose work because a tray card is not state - Fill greys when the tray
-  is full, Regen and Clear grey when it is empty. The tray also rerolls itself whenever a
-  generator setting moves (`ChordTray::refreshForSettings`, polled by the panel's existing
-  15 Hz timer), keyed on the generator's APVTS parameters plus Mood and Start and deliberately
-  *not* on the page's locked chords, which feed Lock Influence and would reroll the whole tray
-  on every commit. `ChordGenMenu::generateCandidates(int count)` is the entry point behind
-  Fill/Regen and the auto-refresh: the one generator call that builds chords and writes them to
+  is full, Regen and Clear grey when it is empty. **Changing a setting generates nothing**
+  (2026-08-01, Owen: "I don't want it to auto generate when you change a source"). The tray
+  rerolled itself on any settings change for part of that day, on the reasoning that sixteen
+  answers to the old Key are worth nothing once the Key has changed - right about the
+  candidates, wrong about who decides: sweeping Source to compare the seven of them threw the
+  tray away six times on the way past, and a control you cannot explore without destroying
+  your work is a control you stop touching. `ChordTray::settingsMovedSinceFill()` polls the
+  same signature (the generator's APVTS parameters plus Mood and Start, deliberately *not* the
+  page's locked chords, which feed Lock Influence and would mark the tray stale on every
+  commit) but only tells the window to *say* the candidates are stale - the caption reads
+  "settings changed since these were generated. Regen for new ones." Generating is **Fill**
+  and **Regen** and nothing else. `ChordGenMenu::generateCandidates(int count)` is the entry
+  point behind both: the one generator call that builds chords and writes them to
   no pad. Elsewhere "the generator draws no cards of its own" and "there is exactly one set of
   chord cards" (`docs/CONTROLS.md`, `README.md`) mean one set of **pads** - a tray candidate is
   not a pad and does not become one without a drag or a menu pick.
@@ -569,6 +628,36 @@ coming back:
   `suggest::all`, the same table the pad card menu's own "Next: could follow" offers, rather
   than inventing a second opinion); **Clear** empties the reference card alone. All three grey
   when the card is empty.
+- **Source and Circle Direction are always-visible button rows, not combo boxes**
+  (2026-08-01, Owen: "maybe instead of the source being a drop down and the direction
+  being a drop down, maybe those can be, like, always visible"). One click instead of
+  two, and seven answers on screen instead of six hidden behind the first, for a setting
+  whose whole point is comparison. JUCE has no attachment for a row of buttons on one
+  choice parameter, which is the one place in `ChordGenPanel` that hand-syncs rather than
+  binding: `setSourceParam(index)` / `setCircleDirParam(index)` write `genSource` /
+  `genCircleDir` on a click, and `refreshRadioStates()`, run from the panel's existing
+  15 Hz timer, polls the parameter back onto the tick mark. They write the same
+  parameters the combo boxes did, so nothing downstream changed.
+- **Scale Compliance, Lock Influence and Smooth Voicing sit on one fixed row; Notes,
+  Inversions and the Octave range sit on another** (2026-08-01) - neither leaves the
+  screen as Source changes, which fixed a standing mistake: Notes and Inversions are
+  facts about the *voicing*, never about which chord it is, so they were never the
+  weighted pool's property and had no business living inside its band. **Algorithmic and
+  Negative Harmony now have no band at all** - Algorithmic because everything that was
+  its own moved to those fixed rows, Negative Harmony because a reflection only ever
+  needed Key, Mode and Octave. The band row collapses to zero height for both, and the
+  freed height goes to the tray, so the window does not resize as you switch source.
+- **`SourceViz` draws a read-only diagram of the current source** under the button row
+  that picks it (2026-08-01, Owen: "a visualization for the generation source so people
+  understand what it's doing"), and highlights the actual walk that produced whatever is
+  in the tray on top of a static figure of the shape - a circle-of-fifths wheel;
+  the Neo-Riemannian P/L/R triangle with the transform sequence as chips; roman-numeral
+  strips for Progressions and Markov; a mirror-axis clock for Negative Harmony;
+  sliding note-stacks for Planing; degree columns for Algorithmic. It takes no input,
+  writes no parameter and generates nothing - `setInterceptsMouseClicks(false, false)` in
+  the constructor, same as every other click-through diagram in Keys - and its
+  `preferredHeight()` is 112 px. Fed from the panel's 15 Hz timer, since everything it
+  draws (source, key, the tray's contents) can move without the class being told.
 - **A tray card's right-click menu** is a new entry on the closed owner-directed list in
   `CLAUDE.md` (Owen, 2026-08-01: "when you right click on a chord in there, I want you to have
   a whole bunch of options about trying to find similar ones or what might come next"):
@@ -702,13 +791,20 @@ All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `sca
 `scaleLock`, `octave`, `channel`, `polyphony`, `sustain`, `latch`,
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStrumDir` /
-`padPage`, the generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the
-note-count and inversion
-toggles, `genCompliance`, `genLockInfluence`, `genSmooth` (Voice Leading, over all seven
-sources) — the knob row's `faderCC1`-`faderCC8` CC assignments, `genSource` (the seven-way
-choice itself), the Markov set `markovMode`, `markovTemp`, `markovLength`, and the five
-sources' own bands: `genCircleDir`, `genPlrP` / `genPlrL` / `genPlrR`, `genProgression`,
-`genPlaningDiatonic`. Negative Harmony has none — Key, Mode and Octave are all it reads.
+`padPage`, the generator's `gen*` set, `genRoot`, `genMode`, `genOctave` / `genOctaveMax`
+(a range since 2026-08-01), `genInv0`-`genInv3`, `genNotesMin` / `genNotesMax` (a 2-11
+range, added 2026-08-01, replacing the three note-count tick boxes these numbers count
+from), `genCompliance`, `genLockInfluence`, `genSmooth` (Smooth Voicing on screen since
+2026-08-01, still `genSmooth` underneath, the parameter id did not move when the name
+did, over all seven sources), `genMajMin` (Lean, -100..100, new the same day), the six
+`genUseKey` / `genUseMode` / `genUseOctave` / `genUseNotes` / `genUseInversions` /
+`genUseCompliance` toggles (new the same day, all default true), the knob row's
+`faderCC1`-`faderCC8` CC assignments, `genSource` (the seven-way choice itself), the
+Markov set `markovMode`, `markovTemp`, `markovLength`, and the five sources' own bands:
+`genCircleDir`, `genPlrP` / `genPlrL` / `genPlrR`, `genProgression`,
+`genPlaningDiatonic`. Negative Harmony has none, Key, Mode and Octave are all it reads,
+and neither does Algorithmic any more now that Notes, Inversions, Compliance and Lock
+Influence sit on the two fixed rows above every source's band.
 
 The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
 `arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`

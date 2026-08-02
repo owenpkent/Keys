@@ -105,8 +105,15 @@ public:
     // off the row clears it, and reaching for the reference box means dragging a card off the
     // row: without this the one gesture Owen asked for would delete the chord it was trying to
     // keep. True means "somebody took a copy", and the card stays exactly where it was.
+    //
+    // `onDragEnd` fires once at the end of every drag off this strip, whatever the gesture
+    // turned out to mean, and it is what puts the outside taker's highlight back out.
+    // `onDropOutside` cannot do that job: it only runs when the card was let go *off* the row,
+    // so dragging out over the reference box and then back onto a pad - or onto the live card -
+    // left the box lit with nothing being dragged at all.
     std::function<void(juce::Point<int> screenPos)> onDragOutside;
     std::function<bool(juce::Point<int> screenPos, const KeysProcessor::ChordPad&)> onDropOutside;
+    std::function<void()> onDragEnd;
 
 private:
     juce::Rectangle<float> cardBounds() const;

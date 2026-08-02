@@ -126,7 +126,8 @@ public:
     // The Pads bar and the generator's window both grey them on this one answer, so the same
     // setting is never live in one place and dead in the other. Key is not included: the
     // chains do transpose to it.
-    bool readsScaleSettings() const;
+    bool readsScaleSettings() const; // Scale Compliance and Lock Influence: the pool's own dials
+    bool readsMode() const;          // everything but Markov, which has no scale in it at all
 
     // Which of the seven brains is up, as the raw `genSource` index. Public because the window
     // shows a different band of settings per source and has to ask. The order is the parameter's,
@@ -166,6 +167,33 @@ private:
     // for, and regenerating one pad steps the chain from its left neighbour, which is behaviour
     // worth more than the symmetry of folding it in here.
     std::vector<chordgen::Chord> generateChords(int count);
+
+    // The two voicing post-passes, applied to every source for the reason voice leading is:
+    // how many notes a chord has and which register it sits in are facts about the voicing, not
+    // about which chord it is, so seven brains honouring them separately would be seven places to
+    // get it wrong (Owen, 2026-08-01: "all of their options should have the option for how many
+    // notes and what inversion"). Both read ranges, and both swap the ends if they cross.
+    std::pair<int, int> noteCountRange() const; // 2..11
+    std::pair<int, int> octaveRange() const;
+    void fitVoicing(std::vector<chordgen::Chord>& chords);
+    void fitPads(std::vector<KeysProcessor::ChordPad>& pads); // the Markov half of that
+
+    // Lean every chord's third major or minor, whatever produced it. A third pass over the
+    // output rather than a seventh brain, for the reason the other two are: it is a question
+    // about the chords you got, not about how to get them.
+    void applyMajorMinorBias(std::vector<chordgen::Chord>& chords);
+
+    // The tick boxes. `constrains(id)` is the one reader, so a box that is not wired anywhere
+    // reads as ticked rather than silently freeing a setting nobody meant to free.
+    bool constrains(const char* paramId) const;
+
+    // Key and Mode are chosen once per *generation* when their box is unticked, not once per
+    // chord. Every source takes a single root and mode for a whole batch (a circle walk, a chain
+    // step, a progression transposed), so a per-chord roll would mean sixteen unrelated
+    // one-chord walks rather than one wandering progression. `rollFreeChoices` picks them; -1
+    // means "the parameter is in charge", which is what genRoot / genMode look for.
+    void rollFreeChoices();
+    int rolledRoot = -1, rolledMode = -1;
     void smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const; // the Markov half of that
 
     // The Markov source (Source: Markov). Same page mechanics, different brain.
@@ -180,7 +208,10 @@ private:
     void stopPreview();
 
     KeysProcessor& processor;
-    juce::Random rng;
+    // Mutable because `currentOptions() const` rolls a free Scale Compliance when its tick box is
+    // clear, and that call site is const for good reasons elsewhere. Safe: ChordGenMenu is
+    // message-thread only, so there is no second reader to race.
+    mutable juce::Random rng;
 
     // Mood and Start are transient (like the performance wheels): they are choices about the
     // progression you are generating right now, not session state, and empty means Any. They

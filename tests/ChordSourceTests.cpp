@@ -381,4 +381,98 @@ struct ProgressionNamesTests : juce::UnitTest
     }
 };
 static ProgressionNamesTests progressionNamesTests;
+
+// The trap that `ChordGenMenu::fitVoicing` has to order itself around, pinned here because
+// fitVoicing itself is private to a class that needs a live KeysProcessor and cannot be reached
+// from a console test.
+//
+// `rootPosition` is the normalisation that makes an inversion *replace* the rotation a chord
+// arrived in rather than compound with it, so fitVoicing has to call it. It also collapses
+// repeated pitch classes and restacks what survives inside a single octave, which makes it
+// destructive to a note count above the mode's own size - so it must run **before** the grow
+// loop, never after. It ran after for a few hours on 2026-08-01 and every request for 8 to 11
+// notes silently returned 7 (5 under a pentatonic mode).
+struct RootPositionCollapseTests : juce::UnitTest
+{
+    RootPositionCollapseTests() : juce::UnitTest("chordgen::rootPosition collapse") {}
+
+    // fitVoicing's grow loop: stack scale thirds above the top note until the chord is `want`
+    // notes. Reproduced here rather than shared, because the point of the test is the shape of
+    // the interaction, and a copy that drifts still demonstrates it.
+    static std::vector<int> growByThirds(std::vector<int> notes, int want, int root, int modeIndex)
+    {
+        const auto& scale = keys::modes::get(modeIndex).intervals;
+        while ((int) notes.size() < want)
+        {
+            const int top = notes.back();
+            int next = top + 3;
+            for (int i = 0; i < 12; ++i)
+            {
+                const int norm = ((((next + i) - root) % 12) + 12) % 12;
+                if (std::find(scale.begin(), scale.end(), norm) != scale.end())
+                {
+                    next = next + i;
+                    break;
+                }
+            }
+            if (next > 127 || next <= top)
+                break;
+            notes.push_back(next);
+        }
+        return notes;
+    }
+
+    void runTest() override
+    {
+        beginTest("a third-stack really does reach eleven notes");
+        {
+            // C major triad in octave 4, grown to eleven. Nothing here is clamped or deduped, so
+            // this is the count fitVoicing is supposed to deliver.
+            const auto grown = growByThirds(keys::chordgen::chordNotes(0, keys::chordgen::typeIndex("Major"), 4),
+                                            11, 0, 0);
+            expectEquals((int) grown.size(), 11, "the grow loop itself can reach eleven notes");
+            expect(ascendingStrict(grown), "a grown stack is strictly ascending");
+            expect(allInRange(grown), "a grown stack stays on the keyboard");
+            expect(grown.back() - grown.front() > 12, "eleven notes cannot fit inside one octave");
+        }
+
+        beginTest("rootPosition after the grow loop throws most of it away");
+        {
+            const auto grown = growByThirds(keys::chordgen::chordNotes(0, keys::chordgen::typeIndex("Major"), 4),
+                                            11, 0, 0);
+            const auto collapsed = keys::chordgen::rootPosition(grown, 0);
+            // Seven, because a seven-note mode has seven distinct pitch classes and stacking
+            // thirds through it returns to the root's own on the eighth note.
+            expectEquals((int) collapsed.size(), 7,
+                         "rootPosition collapses an eleven-note third-stack to the mode's size");
+            expect(collapsed.back() - collapsed.front() < 12,
+                   "and restacks what is left inside one octave");
+        }
+
+        beginTest("what survives is exactly the distinct pitch classes, under every mode");
+        {
+            // The general statement of it, and the one worth pinning: rootPosition keeps one
+            // note per pitch class, so the ceiling on a grown chord is however many distinct
+            // classes the third-stack happened to visit - never the count that was asked for.
+            //
+            // That ceiling is *not* simply the mode's size. Stacking +3-and-search through a
+            // five-note scale from a major triad cycles through only three classes, because the
+            // step skips the degrees a third does not land on. So a pentatonic mode caps at
+            // three, not five: worse than the seven-note case, not better.
+            for (int m = 0; m < keys::modes::count(); ++m)
+            {
+                const auto grown =
+                    growByThirds(keys::chordgen::chordNotes(0, keys::chordgen::typeIndex("Major"), 4), 11, 0, m);
+                const auto collapsed = keys::chordgen::rootPosition(grown, 0);
+                const auto pcs = pcsOf(grown); // one vector, not two temporaries
+                const std::set<int> distinct(pcs.begin(), pcs.end());
+                expectEquals((int) collapsed.size(), (int) distinct.size(),
+                             "rootPosition keeps exactly one note per pitch class, mode "
+                                 + juce::String(m));
+                expect((int) collapsed.size() <= 11, "and never more than was asked for");
+            }
+        }
+    }
+};
+static RootPositionCollapseTests rootPositionCollapseTests;
 } // namespace

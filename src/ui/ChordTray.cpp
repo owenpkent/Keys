@@ -91,9 +91,13 @@ juce::String ChordTray::settingsSignature() const
     // page's locked chords: they reach generation through Lock Influence, and folding them in
     // here would reroll the tray each time a commit changed the page under it.
     static const char* ids[] = { "genRoot", "genMode", "genOctave", "genSource",
-                                 "genTriads", "genSevenths", "genNinths",
+                                 "genNotesMin", "genNotesMax", "genOctaveMax", "genMajMin",
                                  "genInv0", "genInv1", "genInv2", "genInv3",
-                                 "genCompliance", "genLockInfluence",
+                                 "genCompliance", "genLockInfluence", "genSmooth",
+                                 "genCircleDir", "genPlrP", "genPlrL", "genPlrR",
+                                 "genProgression", "genPlaningDiatonic",
+                                 "genUseKey", "genUseMode", "genUseOctave", "genUseNotes",
+                                 "genUseInversions", "genUseCompliance",
                                  "markovMode", "markovTemp", "markovLength" };
     juce::String sig;
     for (const char* id : ids)
@@ -167,17 +171,9 @@ void ChordTray::clear()
     repaint();
 }
 
-void ChordTray::refreshForSettings()
+bool ChordTray::settingsMovedSinceFill() const
 {
-    if (settingsSignature() == lastSignature)
-        return;
-    // Every cell, holes included. A settings change invalidates the candidates you have not
-    // taken *and* the reason a hole was worth keeping, since the hole only ever meant "you took
-    // this one under the old settings".
-    std::vector<int> all(numCells);
-    for (int i = 0; i < numCells; ++i)
-        all[(size_t) i] = i;
-    writeInto(all);
+    return hasFilledCells() && settingsSignature() != lastSignature;
 }
 
 void ChordTray::paint(juce::Graphics& g)

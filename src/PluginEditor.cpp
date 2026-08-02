@@ -400,7 +400,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // a user clicks constantly. Fill and Regen stay because they are constructive and they are
     // the only left-click path into generation; a destructive bulk action is worth the extra
     // click of opening a window. It spent a few hours on the card menu in between, which is
-    // where the older comments about it put it. `ChordGenMenu::clearPage()` is unchanged
+    // where the older comments about it put it. `ChordGenMenu::clearPage()` was deleted
     // throughout, only what reaches it.
     //
     // Each carries a setTitle: "Fill" and "Regen" are unique today, but an accessible name is
@@ -630,6 +630,18 @@ KeysEditor::KeysEditor(KeysProcessor& p)
             }
         }
         return chordGenPanel != nullptr && chordGenPanel->offerReferenceDrop(p, pad);
+    };
+    // And the other end of it, for **both** takers. onDragOutside lights the reference box and a
+    // line tab or slot; only a drop that lands off the row reaches onDropOutside to put them out
+    // again. Drag out over either, change your mind and drop back onto a pad or the live card,
+    // and the highlight stayed on with no drag in progress. The tray's own drag has had this half
+    // since it was built (onCandidateDragEnd, below); this is the same half for the strip's.
+    chordPads.onDragEnd = [this]
+    {
+        if (chordGenPanel)
+            chordGenPanel->clearReferenceDropTarget();
+        if (arpPanel)
+            arpPanel->setExternalDropTarget(-1, -1);
     };
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
