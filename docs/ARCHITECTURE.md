@@ -416,10 +416,11 @@ to stop them. **All Off** beside it does that *and* switches the lines off, and 
 beside that is a display toggle. Which line the *panel* edits is chosen by the tabs at the left
 of its slot row, and that same choice is mirrored by a letter chip on the Pads bar (below).
 
-A **fourth tab, All**, is the macro view: the band and the step editor give way to three rows,
-one per line, each with that line's switch, Latch and Keys, a detented rate knob, its shape and
-eight knobs (Oct, Gate, Chance, Swing, Offset, Ramp, Time, Human), over a shared row holding the
-BPM knob and Launch Quantize. It is a *view* rather than a fourth line - `editedLine` is
+A **fourth tab, All**, is the macro view: the band and the step editor give way to one boxed
+card per line, side by side, each with that line's switch, a detented rate knob, its shape and
+eight knobs (Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel). The tabs and Launch
+Quantize ride the arp's section bar and the tempo rides the Controls bar (all 2026-08-02; see
+`docs/ARP_DESIGN.md` for the passes). It is a *view* rather than a fourth line - `editedLine` is
 untouched by it, so a chord card click keeps one unambiguous target - and it takes the band's
 space rather than adding to it, so the panel does not grow. Each row's attachments bind to its
 own line for the row's life, where the band's rebind on every tab change: two lines on screen

@@ -265,10 +265,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      RATE and SHAPE micro-caps sit over the top line's stepper groups, because two flanked
      `< >` pairs touching read as one puzzle without names ("the arrows ... are not clear as
      to what they're adjusting").
-  2. *The bar.* The A/B/All tabs, the BPM cell and Launch Quantize moved from the panel to
+  2. *The bar.* The A/B/All tabs and Launch Quantize moved from the panel to
      the ARP section bar, left end after the fold zone. **Editor-owned** (`KeysEditor::
-     ArpBarTab`, `bpmBarSlider`, `quantizeBarBox`): the panel dies with the fold and the bar
-     does not. The tabs hide when the section folds (a tab that navigates a panel that is not
+     ArpBarTab`, `quantizeBarBox`): the panel dies with the fold and the bar
+     does not. (The tempo went with them for one build and then to the Controls bar; see the
+     entry below.) The tabs hide when the section folds (a tab that navigates a panel that is not
      on screen is a control with nothing behind it - the pad-pages rule) and are laid out only
      while it is open so BPM slides left rather than orbiting a hole; BPM and Quantize stay,
      arp On's own argument. Each tab is still a chord drop target and still answers to
@@ -284,6 +285,24 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      stop: clicking a *cleared* card that still feeds a line (the ring with no notes) releases
      that hold, because a dead click on a lit target is worse. The Pads bar's letter chip now
      only names *Send to arp slot*'s target and cycles without leaving the All view.
+- **The tempo is a number on the Controls bar** (2026-08-02, fifth pass, Owen: "I think the
+  bpm should live in the controls header. I want it to be like the bpm in ableton, just a
+  number"). It has had three homes in one day - a labelled drag slider in the Controls
+  *band*, then the arp bar, now the Controls *bar* - and this is the right one: **the tempo
+  is the plugin's clock, not the arpeggiator's**, and the arp is merely its loudest consumer.
+  Launch Quantize deliberately stayed behind on the arp bar, which is the same distinction
+  read the other way. It never hides: like arp On, it is a parameter you reach for while
+  playing, and the arp reads it with the Controls section folded shut.
+  **`KeysEditor::BpmField` is a `juce::Slider` subclass that overrides `paint`.** A Slider so
+  the APVTS `SliderAttachment` still drives it; `paint` overridden rather than a style chosen,
+  because every built-in style draws a track, a bar or a knob and Ableton's tempo field is
+  *only* the number - overriding paint means the LookAndFeel is never consulted (Slider::paint
+  is what calls it) while every drag and gesture behaviour is inherited untouched. Vertical
+  drag, `setMouseDragSensitivity` tuned to about a BPM per 4 px. **The `<` `>` pair beside it
+  is not optional**: a drag is a drag, and the mouse-only contract wants a click-only path to
+  every value - this is the part of "just a number" Keys cannot copy from Ableton, which
+  expects a keyboard for that field. Row B of the Controls band keeps the 170 px the old
+  slider held.
 - **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
   the setting Owen described and could not name: "if you start a new note or something that goes
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
@@ -734,8 +753,9 @@ Four things will bite otherwise:
   pass; they hide when the section folds) are `Arp line A tab` and so on
   (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
   the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
-  `Arp target line`. Hold off is `Arp hold off`. BPM on the bar is `Arp BPM` and the Quantize
-  combo is `Arp launch quantize`. The fourth tab is `Arp all tab`, and the macro
+  `Arp target line`. Hold off is `Arp hold off`, and the Quantize combo beside the tabs is
+  `Arp launch quantize`. The tempo is **`Tempo`, on the Controls bar** - it answered to
+  `Arp BPM` on the arp bar for one build. The fourth tab is `Arp all tab`, and the macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
   `Macro line A`, `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
   `Macro dot A` / `Macro trip A` / `Macro anchor A`, and `Macro OCT A` / `Macro GATE A` /

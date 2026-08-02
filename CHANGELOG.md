@@ -5,6 +5,25 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the tempo is a plain number in the Controls header
+
+Owen: "I think the bpm should live in the controls header. I want it to be like the bpm in
+ableton, just a number."
+
+It was a labelled drag slider in row B of the Controls *band*, spent one build on the arp bar,
+and now sits on the Controls *bar* as a recessed field showing nothing but the number, dragged
+vertically the way Ableton's tempo is. That is the right home on the merits and not only by
+taste: **the tempo is the plugin's clock, not the arpeggiator's**, and the arp is merely its
+loudest consumer - Launch Quantize stayed behind on the arp bar, which is the same distinction
+read the other way. Riding a bar means it survives folding Controls away, which the band copy
+never did.
+
+`KeysEditor::BpmField` is a `juce::Slider` subclass that overrides `paint`: a Slider so the
+APVTS attachment still drives it, `paint` overridden rather than a style chosen because every
+built-in style draws a track, a bar or a knob. The `<` `>` pair beside it stays - a drag is a
+drag, and the mouse-only contract wants a click-only path to every value, which is the one
+part of "just a number" Keys cannot copy from a DAW that expects a keyboard for that field.
+
 ### Changed: each line is its own boxed card, the bar carries what they share, and a pad click never feeds a line
 
 Owen, on the side-by-side first cut: "we need a bit more clear delineation between the two

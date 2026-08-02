@@ -234,8 +234,11 @@ private:
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
-    juce::Slider octaveSlider, bpmSlider;
-    juce::Label octaveLabel, chordStrumLabel, bpmLabel;
+    // No BPM slider in the band since 2026-08-02: the tempo is a number on the Controls
+    // *bar* now (bpmField, below), which is where Owen wanted it and what freed row B's
+    // last 170 px.
+    juce::Slider octaveSlider;
+    juce::Label octaveLabel, chordStrumLabel;
     // Strum is a range, the same two-handle band as the humanize velocity beside it: each
     // chord rakes at a speed drawn from it, so repeated stabs are not identical.
     RangeSlider chordStrumSlider;
@@ -383,15 +386,33 @@ private:
     // click all land in the same place.
     void refreshArpBarTabs();
     void nudgeBpm(int delta);
-    juce::Label bpmBarLabel, quantizeBarLabel;
-    // LinearBar with setSliderSnapsToMousePosition(false): the value reads inside the bar,
-    // a drag nudges it relatively rather than jumping to wherever the click landed (a click
-    // must never be a jump on a bar this small), and the < > beside it are the click-only
-    // path a drag target always needs.
-    juce::Slider bpmBarSlider;
-    juce::TextButton bpmBarPrev { "<" }, bpmBarNext { ">" };
+
+    // The tempo, on the **Controls** bar (2026-08-02, Owen: "I think the bpm should live in
+    // the controls header. I want it to be like the bpm in ableton, just a number"). It sat
+    // on the arp bar for one build, which was where the arp needed it; it belongs here
+    // because it is the plugin's clock, not the arpeggiator's - the arp is only its loudest
+    // consumer, and Launch Quantize stayed behind with the arp for exactly that distinction.
+    //
+    // A Slider subclass rather than a bespoke component, so the APVTS SliderAttachment still
+    // drives it; a Slider subclass that overrides `paint` rather than a styled Slider,
+    // because every built-in style draws a track, a bar or a knob and Ableton's tempo field
+    // is *only* the number. Overriding paint means the LookAndFeel is never consulted for it
+    // (Slider::paint is what calls the LookAndFeel), while every drag, gesture and attachment
+    // behaviour is inherited untouched.
+    struct BpmField : public juce::Slider
+    {
+        BpmField();
+        void paint(juce::Graphics&) override;
+    };
+    BpmField bpmField;
+    // The click-only path. A drag is a drag, and the mouse-only contract says every value a
+    // slider holds must also be reachable by clicking - the same reason the arp's rate dial
+    // has its pair. This is the part of "just a number" that Keys cannot copy from Ableton,
+    // which expects a keyboard for its tempo field.
+    juce::TextButton bpmPrevButton { "<" }, bpmNextButton { ">" };
+    juce::Label quantizeBarLabel;
     juce::ComboBox quantizeBarBox;
-    std::unique_ptr<SliderAtt> bpmBarAtt;
+    std::unique_ptr<SliderAtt> bpmAtt;
     std::unique_ptr<ComboAtt> quantizeBarAtt;
     // Which arp line a click on a chord card feeds, shown as its letter and cycled A->B->C by
     // clicking. It rides the *Pads* bar, next to Fill / Regen / Generator, because it is a
@@ -422,7 +443,7 @@ private:
     juce::Label humanizeVelLabel;
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
-    std::unique_ptr<SliderAtt> octaveAtt, bpmAtt; // strum has two values; synced by hand
+    std::unique_ptr<SliderAtt> octaveAtt; // strum has two values; synced by hand
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;

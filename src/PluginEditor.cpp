@@ -312,20 +312,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addCombo(controlsHolder, chordStrumDirBox, chordStrumDirLabel, "Dir",
              { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
 
-    // Tempo. The arpeggiator is the only thing in Keys timed in beats, and until now it had
-    // no tempo of its own: it followed the host and fell back to whatever the host last
-    // said, which in the standalone was 120 forever with no way to change it. A plain drag
-    // slider rather than +/- steppers, because getting from 120 to 90 should be one gesture.
-    styleLabel(bpmLabel, "BPM");
-    controlsHolder.addAndMakeVisible(bpmLabel);
-    bpmSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    bpmSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 46, 26);
-    bpmSlider.setRange(40, 240, 1);
-    bpmSlider.setTooltip("Tempo the arpeggiator runs at when there is no transport to follow "
-                         "- always in the standalone, and whenever the host is stopped. While "
-                         "the host is playing, Keys follows the host.");
-    controlsHolder.addAndMakeVisible(bpmSlider);
-    bpmAtt = std::make_unique<SliderAtt>(processor.apvts, "bpm", bpmSlider);
+    // Tempo used to be a labelled drag slider here in row B of the band. It is a number on
+    // this section's *bar* now (2026-08-02, Owen: "the bpm should live in the controls
+    // header. I want it to be like the bpm in ableton, just a number"), which also means it
+    // survives folding the Controls section - see bpmField.
 
     // --- Keyboard section ------------------------------------------------------------
     // Performance wheels, left of the keyboard. Transient (no params/persistence): Mod
@@ -606,23 +596,16 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addChildComponent(*arpBarAllTab);
 
-    bpmBarLabel.setText("BPM", juce::dontSendNotification);
-    bpmBarLabel.setFont(skin::micro(9.0f));
-    bpmBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
-    addAndMakeVisible(bpmBarLabel);
-    bpmBarSlider.setSliderStyle(juce::Slider::LinearBar);
-    bpmBarSlider.setSliderSnapsToMousePosition(false); // a click on a 48 px bar must not jump
-    bpmBarSlider.setTextBoxIsEditable(false);
-    bpmBarSlider.setTitle("Arp BPM");
-    bpmBarSlider.setTooltip("The tempo both lines run at when there is no transport to follow: "
-                            "always in the standalone, and whenever the host is stopped. A host "
-                            "that is playing always wins, and a line whose rate is in Hz follows "
-                            "neither. Drag to sweep, or step it with < and >.");
-    addAndMakeVisible(bpmBarSlider);
-    bpmBarAtt = std::make_unique<SliderAtt>(processor.apvts, "bpm", bpmBarSlider);
-    bpmBarPrev.onClick = [this] { nudgeBpm(-1); };
-    bpmBarNext.onClick = [this] { nudgeBpm(1); };
-    for (auto* b : { &bpmBarPrev, &bpmBarNext })
+    bpmField.setTitle("Tempo");
+    bpmField.setTooltip("The tempo Keys runs at when there is no transport to follow: always in "
+                        "the standalone, and whenever the host is stopped. A host that is playing "
+                        "always wins, and an arp line whose rate is in Hz follows neither. Drag "
+                        "up or down to sweep it, or step it with < and >.");
+    addAndMakeVisible(bpmField);
+    bpmAtt = std::make_unique<SliderAtt>(processor.apvts, "bpm", bpmField);
+    bpmPrevButton.onClick = [this] { nudgeBpm(-1); };
+    bpmNextButton.onClick = [this] { nudgeBpm(1); };
+    for (auto* b : { &bpmPrevButton, &bpmNextButton })
     {
         b->setTooltip("Nudge the tempo by one BPM.");
         addAndMakeVisible(*b);
@@ -986,6 +969,43 @@ void KeysEditor::refreshArpBarTabs()
             arpBarTabs[(size_t) n]->setToggleState(! macro && line == n, juce::dontSendNotification);
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setToggleState(macro, juce::dontSendNotification);
+}
+
+// ---------------------------------------------------------------------------
+// The tempo field: Ableton's, which is a number you drag and nothing else.
+
+KeysEditor::BpmField::BpmField()
+{
+    // Vertical drag, which is the gesture Ableton's tempo field takes, and no text box: the
+    // number below is painted by us, not by a child Label, so nothing can draw a second copy
+    // of it or a frame around it.
+    setSliderStyle(juce::Slider::RotaryVerticalDrag);
+    setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+    // A whole BPM per 4 px of travel: Ableton's own feel is about this, and the parameter is
+    // an int over a range wide enough that the JUCE default made a short drag jump ten.
+    setMouseDragSensitivity(juce::jmax(1, (int) (4 * 200)));
+    okstudio::ui::makeMouseOnly(*this);
+}
+
+void KeysEditor::BpmField::paint(juce::Graphics& g)
+{
+    // Overriding paint means the LookAndFeel is never asked for a knob or a track; this is
+    // the whole of the control's appearance. A recessed well plus the number, which is what
+    // makes it read as a field you can put a value into rather than as a label.
+    const auto b = getLocalBounds().toFloat().reduced(0.5f);
+    g.setColour(skin::well);
+    g.fillRoundedRectangle(b, skin::radius);
+    g.setColour(juce::Colours::black.withAlpha(0.35f));
+    g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::radius, 0.0f), 0.75f);
+    if (isMouseOverOrDragging())
+    {
+        g.setColour(skin::accentOf(*this).base.withAlpha(0.35f));
+        g.drawRoundedRectangle(b.reduced(0.5f), skin::radius, 1.0f);
+    }
+
+    g.setColour(skin::text);
+    g.setFont(skin::uiSemi(15.0f));
+    g.drawText(getTextFromValue(getValue()), getLocalBounds(), juce::Justification::centred, false);
 }
 
 void KeysEditor::nudgeBpm(int delta)
@@ -1521,7 +1541,8 @@ void KeysEditor::layoutControlsHolder()
     cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
     cell(rowB, 150, chordStrumLabel, chordStrumSlider);
     cell(rowB, 100, chordStrumDirLabel, chordStrumDirBox);
-    cell(rowB, 170, bpmLabel, bpmSlider);
+    // BPM's 170 px cell was the last thing on this row until 2026-08-02; the tempo is a
+    // number on this section's bar now, and the row keeps the slack.
 }
 
 void KeysEditor::layoutPadsHolder()
@@ -1842,6 +1863,16 @@ void KeysEditor::resized()
         // a chip riding a bar costs the window no height, which is what let the knobs give up
         // a section of their own without giving up the fold.
         knobsButton.setBounds(bar.removeFromLeft(66).reduced(0, 2));
+        bar.removeFromLeft(14);
+        // The tempo, at the head of the plugin the way a DAW puts it at the head of the
+        // transport (2026-08-02, Owen's ask). Never hidden with this section: it is a
+        // parameter you reach for while playing, the arp On argument, and the arp reads it
+        // with its own section folded away.
+        bpmPrevButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        bar.removeFromLeft(3);
+        bpmField.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
+        bar.removeFromLeft(3);
+        bpmNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
         bar.removeFromLeft(10);
         section(secControls).caption = bar;
     }
@@ -1886,9 +1917,11 @@ void KeysEditor::resized()
         // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
         arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
 
-        // The tabs, BPM and Quantize, from the left (2026-08-02). The tabs are laid out only
-        // while the section is open - they hide with it, and laying them out regardless would
-        // leave BPM orbiting a hole where they were, the pageButtons lesson next door.
+        // The tabs and Quantize, from the left (2026-08-02). The tabs are laid out only while
+        // the section is open - they hide with it, and laying them out regardless would leave
+        // Quantize orbiting a hole where they were, the pageButtons lesson next door. BPM was
+        // here for one build and is on the Controls bar now: it is the plugin's clock, and
+        // only Quantize is genuinely the arp's.
         if (processor.layout.arp)
         {
             for (auto& t : arpBarTabs)
@@ -1902,13 +1935,6 @@ void KeysEditor::resized()
                 arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
             bar.removeFromLeft(14);
         }
-        bpmBarLabel.setBounds(bar.removeFromLeft(30).withSizeKeepingCentre(30, 24));
-        bpmBarPrev.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
-        bar.removeFromLeft(2);
-        bpmBarSlider.setBounds(bar.removeFromLeft(48).withSizeKeepingCentre(48, 24));
-        bar.removeFromLeft(2);
-        bpmBarNext.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
-        bar.removeFromLeft(14);
         quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
         quantizeBarBox.setBounds(bar.removeFromLeft(92).withSizeKeepingCentre(90, 24));
         bar.removeFromLeft(8);

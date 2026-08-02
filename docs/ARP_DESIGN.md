@@ -214,11 +214,13 @@ goal is to be able to create complex polyrhythms from one view."*
 
 **All** swaps the per-line band and the step editor for one card per line, **side by side**
 (2026-08-02, Owen: *"parallel to each other instead of one on top of the other"*), and that is
-the whole view: the **A/B/All tabs**, the **BPM** cell and **Launch Quantize** ride the ARP
+the whole view: the **A/B/All tabs** and **Launch Quantize** ride the ARP
 section bar (fourth pass, same day: *"move the bpm and the a b and all into the header also.
 remove the 'lines' text"* - they are editor-owned there, because the bar outlives the panel),
-and the twelve slots and the Copy / Clear / Stop / Chain action row belong to the per-line
-tabs. Each card draws its own captioned ruled frame - **LINE A**, **LINE B**, filled, with the
+the **tempo** is a plain number on the *Controls* bar one pass later (*"like the bpm in
+ableton, just a number"* - it is the plugin's clock rather than the arp's, which is why
+Quantize stayed behind), and the twelve slots and the Copy / Clear / Stop / Chain action row
+belong to the per-line tabs. Each card draws its own captioned ruled frame - **LINE A**, **LINE B**, filled, with the
 old outer LINES box gone, since a frame around both was what made two arpeggiators read as one
 (*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
 panel's width cannot hold what used to be one full-width row: the line switch, a detented rate
