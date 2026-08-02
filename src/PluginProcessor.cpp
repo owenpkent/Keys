@@ -212,7 +212,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "uiLayout", 1 }, "Layout",
                                                       StringArray { "Classic", "Performer" }, 0));
 
-    // Arpeggiator globals, three lines' worth (docs/ARP_DESIGN.md). See addArpLineParams.
+    // Arpeggiator globals, every line's worth (docs/ARP_DESIGN.md). See addArpLineParams.
     for (int line = 0; line < numArpLines; ++line)
         addArpLineParams(layout, line);
 
@@ -220,10 +220,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // "if you start a new note or something that goes into the next sequence, so it sounds good
     // always"). Off fires a chord the instant you click it, which is what Keys has always done.
     // Anything else holds the click until the next boundary, so a card can only ever land on
-    // the grid - which is what makes three lines at three rates performable rather than a race
+    // the grid - which is what makes two lines at two rates performable rather than a race
     // against your own mouse.
     //
-    // **Global, not per line.** The whole value of it is that the three lines land *together*;
+    // **Global, not per line.** The whole value of it is that the lines land *together*;
     // three separate quantize settings would be three ways to miss each other.
     //
     // It quantizes the gestures that *fire* something - a chord card, a slot launch, a drag
@@ -393,7 +393,7 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Keys"), 1 }, nm + " Keys", true));
     // Where this line's notes go. Global is the old behaviour and the one to keep for a
     // single instrument downstream; naming a channel is for a multitimbral rack, where the
-    // three lines can drive three different sounds. Note this buys nothing in Keys Host until
+    // the lines can drive different sounds. Note this buys nothing in Keys Host until
     // the hosted instrument is itself multitimbral - it is for the DAW case.
     {
         StringArray channels { "Global" };
@@ -945,7 +945,7 @@ bool KeysProcessor::keybedLit(int midiNote) const
     // The track output and the MIDI input are what they are, whatever the arp is doing.
     if (noteRefs[0][(size_t) midiNote].load() > 0 || inputNoteOn[(size_t) midiNote].load())
         return true;
-    // A chord handed to an arp line: lit unless that line is running it with Show notes on,
+    // A chord handed to an arp line: lit unless that line is running it with Light keys on,
     // in which case it is the run's input and showing it would drown the run. See the header.
     for (int n = 0; n < numArpLines; ++n)
         if (noteRefs[(size_t) (1 + n)][(size_t) midiNote].load() > 0
@@ -1096,7 +1096,7 @@ void KeysProcessor::allNotesOff()
     // The chord held into the arp is the one thing here that outlives a note-off, so a
     // panic has to forget it too - otherwise All Off silences it while the launched slot
     // still paints as playing and the next launch tries to release notes already gone.
-    // All three lines: a panic that left B holding is a panic that did not happen.
+    // Every line: a panic that left B holding is a panic that did not happen.
     for (auto& l : lines)
     {
         l.chordOn.clear();
@@ -1173,7 +1173,7 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     // track's MIDI (a clip, another device) is left in place and passes through.
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
 
-    // Arp stage: three lines, each consuming its own note stream and emitting its own; CCs
+    // Arp stage: one engine per line, each consuming its own note stream and emitting its own; CCs
     // pass through. The engines read the host playhead (the one deliberate exception to Keys'
     // old never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-run on an internal
     // clock at the last-known tempo when the transport is stopped.
@@ -1391,7 +1391,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
 
         // The engine's input is this line's buffer alone, never the merged stream: that is the
         // whole of the routing. Its output goes into midi with everything the other lines and
-        // the pass-through left there, so three lines at three rates simply sum.
+        // the pass-through left there, so two lines at two rates simply sum.
         l.engine.process(ap, hc, numSamples, l.in, l.out);
         watchArpNotes(l.out);
         mergeArpOut(midi, l.out, channel);

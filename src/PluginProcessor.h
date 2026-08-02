@@ -106,7 +106,7 @@ public:
     bool arpNoteLit(int midiNote) const;
 
     // What the on-screen keybed should light, which is deliberately **not** the same question
-    // as isNoteSounding. With Show notes on and a line running, the chord handed to that line
+    // as isNoteSounding. With Light keys on and a line running, the chord handed to that line
     // is not lit: it is the *input* to the run, so every pitch the arp is chewing stays on and
     // the arpeggio moving inside it is invisible. That is exactly how the option looked when it
     // first landed - "it just shows the chords that are being played" - and hiding the input is
@@ -334,12 +334,12 @@ public:
     // doing nothing whenever the arp happened to be off. Every surface that shows a chord
     // card asks here rather than caching a mode of its own, which is what keeps the answer
     // the same wherever a card is drawn.
-    // With three lines the question is "is any line on", and the answer to "which one gets
+    // With more than one line the question is "is any line on", and the answer to "which one gets
     // the chord" is the current line (below) rather than a second mode.
     bool cardsFeedArp() const;
 
     // The current line: which one the arp panel edits, and which one a click on a chord card
-    // hands its chord to. One piece of state behind three surfaces - the A/B/C tabs on the
+    // hands its chord to. One piece of state behind three surfaces - the A/B tabs on the
     // slot row, the letter chip on the Pads bar, and the corner mark a card wears once it has
     // been sent somewhere. It lives with the layout because it is the same kind of thing: not
     // a parameter (it changes no note by itself), message thread only, and Owen should get it
@@ -664,7 +664,7 @@ private:
     Heartbeat heartbeat;
     void heartbeatTick();
 
-    // The whole arp stage: split the merged stream, run the three lines, merge them back.
+    // The whole arp stage: split the merged stream, run the lines, merge them back.
     // Audio thread; see the definition for the routing rules.
     void runArpLines(juce::MidiBuffer& midi, int numSamples);
     void advanceChainClock(int numSamples); // audio thread; raises chainAdvance, never launches

@@ -40,30 +40,43 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
 
-### The three arpeggiator lines
+### The two arpeggiator lines
 
-Keys runs three arpeggiators (2026-08-01; `docs/ARP_DESIGN.md`). All four arp tools take an
-optional **`line`**, 0, 1 or 2 — A, B or C — and **default to 0**, the arpeggiator Keys has
-always had. Every script written before the lines existed therefore still drives the line it
-was written for, unchanged.
+Keys runs two arpeggiators (`docs/ARP_DESIGN.md`). All four arp tools take an optional
+**`line`**, 0 or 1 — A or B — and **default to 0**, the arpeggiator Keys has always had. Every
+script written before the lines existed therefore still drives the line it was written for,
+unchanged.
+
+There were three until 2026-08-02, and **line C's parameters are still registered**: `arp3On`,
+`arp3Rate` and the rest still appear in `list_params` and still accept a write, because dropping
+them from the layout would break every saved session. Nothing reaches them — `arpLineOn` answers
+false above the UI's count, so line C has no engine running, no chip and no row. Writing an
+`arp3*` id is accepted and does nothing audible. Passing `"line": 2` is clamped to B.
 
 Each line owns its own live lanes, its own twelve slots, its own held chord and its own chain,
 so `slot` is read *within* a line: `{ "line": 1, "slot": 3 }` is B's fourth slot, a different
 place from A's. `set_arp_pattern` and `get_arp_pattern` echo the `line` they acted on.
 
-Two arp parameters are **not** per line, because they are about the three of them together:
+Two arp parameters are **not** per line, because they are about both of them together:
 `bpm` (the tempo they run at with no transport to follow) and `arpQuantize` (Launch Quantize -
 Off, or the boundary a chord card, a slot launch or a drag onto a line waits for before it
 lands). Setting `arpQuantize` from a script is worth knowing about: with it on, a
 `press_chord_pad` that feeds a line will not sound until the next boundary.
 
 The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
-`arpRate`, `arpSwing` — and B and C repeat that whole list as `arp2*` and `arp3*`:
-`arp2On`, `arp2Rate`, `arp3Direction`, and so on. `list_params` shows all three sets. Two ids
-are new on every line: `arpKeys` (does this line arpeggiate what you play, or only the chords
-handed to it) and `arpChannel` (Global, or 1-16).
+`arpRate`, `arpSwing` — and B repeats that whole list as `arp2*`: `arp2On`, `arp2Rate`,
+`arp2Direction`, and so on. Four ids are newer than the original arp and worth knowing:
+`arpKeys` (does this line arpeggiate what you play, or only the chords handed to it),
+`arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
+`arpOctaves`, which stacks copies upward) and `arpVolume` (0..100, this line's output level).
 
-A polyrhythm from a cold start is three `set_params` calls and a chord:
+**A line that is off still takes chords in.** Handing a chord to a line that is not running
+makes no sound and is not lost: the engine holds it silently, and setting that line's `On`
+starts it arpeggiating what it is already holding. This changed on 2026-08-02 - the chord used
+to sustain like a pad and the engine never saw it - so a script that switched a line on and then
+fed it a chord can now do the two in either order.
+
+A polyrhythm from a cold start is two `set_params` calls and a chord:
 
 ```
 set_params { "values": { "arpOn": true,  "arpRate": "1/8" } }

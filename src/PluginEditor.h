@@ -348,7 +348,7 @@ private:
     // Which arp line a click on a chord card feeds, shown as its letter and cycled A->B->C by
     // clicking. It rides the *Pads* bar, next to Fill / Regen / Generator, because it is a
     // fact about the cards rather than about the arp: the control that says where a card goes
-    // belongs beside the cards. It is the same state as the A/B/C tabs inside the arp panel,
+    // belongs beside the cards. It is the same state as the A/B tabs inside the arp panel,
     // so either moves both - and it stays reachable with the arp section folded away, which
     // the tabs do not.
     juce::TextButton arpTargetButton { "A" };

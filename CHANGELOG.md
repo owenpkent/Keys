@@ -115,6 +115,8 @@ on a card now begins silently, and the release decides what it was:
 
 ### Added: a macro view, so a polyrhythm is built from one screen
 
+> **Superseded in part by "two arpeggiator lines" above, in this same unreleased batch.** Line C came out on 2026-08-02 and the macro rows changed which knobs they carry. Both entries are kept because they describe one release between them, and the machinery below is still what runs.
+
 Owen: "I want a poly arp view where you can view the rate and shape of all three arpeggiators
 at once ... the goal is to be able to create complex polyrhythms from one view."
 
@@ -168,6 +170,8 @@ there is no transport to follow - always in the standalone, and whenever the hos
 A host that is *playing* always wins, and a line whose rate is in Hz follows neither.
 
 ### Added: three arpeggiators, so Keys can hold a polyrhythm
+
+> **Superseded in part by "two arpeggiator lines" above, in this same unreleased batch.** Line C came out on 2026-08-02 and the macro rows changed which knobs they carry. Both entries are kept because they describe one release between them, and the machinery below is still what runs.
 
 Owen: "I had the idea of having three arpeggiators so we can get polyrhythms and keep keeping
 what we currently have, but having three of them, and then being able to feed cards into

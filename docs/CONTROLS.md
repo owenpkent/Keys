@@ -82,7 +82,7 @@ the window reads at a glance, before you have read a single caption.
 | Section | Bar | Folds away |
 |---------|-----|-----------|
 | **Controls** | top | Size, Root, Scale, Octave, Scale Lock, Voices, MIDI Ch, Humanize, Velocity, Strum, Dir, BPM, and the eight knobs in the row beneath them. **Knobs**, at the left end of this bar, folds just that knob row; the theme swatch at the right end stays put whatever you fold. |
-| **Arp** | below the controls | The three arpeggiator lines. The **A**, **B** and **C** switches and the **Hold off** chip ride on the bar and stay there folded, so a line can be switched on and made to let go of a chord with the panel shut. **Detach** rides on it too, but goes with the fold like every other section's. Folding it puts the editor away, never the arpeggiators. It starts folded, because open it is the tallest thing here. |
+| **Arp** | below the controls | The two arpeggiator lines. The **A** and **B** switches, **Hold off**, **All Off** and **Light keys** ride on the bar and stay there folded, so a line can be switched on and made to let go of a chord with the panel shut. **Detach** rides on it too, but goes with the fold like every other section's. Folding it puts the editor away, never the arpeggiators. |
 | **Pads** | below the arp | The sixteen chord pads and the live chord card. The four page buttons ride at the left of the bar and fold with the strip; the generator's **Fill**, **Regen** and **Generator** chips, its **Key**, **Mode** and **Scale Compliance** combo boxes, and the arp's target-line letter ride at the right and never do. |
 | **Keyboard** | above the keys | The keybed. **Wheels** folds the mod and pitch wheels; Exclusive, Sustain, Latch and All Off stay put. |
 
@@ -569,59 +569,64 @@ sounding (keyboard, a held note, a chord pad) and plays it one note at a time. T
 pads sit directly below it, so a chord is always one click away, and the knobs stay on
 screen above.
 
-### Three lines
+### Two lines
 
-There are **three arpeggiators**, A, B and C, and they run at once. Each has its own rate,
-shape, step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet against 1/4
-is a polyrhythm out of one plugin rather than three.
+There are **two arpeggiators**, A and B, and they run at once. Each has its own rate, shape,
+step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet is a polyrhythm out
+of one plugin rather than two.
 
-**A, B and C on the Arp bar switch a line on**, one chip each. They live on the bar rather
-than inside the panel so folding it away leaves the arpeggiators running and still
-switchable. **B and C start off**, and with them off Keys behaves exactly as it did when
-there was one arpeggiator — which is also what a session saved before them does when you
-open it.
+**A and B on the Arp bar switch a line on**, one chip each. They live on the bar rather than
+inside the panel so folding it away leaves the arpeggiators running and still switchable.
+**B starts off**, and with it off Keys behaves exactly as it did when there was one
+arpeggiator — which is also what a session saved before the lines does when you open it.
 
-**The panel edits one line at a time**, chosen by the **A / B / C tabs at the left of the
-slot row**. Everything on the panel follows that tab: the rate, the shape, the step lanes,
-the twelve slot cards, Bars and Chain. Each tab shows whether its line is on and the chord
-it is holding, so three tabs read as three arpeggiators at a glance. The panel is no taller
-for having them.
+Beside them: **Hold off** lets go of every held chord and stops every chain, leaving the lines
+running. **All Off** does that *and* switches the lines off, which is the difference — release
+alone hands the engines straight back to whatever the keybed is holding. **Light keys** lights
+the on-screen keyboard for the notes the arp is playing; it is display only and changes nothing
+you hear.
 
-### The macro view: all three at once
+**The panel edits one line at a time**, chosen by the **A / B tabs at the left of the slot
+row**. Everything on the panel follows that tab: the rate, the shape, the step lanes, the
+twelve slot cards, Bars and Chain. Each tab shows whether its line is on and the chord it is
+holding, so the tabs read as arpeggiators at a glance. The panel is no taller for having them.
 
-The fourth tab, **All**, is where a polyrhythm gets built. It replaces the per-line band and
-the step editor with **three rows, one per line**, each holding:
+### The macro view: both at once
+
+The last tab, **All**, is where a polyrhythm gets built, and it is the view Keys opens in. It
+replaces the per-line band and the step editor with **one row per line**, each holding:
 
 | | |
 |---|---|
-| **A / B / C** | that line on or off |
+| **A / B** | that line on or off |
 | **LTCH** | Latch: keep that line arpeggiating after you let go, until a new chord arrives |
-| **KEYS** | does that line follow the keys you play, or only the chords you hand it? |
+| **PLAY** | does that line follow the keys you play, or only the chords you hand it? |
 | **Rate** | a knob, detented onto the divisions, with `<` `>` beside it and a **Sync / Hz** switch. A time division in Sync, a frequency in Hz. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
 | **< shape >** | its shape, including Pattern (whose step editor is on that line's own tab) |
-| **OCT** | Repeats: how many times it stacks the chord up the keyboard. The classic arp range |
+| **Dot / Trip / Anchor** | on a strip under the rate. Dotted steps, triplet steps, and whether the run locks to the host's bar grid. All three grey out in Hz, where there is no beat to divide and no grid to lock to |
+| **OCT** | moves that line up or down whole octaves. **Centred**: nothing at 12 o'clock, down to the left, up to the right. Put one line an octave under the other and they stop fighting for the same register. (The upward-only stacking *range* is on the line's own tab) |
 | **GATE** | how much of each step its notes fill. Short gates let another line through |
 | **CHANCE** | how often a step fires at all. Thin one line out and the other two show through |
 | **SWING** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
 | **OFFSET** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
-| **RAMP** and **TIME** | velocity ramp: over Time, that line moves toward Ramp per cent of what you played. Negative fades a held chord out, positive swells it |
+| **VOL** | how loud that line plays, as a share of the velocity it would have. The way to balance the two lines without playing one of them softer. (The velocity **Ramp** and its **Time** are on the line's own tab) |
 | **HUMAN** | nudges each hit a little late and a little quieter. At 0 the line is dead on the grid |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
-| **Chain** | start that line's progression. Three chains at three rates is the point of the view |
+| **Chain** | start that line's progression. Two chains at two rates is the point of the view |
 
-Eight knobs, two switches, a rate and a shape: every setting a regular arpeggiator has, three
-lines deep, on one screen.
+Seven knobs, two switches, a rate with its three modifiers, and a shape: every setting a regular
+arpeggiator has, both lines deep, on one screen.
 
-Under the three rows sits what they share: the **BPM** knob and **Quantize**.
+Under the rows sits what they share: the **BPM** knob and **Quantize**.
 
 The knobs are the same rotary the band above uses for the same settings, with each column
 heading written once at the top rather than repeated down every row. Rate is a knob too, but it
 keeps its `<` `>` steppers: a knob is a drag target, and those are the click-only path to every
 division. Clicking **All** selects the view; you leave it by
-clicking A, B or C, because a tab selects rather than toggles.
+clicking A or B, because a tab selects rather than toggles.
 
-**All is a view, not a fourth line.** The current line stays whatever it was, so clicking a
-chord card still has one unambiguous target while all three are on screen; clicking A, B or C
+**All is a view, not another line.** The current line stays whatever it was, so clicking a
+chord card still has one unambiguous target while both are on screen; clicking A or B
 takes you back to that line's own controls. The panel is exactly as tall in this view as in
 any other, because the rows take the band's space rather than joining it.
 

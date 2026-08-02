@@ -165,13 +165,15 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   Exclusive, the Voices cap, Strum and the keybed lights all still apply) but queued there, and
   only that engine drains it. `runArpLines` lifts the keybed's notes out of the merged stream for
   the lines with **Keys** on, runs each enabled line into its own buffer, and merges them back;
-  a *disabled* line's input passes straight through, so a chord held to it sustains. A per-pitch
+  a *disabled* line's input passed straight through, so a chord held to it sustained (**no longer
+  true from 2026-08-02** - see the entry above; the engine now runs every block and takes the
+  chord in silently). A per-pitch
   ownership mask races - the message thread can clear an owner before the matching note-off is
   drained, stranding that note in an engine's held set forever - and that is why it is queues.
   **`noteRefs` is per destination stream** for the same reason: "one note-on per sounding pitch"
   is a statement about one stream, and a pitch held into line B must not suppress the same pitch
-  played to the output. On screen: **A/B/C on the arp bar** (one per line's On, and Hold off is
-  still one button that releases all three), **three tabs at the left of the slot row** choosing
+  played to the output. On screen: **A/B on the arp bar** (one per line's On, and Hold off is
+  still one button that releases both), **a tab per line at the left of the slot row** choosing
   which line the panel edits (34 px inside a row already 58 tall, so the panel's height is
   unchanged; a tab change rebuilds every APVTS attachment against the new ids, the same move
   `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** saying which
@@ -186,9 +188,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   complex polyrhythms from one view"). It replaces the band and the step editor with three rows,
   one per line, over a shared row holding the BPM knob and Launch Quantize. A row carries the
   line switch, **Latch** and **Keys**, a detented rate knob with its `<` `>` and Sync/Hz, the
-  shape with its own steppers, **eight knobs** (Oct, Gate, Chance, Swing, Offset, Ramp, Time,
-  Human), the held chord and that line's Chain - "like regular arp settings", Owen's ask when the
-  first cut had three. The knobs are the band's own rotary, not sliders, and each column heading
+  shape with its own steppers and its Dot / Trip / Anchor strip, **seven knobs** (Oct, Gate,
+  Chance, Swing, Offset, Vol, Human - Oct is the *transpose* and Vol replaced Ramp and Time
+  together, both 2026-08-02, see the entries above), the held chord and that line's Chain -
+  "like regular arp settings", Owen's ask when the first cut had three. The knobs are the band's own rotary, not sliders, and each column heading
   is written once on the top row while every row reserves the same strip so the columns align.
   **It is a view, not a fourth line**: `editedLine` is untouched by it, so a chord card still has
   one target while all three are on screen, and the panel does not grow because the rows take the
@@ -205,7 +208,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
   - fires a chord the instant you click. Anything else holds the *gesture* until the next boundary
   and then performs it whole, so a slot's pattern, shape, rate and chord land together on the grid.
-  Global rather than per line, because the value of it is that the three lines land together.
+  Global rather than per line, because the value of it is that the lines land together.
   **It never delays the keybed**: playing a note is playing an instrument. The public
   `holdArpChord` / `holdArpChordFromPad` / `launchArpSlot` defer; the `*Now` twins beside them are
   the gesture with the wait already served, and are what the chain calls (it is on a bar line by
@@ -241,19 +244,19 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   this back into Sync - an absent parameter keeps the live instance's current value rather than
   resetting it, so without that a Hz session would reopen in Sync at whatever division it
   happened to hold, silently.
-- **The arp bar carries All Off and Show notes** (2026-08-02, Owen's ask). **All Off**
+- **The arp bar carries All Off and Light keys** (2026-08-02, Owen's ask). **All Off**
   (`allArpOff()`) switches every line off *and* releases every hold, chain and pending launch.
   Switching off is the load-bearing half: release without it and the engines pick straight back
   up on whatever the keybed holds, so it would silence the room for a sixteenth note. It is
   always enabled, unlike Hold off, because a stop button you have to read before trusting is
-  one you cannot reach for in the moment. **Show notes** (`layout.arpLights`) lights the keybed
+  one you cannot reach for in the moment. **Light keys** (`layout.arpLights`) lights the keybed
   for the notes the arp is *playing*. `arpNoteOn` is a flag per pitch written on the audio
   thread off each line's `out` buffer - never off the merged stream, where the arp's notes are
   indistinguishable from the pass-through, and never off `in`, which `noteRefs` already lights.
   **`keybedLit()` is the keybed's own question and not `isNoteSounding()`**: that answer feeds
   the live chord card too, and an arpeggio is a run of single notes, so folding the arp into it
   would rewrite the "current chord" as whichever note the arp is on. Only `NoteSurface` asks
-  `keybedLit`. It also **withholds the chord handed to a running line** while Show notes is on,
+  `keybedLit`. It also **withholds the chord handed to a running line** while Light keys is on,
   which is the difference between the option working and not: that chord is the run's *input*,
   so lighting it holds down every pitch the arp is chewing and the arpeggio inside it is
   invisible. Owen's report on the first cut was "it just shows the chords that are being
@@ -298,10 +301,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   window width, so two more 34 px targets in it would have driven the eight knobs under the
   mouse-only minimum - the row took a `arpMacroSubRow` strip at the bottom instead, removed
   *before* the main line is laid out so nothing above it moved. Height is the cheap axis in this
-  view since line C went; width is the expensive one. Note **Keys and Show notes are unrelated
+  view since line C went; width is the expensive one. Note **PLAY and Light keys are unrelated
   controls with similar names**: `arpKeys` routes the keybed *into* a line, `layout.arpLights`
   only decides whether the keybed lights *up*. Owen asked what the difference was, which is why
-  the Keys tooltip now names Show notes and says it is not that.
+  each label now names what it touches.
 - **Reserve the fixed-size control first, always** (2026-08-02). `MacroRow::resized` expressed
   Shape's width as a subtraction inside the knobs' `jlimit(52, 96, ...)`, which is not a
   reservation: on Owen's window the knobs hit their floor, the clamp discarded the subtraction,
@@ -446,7 +449,8 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   override; any doc still saying the whole bar is the target is describing that three-day
   window. **Detach hides with its section**, and so does every control that would be reaching
   into content that is not on screen: the pad pages, Knobs, Wheels. What stays on a folded
-  bar is what you reach for while playing or generating - the arp's A / B / C line switches and
+  bar is what you reach for while playing or generating - the arp's A / B line switches, All Off,
+  Light keys and
   Hold off, the Pads bar's Fill / Regen / Generator, its Key / Mode / Scale Compliance combos
   and the arp target-line letter beside them, the Keyboard bar's Exclusive / Sustain / Latch /
   All Off - plus the theme swatch, which belongs to the plugin rather than to any one section. Open and folded bars are painted at different weights on
@@ -632,13 +636,16 @@ Four things will bite otherwise:
   can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
   match; set the other one out of the way first.
 - **The arp's own controls are named per line**, for the same first-match reason: the bar
-  chips are `Arp line A` / `B` / `C`, the panel's line tabs are `Arp line A tab` and so on
+  chips are `Arp line A` / `B`, the panel's line tabs are `Arp line A tab` and so on
   (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
   the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
   `Arp target line`. Hold off is `Arp hold off`. The fourth tab is `Arp all tab`, and the macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
-  `Macro line A`, `Macro latch A`, `Macro keys A`, `Macro rate A`, `Macro rate mode A`,
-  `Macro shape A`, `Macro chain A`, and `Macro OCT A` / `Macro GATE A` / ... one per heading.
+  `Macro line A`, `Macro latch A`, `Macro keys A` (the switch labelled **PLAY** on screen - the
+  accessible name follows the parameter id, not the label), `Macro rate A`, `Macro rate mode A`,
+  `Macro shape A`, `Macro chain A`, `Macro dot A` / `Macro trip A` / `Macro anchor A`, and
+  `Macro OCT A` / `Macro GATE A` / ... one per knob heading. On the arp bar: `Arp all off` and
+  `Arp light keys`.
 - **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
   applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
   the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that

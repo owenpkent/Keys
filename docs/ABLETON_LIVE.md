@@ -123,11 +123,11 @@ Arm the instrument track and record; the notes you click land as a normal MIDI c
 Scale Lock, octave, and velocity all apply to what's recorded, because Keys sends the
 already-resolved notes. With any of the Arp section's line switches (**A**, **B**, **C**) lit,
 what lands is the arpeggiated stream rather than the chord you clicked: the arp rewrites the
-note stream on its way out of the plugin, so the clip holds what you heard — all three lines
-at once, if all three are running.
+note stream on its way out of the plugin, so the clip holds what you heard — both lines
+at once, if both are running.
 
-Each line can also name its own **Channel** (Global, or 1–16). That is what makes three lines
-useful against a multitimbral rack: set A, B and C to different channels and one Keys drives
+Each line can also name its own **Channel** (Global, or 1–16). That is what makes two lines
+useful against a multitimbral rack: set A and B to different channels and one Keys drives
 three sounds. Live records all of it into the one clip, on the channels the lines sent it on;
 splitting it back out afterwards is a job for Live, not for Keys.
 

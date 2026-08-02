@@ -1763,7 +1763,7 @@ void KeysEditor::resized()
         bar.removeFromRight(4);
         arpAllOffButton.setBounds(bar.removeFromRight(84).withSizeKeepingCentre(82, 24));
         bar.removeFromRight(10);
-        // Show notes last, so the two stop buttons sit together at the right end where the
+        // Light keys last, so the two stop buttons sit together at the right end where the
         // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
         arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
         section(secArp).caption = bar;
