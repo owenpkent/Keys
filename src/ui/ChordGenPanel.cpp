@@ -533,29 +533,13 @@ void ChordGenPanel::buildControls()
     for (auto* b : { &similarButton, &followButton, &clearRefButton })
         addAndMakeVisible(*b);
 
-    // Straight through to whoever holds the pad strip. Unwired, the tray still auditions.
-    // A tray drag is offered to the reference card first, because that target is inside this
-    // window and the editor's is not: asking the far end about a point that never left this
-    // window would light a pad under a drag that was always going to land here.
-    tray.onDragOver = [this](juce::Point<int> p)
-    {
-        const bool overRef = refCard.getScreenBounds().contains(p);
-        refCard.setDropHighlight(overRef);
-        if (onCandidateDragOver)
-            onCandidateDragOver(overRef ? juce::Point<int> { -1, -1 } : p);
-    };
-    tray.onDrop = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
-    {
-        if (refCard.getScreenBounds().contains(p))
-        {
-            refCard.setChord(pad);
-            // False, so the tray keeps the card: a reference is a *copy* of a chord you like,
-            // and taking the candidate away as payment for keeping it would be backwards.
-            return false;
-        }
-        return onCandidateDropped ? onCandidateDropped(p, pad) : false;
-    };
-    tray.onDragEnd = [this] { if (onCandidateDragEnd) onCandidateDragEnd(); };
+    // The tray's drag needs no wiring at all any more (2026-08-02). It goes out through this
+    // class as a `DragAndDropContainer` and lands on whichever target is under the cursor - the
+    // reference card beside it, or a pad in the other window - so the ordering this used to have
+    // to arrange by hand ("offer the reference first, because that target is inside this window")
+    // is now just which component the point is over, and it is right about a window sitting on
+    // top of another where a bounds test was not. Only the *menu* item below still needs a
+    // pass-through, because a menu item has no target to hit.
     tray.onSendToFirstEmpty = [this](const KeysProcessor::ChordPad& pad)
     { return onCandidateToFirstEmptyPad ? onCandidateToFirstEmptyPad(pad) : false; };
     tray.onPageHasEmptyPad = [this] { return onPageHasEmptyPad ? onPageHasEmptyPad() : false; };
@@ -712,29 +696,11 @@ void ChordGenPanel::refreshMoodItems()
     gen.setMoodChoice(moodBox.getSelectedId() <= 1 ? juce::String() : moodBox.getText());
 }
 
-// The reverse crossing: a pad being dragged out of the main window, offered to the reference.
-// Bounds-checked rather than hit-tested through Desktop::findComponentAt, unlike the drop going
-// the other way. That test exists because the *generator window* can cover the pad strip; this
-// direction has the opposite problem and no equivalent, since a drag that has reached this
-// window is over it by definition.
-void ChordGenPanel::showReferenceDropTarget(juce::Point<int> screenPos)
-{
-    refCard.setDropHighlight(refCard.getScreenBounds().contains(screenPos));
-}
-
-bool ChordGenPanel::offerReferenceDrop(juce::Point<int> screenPos, const KeysProcessor::ChordPad& pad)
-{
-    refCard.setDropHighlight(false);
-    if (! refCard.getScreenBounds().contains(screenPos) || pad.notes.empty())
-        return false;
-    refCard.setChord(pad);
-    return true; // and ChordPads reads this as "do not clear the card I just dragged"
-}
-
-void ChordGenPanel::clearReferenceDropTarget()
-{
-    refCard.setDropHighlight(false);
-}
+// The reverse crossing - a pad dragged out of the main window and offered to the reference - has
+// no entry point here at all now. ChordRefCard is a `DragAndDropTarget` and JUCE delivers to it
+// directly, highlight and drop and the exit that puts the highlight back out, so the three
+// screen-coordinate methods that used to live here went with the editor's plumbing that called
+// them (2026-08-02).
 
 void ChordGenPanel::timerCallback()
 {

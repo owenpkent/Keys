@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../PluginProcessor.h"
+#include "ChordDrag.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 #include <vector>
@@ -46,7 +47,13 @@ namespace keys
 // reading, and it cost too much: starting a drag blurted the chord every time, and with an arp
 // line switched on the press *consumed* the click and cleared `dragSource`, so a card could not
 // be dragged at all in the one mode where dragging it onto a line is the whole point.
+//
+// **Every drag on this strip is stock JUCE drag-and-drop** (2026-08-02), including the ones that
+// leave the window. See ChordDrag.h: the container is the section holder this component is
+// parented into, which is what makes the machinery survive the Pads section being popped out
+// into a window of its own.
 class ChordPads : public juce::Component,
+                  public juce::DragAndDropTarget,
                   private juce::Timer
 {
 public:
@@ -89,23 +96,21 @@ public:
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
-    // A chord dragged in from *another window* - today the generator's audition tray, which
-    // lives in a DetachedWindow of its own (ChordTray, 2026-08-01). JUCE's mouse capture keeps
-    // the drag events on the tray for the whole gesture and no drag-and-drop container spans two
-    // desktop windows, so the source cannot find this component and this component never sees
-    // the mouse. The editor holds both and forwards a **screen** position, the one space the two
-    // share; the geometry, the paint and the refusals stay on this side, where the pads are.
+    // Every drop this strip takes, wherever the chord came from: a pad moved to another pad, a
+    // pad dropped on the live card to recall it, the live card captured onto a pad, and a
+    // candidate dragged in from the generator's audition tray in a window of its own.
     //
-    // Occlusion is answered here rather than by the caller: the generator window can sit over
-    // the strip, and a point inside these bounds but underneath that window is not a drop. That
-    // is what makes this a Desktop hit test and not a bounds check.
-    int externalDropSlotAt(juce::Point<int> screenPos) const; // absolute slot, or -1
-    // Which pad the drag in progress started from, or -1. Read by onDropOutside handlers that
-    // need to name the *card*, not just copy its notes - handing a chord to an arp line marks
-    // the card it came from, so the strip can ring it.
-    int draggedSlot() const { return dragSource; }
-    void setExternalDropSlot(int slot);                       // hover feedback; -1 clears it
-    bool dropExternalChord(juce::Point<int> screenPos, const KeysProcessor::ChordPad& pad);
+    // One entry point for all four, because to a pad they are the same event. The old
+    // arrangement had two - the strip's own mouseUp for the internal cases and a screen-position
+    // call from the editor for the tray - on the belief that JUCE could not deliver a drop across
+    // two top-level windows. It can (ChordDrag.h). Occlusion, the folded section and the detached
+    // section are all answered by JUCE's own target search, which is a better hit test than the
+    // one that was here: it cannot light a pad through a window sitting over it.
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDragEnter(const SourceDetails&) override;
+    void itemDragMove(const SourceDetails&) override;
+    void itemDragExit(const SourceDetails&) override;
+    void itemDropped(const SourceDetails&) override;
 
     // The aimless twin of that drop, for "Send to first empty pad" on a tray card's menu. It
     // takes the first blank slot on the *current page*, left to right, and refuses when there is
@@ -114,23 +119,19 @@ public:
     int firstEmptyPadOnPage() const;
     bool sendChordToFirstEmptyPad(const KeysProcessor::ChordPad& pad);
 
-    // The drag going the *other* way: a card leaving this strip, offered to whatever is outside
-    // this window before the strip decides what the gesture meant. Today the only taker is the
-    // generator's reference box.
+    // The drag going the *other* way needs no hooks at all now. A card leaving this strip is
+    // offered to the generator's reference box and to the arp panel's slots, tabs and macro rows
+    // by JUCE, because each of those is a `DragAndDropTarget`; the three `std::function`s the
+    // editor used to forward screen positions through are gone, and so is the bug class they
+    // came with, where a highlight lit on the way out had to be put back out by hand on every
+    // path a drag could end (including the far window being closed mid-gesture).
     //
-    // `onDropOutside` returning true is load-bearing rather than informational. Dragging a card
-    // off the row clears it, and reaching for the reference box means dragging a card off the
-    // row: without this the one gesture Owen asked for would delete the chord it was trying to
-    // keep. True means "somebody took a copy", and the card stays exactly where it was.
-    //
-    // `onDragEnd` fires once at the end of every drag off this strip, whatever the gesture
-    // turned out to mean, and it is what puts the outside taker's highlight back out.
-    // `onDropOutside` cannot do that job: it only runs when the card was let go *off* the row,
-    // so dragging out over the reference box and then back onto a pad - or onto the live card -
-    // left the box lit with nothing being dragged at all.
-    std::function<void(juce::Point<int> screenPos)> onDragOutside;
-    std::function<bool(juce::Point<int> screenPos, const KeysProcessor::ChordPad&)> onDropOutside;
-    std::function<void()> onDragEnd;
+    // What did *not* go is the veto. Dragging a card off the row clears it, and reaching for the
+    // reference box means dragging a card off the row, so a taker has to be able to say "I have
+    // it, leave the card alone" or the one gesture that keeps a chord would be the one that
+    // deletes it. JUCE has no opinion about that, so it rides on the payload: see
+    // `chorddrag::Payload::taken`, which every target here sets and this strip reads once the
+    // drop has been delivered.
 
 private:
     juce::Rectangle<float> cardBounds() const;
@@ -145,6 +146,15 @@ private:
     int cellAt(juce::Point<float>) const; // -2 = card, >= 0 = absolute pad slot, -1 = none
     bool sourceIsDraggable() const;
     void showPadMenu(int slot);
+
+    // Hand the card under the press to JUCE, ghost and all.
+    void beginChordDrag(const juce::MouseEvent&);
+    // Which cell a drop of this chord would actually land on: the same `cellAt` answer with the
+    // refusals applied, which differ by where the chord came from. -2 is the live card, >= 0 an
+    // absolute pad slot, -1 nothing. Kept apart from `cellAt` because "over a card of this strip"
+    // and "this drop would do something" are different questions and only the first one decides
+    // whether the drag counts as having left the row.
+    int dropCellFor(const chorddrag::Payload&, juce::Point<int> local) const;
 
     // The two chord-shaping actions on that menu, both acting on the *stored* chord of one
     // pad. Menu-only by Owen's call: they are edits, not performance, and the cards have no
@@ -176,12 +186,19 @@ private:
     void timerCallback() override;
     void endAudition();
 
-    int externalDropSlot = -1; // pad a cross-window drag is currently over, or -1
+    // The cell a drag - anyone's, from either window - is currently offering a chord to, or -1.
+    // One field for both, because to a pad they mean the same thing: let go here and this card
+    // takes that chord.
+    int dropCell = -1;
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
     int playing = -1;      // pad sounding out its audition, and lit while it does
     bool playingLive = false; // the live card is sounding its chord
     bool dragging = false;
-    juce::Point<float> downPos, dragPos;
+    juce::Point<float> downPos;
+
+    // The chord this strip currently has in the air, so the answer the targets write on it can
+    // be read once the drop has been delivered. Null except during one of this strip's own drags.
+    chorddrag::Payload::Ptr inFlight;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordPads)
 };

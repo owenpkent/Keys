@@ -195,12 +195,16 @@ Two things this deliberately does not change:
   Same state as the tabs; it is on that bar because it is a fact about the cards, and because it
   has to be reachable with the arp folded shut.
 - **Drag a chord card onto a slot** to bind it there, **onto a tab**, or **onto a line's row in
-  the macro view**, to hand it over now. Screen-position hit-testing through
-  `Desktop::findComponentAt`, mediated by the editor, for the reason the audition tray needs the
-  same: mouse capture keeps the gesture on the strip and the two surfaces can be in different
-  windows. Walking *up* from whatever is under the point is what makes the whole macro row a
-  target including the knobs sitting on it - the knob is found first, and its parent is the
-  line. A drop sets the current line but never changes the view: it is routing a chord, not
+  the macro view**, to hand it over now. Stock `juce::DragAndDropTarget` on each of the three
+  (2026-08-02): the slot cards, the line tabs and the macro rows take the drop themselves, and
+  the pair of screen-position hit tests the editor used to mediate - `externalDropSlotAt` and
+  `externalDropLineAt`, the second a near-copy of `ChordPads`' own - are gone with the belief
+  that made them necessary (see `src/ui/ChordDrag.h` and the chord generator section of
+  `ARCHITECTURE.md`: JUCE delivers across two top-level windows, it just needs telling to).
+  Walking *up* from whatever is under the point is what makes the whole macro row a target
+  including the knobs sitting on it - the knob is found first, and its parent is the line - and
+  that is precisely what JUCE's own `findTarget` does, so it survived the deletion rather than
+  being reimplemented. A drop sets the current line but never changes the view: it is routing a chord, not
   navigating, and in the macro view the line it landed on is already in front of you.
 
 ### The macro view (the fourth tab)

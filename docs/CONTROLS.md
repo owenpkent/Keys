@@ -231,8 +231,11 @@ keyboard on each, and it went on 2026-07-31 once the note list fit under the nam
    the rows to empty it, or drag a pad onto the live card to bring its notes back onto
    the keyboard (held) for editing — capture in reverse. **A locked pad can still be moved
    and still cannot be emptied**: dropping one off the rows does nothing, the same answer
-   the greyed-out **Clear pad** on its menu gives. The ghost fades as you leave the rows to
-   say so before you let go.
+   the greyed-out **Clear pad** on its menu gives. What you drag is the card itself, at full
+   size, so its lock dot travels with it and says which of the two this drag is doing. (Until
+   2026-08-02 the ghost was a small chip that faded once you were over nothing; the chip is gone
+   because the real card can now follow the cursor out of the window entirely, which is what
+   makes the generator's reference box something you can aim at.)
 6. **Edit a pad on the keyboard.** Right-click a pad and pick **Edit on keyboard**: its
    chord latches onto the keys, and every key you add or remove is written straight back
    to the pad, with the name re-detected as you go. That pad wears a **✓** at its
@@ -796,6 +799,9 @@ differently, which is the whole reason there are four.
 - **Send to arp slot**, in a pad's right-click menu, parks a copy of that chord in one of
   the twelve slots to launch later.
 
-Neither drag can lose a chord. Dragging a card off the strip normally clears it; a drop that
-lands on a tab or a slot **copies** instead, and a drop that misses everything leaves the card
-exactly where it was.
+Neither drag can lose a chord *by landing*. Dragging a card off the strip clears it, so both of
+these are drags off the strip — what saves them is that a drop on a tab, a slot, a macro row or
+the generator's reference box **copies** the chord and leaves the card exactly where it was.
+A drop that lands on none of those is an ordinary drag off the strip and still clears the card,
+which is the gesture working, not failing. Lock the pad if you want it to survive a miss: a
+locked card dropped anywhere off the strip does nothing at all.

@@ -118,7 +118,15 @@ private:
     // A section's content lives in a holder rather than directly in the editor, so popping it
     // out is one re-parent instead of a shuffle of every control in the section. The holder's
     // parent is either this editor or a DetachedWindow's content slot; nothing else changes.
-    struct Holder : juce::Component
+    //
+    // It is a `DragAndDropContainer` for one thing, and the thing is the Pads section: JUCE wants
+    // the container to be an ancestor of whatever starts a drag, and the holder is the one
+    // ancestor a section keeps in both places it can live. Put it on the editor instead and every
+    // drag would stop working the moment the section was popped out. The other three holders
+    // inherit it and never use it, which costs a vtable and is the price of the table staying one
+    // kind of thing (see `sections`).
+    struct Holder : juce::Component,
+                    juce::DragAndDropContainer
     {
         std::function<void()> layout;
         std::function<void(juce::Graphics&)> painter; // default: the plain section background

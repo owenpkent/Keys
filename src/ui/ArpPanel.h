@@ -2,6 +2,7 @@
 
 #include "../ArpEngine.h"
 #include "../PluginProcessor.h"
+#include "ChordDrag.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <okstudio/RotaryKnob.h>
 #include <array>
@@ -74,17 +75,19 @@ public:
     // Told when a tab is clicked, so the editor can move the Pads bar's letter chip with it.
     std::function<void()> onEditLineChanged;
 
-    // A drop target for a chord card dragged out of the pad strip, in screen coordinates:
-    // the slot card under `screenPos`, or -1. Mirrors ChordPads::externalDropSlotAt, and for
-    // the same reason - the two surfaces can be in different top-level windows, so the editor
-    // that holds both passes screen positions between them.
-    int externalDropSlotAt(juce::Point<int> screenPos) const;
-    // Same, for the line tabs: the line under `screenPos`, or -1. A card dropped on a tab is
-    // handed to that line there and then, without going through a slot.
-    int externalDropLineAt(juce::Point<int> screenPos) const;
-    // Paint the slot or tab a drag is currently over (-1 = none). Set by the editor while a
-    // card is being dragged, so the target lights up before the mouse is released.
-    void setExternalDropTarget(int slot, int lineTab);
+    // What a chord card dropped on this panel does, once JUCE has said where it landed. The
+    // slot cards, line tabs and macro rows are each a `DragAndDropTarget` of their own and call
+    // one of these; the panel owns the actions because both of them touch more than one card.
+    //
+    // There used to be a pair of screen-coordinate hit tests up here - `externalDropSlotAt` and
+    // `externalDropLineAt`, the second of them a near-copy of ChordPads' own, all three walking
+    // `Desktop::findComponentAt` by hand. They existed because the strip and this panel can be in
+    // different top-level windows and the code believed JUCE could not deliver a drop across two
+    // of them. It can: see ChordDrag.h. Walking *up* from the component under the point, which is
+    // what made the whole macro row a target including the knobs sitting on it, is exactly what
+    // JUCE's own `findTarget` does, so the behaviour survived the deletion.
+    void takeChordOnSlot(int slot, const chorddrag::Payload&);
+    void takeChordOnLine(int line, const chorddrag::Payload&);
 
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -99,19 +102,25 @@ public:
     // Each row's attachments are bound to its own line for the row's whole life, unlike the
     // band above, which rebinds every time the tabs move. That is the point of the row: three
     // lines on screen at once cannot each be "the current line".
-    class MacroRow : public juce::Component
+    class MacroRow : public juce::Component,
+                     public juce::DragAndDropTarget
     {
     public:
-        MacroRow(KeysProcessor&, int line);
+        MacroRow(ArpPanel&, KeysProcessor&, int line);
 
         void paint(juce::Graphics&) override;
         void resized() override;
         // Readouts that no attachment drives: the rate text (it spans two parameters and two
         // units), the shape, and the chord this line is holding. Called by the panel's timer.
         void refresh();
-        // Lit while a chord card dragged out of the pad strip is over this row. The row is the
-        // line here, laid out large, so it is a far easier target than the tab that names it.
-        void setDropTarget(bool);
+
+        // A chord card dragged out of the pad strip. The row is the line here, laid out large,
+        // so it is a far easier target than the tab that names it - and because JUCE walks up
+        // from whatever is under the point, the knobs sitting on the row are part of it.
+        bool isInterestedInDragSource(const SourceDetails&) override;
+        void itemDragEnter(const SourceDetails&) override;
+        void itemDragExit(const SourceDetails&) override;
+        void itemDropped(const SourceDetails&) override;
 
         // The eight knobs a row carries, left to right. One table so the labels, the
         // parameters and the layout cannot drift apart; the headings are drawn once, on the
@@ -158,6 +167,9 @@ public:
         std::unique_ptr<ButtonAtt> onAtt, latchAtt, keysAtt, rateModeAtt;
         std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
+        void setDropTarget(bool);
+
+        ArpPanel& owner;
         // Exactly one of these is ever non-null; refreshRateMode owns that invariant.
         std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
         int lastRateFree = -1;      // -1 = no attachment installed yet
@@ -237,23 +249,32 @@ public:
     // twelve identical letters. Left-click launches it. Right-click opens its menu, an
     // accelerator only: everything in there has a left-click path on the buttons below the
     // row (the same arrangement the chord pads use, per the CLAUDE.md exception).
-    class SlotCard : public juce::Button
+    class SlotCard : public juce::Button,
+                     public juce::DragAndDropTarget
     {
     public:
-        SlotCard(KeysProcessor&, const ArpPanel& owner, int index);
+        SlotCard(ArpPanel&, KeysProcessor&, int index);
 
         void paintButton(juce::Graphics&, bool over, bool down) override;
         void mouseDown(const juce::MouseEvent&) override;
 
         std::function<void()> onRightClick;
-        // Lit while a chord card dragged out of the pad strip is over this slot. The drop
-        // itself is the editor's to deliver: the drag never leaves the strip's mouse capture,
-        // so this card is never told about it by JUCE.
-        void setDropTarget(bool);
+
+        // A chord card dropped here binds that chord to this slot: the left-click twin *Send to
+        // arp slot* never had, and the reason that menu item was allowed to be right-click-only
+        // is that naming one slot of twelve needs a target picker. JUCE tells this card about the
+        // drop directly, mouse capture and window boundaries notwithstanding - the comment that
+        // used to sit here saying otherwise was wrong (ChordDrag.h).
+        bool isInterestedInDragSource(const SourceDetails&) override;
+        void itemDragEnter(const SourceDetails&) override;
+        void itemDragExit(const SourceDetails&) override;
+        void itemDropped(const SourceDetails&) override;
 
     private:
+        void setDropTarget(bool);
+
+        ArpPanel& owner;
         KeysProcessor& processor;
-        const ArpPanel& owner;
         int index;
         bool dropTarget = false;
 
@@ -264,20 +285,30 @@ public:
     // panel edits, and says what that line is doing: lit when the line is on, and carrying the
     // name of the chord it is holding, so three tabs read as three arpeggiators at a glance.
     // A chord card can also be dropped straight onto one.
-    class LineTab : public juce::Button
+    class LineTab : public juce::Button,
+                    public juce::DragAndDropTarget
     {
     public:
         // `line` < 0 is the macro tab: the fourth one, which selects the all-three view
         // rather than a line. One class for both because they are one row of targets and have
         // to look like one.
-        LineTab(KeysProcessor&, const ArpPanel& owner, int line);
+        LineTab(ArpPanel&, KeysProcessor&, int line);
 
         void paintButton(juce::Graphics&, bool over, bool down) override;
-        void setDropTarget(bool);
+
+        // A chord card dropped on a tab is handed to that line there and then, without going
+        // through a slot. The macro tab (`line` < 0) selects a view rather than a line, so it
+        // takes no chord and never lights.
+        bool isInterestedInDragSource(const SourceDetails&) override;
+        void itemDragEnter(const SourceDetails&) override;
+        void itemDragExit(const SourceDetails&) override;
+        void itemDropped(const SourceDetails&) override;
 
     private:
+        void setDropTarget(bool);
+
+        ArpPanel& owner;
         KeysProcessor& processor;
-        const ArpPanel& owner;
         int line;
         bool dropTarget = false;
 

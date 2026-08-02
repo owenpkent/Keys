@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../PluginProcessor.h"
+#include "ChordDrag.h"
 #include "ChordGenMenu.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
@@ -31,12 +32,14 @@ namespace keys
 //   * **drag onto a pad** - commit it there. A drag is the only gesture that can name a slot,
 //     which is why it and not a second click is the commit.
 //
-// The drag crosses windows, and nothing in JUCE does that for free. The pad strip is in the
-// main editor window and this is in a DetachedWindow of its own, so a `DragAndDropContainer`
-// would never see the drop and `mouseUp` arrives here with coordinates local to a component the
-// pads know nothing about. The two hooks below hand the editor a *screen* position, which is
-// the one space the two windows share; the editor holds both ends and closes the gap. Occlusion
-// is the target's problem, not this one's (see ChordPads::externalDropSlotAt).
+// The drag crosses windows, and JUCE does that for free - which is the opposite of what this
+// comment said until 2026-08-02. `DragAndDropContainer::startDragging` takes a fourth parameter,
+// `allowDraggingToExternalWindows`; pass true and the drop is delivered to a target in any other
+// JUCE window, the pad strip included. See ChordDrag.h for the mechanism. The container is
+// ChordGenPanel, this window's content, and it is a container for no other reason.
+//
+// The ghost follows the cursor out of this window and over the strip, because the drag image is
+// a desktop window of its own rather than a child of anything here.
 //
 // A committed card **leaves its cell empty**, which is the one piece of state the tray keeps:
 // the hole is how you see which candidates you have already taken, and it is what gives Fill
@@ -110,13 +113,6 @@ public:
     // would mark the tray stale every time you committed a card.
     bool settingsMovedSinceFill() const;
 
-    // The drag's two ends plus its cleanup, all in *screen* coordinates - see the class comment
-    // for why there is no other space these two windows share. Unset, the tray still auditions,
-    // which is what makes the click the half of the gesture that cannot break.
-    std::function<void(juce::Point<int> screenPos)> onDragOver;
-    std::function<bool(juce::Point<int> screenPos, const KeysProcessor::ChordPad&)> onDrop;
-    std::function<void()> onDragEnd;
-
     // "Send to first empty pad" on the card menu. It is the menu's one *placing* item and it
     // exists because a drag needs a hand steady enough to land on one card of sixteen in another
     // window; this is the same commit with the aim taken out. Returns false when the page is
@@ -131,6 +127,7 @@ private:
     void writeInto(const std::vector<int>& cellIndices); // the one call that asks for candidates
     void showCardMenu(int index);
     void reshapeCell(int index, const std::vector<int>& notes); // an edit to one candidate
+    void beginDrag(const juce::MouseEvent&);
     void endDrag();
 
     KeysProcessor& processor;
@@ -149,6 +146,11 @@ private:
     bool dragging = false;
     juce::Point<float> downPos;
 
+    // The chord currently in the air, kept so the answer that comes back on it can be read when
+    // the button goes up. Held by the drag itself as well, so this pointer going stale is not a
+    // way the payload can die.
+    chorddrag::Payload::Ptr inFlight;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordTray)
 };
 
@@ -165,15 +167,22 @@ private:
 // It fills from either direction, and both are drags:
 //
 //   * a **tray card** dropped on it, which never leaves this window;
-//   * a **pad from the main window** dropped on it, which is the mirror of the commit drag and
-//     the reason ChordPads grew `onDropOutside`. Dropping a pad here **copies** it: dragging a
-//     card off the strip normally clears it, and a gesture that reached for the reference box
-//     and deleted a chord instead would be the worst bug in the window.
+//   * a **pad from the main window** dropped on it, the mirror of the commit drag. Dropping a
+//     pad here **copies** it: dragging a card off the strip normally clears it, so this card
+//     sets `taken` on the payload and the strip reads that as "somebody has it, leave the card
+//     alone". A gesture that reached for the reference box and deleted a chord instead would be
+//     the worst bug in the window, which is the whole reason that flag exists.
+//
+// It takes the drop itself, as an ordinary `DragAndDropTarget`, rather than being offered a
+// screen position by the editor: a drag that has reached this card is over this card, and JUCE's
+// own target search answers "which window is on top here" better than a bounds test could - the
+// reference box used to light up through a window sitting over it.
 //
 // Left-click auditions it, the same as a tray card. It is not a drag source: it is where chords
 // come to be kept, and the pads are one click away through Similar / Could follow rather than a
 // second commit path nobody asked for.
-class ChordRefCard : public juce::Component
+class ChordRefCard : public juce::Component,
+                     public juce::DragAndDropTarget
 {
 public:
     ChordRefCard(KeysProcessor&, ChordGenMenu&);
@@ -183,6 +192,13 @@ public:
     void mouseUp(const juce::MouseEvent&) override;
     void mouseEnter(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
+
+    // A chord card from the tray beside it or from the pad strip in another window. The live
+    // card is refused: it is what is under your hand on the keyboard, not a chord you have kept.
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDragEnter(const SourceDetails&) override;
+    void itemDragExit(const SourceDetails&) override;
+    void itemDropped(const SourceDetails&) override;
 
     void setChord(const KeysProcessor::ChordPad&);
     void clearChord();

@@ -185,10 +185,10 @@ void ChordTray::paint(juce::Graphics& g)
         const auto b = cellBounds(i);
         const auto& c = cells[(size_t) i];
         const bool filled = ! c.notes.empty();
-        // The card being dragged dims where it sits: the ghost cannot follow the cursor out of
-        // this window, so the source saying "this one is in the air" plus the pad strip lighting
-        // its target is the whole of the drag's feedback.
-        const bool inFlight = dragging && i == pressed;
+        // The card being dragged dims where it sits. The ghost does follow the cursor out of this
+        // window now (2026-08-02), so this is no longer standing in for it - it is the hole the
+        // card left, which is the thing that says a commit will empty this cell.
+        const bool airborne = dragging && i == pressed;
 
         if (! filled)
         {
@@ -201,7 +201,7 @@ void ChordTray::paint(juce::Graphics& g)
 
         {
             juce::Graphics::ScopedSaveState ss(g);
-            if (inFlight)
+            if (airborne)
                 g.setOpacity(0.4f);
             skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
 
@@ -381,23 +381,46 @@ void ChordTray::mouseDown(const juce::MouseEvent& e)
 
 void ChordTray::mouseDrag(const juce::MouseEvent& e)
 {
-    if (pressed < 0)
+    if (pressed < 0 || dragging)
         return;
 
-    if (! dragging && e.position.getDistanceFrom(downPos) > 6.0f)
+    if (e.position.getDistanceFrom(downPos) > 6.0f)
     {
         // A press that becomes a drag is a commit, not an audition. Stop the note first, the
         // same way the pad strip turns a press into a rearrange.
         gen.stopAudition();
-        dragging = true;
-        repaint();
+        beginDrag(e);
     }
-
-    if (dragging && onDragOver)
-        onDragOver(e.getScreenPosition());
 }
 
-void ChordTray::mouseUp(const juce::MouseEvent& e)
+// Hand the candidate to JUCE and let go of it. Everything after this - the ghost, the target
+// lighting up, the drop landing in another window - is the framework's, which is the whole point
+// of the 2026-08-02 migration: this used to be a screen-coordinate callback per phase.
+void ChordTray::beginDrag(const juce::MouseEvent& e)
+{
+    auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this);
+    if (container == nullptr)
+    {
+        jassertfalse; // ChordGenPanel is meant to be one; a tray with no container cannot commit
+        return;
+    }
+
+    // The snapshot is taken *before* `dragging` goes true, so the ghost is a picture of the card
+    // as it reads at rest rather than of the dimmed hole it is about to become.
+    const auto cell = cellBounds(pressed).toNearestInt();
+    const auto ghost = createComponentSnapshot(cell, true, 2.0f).convertedToFormat(juce::Image::ARGB);
+    const auto grab = cell.getTopLeft() - downPos.roundToInt(); // JUCE negates this into the image
+
+    inFlight = new chorddrag::Payload(chorddrag::Payload::From::trayCell, pressed,
+                                      cells[(size_t) pressed]);
+    dragging = true;
+    repaint();
+
+    container->startDragging(juce::var(inFlight.get()), this, juce::ScaledImage(ghost, 2.0),
+                             /*allowDraggingToExternalWindows*/ true, &grab, &e.source);
+}
+
+void ChordTray::mouseUp(const juce::MouseEvent&)
 {
     if (pressed < 0)
         return;
@@ -412,30 +435,38 @@ void ChordTray::mouseUp(const juce::MouseEvent& e)
         return;
     }
 
-    if (onDrop && onDrop(e.getScreenPosition(), cells[(size_t) pressed]))
-    {
-        // It landed, and the cell it came from goes empty rather than refilling itself. The hole
-        // is the only state this tray keeps and it earns its place twice: it is how you see which
-        // of the sixteen you have already taken, and it is what gives Fill something to do. A
-        // cell that refilled instantly left Fill permanently greyed and Regen indistinguishable
-        // from "reroll everything", which is most of why the window's three buttons were still
-        // pointed at the pads.
-        cells[(size_t) pressed] = {};
-    }
-    // A drop anywhere else - the tray itself, the desktop, a folded pad section - does nothing
-    // at all and keeps the candidate. There is no "drag off to discard" here: a tray card costs
-    // nothing to leave alone, and the gesture that clears a *pad* is the same shape, so making
-    // this one destructive would be the one drag in Keys that loses work by missing.
-
-    endDrag();
+    // Whether a pad took the candidate is not known yet - `itemDropped` runs after this, later in
+    // the same event. Ask a message-loop turn from now, which is after it and before the next
+    // frame. See chorddrag::whenDragSettles.
+    chorddrag::whenDragSettles(*this, inFlight,
+                               [](ChordTray& t, const chorddrag::Payload& p)
+                               {
+                                   if (p.consumed && p.index >= 0 && p.index < numCells)
+                                   {
+                                       // It landed, and the cell it came from goes empty rather
+                                       // than refilling itself. The hole is the only state this
+                                       // tray keeps and it earns its place twice: it is how you
+                                       // see which of the sixteen you have already taken, and it
+                                       // is what gives Fill something to do. A cell that refilled
+                                       // instantly left Fill permanently greyed and Regen
+                                       // indistinguishable from "reroll everything".
+                                       t.cells[(size_t) p.index] = {};
+                                   }
+                                   // Anywhere else - the tray itself, the reference box, the
+                                   // desktop, a folded pad section - keeps the candidate. There is
+                                   // no "drag off to discard" here: a tray card costs nothing to
+                                   // leave alone, and the gesture that clears a *pad* is the same
+                                   // shape, so making this one destructive would be the one drag
+                                   // in Keys that loses work by missing.
+                                   t.endDrag();
+                               });
 }
 
 void ChordTray::endDrag()
 {
     dragging = false;
     pressed = -1;
-    if (onDragEnd)
-        onDragEnd();
+    inFlight = nullptr;
     repaint();
 }
 
@@ -472,6 +503,36 @@ void ChordRefCard::setDropHighlight(bool on)
         return;
     dropHighlight = on;
     repaint();
+}
+
+// The reference takes chords from either window. It refuses the live card because that one is
+// what you are holding on the keyboard rather than a chord you have decided to keep, which is
+// the same refusal the strip's own drag made when it offered only filled pads to the outside.
+bool ChordRefCard::isInterestedInDragSource(const SourceDetails& details)
+{
+    auto* p = chorddrag::chordBeingDragged(details);
+    return p != nullptr && p->from != chorddrag::Payload::From::liveCard;
+}
+
+void ChordRefCard::itemDragEnter(const SourceDetails&) { setDropHighlight(true); }
+
+// The highlight now goes out on every path there is, including the one that used to leak: JUCE
+// calls this when the drag leaves, when it is dropped elsewhere, and when the drag image dies
+// with the window that started it. The editor used to have to remember to clear it by hand.
+void ChordRefCard::itemDragExit(const SourceDetails&) { setDropHighlight(false); }
+
+void ChordRefCard::itemDropped(const SourceDetails& details)
+{
+    setDropHighlight(false);
+    auto* p = chorddrag::chordBeingDragged(details);
+    if (p == nullptr || p->from == chorddrag::Payload::From::liveCard)
+        return;
+
+    setChord(p->chord);
+    // Taken, so a pad that came from the strip is not cleared behind it - but never *consumed*,
+    // so a tray candidate stays in its cell. A reference is a copy of a chord you like, and
+    // charging the tray a card for keeping one would be backwards.
+    p->taken = true;
 }
 
 void ChordRefCard::mouseEnter(const juce::MouseEvent&) { hovered = true; repaint(); }

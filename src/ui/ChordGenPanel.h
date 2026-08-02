@@ -56,7 +56,12 @@ namespace keys
 //
 // This class still never calls noteOn. The tray auditions through ChordGenMenu, the same path
 // the suggestion preview takes and for the same reason: the brain outlives every window.
+// It is a `DragAndDropContainer` for one reason: the tray inside it drags candidates onto the pad
+// strip in the *other* window, and JUCE requires the container to be an ancestor of the source.
+// Nothing else about this class is drag machinery - the ends of the gesture belong to the tray
+// and to whatever takes the drop, which is how it can now cross a window at all.
 class ChordGenPanel : public juce::Component,
+                      public juce::DragAndDropContainer,
                       private juce::Timer
 {
 public:
@@ -70,25 +75,11 @@ public:
     // wires both to one call, so there is exactly one way for this object to die.
     std::function<void()> onClose;
 
-    // The audition tray's cross-window drag, passed straight through to the editor - this class
-    // is the only thing that holds the tray, and the editor is the only thing that holds both it
-    // and the pad strip. Screen coordinates; see ChordTray for why there is no other option.
-    std::function<void(juce::Point<int> screenPos)> onCandidateDragOver;
-    std::function<bool(juce::Point<int> screenPos, const KeysProcessor::ChordPad&)> onCandidateDropped;
-    std::function<void()> onCandidateDragEnd;
-
-    // "Send to first empty pad" on a tray card's menu: the drag with the aim taken out. Same
-    // pass-through, and the same reason for it - this window cannot see the pad strip.
+    // "Send to first empty pad" on a tray card's menu: the commit drag with the aim taken out.
+    // Passed through to the editor, because a *menu item* has no target and no drop - this
+    // window still cannot name a pad on its own. The drag itself needs nothing here any more.
     std::function<bool(const KeysProcessor::ChordPad&)> onCandidateToFirstEmptyPad;
     std::function<bool()> onPageHasEmptyPad;
-
-    // A chord dragged *out* of the main window's pad strip and offered to the reference card:
-    // the mirror of the commit drag, and the only route by which anything outside this window
-    // puts something into it. Screen coordinates again. `offerReferenceDrop` returns true when
-    // the reference took it, which is what tells ChordPads not to treat the drag as a clear.
-    void showReferenceDropTarget(juce::Point<int> screenPos);
-    bool offerReferenceDrop(juce::Point<int> screenPos, const KeysProcessor::ChordPad&);
-    void clearReferenceDropTarget();
 
     // What the layout below actually needs, so the window's minimum is derived rather than
     // guessed. Widest row is the algorithmic settings row; tallest is all four rows plus the
