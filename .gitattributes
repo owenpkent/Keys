@@ -1,0 +1,27 @@
+# Every text file in Keys is LF in the repository, and LF in the working tree.
+#
+# This exists because of one commit. 2026-08-02's docs sweep (eaa283e) re-saved five
+# source files and several docs as CRLF while changing 38 lines of comments in them,
+# which rendered as a ~13,000 line diff over a ~490 line change: a review that cannot
+# be read is a review that does not happen, and every branch open at the time was put
+# into conflict with it. Nothing here is a style preference. It is the thing that stops
+# a whitespace flip from hiding the change it is riding with.
+#
+# `text=auto` lets git decide what is text; `eol=lf` is what makes a Windows editor's
+# CRLF save normalise on the way in rather than landing in a commit.
+* text=auto eol=lf
+
+# Binary, so git never inspects or converts them.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.pdf  binary
+*.wav  binary
+*.aiff binary
+*.vst3 binary
+*.exe  binary
+*.dll  binary
+*.onnx binary
