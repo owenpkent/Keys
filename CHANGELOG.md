@@ -20,10 +20,12 @@ and **Launch Quantize**.
   click still has one unambiguous target while all three are on screen. Clicking A, B or C
   goes back to that line's deep controls.
 - **The panel does not grow.** The macro rows take the band's space rather than joining it.
-- Rate is a readout between two steppers rather than a dial, because this row exists to be
-  read three at a time and nudged with single clicks. Gate, Chance and Swing *are* knobs, the
-  same machined rotary the band above draws them as, with the column heading written once at
-  the top rather than three times down the side.
+- **Eight knobs a row** - Oct, Gate, Chance, Swing, Offset, Ramp, Time, Human - plus **Latch**
+  and **Keys** switches: every setting a regular arpeggiator has, three lines deep, on one
+  screen. They are the same machined rotary the band above uses for the same parameters, with
+  each column heading written once at the top rather than repeated down every row.
+- Rate is a knob too, detented onto the divisions, but it keeps its `<` `>` steppers: a knob is
+  a drag target, and those are the click-only path to every division in both units.
 - Clicking **All** selects the view; you leave it by clicking A, B or C. A tab selects, it does
   not toggle.
 - The view you left is remembered, like the line you left.

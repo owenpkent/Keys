@@ -869,11 +869,55 @@ void ArpPanel::SlotCard::mouseDown(const juce::MouseEvent& e)
 // ---------------------------------------------------------------------------
 // MacroRow: one arpeggiator line, in one row. Three of these are the macro view.
 
+namespace
+{
+    // The eight knobs a macro row carries, in the order they are laid out. Heading, parameter
+    // and tooltip in one place so the columns cannot drift out of step with what they set.
+    struct MacroKnobSpec { KeysProcessor::ArpParam param; const char* heading; const char* tip; };
+    const MacroKnobSpec macroKnobSpecs[] = {
+        { KeysProcessor::apOctaves, "OCT",
+          "How many times this line stacks the chord up the keyboard. The classic arp range." },
+        { KeysProcessor::apGate, "GATE",
+          "How much of each step this line's notes fill. Short gates let another line through." },
+        { KeysProcessor::apChance, "CHANCE",
+          "How often a step fires at all. Thin one line out and the other two show through." },
+        { KeysProcessor::apSwing, "SWING",
+          "Shifts this line's offbeats late (right) or early (left). The quickest way to stop "
+          "two lines landing on top of each other." },
+        { KeysProcessor::apOffset, "OFFSET",
+          "Starts this line's pattern from a different foot. Two lines on the same rate and "
+          "different offsets are out of phase rather than in unison." },
+        { KeysProcessor::apVelRamp, "RAMP",
+          "Over Time, this line's velocity moves toward this much of what you played. Negative "
+          "fades a held chord out, positive swells it." },
+        { KeysProcessor::apRampBeats, "TIME",
+          "How long that ramp takes, in beats - or in seconds while this line's rate is in Hz, "
+          "because there is no beat to count there." },
+        { KeysProcessor::apHumanize, "HUMAN",
+          "Nudges each hit a little late and a little quieter, by a different amount every "
+          "time. At 0 the line is dead on the grid." },
+    };
+    static_assert(sizeof(macroKnobSpecs) / sizeof(macroKnobSpecs[0])
+                      == (size_t) ArpPanel::MacroRow::numKnobs,
+                  "every macro knob needs a heading and a parameter");
+} // namespace
+
 ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
 {
     okstudio::ui::makeMouseOnly(*this);
     const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
     const auto id = [n](KeysProcessor::ArpParam w) { return KeysProcessor::arpParamId(n, w); };
+    // Headings are written once, on the top row; every row still reserves the strip so the
+    // columns stay aligned down the view.
+    const auto heading = [this](juce::Label& l, const char* text)
+    {
+        l.setText(text, juce::dontSendNotification);
+        l.setJustificationType(juce::Justification::centred);
+        l.setFont(skin::micro(9.0f));
+        l.setColour(juce::Label::textColourId, skin::textFaint);
+        l.setVisible(line == 0);
+        addChildComponent(l);
+    };
 
     onButton.setButtonText(letter);
     onButton.setTitle("Macro line " + letter); // the bar chips already answer to "Arp line A"
@@ -881,18 +925,40 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     addAndMakeVisible(onButton);
     onAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apOn), onButton);
 
-    // Rate as a readout between two steppers, not as a dial. A dial is a drag target, and this
-    // row exists to be *read* three at a time and nudged with single clicks; the deep control
-    // with its detented dial is still one tab away.
-    rateReadout.setJustificationType(juce::Justification::centred);
-    rateReadout.setFont(skin::uiSemi(14.0f));
-    addAndMakeVisible(rateReadout);
+    // The two switches that decide what a line listens to, beside the switch that decides
+    // whether it runs at all. Not knobs, because neither is a quantity.
+    latchButton.setTitle("Macro latch " + letter);
+    latchButton.setTooltip("Keep this line arpeggiating after you let go, until a new chord "
+                           "arrives.");
+    addAndMakeVisible(latchButton);
+    latchAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apLatch), latchButton);
+    heading(latchLabel, "LTCH");
+
+    keysButton.setTitle("Macro keys " + letter);
+    keysButton.setTooltip("Does this line arpeggiate what you play, or only the chords you hand "
+                          "it? Off makes it a card player, independent of the keybed.");
+    addAndMakeVisible(keysButton);
+    keysAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apKeys), keysButton);
+    heading(keysLabel, "KEYS");
+
+    // Rate: the same detented dial the band uses, so a division is a detent and the readout
+    // under it says which one. The steppers beside it are the click-only path to every value,
+    // in both units - a dial is a drag target, and this panel may not require a drag.
+    rateKnob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+    rateKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 58, 15);
+    rateKnob.setTitle("Macro rate " + letter);
+    rateKnob.setTooltip("This line's rate: a time division in Sync, a frequency in Hz. Polyrhythm "
+                        "lives here - put one line on 1/8 and another on a 1/8 triplet.");
+    rateKnob.onDragStart = [this] { rateDragging = true; };
+    rateKnob.onDragEnd = [this] { rateDragging = false; refreshRateMode(); };
+    addAndMakeVisible(rateKnob);
+    heading(knobLabels[kOctaves], macroKnobSpecs[kOctaves].heading); // laid out with the rest
+
     ratePrev.onClick = [this] { stepRate(-1); };
     rateNext.onClick = [this] { stepRate(1); };
     for (auto* b : { &ratePrev, &rateNext })
     {
-        b->setTooltip("Step this line's rate. Polyrhythm lives here: put one line on 1/8 and "
-                      "another on a 1/8 triplet.");
+        b->setTooltip("Step this line's rate: one division in Sync, a quarter of an octave in Hz.");
         addAndMakeVisible(*b);
     }
     rateModeButton.setClickingTogglesState(true);
@@ -916,39 +982,24 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     for (auto* b : { &shapePrev, &shapeNext })
         addAndMakeVisible(*b);
 
-    // Gate, Chance and Swing: the three that decide whether two lines interlock or fight.
-    // The skin's machined rotary, exactly as the band above draws the same three - a row of
-    // linear sliders here read as a different panel bolted on (Owen, 2026-08-01: "I was
-    // thinking more knobs rather than slider"). The column heading is drawn once, on the top
-    // row only, but every row reserves the same strip so the three knobs stay aligned.
-    struct SliderSpec { juce::Slider& s; juce::Label& l; KeysProcessor::ArpParam p; const char* name; const char* tip; };
-    const SliderSpec specs[] = {
-        { gateSlider, gateLabel, KeysProcessor::apGate, "GATE",
-          "How much of each step this line's notes fill. Short gates let another line through." },
-        { chanceSlider, chanceLabel, KeysProcessor::apChance, "CHANCE",
-          "How often a step fires at all. Thin one line out and the other two show through." },
-        { swingSlider, swingLabel, KeysProcessor::apSwing, "SWING",
-          "Shifts this line's offbeats late (positive) or early (negative). The quickest way to "
-          "stop two lines landing on top of each other." },
-    };
-    for (const auto& spec : specs)
+    // The eight settings a regular arpeggiator has, as the skin's machined rotary - the same
+    // knob the band above draws the same parameters with (Owen, 2026-08-01: "what other knobs
+    // can we have? should be like regular arp settings").
+    for (int k = 0; k < numKnobs; ++k)
     {
-        spec.s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
-        // Read-only text box, like every other knob in this panel: the value belongs under the
-        // knob, and an editable box is a keyboard target on a surface that has none.
-        spec.s.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 46, 14);
-        spec.s.setTooltip(spec.tip);
-        addAndMakeVisible(spec.s);
-        spec.l.setText(spec.name, juce::dontSendNotification);
-        spec.l.setJustificationType(juce::Justification::centred);
-        spec.l.setFont(skin::micro(9.0f));
-        spec.l.setColour(juce::Label::textColourId, skin::textFaint);
-        spec.l.setVisible(line == 0); // one heading for the column, not one per row
-        addChildComponent(spec.l);
+        auto& knob = knobs[(size_t) k];
+        knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+        // Read-only text box, like every other knob here: the value belongs under the knob, and
+        // an editable box is a keyboard target on a surface that has none.
+        knob.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 52, 15);
+        knob.setTooltip(macroKnobSpecs[(size_t) k].tip);
+        knob.setTitle("Macro " + juce::String(macroKnobSpecs[(size_t) k].heading) + " " + letter);
+        addAndMakeVisible(knob);
+        if (k != kOctaves) // its heading is already made, above
+            heading(knobLabels[(size_t) k], macroKnobSpecs[(size_t) k].heading);
+        knobAtts[(size_t) k] = std::make_unique<SliderAtt>(
+            processor.apvts, id(macroKnobSpecs[(size_t) k].param), knob);
     }
-    gateAtt = std::make_unique<SliderAtt>(processor.apvts, id(KeysProcessor::apGate), gateSlider);
-    chanceAtt = std::make_unique<SliderAtt>(processor.apvts, id(KeysProcessor::apChance), chanceSlider);
-    swingAtt = std::make_unique<SliderAtt>(processor.apvts, id(KeysProcessor::apSwing), swingSlider);
 
     chordLabel.setJustificationType(juce::Justification::centred);
     chordLabel.setFont(skin::uiSemi(13.0f));
@@ -967,7 +1018,32 @@ ArpPanel::MacroRow::MacroRow(KeysProcessor& p, int n) : processor(p), line(n)
     };
     addAndMakeVisible(chainButton);
 
+    refreshRateMode();
     refresh();
+}
+
+// One dial, two parameters, two units - the band's `refreshRateMode` for one row. The
+// attachment that is alive decides the dial's range, its detents and its readout, so the swap
+// has to happen on every mode change; it cannot happen under an open drag, because the
+// attachment that started the gesture has to be the one that ends it.
+void ArpPanel::MacroRow::refreshRateMode()
+{
+    const bool free = processor.apvts.getRawParameterValue(
+                          KeysProcessor::arpParamId(line, KeysProcessor::apRateFree))->load() > 0.5f;
+    rateModeButton.setButtonText(free ? "Hz" : "Sync");
+    if (lastRateFree == (int) free)
+        return;
+    if (rateDragging)
+        return; // onDragEnd calls back
+    lastRateFree = (int) free;
+    rateSyncAtt.reset();
+    rateHzAtt.reset();
+    if (free)
+        rateHzAtt = std::make_unique<SliderAtt>(
+            processor.apvts, KeysProcessor::arpParamId(line, KeysProcessor::apRateHz), rateKnob);
+    else
+        rateSyncAtt = std::make_unique<SliderAtt>(
+            processor.apvts, KeysProcessor::arpParamId(line, KeysProcessor::apRate), rateKnob);
 }
 
 // Shape spans two parameters here exactly as it does in the band above (arpDirection plus
@@ -1025,7 +1101,6 @@ void ArpPanel::MacroRow::stepRate(int delta)
             *hz = (float) juce::jlimit((double) ArpEngine::minRateHz, (double) ArpEngine::maxRateHz, wanted);
             hz->endChangeGesture();
         }
-        refresh();
         return;
     }
 
@@ -1039,27 +1114,13 @@ void ArpPanel::MacroRow::stepRate(int delta)
             rate->endChangeGesture();
         }
     }
-    refresh();
 }
 
 void ArpPanel::MacroRow::refresh()
 {
-    auto& apvts = processor.apvts;
-    const bool free = apvts.getRawParameterValue(
-                          KeysProcessor::arpParamId(line, KeysProcessor::apRateFree))->load() > 0.5f;
-    rateModeButton.setButtonText(free ? "Hz" : "Sync");
-    if (free)
-    {
-        const double hz = (double) apvts.getRawParameterValue(
-                              KeysProcessor::arpParamId(line, KeysProcessor::apRateHz))->load();
-        rateReadout.setText(ArpEngine::rateHzText(hz) + " Hz", juce::dontSendNotification);
-    }
-    else if (auto* rate = dynamic_cast<juce::AudioParameterChoice*>(
-                 apvts.getParameter(KeysProcessor::arpParamId(line, KeysProcessor::apRate))))
-    {
-        rateReadout.setText(rate->getCurrentChoiceName(), juce::dontSendNotification);
-    }
+    refreshRateMode(); // a host can automate the unit out from under us
 
+    auto& apvts = processor.apvts;
     const bool pattern = apvts.getRawParameterValue(
                              KeysProcessor::arpParamId(line, KeysProcessor::apPattern))->load() > 0.5f;
     const int dir = (int) apvts.getRawParameterValue(
@@ -1084,8 +1145,8 @@ void ArpPanel::MacroRow::refresh()
 
 void ArpPanel::MacroRow::paint(juce::Graphics& g)
 {
-    // A hairline under every row but the last, so three rows read as three lines rather than
-    // as one block of controls.
+    // A hairline under every row, so three rows read as three lines rather than as one block
+    // of controls.
     g.setColour(skin::text.withAlpha(0.06f));
     g.fillRect(0.0f, (float) getHeight() - 1.0f, (float) getWidth(), 1.0f);
 }
@@ -1094,44 +1155,55 @@ void ArpPanel::MacroRow::resized()
 {
     auto full = getLocalBounds().withTrimmedBottom(2);
     // Every row gives up the same strip to the column headings, whether or not it draws them,
-    // so the three knob columns line up down the view.
-    auto heads = full.removeFromTop(11);
+    // so the columns line up down the view.
+    const auto headStrip = full.removeFromTop(11);
     auto r = full;
     const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
     // The single-height controls sit centred against the knobs beside them.
     const auto centred = [](juce::Rectangle<int> c) { return c.withSizeKeepingCentre(c.getWidth(), 26); };
 
-    onButton.setBounds(centred(take(44)));
-    ratePrev.setBounds(centred(take(30)));
-    rateReadout.setBounds(centred(take(58)));
-    rateNext.setBounds(centred(take(30)));
-    rateModeButton.setBounds(centred(take(46)));
-    shapePrev.setBounds(centred(take(28)));
-    shapeBox.setBounds(centred(take(juce::jlimit(90, 128, r.getWidth() / 5))));
-    shapeNext.setBounds(centred(take(28)));
-    heads.removeFromLeft(full.getWidth() - r.getWidth()); // the headings start where the knobs do
+    onButton.setBounds(centred(take(40)));
+    latchButton.setBounds(centred(take(34)));
+    keysButton.setBounds(centred(take(34)));
 
-    // Chain and the chord come off the right, so the three knobs share whatever is left and
-    // the row degrades by squeezing them rather than by pushing controls off the end.
-    chainButton.setBounds(centred(r.removeFromRight(64)));
-    heads.removeFromRight(64 + 6);
+    ratePrev.setBounds(centred(take(26)));
+    rateKnob.setBounds(take(58));
+    rateNext.setBounds(centred(take(26)));
+    rateModeButton.setBounds(centred(take(42)));
+
+    // Chain and the chord come off the right...
+    chainButton.setBounds(centred(r.removeFromRight(60)));
     r.removeFromRight(6);
-    chordLabel.setBounds(centred(r.removeFromRight(72)));
-    heads.removeFromRight(72 + 6);
+    chordLabel.setBounds(centred(r.removeFromRight(64)));
     r.removeFromRight(6);
 
-    const int each = juce::jmax(56, (r.getWidth() - 12) / 3);
-    juce::Slider* knobs[] = { &gateSlider, &chanceSlider, &swingSlider };
-    juce::Label* labels[] = { &gateLabel, &chanceLabel, &swingLabel };
-    for (int i = 0; i < 3; ++i)
+    // ...then the knob strip is **reserved** out of what is left, before Shape takes its cut.
+    // Laying the knobs last and giving the final one "whatever remains" starved it to nothing
+    // the moment the row got tight: eight of them were drawn as seven, silently. Shape absorbs
+    // the slack instead, because a narrower combo is a combo and a zero-width knob is a bug.
+    const int each = juce::jlimit(52, 96,
+                                  (r.getWidth() - 6 * (numKnobs - 1) - 140) / numKnobs);
+    auto knobStrip = r.removeFromRight(each * numKnobs + 6 * (numKnobs - 1));
+    r.removeFromRight(8);
+
+    shapePrev.setBounds(centred(take(26)));
+    shapeBox.setBounds(centred(take(juce::jmax(72, r.getWidth() - 32))));
+    shapeNext.setBounds(centred(take(26)));
+
+    for (int k = 0; k < numKnobs; ++k)
     {
-        const int w = i == 2 ? r.getWidth() : each;
-        auto c = r.removeFromLeft(w);
-        r.removeFromLeft(6);
-        labels[i]->setBounds(heads.removeFromLeft(w));
-        heads.removeFromLeft(6);
-        knobs[i]->setBounds(c);
+        knobs[(size_t) k].setBounds(knobStrip.removeFromLeft(each));
+        knobStrip.removeFromLeft(6);
     }
+
+    // Headings are placed from the control they name, not by walking a second copy of the
+    // layout: one source of truth for where a column is, so they cannot drift apart.
+    const auto headFor = [&headStrip](juce::Label& l, const juce::Component& c)
+    { l.setBounds(c.getX(), headStrip.getY(), c.getWidth(), headStrip.getHeight()); };
+    headFor(latchLabel, latchButton);
+    headFor(keysLabel, keysButton);
+    for (int k = 0; k < numKnobs; ++k)
+        headFor(knobLabels[(size_t) k], knobs[(size_t) k]);
 }
 
 // ---------------------------------------------------------------------------

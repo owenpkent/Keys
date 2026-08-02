@@ -541,18 +541,29 @@ the step editor with **three rows, one per line**, each holding:
 | | |
 |---|---|
 | **A / B / C** | that line on or off |
-| **< rate >** and **Sync / Hz** | its rate, stepped one value at a time. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
+| **LTCH** | Latch: keep that line arpeggiating after you let go, until a new chord arrives |
+| **KEYS** | does that line follow the keys you play, or only the chords you hand it? |
+| **Rate** | a knob, detented onto the divisions, with `<` `>` beside it and a **Sync / Hz** switch. A time division in Sync, a frequency in Hz. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
 | **< shape >** | its shape, including Pattern (whose step editor is on that line's own tab) |
-| **Gate** | knob. How much of each step its notes fill. Short gates let another line through |
-| **Chance** | knob. How often a step fires at all. Thin one line out and the other two show through |
-| **Swing** | knob. Shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
+| **OCT** | Repeats: how many times it stacks the chord up the keyboard. The classic arp range |
+| **GATE** | how much of each step its notes fill. Short gates let another line through |
+| **CHANCE** | how often a step fires at all. Thin one line out and the other two show through |
+| **SWING** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
+| **OFFSET** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
+| **RAMP** and **TIME** | velocity ramp: over Time, that line moves toward Ramp per cent of what you played. Negative fades a held chord out, positive swells it |
+| **HUMAN** | nudges each hit a little late and a little quieter. At 0 the line is dead on the grid |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
 | **Chain** | start that line's progression. Three chains at three rates is the point of the view |
 
+Eight knobs, two switches, a rate and a shape: every setting a regular arpeggiator has, three
+lines deep, on one screen.
+
 Under the three rows sits what they share: the **BPM** knob and **Quantize**.
 
-The three knobs are the same rotary the band above uses for the same three settings, with the
-column heading written once at the top. Clicking **All** selects the view; you leave it by
+The knobs are the same rotary the band above uses for the same settings, with each column
+heading written once at the top rather than repeated down every row. Rate is a knob too, but it
+keeps its `<` `>` steppers: a knob is a drag target, and those are the click-only path to every
+division. Clicking **All** selects the view; you leave it by
 clicking A, B or C, because a tab selects rather than toggles.
 
 **All is a view, not a fourth line.** The current line stays whatever it was, so clicking a

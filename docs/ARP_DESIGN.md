@@ -114,10 +114,18 @@ Owen: *"a fourth option for a simplified version that shows a little bit of all 
 goal is to be able to create complex polyrhythms from one view."*
 
 **All** sits after C in the tab row and swaps the per-line band and the step editor for three
-`MacroRow`s - switch, rate (with its Sync/Hz unit), shape, gate, chance, swing, the held chord,
-and that line's Chain - over a shared row carrying the **BPM** knob and **Launch Quantize**.
+`MacroRow`s, over a shared row carrying the **BPM** knob and **Launch Quantize**. A row holds
+the line switch, **Latch** and **Keys**, a detented rate knob with `<` `>` and its Sync/Hz
+switch, the shape with steppers of its own, **eight knobs** - Oct, Gate, Chance, Swing, Offset,
+Ramp, Time, Human - the held chord, and that line's Chain. Owen's brief when the first cut
+carried three: *"what other knobs can we have? should be like regular arp settings."*
 
-Three decisions worth keeping:
+The knobs are the band's own machined rotary rather than sliders, and each column heading is
+written once on the top row while every row reserves the same strip, so the columns line up
+without three copies of the same word. Rate is a knob as well, but keeps its steppers: a knob is
+a drag target and those are the click-only path to every division.
+
+Four decisions worth keeping:
 
 1. **It is a view, not a fourth line.** `editedLine` is untouched by it, so a chord card click
    still has one unambiguous target while all three lines are on screen. A "line D" that meant
@@ -130,8 +138,12 @@ Three decisions worth keeping:
    share a mechanism - and the rows are built once and hidden rather than created on demand, so
    nothing churns when the tab moves.
 
-Rate is a readout between two steppers rather than a dial, because this row is read three at a
-time and nudged with single clicks; the detented dial is one tab away.
+4. **The knob strip is reserved out of the row before Shape takes its cut.** Laying the knobs
+   last and giving the last one "whatever remains" starved it to nothing as soon as the row got
+   tight - eight knobs drew as seven, with no other symptom. Shape absorbs the slack instead,
+   because a narrower combo is still a combo and a zero-width knob is a bug. The column headings
+   are placed from the control they name rather than by walking a second copy of the layout, so
+   there is one source of truth for where a column is.
 
 ### Launch Quantize
 

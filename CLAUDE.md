@@ -127,6 +127,38 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** saying which
   line a chord-card click feeds. **Dragging a chord card onto an arp slot binds it there**, or
   onto a tab to hand it over now - the left-click twin *Send to arp slot* never had.
+  **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
+  complex polyrhythms from one view"). It replaces the band and the step editor with three rows,
+  one per line, over a shared row holding the BPM knob and Launch Quantize. A row carries the
+  line switch, **Latch** and **Keys**, a detented rate knob with its `<` `>` and Sync/Hz, the
+  shape with its own steppers, **eight knobs** (Oct, Gate, Chance, Swing, Offset, Ramp, Time,
+  Human), the held chord and that line's Chain - "like regular arp settings", Owen's ask when the
+  first cut had three. The knobs are the band's own rotary, not sliders, and each column heading
+  is written once on the top row while every row reserves the same strip so the columns align.
+  **It is a view, not a fourth line**: `editedLine` is untouched by it, so a chord card still has
+  one target while all three are on screen, and the panel does not grow because the rows take the
+  band's space rather than joining it. Each row's attachments bind to its own line for good,
+  unlike the band's, which rebind on every tab change - three lines at once cannot each be "the
+  current line". **A tab selects; it does not toggle** (clicking All while All is up means All).
+  Two layout traps already paid for: **the knob strip is reserved out of the row before Shape
+  takes its cut**, because laying the knobs last and giving the final one "whatever remains"
+  starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
+  symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
+  ruled box is drawn beside the band on every plain shape.
+- **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
+  the setting Owen described and could not name: "if you start a new note or something that goes
+  into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
+  - fires a chord the instant you click. Anything else holds the *gesture* until the next boundary
+  and then performs it whole, so a slot's pattern, shape, rate and chord land together on the grid.
+  Global rather than per line, because the value of it is that the three lines land together.
+  **It never delays the keybed**: playing a note is playing an instrument. The public
+  `holdArpChord` / `holdArpChordFromPad` / `launchArpSlot` defer; the `*Now` twins beside them are
+  the gesture with the wait already served, and are what the chain calls (it is on a bar line by
+  construction) and what a slot launch calls for its own chord (it has already waited). The
+  deadline is wall clock, computed from `arpBeats` - the beat position the audio thread publishes
+  each block, the host's own while it rolls and an internal count otherwise - and waited out on
+  the **1 ms strum timer**, not the 50 Hz heartbeat: 20 ms is a sixth of a 1/16 at 120 bpm, which
+  is the sloppiness the feature exists to remove. A panic and Hold off both clear what is pending.
 - **Arp slots carry chords, not just patterns.** The twelve slots hold lane data *and* a
   chord, a shape and a rate; launching one installs all of it and holds the chord into the
   arp (`holdArpChord`, tagged `arpChordTag` so it never collides with pad or live-card
@@ -429,7 +461,10 @@ Four things will bite otherwise:
   chips are `Arp line A` / `B` / `C`, the panel's line tabs are `Arp line A tab` and so on
   (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
   the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
-  `Arp target line`. Hold off is `Arp hold off`.
+  `Arp target line`. Hold off is `Arp hold off`. The fourth tab is `Arp all tab`, and the macro
+  view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
+  `Macro line A`, `Macro latch A`, `Macro keys A`, `Macro rate A`, `Macro rate mode A`,
+  `Macro shape A`, `Macro chain A`, and `Macro OCT A` / `Macro GATE A` / ... one per heading.
 - **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
   applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
   the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that

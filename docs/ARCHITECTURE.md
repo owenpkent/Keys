@@ -368,6 +368,15 @@ chains, because a per-line release would leave two lines droning with nothing on
 to stop them. Which line the *panel* edits is chosen by three tabs at the left of its slot
 row, and that same choice is mirrored by a letter chip on the Pads bar (below).
 
+A **fourth tab, All**, is the macro view: the band and the step editor give way to three rows,
+one per line, each with that line's switch, Latch and Keys, a detented rate knob, its shape and
+eight knobs (Oct, Gate, Chance, Swing, Offset, Ramp, Time, Human), over a shared row holding the
+BPM knob and Launch Quantize. It is a *view* rather than a fourth line - `editedLine` is
+untouched by it, so a chord card click keeps one unambiguous target - and it takes the band's
+space rather than adding to it, so the panel does not grow. Each row's attachments bind to its
+own line for the row's life, where the band's rebind on every tab change: three lines on screen
+at once cannot each be "the current line".
+
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
 chord) was also the one place you could not reach a chord. Their page buttons ride on the
@@ -711,6 +720,12 @@ sit beside `arpRate` instead, which costs nothing, because what a session and an
 lane follow is a parameter's string id and not its position (JUCE hashes that id for VST3).
 What is load-bearing is what lives *inside* a parameter (a choice's list of values, an int's
 range), and `arpRate`'s eleven divisions are byte-identical, so nothing about it moved.
+
+**Two arp parameters are deliberately not per line**, because they are about the three of them
+together: `bpm` (the tempo they run at when there is no transport to follow) and `arpQuantize`
+(Launch Quantize - Off, or the boundary a chord card, a slot launch or a drag onto a line waits
+for before it lands). Three separate quantize settings would be three ways for the lines to miss
+each other, which is the opposite of what it is for.
 
 **That whole set exists three times**, once per arpeggiator line. `createLayout` calls
 `addArpLineParams` three times rather than writing it out three times, so a control cannot

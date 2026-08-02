@@ -107,27 +107,41 @@ public:
         // units), the shape, and the chord this line is holding. Called by the panel's timer.
         void refresh();
 
+        // The eight knobs a row carries, left to right. One table so the labels, the
+        // parameters and the layout cannot drift apart; the headings are drawn once, on the
+        // top row, and every row reserves the same strip so the columns line up.
+        enum Knob { kOctaves = 0, kGate, kChance, kSwing, kOffset, kRamp, kRampTime, kHuman,
+                    numKnobs };
+
     private:
         void applyShape();
         void stepShape(int delta);
         void stepRate(int delta);
+        // Rate is one knob over two parameters and two units, exactly as the band's is: which
+        // attachment exists depends on Sync or Hz, and the swap has to wait out an open drag.
+        void refreshRateMode();
 
         KeysProcessor& processor;
         int line;
 
-        juce::ToggleButton onButton;
-        juce::Label rateReadout;
+        juce::ToggleButton onButton, latchButton, keysButton;
+        okstudio::RotaryKnob rateKnob;
         juce::TextButton ratePrev { "<" }, rateNext { ">" };
         juce::TextButton rateModeButton { "Sync" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
-        juce::Slider gateSlider, chanceSlider, swingSlider;
-        juce::Label gateLabel, chanceLabel, swingLabel;
+        std::array<juce::Slider, numKnobs> knobs;
+        std::array<juce::Label, numKnobs> knobLabels;
+        juce::Label latchLabel, keysLabel;
         juce::Label chordLabel;
         juce::TextButton chainButton { "Chain" };
 
-        std::unique_ptr<ButtonAtt> onAtt, rateModeAtt;
-        std::unique_ptr<SliderAtt> gateAtt, chanceAtt, swingAtt;
+        std::unique_ptr<ButtonAtt> onAtt, latchAtt, keysAtt, rateModeAtt;
+        std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
+        // Exactly one of these is ever non-null; refreshRateMode owns that invariant.
+        std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
+        int lastRateFree = -1;      // -1 = no attachment installed yet
+        bool rateDragging = false;  // an open gesture; the swap defers until it closes
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MacroRow)
     };
