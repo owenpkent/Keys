@@ -97,6 +97,80 @@ int ChordPads::cellAt(juce::Point<float> pos) const
     return -1;
 }
 
+// The cross-window drop, all three parts of it. See the header for why the generator's tray
+// cannot reach this component the ordinary way.
+//
+// Desktop::findComponentAt rather than a bounds check on `screenPos`, because the generator's
+// window is free to sit on top of the pad strip and a point over that window is not over a pad
+// even when it is inside these bounds. Walking up from whatever is hit also answers the folded
+// and detached cases for free: fold the Pads section and this component is not visible, so
+// nothing here is ever found.
+int ChordPads::externalDropSlotAt(juce::Point<int> screenPos) const
+{
+    auto* hit = juce::Desktop::getInstance().findComponentAt(screenPos);
+    for (auto* c = hit; c != nullptr; c = c->getParentComponent())
+        if (c == this)
+        {
+            const int slot = cellAt(getLocalPoint(nullptr, screenPos).toFloat());
+            // Pads only. The live card is what is under your hand on the keyboard, not a place
+            // to put things, and a locked pad refuses: the lock is the thing that stops a chord
+            // being destroyed (Owen, 2026-07-30), and a drop replaces one outright.
+            if (slot >= 0 && ! processor.chordPad(slot).locked)
+                return slot;
+            return -1;
+        }
+    return -1;
+}
+
+void ChordPads::setExternalDropSlot(int slot)
+{
+    if (slot == externalDropSlot)
+        return;
+    externalDropSlot = slot;
+    repaint();
+}
+
+bool ChordPads::dropExternalChord(juce::Point<int> screenPos, const KeysProcessor::ChordPad& pad)
+{
+    const int slot = externalDropSlotAt(screenPos);
+    if (slot < 0)
+        return false;
+
+    // clearChordPad first, and it is not tidiness. A dropped candidate is a *different* chord
+    // from whatever the slot held, unlike the octave and voicing edits that go through
+    // rewritePadChord and want the sounding notes to follow the card. setChordPad on its own
+    // does not stop anything, so a pad left ringing by Sustain - or one feeding the arp - would
+    // have had its old notes stranded on with nothing left owning them. clearChordPad is the
+    // one public call that stops the pad *and* releases the arp hold if this card is the one
+    // holding it, so the old chord is properly given up before the new one lands.
+    processor.clearChordPad(slot);
+    processor.setChordPad(slot, pad);
+    externalDropSlot = -1;
+    repaint();
+    return true;
+}
+
+int ChordPads::firstEmptyPadOnPage() const
+{
+    const int offset = processor.padPageOffset();
+    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
+        if (processor.chordPad(offset + v).notes.empty())
+            return offset + v;
+    return -1;
+}
+
+bool ChordPads::sendChordToFirstEmptyPad(const KeysProcessor::ChordPad& pad)
+{
+    const int slot = firstEmptyPadOnPage();
+    if (slot < 0)
+        return false;
+    // No clearChordPad first, unlike the drop: the slot is empty by definition, so there is no
+    // chord to give up and nothing sounding to release.
+    processor.setChordPad(slot, pad);
+    repaint();
+    return true;
+}
+
 bool ChordPads::sourceIsDraggable() const
 {
     if (dragSource == -2)
@@ -179,8 +253,12 @@ void ChordPads::paint(juce::Graphics& g)
         const auto& pad = processor.chordPad(i);
         const bool filled = ! pad.notes.empty();
         const bool active = processor.chordPadActive(i);
-        const bool dropHere = dragging && hovered == i
-                              && ((dragSource == -2 && isChord(currentNotes)) || (dragSource >= 0 && dragSource != i));
+        // Either drag can be offering this pad: one inside the strip, or a candidate being
+        // dragged in from the generator's tray in another window. They light the same, because
+        // to the pad they mean the same thing - let go here and this card takes that chord.
+        const bool dropHere = (dragging && hovered == i
+                               && ((dragSource == -2 && isChord(currentNotes)) || (dragSource >= 0 && dragSource != i)))
+                              || externalDropSlot == i;
 
         // The pad being edited gives up its right end to the tick that ends the edit, so
         // the chord name moves over rather than running underneath it.
@@ -354,7 +432,7 @@ bool ChordPads::toArp() const
 //   New chord / Next: could follow > / Send to arp slot >
 //
 // The fourth group went with the generator's settings, into the window that now holds them
-// (ChordGenPanel): Clear page sits in there beside Fill and Regen, where the other page-wide
+// (ChordGenPanel): its Fill, Regen and Clear act on the audition tray, not on this page, where
 // actions are. The separators do the work section headers used to, at half the height and
 // without naming what is already obvious from the items under them.
 void ChordPads::showPadMenu(int slot)
@@ -673,7 +751,14 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
         }
     }
     if (dragging)
+    {
+        // Tell whatever is outside this window where the drag is, so the generator's reference
+        // box can light up before you let go. Only a *pad* is offered: the live card is what you
+        // are holding on the keyboard, not something to keep a copy of.
+        if (onDragOutside && dragSource >= 0)
+            onDragOutside(e.getScreenPosition());
         repaint();
+    }
 }
 
 void ChordPads::mouseUp(const juce::MouseEvent& e)
@@ -704,8 +789,15 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
             }
             else if (target >= 0 && target != dragSource)
                 processor.moveChordPad(dragSource, target); // rearrange, locked or not
-            else if (target == -1 && ! processor.chordPad(dragSource).locked)
+            else if (target == -1
+                     && ! (onDropOutside
+                           && onDropOutside(e.getScreenPosition(), processor.chordPad(dragSource)))
+                     && ! processor.chordPad(dragSource).locked)
                 processor.clearChordPad(dragSource); // dragged off the row = clear
+            // The outside offer has to come *before* the clear and short-circuit it. Off the row
+            // is where the generator's reference box is, so without that ordering the one way to
+            // keep a chord you like would be the way to delete it. Whoever took it took a copy;
+            // this card does not move.
             // A locked card dropped off the strip does nothing at all. The lock is the thing
             // that stops a chord being destroyed (Owen, 2026-07-30), and "Clear pad" on the
             // card menu has always greyed for a locked pad - this path was the hole in that,
@@ -715,6 +807,12 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
             // says which of the two it is doing.
         }
     }
+    // Whatever the gesture turned out to be, the drag is over: tell whoever lit up for it. This
+    // is unconditional and outside the branches above on purpose - only one of those three ends
+    // off the row, and the other two are exactly the paths that used to leave the generator's
+    // reference box glowing at nothing.
+    if (dragging && onDragEnd)
+        onDragEnd();
     dragging = false;
     dragSource = -1;
     repaint();

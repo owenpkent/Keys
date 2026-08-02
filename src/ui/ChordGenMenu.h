@@ -26,7 +26,8 @@ namespace keys
 //     no height at all. This is the fast path, and it survives folding the pads away;
 //   * the **generator's own window** (ChordGenPanel, 2026-07-30, Owen: "I think the chord
 //     generator should just pop out a new window instead of being in the right click menu").
-//     That is the complete path: every setting, plus Fill, Regen and Clear page. It opens from
+//     That is the complete path: every setting, plus the audition tray and its own Fill, Regen
+//     and Clear, none of which touch a pad. It opens from
 //     a button on the same bar and is built and destroyed with itself, so it holds nothing
 //     while it is shut;
 //   * a **pad's card menu**, for the two things that are about one card rather than the page:
@@ -55,16 +56,52 @@ public:
     // Each greys itself out when it would do nothing (see the two queries below), so which
     // button is which is readable from the bar without a tooltip.
     //
-    // clearPage is not a chip beside them: it wipes sixteen pads, there is no undo in Keys, and
-    // on the bar it sat one slip away from the page buttons. It is a button inside the
-    // generator's window, where the other page-wide actions are and where a slip costs an
-    // extra click to reach in the first place.
+    // **There is no clearPage.** There was one until 2026-08-01, and it lived in the generator's
+    // window rather than on the bar because it wiped sixteen pads with no undo behind it and
+    // wanted to be somewhere you went on purpose. That window stopped writing pads at all that
+    // day (Owen: "I don't want it to regenerate the ones in the host window, only in the card
+    // generator window"), which left the one destructive page action with nowhere to live that
+    // was not the bar it had already been moved off. It was deleted rather than rehoused: a card
+    // at a time is Clear pad on its own menu or a drag off the strip, and replacing the whole
+    // page wholesale is what Regen is. Do not restore it without asking.
     void fillPage();
     void regeneratePage();
-    void clearPage();
+
+    // Loose chords for the generator window's audition tray (ChordTray, 2026-08-01): generated
+    // from the current settings and written to no pad at all. Every other entry point here
+    // *places* what it makes, because until the tray existed there was nowhere to put a chord
+    // the page had not accepted, and hearing one therefore cost a slot. This is the one that
+    // hands them back instead. Lock Influence still applies, so the tray leans the way Fill
+    // does; short of `count`, the caller gets what there was.
+    std::vector<KeysProcessor::ChordPad> generateCandidates(int count);
+
+    // The two seeded variants, for the tray's card menu (Owen, 2026-08-01: "when you right click
+    // on a chord in there, I want you to have a whole bunch of options about trying to find
+    // similar ones or what might come next"). Both take one candidate and answer with a trayful
+    // built *from* it, which is what turns the tray from a bag of sixteen unrelated chords into
+    // something you can explore: hear one you like, then ask for its neighbours.
+    //
+    //   * **similarTo** keeps the root and varies the colour: the same chord as a seventh, a
+    //     ninth, a sus, a different inversion, the parallel major or minor;
+    //   * **couldFollow** answers the other question, and leans on `suggest::all` rather than
+    //     inventing a second opinion - that table is Octavium's, it is already what the pad card
+    //     menu offers, and two different answers to "what comes after this" would be a bug
+    //     wearing two hats.
+    //
+    // Short of `count` they return what there was; the tray leaves the rest of its cells alone.
+    std::vector<KeysProcessor::ChordPad> similarTo(const std::vector<int>& seed, int count);
+    std::vector<KeysProcessor::ChordPad> couldFollow(const std::vector<int>& seed, int count);
+
+    // The audition, opened up for the tray. The note path stays on this side rather than moving
+    // into the window for the reason the class comment gives: it calls noteOn with no pad behind
+    // it and is released by this object's 800 ms timer, and this object outlives every window,
+    // so no close can strand a preview note. ChordTray and ChordGenPanel both go through here
+    // and neither of them ever calls noteOn.
+    void auditionChord(const std::vector<int>& notes) { previewChord(notes); }
+    void stopAudition() { stopPreview(); }
 
     // What each of those two would find to do, for the bar and the window to grey their
-    // buttons on. Clear page shares the second: it takes exactly what Regen would.
+    // buttons on.
     bool pageHasEmptyPads() const { return ! emptyPadsOnPage().empty(); }
     bool pageHasRegeneratablePads() const { return ! regeneratablePadsOnPage().empty(); }
 
@@ -89,7 +126,13 @@ public:
     // The Pads bar and the generator's window both grey them on this one answer, so the same
     // setting is never live in one place and dead in the other. Key is not included: the
     // chains do transpose to it.
-    bool readsScaleSettings() const;
+    bool readsScaleSettings() const; // Scale Compliance and Lock Influence: the pool's own dials
+    bool readsMode() const;          // everything but Markov, which has no scale in it at all
+
+    // Which of the seven brains is up, as the raw `genSource` index. Public because the window
+    // shows a different band of settings per source and has to ask. The order is the parameter's,
+    // and appending is the only safe way to grow it (see the parameter's own comment).
+    int sourceIndex() const;
 
     // Mood and Start, the two picks that are not parameters (see the members). The window
     // drives them through here rather than holding them, so switching it off and on again does
@@ -116,6 +159,43 @@ private:
     int genRoot() const;
     int genMode() const;
 
+    // Every source except Markov produces `chordgen::Chord`, so one call covers Algorithmic and
+    // the five that arrived on 2026-08-01, and every caller that used to reach straight for
+    // `chordgen::generate` goes through here instead. Voice leading is applied on the way out,
+    // because it is a pass over whatever a source produced rather than a source of its own.
+    // Markov keeps its own three paths: its chords carry a numeral that ChordGen has no field
+    // for, and regenerating one pad steps the chain from its left neighbour, which is behaviour
+    // worth more than the symmetry of folding it in here.
+    std::vector<chordgen::Chord> generateChords(int count);
+
+    // The two voicing post-passes, applied to every source for the reason voice leading is:
+    // how many notes a chord has and which register it sits in are facts about the voicing, not
+    // about which chord it is, so seven brains honouring them separately would be seven places to
+    // get it wrong (Owen, 2026-08-01: "all of their options should have the option for how many
+    // notes and what inversion"). Both read ranges, and both swap the ends if they cross.
+    std::pair<int, int> noteCountRange() const; // 2..11
+    std::pair<int, int> octaveRange() const;
+    void fitVoicing(std::vector<chordgen::Chord>& chords);
+    void fitPads(std::vector<KeysProcessor::ChordPad>& pads); // the Markov half of that
+
+    // Lean every chord's third major or minor, whatever produced it. A third pass over the
+    // output rather than a seventh brain, for the reason the other two are: it is a question
+    // about the chords you got, not about how to get them.
+    void applyMajorMinorBias(std::vector<chordgen::Chord>& chords);
+
+    // The tick boxes. `constrains(id)` is the one reader, so a box that is not wired anywhere
+    // reads as ticked rather than silently freeing a setting nobody meant to free.
+    bool constrains(const char* paramId) const;
+
+    // Key and Mode are chosen once per *generation* when their box is unticked, not once per
+    // chord. Every source takes a single root and mode for a whole batch (a circle walk, a chain
+    // step, a progression transposed), so a per-chord roll would mean sixteen unrelated
+    // one-chord walks rather than one wandering progression. `rollFreeChoices` picks them; -1
+    // means "the parameter is in charge", which is what genRoot / genMode look for.
+    void rollFreeChoices();
+    int rolledRoot = -1, rolledMode = -1;
+    void smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const; // the Markov half of that
+
     // The Markov source (Source: Markov). Same page mechanics, different brain.
     bool markovActive() const;
     juce::String moodForChain() const; // `mood`, or Any when it belongs to another chain
@@ -128,7 +208,10 @@ private:
     void stopPreview();
 
     KeysProcessor& processor;
-    juce::Random rng;
+    // Mutable because `currentOptions() const` rolls a free Scale Compliance when its tick box is
+    // clear, and that call site is const for good reasons elsewhere. Safe: ChordGenMenu is
+    // message-thread only, so there is no second reader to race.
+    mutable juce::Random rng;
 
     // Mood and Start are transient (like the performance wheels): they are choices about the
     // progression you are generating right now, not session state, and empty means Any. They

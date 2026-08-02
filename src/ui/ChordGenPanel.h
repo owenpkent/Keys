@@ -2,6 +2,8 @@
 
 #include "../PluginProcessor.h"
 #include "ChordGenMenu.h"
+#include "ChordTray.h"
+#include "SourceViz.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
 #include <functional>
@@ -26,11 +28,14 @@ namespace keys
 //   * every control is an APVTS attachment, exactly as it was, so it and the twin on the Pads
 //     bar (Key, Mode, Scale Compliance) read and write the one parameter and can never
 //     disagree. There is no hand-syncing anywhere in this class;
-//   * the page-wide actions call straight into ChordGenMenu - `fillPage`, `regeneratePage`,
-//     `clearPage`. The old panel had its own copies of all three; those are gone, and Fill's
-//     "empty pads only" rule (Owen, the same day) came with the move for free;
-//   * **Clear page** is here rather than on the Pads bar or a card menu. It empties sixteen
-//     pads and Keys has no undo of any kind, so it wants to be somewhere you went on purpose;
+//   * **nothing in here writes a pad** (2026-08-01, Owen: "when you click on regenerate unlocked,
+//     I don't want it to regenerate the ones in the host window, only in the card generator
+//     window"). Fill, Regen and Clear act on the audition tray below, and the only way a chord in
+//     this window reaches the strip is a drag you made. The Pads bar keeps Fill and Regen for the
+//     page itself, next to the pads they write. This window did call `fillPage` /
+//     `regeneratePage` / `clearPage` until that day; the first two are still ChordGenMenu's and
+//     still reached from the bar, and `clearPage` was deleted outright, because a page-wide wipe
+//     with no undo had exactly one home and this was it;
 //   * the suggestion audition is *not* here. It calls noteOn with no pad behind it and is
 //     released by an 800 ms timer, so it stays in ChordGenMenu where the destructor that
 //     stops it cannot be closed away (see ~ChordGenMenu). This class never plays a note;
@@ -38,10 +43,19 @@ namespace keys
 //     progression being generated, and shutting the window must not reset them, so the combo
 //     boxes read and write ChordGenMenu's copies.
 //
-// There is no pad grid. The panel drew a 4x4 copy of the current page until 2026-07-30 - the
-// same sixteen pads, through the same KeysProcessor::setChordPad, as the Pads section already
-// on screen. The cards are the Pads section's, and each of them names its chord and lists its
-// notes, which is what this grid was for.
+// There is a 4x4 grid again from 2026-08-01, and it is not the one that was removed. The panel
+// drew a copy of the current *page* until 2026-07-30 - the same sixteen pads, through the same
+// KeysProcessor::setChordPad, as the Pads section already on screen, so it was a second view of
+// one thing and the cards downstairs were the better view. What is here now is ChordTray:
+// sixteen candidates that belong to no slot and are not in the session, for hearing a chord
+// before it costs you a pad (Owen: "I have four by four pad where you can audition new chords.
+// We want to be able to try a bunch out"). The tray is where a chord comes *from*; the pads are
+// where it goes. Read ChordTray's own comment before touching it - the distinction is the whole
+// reason it is allowed to exist, and a grid here that wrote pads directly would be the removed
+// one again under a new name.
+//
+// This class still never calls noteOn. The tray auditions through ChordGenMenu, the same path
+// the suggestion preview takes and for the same reason: the brain outlives every window.
 class ChordGenPanel : public juce::Component,
                       private juce::Timer
 {
@@ -55,6 +69,26 @@ public:
     // The on-screen Close button. The window's title-bar X runs the same teardown; the editor
     // wires both to one call, so there is exactly one way for this object to die.
     std::function<void()> onClose;
+
+    // The audition tray's cross-window drag, passed straight through to the editor - this class
+    // is the only thing that holds the tray, and the editor is the only thing that holds both it
+    // and the pad strip. Screen coordinates; see ChordTray for why there is no other option.
+    std::function<void(juce::Point<int> screenPos)> onCandidateDragOver;
+    std::function<bool(juce::Point<int> screenPos, const KeysProcessor::ChordPad&)> onCandidateDropped;
+    std::function<void()> onCandidateDragEnd;
+
+    // "Send to first empty pad" on a tray card's menu: the drag with the aim taken out. Same
+    // pass-through, and the same reason for it - this window cannot see the pad strip.
+    std::function<bool(const KeysProcessor::ChordPad&)> onCandidateToFirstEmptyPad;
+    std::function<bool()> onPageHasEmptyPad;
+
+    // A chord dragged *out* of the main window's pad strip and offered to the reference card:
+    // the mirror of the commit drag, and the only route by which anything outside this window
+    // puts something into it. Screen coordinates again. `offerReferenceDrop` returns true when
+    // the reference took it, which is what tells ChordPads not to treat the drag as a clear.
+    void showReferenceDropTarget(juce::Point<int> screenPos);
+    bool offerReferenceDrop(juce::Point<int> screenPos, const KeysProcessor::ChordPad&);
+    void clearReferenceDropTarget();
 
     // What the layout below actually needs, so the window's minimum is derived rather than
     // guessed. Widest row is the algorithmic settings row; tallest is all four rows plus the
@@ -72,17 +106,25 @@ private:
     void buildControls();
     void refreshMoodItems(); // the Mood list belongs to the chain that is up
 
-    // The two sets of controls that share row B, and the one place that decides which of them
-    // is on screen. Returned by value rather than as an initializer_list, whose backing array
-    // would not outlive the return.
-    std::array<juce::Component*, 13> algorithmicBand();
-    std::array<juce::Component*, 10> markovBand();
-    void applySource(bool markov);
+    // The seven sets of controls that share row B, and the one place that decides which is on
+    // screen. They are laid into the *same* rect and exactly one may be visible: the bands are
+    // different widths, so a hidden-but-visible one paints out past the edge of the one that is
+    // up. Two of these until 2026-08-01, when the five `sources::` brains arrived; the shape did
+    // not change, only the count, and `bandFor` replaced the pair of fixed-size arrays because a
+    // switch that has to name every band is a switch somebody forgets to extend.
+    std::vector<juce::Component*> bandFor(int source);
+    std::vector<juce::Component*> allBandControls();
+    void applySource(int source);
 
     KeysProcessor& processor;
     ChordGenMenu& gen;
 
-    juce::Label title, modeEmotion, pageLabel;
+    // No mode-character line beside the title since 2026-08-01 (Owen: "we don't want it to say,
+    // like, bruised, relaxed, jazz at the top related to the key"). It printed
+    // `modes::get(mode).emotion` - "Bluesy, Relaxed, Rock" for Mixolydian - which is a claim
+    // about how a mode feels, in a window whose whole job is to let you hear chords and decide
+    // that for yourself. `modes::get().emotion` is untouched and still used elsewhere.
+    juce::Label title, pageLabel;
     juce::TextButton closeButton { "Close" };
 
     juce::ComboBox rootBox, modeBox;
@@ -90,31 +132,126 @@ private:
     juce::Slider octaveSlider, complianceSlider, lockInfluenceSlider;
     juce::Label octaveLabel, complianceLabel, lockInfluenceLabel;
 
-    juce::Label notesLabel, invLabel;
-    juce::ToggleButton triadsButton { "3" }, seventhsButton { "4" }, ninthsButton { "5" };
+    // Notes and Inversions are always on screen from 2026-08-01 (Owen: "all of their options
+    // should have the option for how many notes and what inversion"). They were the head of the
+    // Algorithmic band and went off screen under the other six, which was wrong twice over: the
+    // note count and the register are facts about the *voicing*, so they were never the weighted
+    // pool's property in the first place, and the generator now applies both as post-passes over
+    // whatever any of the seven produced.
+    //
+    // The 3/4/5 tick boxes became a min/max pair spanning 2 to 11. Below three you get dyads, and
+    // above five the stack keeps climbing in thirds through the mode. Three tick boxes could not
+    // have carried ten values without becoming ten targets.
+    juce::Label notesLabel, invLabel, octaveMaxLabel;
+    juce::Slider notesMinSlider, notesMaxSlider, octaveMaxSlider;
     juce::ToggleButton inv0Button { "R" }, inv1Button { "1st" }, inv2Button { "2nd" }, inv3Button { "3rd" };
 
-    juce::TextButton fillButton { "Fill Page" };
-    juce::TextButton regenButton { "Regen Unlocked" };
-    juce::TextButton clearButton { "Clear Page" };
+    // The tray's three actions. They read Fill / Regen / Clear rather than the Fill Page / Regen
+    // Unlocked / Clear Page they were until 2026-08-01, because the word Page is exactly what
+    // stopped being true: none of them touches a pad any more.
+    juce::TextButton fillButton, regenButton, clearButton;
+
+    // The audition tray. Owned here rather than by ChordGenMenu, and that is consistent with the
+    // rest of this class rather than an exception to it: a tray card is not state, so throwing
+    // the sixteen away with the window costs nothing. Mood and Start live on the brain because
+    // losing *them* would silently change what the next generation produces.
+    // The picture of what the current source is doing, under the row of source buttons so it
+    // explains the one you just pressed. Read-only and click-through: it is a diagram, and it
+    // takes no input at all. Fed from the timer, because everything it draws (the source, the
+    // key, the tray's contents) can move without this class being told.
+    SourceViz viz;
+
+    ChordTray tray;
+    juce::Label trayLabel;
+
+    // The reference chord and the three things you can do to it, all left-click. Similar and
+    // Could follow are also items on a tray card's right-click menu, seeded by that card instead
+    // of by this one; these are the twins that keep those two off the closed right-click list,
+    // and they are the reason the reference exists at all - a seed you keep is a seed you can
+    // ask twice.
+    ChordRefCard refCard;
+    juce::Label refLabel;
+    juce::TextButton similarButton { "Similar" }, followButton { "Could follow" },
+        clearRefButton { "Clear" };
 
     // The Markov source's controls; visible only while Source is Markov, in the same band as
     // the algorithmic settings they replace. Those settings mean nothing to a chain walk, so
     // the band shows whichever set is live rather than reserving a row that is dead half the
     // time. Sharing the rect makes the visibility swap load-bearing rather than cosmetic:
     // applySource() owns it, and the two sets are never on screen together.
-    juce::ComboBox sourceBox, chainBox, moodBox, startBox;
-    juce::Label sourceLabel, chainLabel, moodLabel, startLabel;
+    // Source is seven buttons on a row of their own, not a combo box (Owen, 2026-08-01: "maybe
+    // instead of the source being a drop down and the direction being a drop down, maybe those
+    // can be, like, always visible"). A combo costs two clicks and hides six of the seven answers
+    // behind the first, which for a setting whose whole point is comparison is the wrong shape.
+    // Laid out by `sourceButtons()`, and each one writes `genSource` through the same parameter
+    // the Pads bar reads, so there is still exactly one source of truth.
+    std::array<juce::TextButton, 7> sourceButtons;
+    juce::Label sourceLabel;
+    std::array<juce::TextButton, 2> circleDirButtons; // same treatment, same reason
+    void setSourceParam(int index);
+    void setCircleDirParam(int index);
+    void refreshRadioStates(); // the tick marks, polled with everything else
+
+    juce::ComboBox chainBox, moodBox, startBox;
+    juce::Label chainLabel, moodLabel, startLabel;
     juce::Slider tempSlider, lengthSlider;
     juce::Label tempLabel, lengthLabel;
 
-    std::unique_ptr<ComboAtt> rootAtt, modeAtt, sourceAtt, chainAtt;
+    // The five brains added on 2026-08-01, one band each. Negative Harmony has no band at all:
+    // it reflects the key about the axis between tonic and dominant, and Key, Mode and Octave in
+    // row A are the whole of what that needs, so an empty row B is the honest answer rather than
+    // a control invented to fill it.
+    juce::ComboBox progressionBox;
+    juce::Label circleDirLabel, progressionLabel;
+    juce::Slider plrPSlider, plrLSlider, plrRSlider;
+    juce::Label plrPLabel, plrLLabel, plrRLabel;
+    juce::ToggleButton planingDiatonicButton { "Diatonic" };
+    juce::Label planingLabel;
+
+    // Brightness sweeps the seven diatonic modes from Lydian to Locrian, which is what "a slider
+    // between major and minor" turns out to mean once you look at what is between them (Owen,
+    // 2026-08-01: "what about a slider that goes between major and minor?"). Major and minor are
+    // positions 1 and 4 on it, so sliding past either lands you somewhere real rather than
+    // nowhere. It is a **view onto `genMode`**, not a parameter of its own, because two
+    // parameters for one thing is how they end up disagreeing; `brightnessOrder` is the map.
+    // The mode table's back half (harmonic minor, blues, the pentatonics) is not on this axis at
+    // all, so the slider greys when Mode is one of those and says so by doing nothing.
+    juce::Slider brightnessSlider;
+    juce::Label brightnessLabel;
+    void setModeFromBrightness(int position);
+    void refreshBrightness();
+    int lastBrightnessShown = -1;
+
+    // And the other half of that ask: lean the chords major or minor without moving the mode.
+    juce::Slider majMinSlider;
+    juce::Label majMinLabel;
+
+    // Voice leading is not a band. It is a pass over whatever a source produced, so it belongs to
+    // all seven and sits in row A where none of them can hide it.
+    juce::Slider smoothSlider;
+    juce::Label smoothLabel;
+
+    // No attachment for Source or Circle Direction: both are button rows now, and a row of
+    // buttons on one choice parameter is a thing JUCE has no attachment for. They write the
+    // parameter in setSourceParam / setCircleDirParam and read it back in refreshRadioStates,
+    // which the timer runs. That is hand-syncing, which this class otherwise never does, and it
+    // is confined to those three functions on purpose.
+    std::unique_ptr<ComboAtt> rootAtt, modeAtt, chainAtt;
+    std::unique_ptr<ComboAtt> progressionAtt;
     std::unique_ptr<SliderAtt> octaveAtt, complianceAtt, lockInfluenceAtt, tempAtt, lengthAtt;
-    std::unique_ptr<ButtonAtt> triadsAtt, seventhsAtt, ninthsAtt;
+    std::unique_ptr<SliderAtt> plrPAtt, plrLAtt, plrRAtt, smoothAtt;
+    std::unique_ptr<SliderAtt> notesMinAtt, notesMaxAtt, octaveMaxAtt, majMinAtt;
+
+    // The tick boxes. Each is 34 px wide and the full height of its cell, because the mouse-only
+    // floor applies to a check box exactly as it does to a button, and a tick parked in a 14 px
+    // caption strip would be a target you cannot hit.
+    std::array<juce::ToggleButton, 6> useBoxes;
+    std::array<std::unique_ptr<ButtonAtt>, 6> useAtts;
+    std::unique_ptr<ButtonAtt> planingDiatonicAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;
 
-    int lastChainMode = -1;   // rebuild the Mood list when the chain mode changes
-    bool markovShown = false; // last visibility applied, to relayout on source change
+    int lastChainMode = -1; // rebuild the Mood list when the chain mode changes
+    int shownSource = -1;   // last band applied, to relayout on a source change
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenPanel)
 };

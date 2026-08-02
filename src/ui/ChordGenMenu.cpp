@@ -1,11 +1,13 @@
 #include "ChordGenMenu.h"
 #include "../ChordMarkov.h"
+#include "../ChordSources.h"
 #include "../ChordSuggest.h"
 #include "../Chords.h"
 #include "../ScaleModes.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
 #include <algorithm>
+#include <cmath>
 
 namespace keys
 {
@@ -76,12 +78,317 @@ ChordGenMenu::~ChordGenMenu()
     stopPreview(); // a suggestion left auditioning must not outlive the generator
 }
 
-bool ChordGenMenu::markovActive() const
+int ChordGenMenu::sourceIndex() const
 {
-    return (int) processor.apvts.getRawParameterValue("genSource")->load() == 1;
+    // Floor only. An upper clamp here has to be a literal count of the sources, and the one that
+    // was here read 6, so appending an eighth brain - the one growth the parameter's own comment
+    // calls safe - would have arrived silently reading as Planing. A source this build does not
+    // know instead falls through generateChords' `default:` to the weighted pool, which is the
+    // safe answer that switch was written to give, and shows no per-source band.
+    return juce::jmax(0, (int) processor.apvts.getRawParameterValue("genSource")->load());
 }
 
-bool ChordGenMenu::readsScaleSettings() const { return ! markovActive(); }
+bool ChordGenMenu::markovActive() const { return sourceIndex() == 1; }
+
+// Two different questions, and conflating them greyed Mode under five sources that read it.
+//
+//   * **Scale Compliance and Lock Influence** are the weighted pool's own dials: how far it may
+//     stray from the key, and how much it copies the families of your locked cards. Nothing else
+//     has a pool to weight, so they are dead to the other six;
+//   * **Mode** is read by everything except Markov. Circle of fifths takes each landing degree's
+//     quality from it, Neo-Riemannian picks its starting triad from it, Progressions resolves its
+//     degrees through it, and negative harmony and planing use it as the scale they reflect or
+//     slide through. A chain walk is the one brain with no scale in it at all.
+bool ChordGenMenu::readsScaleSettings() const { return sourceIndex() == 0; }
+bool ChordGenMenu::readsMode() const { return sourceIndex() != 1; }
+
+bool ChordGenMenu::constrains(const char* paramId) const
+{
+    // Absent parameter reads as ticked. A setting whose box was never wired should behave as it
+    // always did, not silently free itself.
+    if (auto* v = processor.apvts.getRawParameterValue(paramId))
+        return v->load() > 0.5f;
+    return true;
+}
+
+void ChordGenMenu::rollFreeChoices()
+{
+    rolledRoot = constrains("genUseKey") ? -1 : rng.nextInt(12);
+    // Diatonic modes only when Mode is free. The table's back half is harmonic minor, blues and
+    // the pentatonics, which are scales rather than modes: wandering into a five-note scale
+    // because you unticked a box is a surprise, not a freedom.
+    rolledMode = constrains("genUseMode") ? -1 : rng.nextInt(7);
+}
+
+// Lean every chord's third. Positive pushes major, negative minor, and the magnitude is the
+// chance that any given chord is pushed at all, so 40% leans most of a page without flattening
+// it into one colour. Only the third moves: the root, the fifth and every extension stay, so a
+// major ninth leaned minor is still a ninth.
+void ChordGenMenu::applyMajorMinorBias(std::vector<chordgen::Chord>& chords)
+{
+    const int bias = (int) processor.apvts.getRawParameterValue("genMajMin")->load();
+    if (bias == 0)
+        return;
+    const bool wantMajor = bias > 0;
+    const float chance = (float) std::abs(bias) * 0.01f;
+
+    for (auto& c : chords)
+    {
+        if (c.notes.empty() || rng.nextFloat() > chance)
+            continue;
+        for (auto& n : c.notes)
+        {
+            const int iv = (((n - c.rootPc) % 12) + 12) % 12;
+            if (wantMajor && iv == 3 && n + 1 <= 127)
+                n += 1;
+            else if (! wantMajor && iv == 4 && n - 1 >= 0)
+                n -= 1;
+        }
+        std::sort(c.notes.begin(), c.notes.end());
+
+        // The chord's *label* has to follow its notes. This pass moves a third, which is the one
+        // interval a type name is mostly about, so a major triad leaned minor kept reading as
+        // "Major" in `Chord::type` - and that is what `generateCandidates` copies onto a pad,
+        // where Next voicing and the suggestion table both read it. The name beside it is
+        // re-detected from the notes, so leaving type alone made the two disagree on the same
+        // card. Only taken when the reading still calls the same note the root: analyse is free
+        // to name any sounding pitch class the root, and letting it move one under fitVoicing -
+        // which stacks and shrinks a chord *around* its root - would be a worse bug than a stale
+        // type. Where it does move, both fields keep the source's answer and stay consistent.
+        const auto [readRoot, readType] = suggest::analyse(c.notes);
+        if (readRoot == c.rootPc)
+            c.type = readType;
+    }
+}
+
+// Ranges rather than single values since 2026-08-01, and read with the ends swapped if they cross:
+// two independent parameters cannot police each other, and the alternative is a generator that
+// silently produces nothing whenever a min is dragged past its max.
+std::pair<int, int> ChordGenMenu::noteCountRange() const
+{
+    const int a = (int) processor.apvts.getRawParameterValue("genNotesMin")->load();
+    const int b = (int) processor.apvts.getRawParameterValue("genNotesMax")->load();
+    return { juce::jmin(a, b), juce::jmax(a, b) };
+}
+
+std::pair<int, int> ChordGenMenu::octaveRange() const
+{
+    const int a = (int) processor.apvts.getRawParameterValue("genOctave")->load();
+    const int b = (int) processor.apvts.getRawParameterValue("genOctaveMax")->load();
+    return { juce::jmin(a, b), juce::jmax(a, b) };
+}
+
+// Note count and register, applied to every chord whatever made it. These are post-passes for the
+// same reason voice leading is: they are facts about the *voicing* a chord arrives in, not about
+// which chord it is, so asking each of seven brains to honour them separately would be seven
+// places to get it wrong. Owen's ask was exactly this shape - "all of their options should have
+// the option for how many notes and what inversion".
+//
+// Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is still in
+// the key rather than a chromatic pile. Shrinking drops from the top, which keeps the root and the
+// third and therefore keeps the chord recognisable: a dyad off a major seventh should be the root
+// and its third, not the seventh and the ninth.
+void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
+{
+    const auto [minN, maxN] = noteCountRange();
+    const auto [minOct, maxOct] = octaveRange();
+    const auto& scale = modes::get(genMode()).intervals; // semitone offsets from the tonic
+    const int root = genRoot();
+    // Unticked means every inversion is fair game, which is not the same as every box ticked:
+    // the boxes are a *choice* the generator may not exceed, and this is the absence of one.
+    const bool freeNotes = ! constrains("genUseNotes");
+    const bool freeOctave = ! constrains("genUseOctave");
+    const auto inversions = constrains("genUseInversions")
+                                ? currentOptions().inversions // defaulted to root if none ticked
+                                : std::vector<int> { 0, 1, 2, 3 };
+
+    for (auto& c : chords)
+    {
+        if (c.notes.empty())
+            continue;
+
+        // Unticked means the range is not a constraint at all, so the roll spans the whole 2..11
+        // the parameter can express rather than whatever the two steppers happen to read.
+        const int want = freeNotes ? 2 + rng.nextInt(10)
+                                   : minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
+        std::sort(c.notes.begin(), c.notes.end());
+
+        // Root position **first**, before the note count is fitted rather than after it.
+        //
+        // This is the normalisation that makes an inversion *replace* whatever rotation the
+        // chord arrived in instead of compounding with it, and it has to happen; the ordering is
+        // the part that was wrong. `rootPosition` also collapses repeated pitch classes and
+        // restacks what survives inside a single octave, so running it after the grow loop threw
+        // the grow loop away: stacking thirds through a seven-note mode comes back round to the
+        // root's own pitch class on the eighth note, so every count above seven silently
+        // returned seven (five under a pentatonic mode), and the two-octave stack the loop had
+        // just built returned as a one-octave cluster. Normalise, then fit, then invert.
+        auto voiced = chordgen::rootPosition(c.notes, c.rootPc);
+        if (voiced.empty())
+            voiced = c.notes; // a root that is not in its own chord; keep what we were given
+
+        // Shrink: from the top, so the root and third survive. On root position, which is the
+        // one arrangement where "the top" and "the extensions" are the same notes.
+        if ((int) voiced.size() > want && want >= 1)
+            voiced.resize((size_t) want);
+
+        // Grow: keep stacking scale thirds above the top note. Stepping two scale degrees at a
+        // time is what "a third" means inside a mode, and it is why this stays diatonic where
+        // adding a flat 4 semitones would not.
+        while ((int) voiced.size() < want)
+        {
+            const int top = voiced.back();
+            int next = top + 3;
+            for (int i = 0; i < 12; ++i) // find the next scale tone at least a third above
+            {
+                const int norm = ((((next + i) - root) % 12) + 12) % 12;
+                if (std::find(scale.begin(), scale.end(), norm) != scale.end())
+                {
+                    next = next + i;
+                    break;
+                }
+            }
+            if (next > 127 || next <= top)
+                break; // off the keyboard, or the search found nothing: stop rather than loop
+            voiced.push_back(next);
+        }
+
+        // Inversion, for every source rather than the weighted pool alone: tick R alone and you
+        // get root position, even from a pool that had already inverted the chord itself. Last,
+        // so it rotates the chord you actually asked for rather than the one the source happened
+        // to hand over.
+        if (! inversions.empty())
+        {
+            const int inv = inversions[(size_t) rng.nextInt((int) inversions.size())];
+            auto rotated = chordgen::applyInversion(voiced, inv);
+            bool fits = true;
+            for (const int n : rotated)
+                if (n < 0 || n > 127)
+                    fits = false;
+            if (fits)
+                voiced = std::move(rotated);
+        }
+        c.notes = std::move(voiced);
+
+        // Register: move the whole chord so its lowest note sits in an octave inside the range.
+        // The chord moves in one piece, so its shape and its voice leading are untouched.
+        const int wantOct = freeOctave ? 2 + rng.nextInt(5)
+                                       : minOct + (maxOct > minOct ? rng.nextInt(maxOct - minOct + 1) : 0);
+        const int haveOct = c.notes.front() / 12;
+        const int shift = (wantOct - haveOct) * 12;
+        if (shift != 0)
+        {
+            bool fits = true;
+            for (const int n : c.notes)
+                if (n + shift < 0 || n + shift > 127)
+                    fits = false;
+            if (fits)
+                for (auto& n : c.notes)
+                    n += shift;
+        }
+    }
+}
+
+// One door to five brains plus the original. Voice leading runs on the way out, which is the
+// point of it being a pass and not a source: whichever of these produced the chords, they arrive
+// at the caller already smoothed by however much the dial asks for.
+std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
+{
+    rollFreeChoices(); // before anything reads genRoot or genMode
+    const auto& a = processor.apvts;
+    const int oct = currentOptions().octave;
+    const int root = genRoot(), mode = genMode();
+    std::vector<chordgen::Chord> out;
+
+    switch (sourceIndex())
+    {
+        case 2:
+            out = sources::circleOfFifths(root, mode, oct, count,
+                                          a.getRawParameterValue("genCircleDir")->load() > 0.5f ? 1 : -1, rng);
+            break;
+        case 3:
+            out = sources::neoRiemannian(root, mode, oct, count,
+                                         (int) a.getRawParameterValue("genPlrP")->load(),
+                                         (int) a.getRawParameterValue("genPlrL")->load(),
+                                         (int) a.getRawParameterValue("genPlrR")->load(), rng);
+            break;
+        case 4:
+            // The picker's entry 0 is "Random", which the table spells -1.
+            out = sources::progressions(root, mode, oct, count,
+                                        (int) a.getRawParameterValue("genProgression")->load() - 1, rng);
+            break;
+        case 5: out = sources::negativeHarmony(root, mode, oct, count, rng); break;
+        case 6:
+            out = sources::planing(root, mode, oct, count,
+                                   a.getRawParameterValue("genPlaningDiatonic")->load() > 0.5f, rng);
+            break;
+        default:
+            // Algorithmic, and the fallback for a source index this build does not know - a
+            // session from a later version could carry one, and the weighted pool is the safe
+            // thing to answer with.
+            out = chordgen::generate(root, mode, count, currentOptions(), lockedTypesOnPage(), rng);
+            break;
+    }
+
+    // Bias the thirds, then fit the voicing, then smooth it, and the order is load-bearing in
+    // both joins. Bias first because it changes *which* notes a chord holds while the other two
+    // only move them about. Smoothing last because fitVoicing moves whole chords between
+    // octaves, so running it afterwards would undo exactly what the smoothing pass worked out.
+    applyMajorMinorBias(out);
+    fitVoicing(out);
+    sources::applyVoiceLeading(out, a.getRawParameterValue("genSmooth")->load() * 0.01f);
+    return out;
+}
+
+// The same pass for Markov, which cannot go through generateChords: its chords carry a numeral
+// ChordGen has no field for, so they arrive already built as pads. Round-trips the notes through
+// a throwaway Chord vector rather than duplicating the algorithm, and copies only the notes back,
+// so the numeral and name survive. Voice leading never changes which pitch classes a chord holds,
+// only their register, so a name written before this runs is still right after it.
+// fitVoicing for the Markov path, which arrives as pads rather than Chords. Round-trips through
+// a throwaway Chord vector exactly as smoothPads does, and copies back the notes plus the name,
+// because unlike smoothing this pass *does* change which notes a chord holds.
+void ChordGenMenu::fitPads(std::vector<KeysProcessor::ChordPad>& pads)
+{
+    std::vector<chordgen::Chord> tmp;
+    tmp.reserve(pads.size());
+    for (const auto& p : pads)
+    {
+        chordgen::Chord c;
+        c.rootPc = p.rootPc;
+        c.type = p.type;
+        c.notes = p.notes;
+        tmp.push_back(std::move(c));
+    }
+    applyMajorMinorBias(tmp); // same order as generateChords: bias, then fit
+    fitVoicing(tmp);
+    for (size_t i = 0; i < pads.size() && i < tmp.size(); ++i)
+    {
+        pads[i].notes = tmp[i].notes;
+        pads[i].name = chords::detect(tmp[i].notes);
+    }
+}
+
+void ChordGenMenu::smoothPads(std::vector<KeysProcessor::ChordPad>& pads) const
+{
+    const float amount = processor.apvts.getRawParameterValue("genSmooth")->load() * 0.01f;
+    if (amount <= 0.0f || pads.size() < 2)
+        return;
+
+    std::vector<chordgen::Chord> tmp;
+    tmp.reserve(pads.size());
+    for (const auto& p : pads)
+    {
+        chordgen::Chord c;
+        c.rootPc = p.rootPc;
+        c.type = p.type;
+        c.notes = p.notes;
+        tmp.push_back(std::move(c));
+    }
+    sources::applyVoiceLeading(tmp, amount);
+    for (size_t i = 0; i < pads.size() && i < tmp.size(); ++i)
+        pads[i].notes = tmp[i].notes;
+}
 
 int ChordGenMenu::chainMode() const
 {
@@ -101,11 +408,15 @@ juce::String ChordGenMenu::moodForChain() const
 
 int ChordGenMenu::genRoot() const
 {
+    if (rolledRoot >= 0)
+        return rolledRoot; // Key is unticked; rollFreeChoices picked one for this generation
     return (int) processor.apvts.getRawParameterValue("genRoot")->load();
 }
 
 int ChordGenMenu::genMode() const
 {
+    if (rolledMode >= 0)
+        return rolledMode; // Mode is unticked
     return juce::jlimit(0, modes::count() - 1, (int) processor.apvts.getRawParameterValue("genMode")->load());
 }
 
@@ -122,12 +433,12 @@ chordgen::Options ChordGenMenu::currentOptions() const
 
     chordgen::Options o;
     o.octave = (int) a.getRawParameterValue("genOctave")->load();
-    o.noteCounts.clear();
-    if (on("genTriads"))   o.noteCounts.push_back(3);
-    if (on("genSevenths")) o.noteCounts.push_back(4);
-    if (on("genNinths"))   o.noteCounts.push_back(5);
-    if (o.noteCounts.empty())
-        o.noteCounts = { 3 }; // unticking everything would generate nothing; triads are the floor
+    // Every type the pool knows, always. This used to be filtered by the three note-count tick
+    // boxes; since 2026-08-01 the Notes range decides how many notes a chord ends up with, in
+    // `fitVoicing`, after the source has chosen it. Filtering here as well would mean a request
+    // for five notes could only ever be met by a type that already had five, which is a much
+    // narrower pool than "any chord, grown to five".
+    o.noteCounts = { 3, 4, 5 };
     o.inversions.clear();
     if (on("genInv0")) o.inversions.push_back(0);
     if (on("genInv1")) o.inversions.push_back(1);
@@ -135,7 +446,11 @@ chordgen::Options ChordGenMenu::currentOptions() const
     if (on("genInv3")) o.inversions.push_back(3);
     if (o.inversions.empty())
         o.inversions = { 0 };
-    o.scaleCompliance = a.getRawParameterValue("genCompliance")->load() * 0.01f;
+    // Free means a different amount of straying every generation, which is what "the generator
+    // decides" has to mean for a dial: pinning it to 0 or 100 would just be a third fixed value.
+    o.scaleCompliance = constrains("genUseCompliance")
+                            ? a.getRawParameterValue("genCompliance")->load() * 0.01f
+                            : rng.nextFloat();
     o.lockInfluence = a.getRawParameterValue("genLockInfluence")->load() * 0.01f;
     return o;
 }
@@ -168,6 +483,29 @@ void ChordGenMenu::writeChord(int slot, const chordgen::Chord& c)
 void ChordGenMenu::previewChord(const std::vector<int>& notes)
 {
     stopPreview();
+
+    // Choke every other chord source before sounding this one, and it is not a nicety (Owen,
+    // 2026-08-01: "when I drag a chord from the main window to this window and then click on it,
+    // it doesn't play. And some of the generated chords sound like they're only one note even
+    // though they're saying there's three").
+    //
+    // Both of those were one bug, and it was this rule working exactly as designed. Keys emits
+    // one note-on per *pitch* and only on the 0->1 transition of noteRefs, so that releasing one
+    // owner can never silence another's notes. An audition asking for a pitch some pad is already
+    // holding therefore emits nothing at all. With Sustain on, a pad left ringing made the whole
+    // audition silent when the chords matched, and made it sound like one note when they merely
+    // overlapped: you heard only the pitches the pad did not already own. Nothing was wrong with
+    // the chord, which is why the card could truthfully list three notes and play one.
+    //
+    // An audition is a monitor, not a performance, so it takes the room. This is the same call
+    // Exclusive makes and it reaches the same three places - the pads, the live card, and a chord
+    // held into the arp - because any of them can own a pitch this needs. Unconditional rather
+    // than only-when-they-collide: which pitches overlap is invisible, and a "hear this chord"
+    // button that works or does not depending on an overlap you cannot see is the bug again in a
+    // quieter form. The cost is that auditioning stops a chord you were deliberately sustaining,
+    // which is a click to put back and worth paying for a button that always does what it says.
+    processor.stopAllChordPads();
+
     const float vel = processor.baseVelocity01();
     for (const int n : notes)
         processor.noteOn(n, vel); // Humanize colours the audition like everything else
@@ -190,6 +528,7 @@ void ChordGenMenu::timerCallback()
 
 void ChordGenMenu::regeneratePageMarkov()
 {
+    rollFreeChoices();
     // Octavium regenerates unlocked cards left to right, each stepping the chain
     // from its (possibly just-updated) left neighbour, so changes cascade.
     const int offset = processor.padPageOffset();
@@ -204,6 +543,7 @@ void ChordGenMenu::regeneratePageMarkov()
 
 void ChordGenMenu::fillPageMarkov()
 {
+    rollFreeChoices();
     const auto targets = emptyPadsOnPage();
     if (targets.empty())
         return;
@@ -228,6 +568,7 @@ void ChordGenMenu::fillPageMarkov()
 
 void ChordGenMenu::regeneratePadMarkov(int slot)
 {
+    rollFreeChoices();
     const int offset = processor.padPageOffset();
     // The chain steps from the pad to the left on this page; the first pad restarts.
     juce::String predecessor;
@@ -246,6 +587,119 @@ void ChordGenMenu::regeneratePadMarkov(int slot)
     pad.numeral = c.numeral;
     pad.locked = processor.chordPad(slot).locked;
     processor.setChordPad(slot, pad);
+}
+
+// Candidates for the audition tray: the same two brains, the same settings, and no slot. This
+// is the only generator path that builds a ChordPad it does not hand to the processor, which is
+// why the pad-building is repeated here rather than shared with writeChord - that one preserves
+// the target slot's lock, and a candidate has no target yet.
+std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
+{
+    std::vector<KeysProcessor::ChordPad> out;
+    if (count <= 0)
+        return out;
+    out.reserve((size_t) count);
+
+    rollFreeChoices(); // Markov reads genRoot below, so this must precede it too
+    if (markovActive())
+    {
+        // One walk of the chain rather than `count` independent first chords, so the tray reads
+        // as a progression you could take in order - which is what a Markov corpus is for, and
+        // what fillPageMarkov already does with the page.
+        const auto generated = markov::generate(chainMode(), genRoot(), currentOptions().octave,
+                                                (int) processor.apvts.getRawParameterValue("markovLength")->load(),
+                                                processor.apvts.getRawParameterValue("markovTemp")->load(),
+                                                moodForChain(), start, count, rng);
+        for (const auto& c : generated)
+        {
+            KeysProcessor::ChordPad pad;
+            pad.notes = c.notes;
+            pad.name = chords::detect(c.notes);
+            pad.rootPc = c.rootPc;
+            pad.type = c.type;
+            pad.numeral = c.numeral;
+            out.push_back(std::move(pad));
+        }
+        fitPads(out);    // note count and register, every source including this one
+        smoothPads(out); // and then the smoothing, in that order for the reason fitVoicing gives
+        return out;
+    }
+
+    for (const auto& c : generateChords(count))
+    {
+        KeysProcessor::ChordPad pad;
+        pad.notes = c.notes;
+        pad.name = chords::detect(c.notes);
+        pad.rootPc = c.rootPc;
+        pad.type = c.type;
+        pad.degree = c.degree;
+        out.push_back(std::move(pad));
+    }
+    return out;
+}
+
+// The two seeded answers behind the tray's card menu. Both take the chord you are pointing at
+// and hand back a trayful built from it, and the split between them is the whole reason there
+// are two: "more like this" is a question about *colour* and keeps the root, "what comes next"
+// is a question about *motion* and changes it.
+std::vector<KeysProcessor::ChordPad> ChordGenMenu::similarTo(const std::vector<int>& seed, int count)
+{
+    std::vector<KeysProcessor::ChordPad> out;
+    if (seed.empty() || count <= 0)
+        return out;
+
+    const int rootPc = suggest::analyse(seed).first;
+    const int octave = seed.front() / 12; // the seed's own register, so the family sits with it
+
+    // Same root, every colour chordgen knows: the triad, the sevenths, the sus, the ninths, on
+    // down the type table. Deliberately not `suggest::all` - that table moves the root, which is
+    // exactly what "similar" must not do.
+    const auto& types = chordgen::types();
+    for (int pass = 0; pass < 3 && (int) out.size() < count; ++pass)
+    {
+        // Later passes drop an octave and then climb one, so a request for more variations than
+        // there are chord types answers with the same colours in a different register rather
+        // than running out and leaving the tray half empty.
+        const int oct = octave + (pass == 1 ? -1 : pass == 2 ? 1 : 0);
+        for (int t = 0; t < (int) types.size() && (int) out.size() < count; ++t)
+        {
+            auto notes = chordgen::chordNotes(rootPc, t, oct);
+            if (notes.empty() || notes == seed || notes.back() > 127 || notes.front() < 0)
+                continue; // a chord is not one of its own neighbours, and neither is a silent one
+
+            KeysProcessor::ChordPad pad;
+            pad.name = chords::detect(notes);
+            pad.notes = std::move(notes);
+            pad.rootPc = rootPc;
+            pad.type = t;
+            out.push_back(std::move(pad));
+        }
+    }
+    return out;
+}
+
+std::vector<KeysProcessor::ChordPad> ChordGenMenu::couldFollow(const std::vector<int>& seed, int count)
+{
+    std::vector<KeysProcessor::ChordPad> out;
+    if (seed.empty() || count <= 0)
+        return out;
+
+    // Straight onto `suggest::all`, which is the same eighteen moves the pad card menu offers
+    // under "Next: could follow". One table, one opinion: a second answer to "what comes after
+    // this" that disagreed with the first would be a bug wearing two hats.
+    const auto [rootPc, type] = suggest::analyse(seed);
+    for (const auto& s : suggest::all(rootPc, type, seed.front() / 12))
+    {
+        if ((int) out.size() >= count)
+            break;
+        KeysProcessor::ChordPad pad;
+        pad.notes = s.notes;
+        pad.name = chords::detect(s.notes);
+        pad.rootPc = s.rootPc;
+        pad.type = s.type;
+        out.push_back(std::move(pad));
+    }
+    return out;
 }
 
 std::vector<int> ChordGenMenu::emptyPadsOnPage() const
@@ -289,8 +743,7 @@ void ChordGenMenu::fillPage()
     if (targets.empty())
         return;
 
-    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(),
-                                           currentOptions(), lockedTypesOnPage(), rng);
+    const auto chords = generateChords((int) targets.size());
     for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
         writeChord(targets[(size_t) i], chords[(size_t) i]);
 }
@@ -311,18 +764,9 @@ void ChordGenMenu::regeneratePage()
     if (targets.empty())
         return;
 
-    const auto chords = chordgen::generate(genRoot(), genMode(), (int) targets.size(),
-                                           currentOptions(), lockedTypesOnPage(), rng);
+    const auto chords = generateChords((int) targets.size());
     for (int i = 0; i < (int) targets.size() && i < (int) chords.size(); ++i)
         writeChord(targets[(size_t) i], chords[(size_t) i]);
-}
-
-void ChordGenMenu::clearPage()
-{
-    const int offset = processor.padPageOffset();
-    for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        if (! processor.chordPad(offset + v).locked) // Clear spares locks too, like Regen
-            processor.clearChordPad(offset + v);
 }
 
 void ChordGenMenu::regeneratePad(int slot)
@@ -359,8 +803,7 @@ void ChordGenMenu::newChordFor(int slot)
         regeneratePadMarkov(slot);
         return;
     }
-    const auto generated = chordgen::generate(genRoot(), genMode(), 1, currentOptions(),
-                                              lockedTypesOnPage(), rng);
+    const auto generated = generateChords(1);
     if (! generated.empty())
         writeChord(slot, generated.front());
 }

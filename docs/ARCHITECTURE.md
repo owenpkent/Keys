@@ -17,6 +17,10 @@ src/
 ├── ChordSuggest.h            # pure "what could follow this chord", unit-tested
 ├── ChordMarkov.h             # pure Markov progression source, unit-tested
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
+├── ChordSources.h            # circle of fifths, Neo-Riemannian PLR, progression templates,
+│                             # negative harmony, planing, voice-leading as a post-pass
+│                             # (tests/ChordSourceTests.cpp). Wired to the UI since 2026-08-01:
+│                             # Source is seven choices now (Algorithmic, Markov and these five)
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync
 │                             # (docs/ARP_DESIGN.md)
@@ -28,10 +32,17 @@ src/
 │   │                         # Controls section
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain (algorithmic + Markov). Draws
-│   │                         # nothing; a member of the editor, so it outlives every view
+│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain, all seven sources plus voice
+│   │                         # leading. Draws nothing; a member of the editor, so it
+│   │                         # outlives every view
 │   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
 │   │                         # when that window opens, destroyed when it closes
+│   ├── SourceViz.{h,cpp}     # read-only diagram of the current source, under its button
+│   │                         # row in that window (2026-08-01). Click-through, no state
+│   ├── ChordTray.{h,cpp}     # 4x4 grid of candidate chords inside that window (2026-08-01),
+│   │                         # plus ChordRefCard, one seed chord the tray's own actions cannot
+│   │                         # touch; both belong to no pad and are thrown away when the
+│   │                         # window closes
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
@@ -237,7 +248,7 @@ per source — a pad and the keyboard each fit under it separately.
 ## Chord generation
 
 `ChordGen.h` builds a **weighted pool** of candidate chords for a key and mode, then
-samples it. That one idea carries both sliders in the generator:
+samples it. That one idea carries both sliders that are still the pool's own:
 
 - **Scale Compliance** decides which tiers enter the pool: diatonic (always, weight 1),
   then borrowed from parallel modes, then secondary dominants, then any chromatic root,
@@ -245,6 +256,25 @@ samples it. That one idea carries both sliders in the generator:
 - **Lock Influence** re-weights the whole pool toward the *families* (triad / seventh /
   sixth / add / extended) of the chords you locked — so regenerating keeps their
   character without copying them.
+
+Note count and inversions **used to be pool properties too, and are not any more**
+(2026-08-01, Owen: "all of their options should have the option for how many notes and
+what inversion"). Both are facts about the *voicing* a chord arrives in rather than about
+which chord it is, so `ChordGenMenu::fitVoicing` now applies them as a post-pass over
+whatever any of the seven sources produced. `fitPads` is the same pass for the Markov
+path, which arrives as pads rather than `chordgen::Chord`s.
+
+Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is
+still in key; shrinking one drops from the top, which keeps the root and the third (the
+part that makes a chord recognisable) however far it shrinks. Inversions **replace** the
+rotation a chord arrived in rather than compounding with it (root position first, then
+invert), so ticking only "R" gives root position even from a source that had already
+inverted one. `genNotesMin` / `genNotesMax` replaced the old 3/4/5 tick boxes with a
+2 to 11 range, and `genOctave` / `genOctaveMax` do the same for register.
+
+**`genMajMin` ("Lean")** runs before `fitVoicing`, biasing generated chords' thirds major
+or minor whatever the mode. Its magnitude is the *probability* that a given chord gets
+pushed, and it only ever touches the third, so a major ninth leaned minor is still a ninth.
 
 A fill seeds the plain diatonic chord on each degree in order, then weighted-samples the
 rest and shuffles only that tail. Each chord remembers the `degree` it came from, which
@@ -275,6 +305,63 @@ algorithm is Octavium's, verified line-by-line; the corpus is authored for Keys,
 because Octavium's was never in its repo or installer — its shipped Markov source
 degenerated to I-I-I-I for every user. Realisation is root-position through
 `chordgen::chordNotes` at the generator octave (Octavium hardcoded octave 4).
+
+`ChordSources.h` added five more brains on 2026-08-01, taking Source from two choices to
+seven: **Circle of Fifths** walks the circle from the tonic, taking each degree's diatonic
+quality where the landing is in the key and major otherwise, with an occasional doubled or
+reversed step so a lap doesn't read as one mechanical scale run; its one setting is
+direction (flat-ward, the falling fifth most progressions are built on, or sharp-ward).
+**Neo-Riemannian** starts on the tonic triad and takes P/L/R steps, each moving exactly one
+voice and holding the other two in place, weighted by three sliders (all zero reads as equal
+thirds). **Progressions** transposes a named template (ii-V-I, the axis, 12-bar blues,
+Andalusian, Royal Road, rhythm changes, Coltrane's major-third cycle) to the current key and
+loops it to fill the page; index 0 is Random. **Negative Harmony** mirrors a plain diatonic
+progression about the tonic/dominant axis (C major becomes C minor) and is the one source
+with no band of its own, since Key, Mode and Octave are the whole of what a reflection needs.
+**Planing** takes one chord shape and slides it, diatonically (the quality bends to fit the
+scale) or chromatically (the shape is preserved exactly, the Debussy sound). All five return
+plain `chordgen::Chord`s, are not scale-compliance-gated and take no lock bias — a source
+like this replaces a whole page in one call, and per-chord lock influence stays the weighted
+pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algorithmic plus
+these five; Markov keeps its own three paths, because its chords carry a numeral these don't
+and its per-pad regeneration steps the chain from the left neighbour.
+
+Sitting over all seven is **Smooth Voicing** (`genSmooth`, renamed from "Voice Leading"
+2026-08-01, Owen: "I don't understand what the voice reading does"; the parameter id
+did not move), a post-pass rather than a source of its own: each chord after the first
+has each pitch class placed in whichever octave sits closest to the previous chord,
+blended by the percentage. Blending in octave counts rather than raw semitones is
+deliberate, two notes sharing a pitch class are always a whole number of octaves apart,
+so every intermediate amount still lands on the source chord's own notes; it never
+chooses which chords you get or which notes they contain, only which octave each note
+sits in. `smoothPads()` runs it over the Markov path; the other six get it inline in
+`generateChords`.
+
+`ChordGenMenu::readsScaleSettings()` and `readsMode()` answer two different questions
+and are easy to conflate. **Scale Compliance and Lock Influence are the weighted pool's
+alone**, `readsScaleSettings()` is `sourceIndex() == 0`, true for Algorithmic only, since
+none of the other six weighs a pool against either dial. **Mode is read by every source
+except Markov**, `readsMode()` is `sourceIndex() != 1`, because Circle of Fifths,
+Neo-Riemannian, Progressions, Negative Harmony and Planing all still need a scale to read
+qualities off, walk within, mirror about or slide through; only a chain of bigram
+transitions has no scale in it at all. Mode does **not** grey outside Algorithmic.
+
+Six tick boxes (`genUseKey`, `genUseMode`, `genUseOctave`, `genUseNotes`,
+`genUseInversions`, `genUseCompliance`, all default true) let generation off the leash a
+setting at a time (2026-08-01, Owen: "check marks for the different sliders and options
+that enable or disable them"). Ticked, the setting constrains generation; unticked, the
+generator rolls that choice itself, `ChordGenMenu::constrains(paramId)` is the one
+predicate both `fitVoicing` and the pool read, and an absent parameter reads as ticked so
+a box that was never wired behaves as it always did. Key and Mode roll **once per
+generation, not per chord**, because every source takes a single root and mode for a
+whole batch; a free Mode picks only from the seven diatonic modes. Lock Influence, Smooth
+Voicing and Lean (`genMajMin`) have no box: each already has an off position on its own
+dial, so a box beside it would be a second control for what zero already says.
+
+The new sources are *appended* to the `genSource` list, and APVTS stores a choice
+parameter's plain index, so a session saved as Markov still reopens as Markov — the list must
+never be reordered or inserted into, only appended to, or a saved session would silently
+reopen on a different brain.
 
 All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`.
 
@@ -352,6 +439,13 @@ Two things are easy to miss when adding a colour path. The kit bakes several JUC
 `ColourId`s from the accent at construction (tick marks, slider tracks, the popup
 highlight), so `setAccent` re-applies every one of them. And `wheelLnf` is a *second*
 LookAndFeel instance with its own copy, so it has to be re-tinted alongside `lnf`.
+
+**`skin::textDim` and `skin::textFaint` were brightened 2026-08-01** (Owen: "hard to read
+some text, too dark"). They had been picked by eye against `skin::text`, which is the
+wrong comparison: nearly everything wearing them is 9-11 px letter-spaced uppercase (the
+section captions, the note list under every chord card), and small letterforms need far
+more contrast than large ones to read at the same effort. `skin::text` itself is
+unchanged - it was never the problem.
 
 This replaced full-editor overlays that dimmed and covered everything, including the
 keyboard. Editing an arp while unable to play a note was backwards for an instrument you
@@ -444,6 +538,111 @@ coming back:
   panel used to gate them on being alive, so the generator's own actions vanished from a card
   whenever its view was closed - that is the bug the brain/view split exists to prevent, and it
   is why the window must never own `ChordGenMenu`.
+- **The window grew a 4x4 tray of candidates on 2026-08-01, and it is not the grid that left
+  on 2026-07-30.** That earlier one drew the current *page* - the same sixteen pads, through
+  the same `setChordPad` - so it was the Pads section drawn a second time. `ChordTray` draws
+  sixteen chords that belong to **no pad**: not on any page, not in the session, gone when the
+  window closes (Owen, 2026-08-01: "I have four by four pad where you can audition new chords.
+  We want to be able to try a bunch out"). A click auditions one for 800 ms through
+  `ChordGenMenu::auditionChord`, which forwards to the same `previewChord` the suggestion menu
+  already used, so `ChordTray` and `ChordGenPanel` still never call `noteOn` between them.
+  `previewChord` calls `processor.stopAllChordPads()` before sounding the audition (fixed
+  2026-08-01, same day: Owen found that a ringing pad under Sustain made an audition of the
+  same chord silent, or made an overlapping one sound like it had fewer notes than it listed,
+  because Keys emits a note-on only on the 0->1 transition of `noteRefs`. An audition is a
+  monitor rather than a performance, so it takes the room; the cost is that it stops a
+  deliberately sustained pad and releases a chord held into the arp). A drag onto a pad
+  commits it there, and **a committed card leaves its cell empty** rather than refilling
+  itself - the hole is how you see which candidates you have already taken, and it is what
+  gives **Fill** something to do. **Fill**, **Regen** and **Clear**, on the tray's own header
+  row, replace the **Reroll** button that used to sit there: Fill writes the empty cells only,
+  Regen rerolls the ones that already carry a candidate, Clear empties the tray outright, and
+  none of the three can lose work because a tray card is not state - Fill greys when the tray
+  is full, Regen and Clear grey when it is empty. **Changing a setting generates nothing**
+  (2026-08-01, Owen: "I don't want it to auto generate when you change a source"). The tray
+  rerolled itself on any settings change for part of that day, on the reasoning that sixteen
+  answers to the old Key are worth nothing once the Key has changed - right about the
+  candidates, wrong about who decides: sweeping Source to compare the seven of them threw the
+  tray away six times on the way past, and a control you cannot explore without destroying
+  your work is a control you stop touching. `ChordTray::settingsMovedSinceFill()` polls the
+  same signature (the generator's APVTS parameters plus Mood and Start, deliberately *not* the
+  page's locked chords, which feed Lock Influence and would mark the tray stale on every
+  commit) but only tells the window to *say* the candidates are stale - the caption reads
+  "settings changed since these were generated. Regen for new ones." Generating is **Fill**
+  and **Regen** and nothing else. `ChordGenMenu::generateCandidates(int count)` is the entry
+  point behind both: the one generator call that builds chords and writes them to
+  no pad. Elsewhere "the generator draws no cards of its own" and "there is exactly one set of
+  chord cards" (`docs/CONTROLS.md`, `README.md`) mean one set of **pads** - a tray candidate is
+  not a pad and does not become one without a drag or a menu pick.
+- **`ChordRefCard` is the one chord the tray's own actions cannot touch** (Owen, 2026-08-01:
+  "I think we should have another box for the reference chord where we can drag in something
+  from the main window or one of the other chords. So when you regenerate everything, it
+  doesn't erase your reference chord"). It fills from a **tray card** dropped on it, or from a
+  **pad in the main window** dropped on it - the latter is why `ChordPads` grew `onDragOutside`
+  / `onDropOutside`: a drop on the reference card **copies**, and `onDropOutside` returning
+  true suppresses the ordinary "drag off the strip clears the pad" behaviour, so reaching for
+  the reference box can never delete the chord you were trying to keep. Left-click auditions it
+  the same as a tray card. Beside it, **Similar** and **Could follow** call
+  `ChordGenMenu::similarTo` / `couldFollow` with the reference chord as seed and write a fresh
+  trayful (`similarTo` keeps the root and varies the colour; `couldFollow` reuses
+  `suggest::all`, the same table the pad card menu's own "Next: could follow" offers, rather
+  than inventing a second opinion); **Clear** empties the reference card alone. All three grey
+  when the card is empty.
+- **Source and Circle Direction are always-visible button rows, not combo boxes**
+  (2026-08-01, Owen: "maybe instead of the source being a drop down and the direction
+  being a drop down, maybe those can be, like, always visible"). One click instead of
+  two, and seven answers on screen instead of six hidden behind the first, for a setting
+  whose whole point is comparison. JUCE has no attachment for a row of buttons on one
+  choice parameter, which is the one place in `ChordGenPanel` that hand-syncs rather than
+  binding: `setSourceParam(index)` / `setCircleDirParam(index)` write `genSource` /
+  `genCircleDir` on a click, and `refreshRadioStates()`, run from the panel's existing
+  15 Hz timer, polls the parameter back onto the tick mark. They write the same
+  parameters the combo boxes did, so nothing downstream changed.
+- **Scale Compliance, Lock Influence and Smooth Voicing sit on one fixed row; Notes,
+  Inversions and the Octave range sit on another** (2026-08-01) - neither leaves the
+  screen as Source changes, which fixed a standing mistake: Notes and Inversions are
+  facts about the *voicing*, never about which chord it is, so they were never the
+  weighted pool's property and had no business living inside its band. **Algorithmic and
+  Negative Harmony now have no band at all** - Algorithmic because everything that was
+  its own moved to those fixed rows, Negative Harmony because a reflection only ever
+  needed Key, Mode and Octave. The band row collapses to zero height for both, and the
+  freed height goes to the tray, so the window does not resize as you switch source.
+- **`SourceViz` draws a read-only diagram of the current source** under the button row
+  that picks it (2026-08-01, Owen: "a visualization for the generation source so people
+  understand what it's doing"), and highlights the actual walk that produced whatever is
+  in the tray on top of a static figure of the shape - a circle-of-fifths wheel;
+  the Neo-Riemannian P/L/R triangle with the transform sequence as chips; roman-numeral
+  strips for Progressions and Markov; a mirror-axis clock for Negative Harmony;
+  sliding note-stacks for Planing; degree columns for Algorithmic. It takes no input,
+  writes no parameter and generates nothing - `setInterceptsMouseClicks(false, false)` in
+  the constructor, same as every other click-through diagram in Keys - and its
+  `preferredHeight()` is 112 px. Fed from the panel's 15 Hz timer, since everything it
+  draws (source, key, the tray's contents) can move without the class being told.
+- **A tray card's right-click menu** is a new entry on the closed owner-directed list in
+  `CLAUDE.md` (Owen, 2026-08-01: "when you right click on a chord in there, I want you to have
+  a whole bunch of options about trying to find similar ones or what might come next"):
+  `ChordTray::showCardMenu` builds eight items in four groups - Send to first empty pad; Fill
+  tray with similar chords, Fill tray with what could follow; Octave down, Octave up, Next
+  voicing; New chord here, Clear this card. **Opening it makes no sound**, and neither do the
+  three shaping edits - it auditioned the card for a few minutes on the same day and Owen had
+  that taken out, since the left click is already how you hear a card, and right-clicking one
+  you just auditioned (or right-clicking on the way to Clear) played it again for no reason.
+  Send to first empty pad is the drag with the aim taken out (`ChordPads::firstEmptyPadOnPage` /
+  `sendChordToFirstEmptyPad`), and it is the one *placing* item, greyed by `onPageHasEmptyPad`
+  when the current page has no room.
+- **The drag crosses two top-level windows**, which JUCE gives nothing for: a
+  `DragAndDropContainer` only ever sees a drop inside its own window, and the tray lives in
+  the generator's `DetachedWindow` while the pads live in the main editor or a `DetachedWindow`
+  of their own. `ChordGenPanel::onCandidateDragOver` / `onCandidateDropped` /
+  `onCandidateDragEnd` hand the editor a **screen** position - the one space the two windows
+  share - and the editor forwards it to `ChordPads::externalDropSlotAt(screenPos)` /
+  `setExternalDropSlot(slot)` / `dropExternalChord(screenPos, pad)`. The hit test is
+  `juce::Desktop::findComponentAt`, so a generator window sitting over the strip reads as "not
+  over a pad," and a folded Pads section finds nothing at all - occlusion is the target's
+  problem, same as every other drag in Keys. A drop **refuses a locked pad** (the lock that
+  protects a chord from generation protects it from a stray drag too) and calls
+  `clearChordPad` before `setChordPad`, so a sounding or arp-held pad releases its old notes
+  properly instead of having the chord swapped out from under them.
 - **The window is not a `Section`.** It never docks, so it has no bar, no fold, no caption and
   no Detach button, and every one of those is something `KeysEditor::sections` walks. What it
   does share is `DetachedWindow` (the skinned 38 px title bar with mouse-only-sized buttons,
@@ -504,10 +703,15 @@ coming back:
   cannot take the card menu and the bar together, which would be the whole generator. They cost
   the window no height and 502 px of bar (540 with the gaps between them), which is what moved
   `minWidthForView()` from 1010 to 1070 - a number Keys Host now asks for rather than copying.
-- **Clear page** is a button in the generator's window and deliberately *not* a chip. It wipes
-  every unlocked pad on the page, there is no `juce::UndoManager` anywhere in Keys, and a bulk
-  destructive action with no undo does not belong 4 px from Regen. It was briefly an item on
-  the pad menu for the same reason, and moved with the rest of the page-wide actions.
+- **Clear page is removed** (2026-08-01). It had already moved once, from a chip on the Pads
+  bar to a button in the generator's window (2026-07-30), because it wiped every unlocked pad
+  on the page with no `juce::UndoManager` anywhere in Keys to catch a slip. The tray gave the
+  window a destructive action that costs nothing - **Clear**, on the tray's own header - and
+  once that existed, a button that could still erase all sixteen live pads at once had no
+  reason left to be a click away inside the same window. Nothing in Keys now empties a whole
+  page in one gesture: per-pad clearing is still **Clear pad** on that pad's menu or dragging
+  its card off the strip, and the page can still be replaced wholesale, one pad at a time as
+  it decides each, by **Regen** on the Pads bar.
 - **Fill never overwrites** (2026-07-30, Owen: "new generations shouldn't overwrite
   existing"). `fillPage()` writes the *empty* pads and only those, locked or not - a blank
   needs no protection. `regeneratePage()` is the destructive one and the only one: it rerolls
@@ -517,8 +721,7 @@ coming back:
   button ended up being the one that could lose sixteen chords. Each chip greys itself out
   when its list of targets is empty (`pageHasEmptyPads` / `pageHasRegeneratablePads`, polled
   from the editor's timer and from the panel's), so which of the two is which is readable
-  without a tooltip. Clear page greys on the second of the two: it takes exactly what Regen
-  would.
+  without a tooltip.
 - **The lock is an indicator on the card and an item on the menu, and nothing else**
   (2026-07-30, Owen: "I don't want the lock button to be visible. I only want it to be in right
   click"). A filled, locked card paints a 5 px dot in its top-right corner; an unlocked one
@@ -548,11 +751,20 @@ All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `sca
 `scaleLock`, `octave`, `channel`, `polyphony`, `sustain`, `latch`,
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStrumDir` /
-`padPage`, the generator's `gen*` set — `genRoot`, `genMode`, `genOctave`, the
-note-count and inversion
-toggles, `genCompliance`, `genLockInfluence` — the knob row's `faderCC1`-`faderCC8`
-CC assignments, and the Markov set `genSource`, `markovMode`, `markovTemp`,
-`markovLength`.
+`padPage`, the generator's `gen*` set, `genRoot`, `genMode`, `genOctave` / `genOctaveMax`
+(a range since 2026-08-01), `genInv0`-`genInv3`, `genNotesMin` / `genNotesMax` (a 2-11
+range, added 2026-08-01, replacing the three note-count tick boxes these numbers count
+from), `genCompliance`, `genLockInfluence`, `genSmooth` (Smooth Voicing on screen since
+2026-08-01, still `genSmooth` underneath, the parameter id did not move when the name
+did, over all seven sources), `genMajMin` (Lean, -100..100, new the same day), the six
+`genUseKey` / `genUseMode` / `genUseOctave` / `genUseNotes` / `genUseInversions` /
+`genUseCompliance` toggles (new the same day, all default true), the knob row's
+`faderCC1`-`faderCC8` CC assignments, `genSource` (the seven-way choice itself), the
+Markov set `markovMode`, `markovTemp`, `markovLength`, and the five sources' own bands:
+`genCircleDir`, `genPlrP` / `genPlrL` / `genPlrR`, `genProgression`,
+`genPlaningDiatonic`. Negative Harmony has none, Key, Mode and Octave are all it reads,
+and neither does Algorithmic any more now that Notes, Inversions, Compliance and Lock
+Influence sit on the two fixed rows above every source's band.
 
 The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
 `arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`

@@ -64,13 +64,52 @@ public:
     // through here. Ids 200 and up belong to the supplier; everything below is this class's own.
     //
     // One hook, not the two there were until 2026-07-30. The second, `onExtraPageItems`, added
-    // a **this page** group at the foot of the menu - Clear page and a Generator settings
+    // a **this page** group at the foot of the menu - a Clear page item and a Generator settings
     // submenu holding every setting the generator has. All of that moved into the generator's
     // own window that day (Owen: "the chord generator should just pop out a new window instead
     // of being in the right click menu"), which left the hook with nothing to add.
     static constexpr int extraMenuIdBase = 200;
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
+
+    // A chord dragged in from *another window* - today the generator's audition tray, which
+    // lives in a DetachedWindow of its own (ChordTray, 2026-08-01). JUCE's mouse capture keeps
+    // the drag events on the tray for the whole gesture and no drag-and-drop container spans two
+    // desktop windows, so the source cannot find this component and this component never sees
+    // the mouse. The editor holds both and forwards a **screen** position, the one space the two
+    // share; the geometry, the paint and the refusals stay on this side, where the pads are.
+    //
+    // Occlusion is answered here rather than by the caller: the generator window can sit over
+    // the strip, and a point inside these bounds but underneath that window is not a drop. That
+    // is what makes this a Desktop hit test and not a bounds check.
+    int externalDropSlotAt(juce::Point<int> screenPos) const; // absolute slot, or -1
+    void setExternalDropSlot(int slot);                       // hover feedback; -1 clears it
+    bool dropExternalChord(juce::Point<int> screenPos, const KeysProcessor::ChordPad& pad);
+
+    // The aimless twin of that drop, for "Send to first empty pad" on a tray card's menu. It
+    // takes the first blank slot on the *current page*, left to right, and refuses when there is
+    // none - which is what greys the item rather than silently overwriting something. Empty
+    // means empty, locked or not, the same definition Fill on the Pads bar uses.
+    int firstEmptyPadOnPage() const;
+    bool sendChordToFirstEmptyPad(const KeysProcessor::ChordPad& pad);
+
+    // The drag going the *other* way: a card leaving this strip, offered to whatever is outside
+    // this window before the strip decides what the gesture meant. Today the only taker is the
+    // generator's reference box.
+    //
+    // `onDropOutside` returning true is load-bearing rather than informational. Dragging a card
+    // off the row clears it, and reaching for the reference box means dragging a card off the
+    // row: without this the one gesture Owen asked for would delete the chord it was trying to
+    // keep. True means "somebody took a copy", and the card stays exactly where it was.
+    //
+    // `onDragEnd` fires once at the end of every drag off this strip, whatever the gesture
+    // turned out to mean, and it is what puts the outside taker's highlight back out.
+    // `onDropOutside` cannot do that job: it only runs when the card was let go *off* the row,
+    // so dragging out over the reference box and then back onto a pad - or onto the live card -
+    // left the box lit with nothing being dragged at all.
+    std::function<void(juce::Point<int> screenPos)> onDragOutside;
+    std::function<bool(juce::Point<int> screenPos, const KeysProcessor::ChordPad&)> onDropOutside;
+    std::function<void()> onDragEnd;
 
 private:
     juce::Rectangle<float> cardBounds() const;
@@ -106,6 +145,7 @@ private:
     std::vector<int> currentNotes;
     juce::String currentName;
 
+    int externalDropSlot = -1; // pad a cross-window drag is currently over, or -1
     int dragSource = -1;   // -2 card, 0..N-1 pad, -1 none
     int playing = -1;      // pad held down and sounding (beat-pad momentary play)
     bool playingLive = false; // the live card is held down and sounding its chord

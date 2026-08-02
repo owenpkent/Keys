@@ -252,14 +252,14 @@ private:
     //
     // Clear is not a third one here. It empties every unlocked pad on the page with one click,
     // there is no undo anywhere in Keys, and it sat between Regen and the page buttons. It is a
-    // button in the generator's window now, beside these two; `clearPage()` itself is untouched.
+    // gone entirely as of 2026-08-01 (see ChordGenMenu), since that window stopped writing pads.
     juce::TextButton fillButton { "Fill" }, regenButton { "Regen" };
 
     // And the way into everything else the generator has: its own window (2026-07-30, Owen's
     // call). It rides the same bar and never hides, for the same reason those two do not -
     // fold the pads away and this is the only thing left on screen that can reach the
     // generator. The window is where Octave, Source, Notes, Inversions, Lock Influence, the
-    // Markov chains and Clear page live; they were submenus of a pad's card menu for a few
+    // Markov chains and the audition tray live; they were submenus of a pad's card menu for a few
     // hours earlier that day, which took the menu to 23 rows and 820 px.
     juce::TextButton chordGenButton { "Generator" };
 

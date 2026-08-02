@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "ChordSources.h" // the Progression picker's item list is that table's own
 #include "PluginEditor.h"
 #include "ScaleModes.h"
 #include "mcp/KeysMcp.h"
@@ -69,9 +70,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genMode", 1 }, "Generator Mode",
                                                       modes::names(), 0));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctave", 1 }, "Generator Octave", 2, 6, 4));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genTriads", 1 }, "Generate Triads", true));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genSevenths", 1 }, "Generate 7ths", true));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genNinths", 1 }, "Generate 9ths", false));
+    // genTriads / genSevenths / genNinths were here until 2026-08-01. They picked which chord
+    // *types* the weighted pool could draw from, by note count, and the three tick boxes that
+    // drove them became the Notes range. They are deleted rather than left unread: a parameter no
+    // control can reach but generation still obeys is the worst of both, and note count is now
+    // decided after the fact by `fitVoicing` for every source rather than by type filtering for
+    // one. An old session simply carries three entries nothing looks at, which APVTS ignores.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv0", 1 }, "Inversion Root", true));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv1", 1 }, "Inversion 1st", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genInv2", 1 }, "Inversion 2nd", false));
@@ -123,8 +127,80 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
 
     // Second chord-generator source: Markov walks bundled progression tables instead of
     // weighting a candidate pool. Its settings only apply when the source is Markov.
+    // Seven brains now, and the five after Markov are `sources::` (2026-08-01). They are
+    // **appended**, which is what makes this safe for a session saved before them: APVTS stores a
+    // choice parameter's denormalised value, so a saved 1 is still Markov whatever the list grew
+    // to. Never reorder or insert into this list - that is what would silently reopen a session
+    // on the wrong brain, and there is no migration hook for it the way `migrateRateMode` covers
+    // the arp's clock.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genSource", 1 }, "Generator Source",
-                                                      juce::StringArray { "Algorithmic", "Markov" }, 0));
+                                                      juce::StringArray { "Algorithmic", "Markov",
+                                                                          "Circle of Fifths", "Neo-Riemannian",
+                                                                          "Progressions", "Negative Harmony",
+                                                                          "Planing" },
+                                                      0));
+
+    // Per-source settings. Each is dead under every source but its own, and the window hides it
+    // rather than greying it: a band that means nothing to the brain that is up says so more
+    // plainly by not being there (the same call applySource has always made for Markov).
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genCircleDir", 1 }, "Circle Direction",
+                                                      juce::StringArray { "Flat-ward (down a 5th)",
+                                                                          "Sharp-ward (up a 5th)" },
+                                                      0));
+    // How often each Neo-Riemannian transform is taken. Relative weights rather than
+    // probabilities, so all-zero is meaningless and the generator reads it as equal thirds.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genPlrP", 1 }, "PLR Parallel", 0, 100, 34));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genPlrL", 1 }, "PLR Leading-tone", 0, 100, 33));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genPlrR", 1 }, "PLR Relative", 0, 100, 33));
+    {
+        // Straight off the table in ChordSources.h, so the picker and the generator can never
+        // disagree about which progression index means what. Entry 0 is "Random".
+        juce::StringArray names;
+        for (const auto& n : sources::progressionNames())
+            names.add(n);
+        layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genProgression", 1 },
+                                                          "Progression", names, 0));
+    }
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genPlaningDiatonic", 1 },
+                                                    "Planing Diatonic", true));
+    // Voice leading is not a source: it is a pass over whatever a source produced, so it stays on
+    // screen under all seven. 0 leaves every voicing alone, 100 always takes the smoothest.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genSmooth", 1 }, "Voice Leading", 0, 100, 0));
+
+    // How many notes a chord has, and which registers it may sit in. Both are **ranges**, both
+    // are post-passes over whatever a source produced, and both therefore apply to all seven
+    // (Owen, 2026-08-01: "all of their options should have the option for how many notes and what
+    // inversion, and I'd actually like how many notes to go from two all the way up to 11, and an
+    // octave range").
+    //
+    // Two to eleven, not the 3/4/5 tick boxes these replace. Below three you get dyads, which are
+    // a real voicing and not a broken chord; above five the stack keeps climbing in thirds
+    // through the scale, so eleven is a chord covering every degree and then some. `genOctave`
+    // became a pair for the same reason: one octave puts sixteen chords in one register, and a
+    // range lets a page breathe. Nothing enforces min <= max here, because a parameter cannot see
+    // its sibling; the reader swaps them (see `noteCountRange` / `octaveRange`).
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 2, 11, 3));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 2, 11, 4));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctaveMax", 1 }, "Octave Max", 2, 6, 4));
+
+    // Lean the chords major or minor, whatever brain made them and whatever mode they are in.
+    // Zero is neutral and means "leave every third alone", which is why this one needs no tick
+    // box beside it: its off position is already a value on the dial.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genMajMin", 1 }, "Major / Minor", -100, 100, 0));
+
+    // The tick boxes (Owen, 2026-08-01: "check marks for the different sliders and options that
+    // enable or disable them for the generation process"). Ticked, the setting constrains
+    // generation; unticked, the generator is free and rolls that choice itself.
+    //
+    // Only the six settings where "free" is genuinely different from "zero" get one. Lock
+    // Influence, Smooth Voicing and Major/Minor already have an off position on their own dial,
+    // so a tick box beside them would be a second control for a thing the first one does.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseKey", 1 }, "Constrain Key", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseMode", 1 }, "Constrain Mode", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseOctave", 1 }, "Constrain Octave", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseNotes", 1 }, "Constrain Note Count", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseInversions", 1 }, "Constrain Inversions", true));
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "genUseCompliance", 1 }, "Constrain Scale Compliance", true));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "markovMode", 1 }, "Markov Mode",
                                                       juce::StringArray { "Major", "Minor", "Modal" }, 0));
     layout.add(std::make_unique<AudioParameterFloat>(ParameterID { "markovTemp", 1 }, "Markov Temperature",
