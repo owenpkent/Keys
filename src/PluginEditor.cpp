@@ -573,6 +573,11 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     { if (chordGenPanel) chordGenPanel->showReferenceDropTarget(p); };
     chordPads.onDropOutside = [this](juce::Point<int> p, const KeysProcessor::ChordPad& pad)
     { return chordGenPanel != nullptr && chordGenPanel->offerReferenceDrop(p, pad); };
+    // And the other end of it. A drag that started over the reference box and finished back on a
+    // pad never reaches offerReferenceDrop, so without this the box stays lit; the tray's own
+    // drag has had this half since it was built (onCandidateDragEnd, below).
+    chordPads.onDragEnd = [this]
+    { if (chordGenPanel) chordGenPanel->clearReferenceDropTarget(); };
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };

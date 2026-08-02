@@ -80,7 +80,12 @@ ChordGenMenu::~ChordGenMenu()
 
 int ChordGenMenu::sourceIndex() const
 {
-    return juce::jlimit(0, 6, (int) processor.apvts.getRawParameterValue("genSource")->load());
+    // Floor only. An upper clamp here has to be a literal count of the sources, and the one that
+    // was here read 6, so appending an eighth brain - the one growth the parameter's own comment
+    // calls safe - would have arrived silently reading as Planing. A source this build does not
+    // know instead falls through generateChords' `default:` to the weighted pool, which is the
+    // safe answer that switch was written to give, and shows no per-source band.
+    return juce::jmax(0, (int) processor.apvts.getRawParameterValue("genSource")->load());
 }
 
 bool ChordGenMenu::markovActive() const { return sourceIndex() == 1; }
@@ -140,6 +145,19 @@ void ChordGenMenu::applyMajorMinorBias(std::vector<chordgen::Chord>& chords)
                 n -= 1;
         }
         std::sort(c.notes.begin(), c.notes.end());
+
+        // The chord's *label* has to follow its notes. This pass moves a third, which is the one
+        // interval a type name is mostly about, so a major triad leaned minor kept reading as
+        // "Major" in `Chord::type` - and that is what `generateCandidates` copies onto a pad,
+        // where Next voicing and the suggestion table both read it. The name beside it is
+        // re-detected from the notes, so leaving type alone made the two disagree on the same
+        // card. Only taken when the reading still calls the same note the root: analyse is free
+        // to name any sounding pitch class the root, and letting it move one under fitVoicing -
+        // which stacks and shrinks a chord *around* its root - would be a worse bug than a stale
+        // type. Where it does move, both fields keep the source's answer and stay consistent.
+        const auto [readRoot, readType] = suggest::analyse(c.notes);
+        if (readRoot == c.rootPc)
+            c.type = readType;
     }
 }
 
@@ -195,17 +213,35 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
                                    : minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
         std::sort(c.notes.begin(), c.notes.end());
 
+        // Root position **first**, before the note count is fitted rather than after it.
+        //
+        // This is the normalisation that makes an inversion *replace* whatever rotation the
+        // chord arrived in instead of compounding with it, and it has to happen; the ordering is
+        // the part that was wrong. `rootPosition` also collapses repeated pitch classes and
+        // restacks what survives inside a single octave, so running it after the grow loop threw
+        // the grow loop away: stacking thirds through a seven-note mode comes back round to the
+        // root's own pitch class on the eighth note, so every count above seven silently
+        // returned seven (five under a pentatonic mode), and the two-octave stack the loop had
+        // just built returned as a one-octave cluster. Normalise, then fit, then invert.
+        auto voiced = chordgen::rootPosition(c.notes, c.rootPc);
+        if (voiced.empty())
+            voiced = c.notes; // a root that is not in its own chord; keep what we were given
+
+        // Shrink: from the top, so the root and third survive. On root position, which is the
+        // one arrangement where "the top" and "the extensions" are the same notes.
+        if ((int) voiced.size() > want && want >= 1)
+            voiced.resize((size_t) want);
+
         // Grow: keep stacking scale thirds above the top note. Stepping two scale degrees at a
         // time is what "a third" means inside a mode, and it is why this stays diatonic where
         // adding a flat 4 semitones would not.
-        while ((int) c.notes.size() < want)
+        while ((int) voiced.size() < want)
         {
-            const int top = c.notes.back();
+            const int top = voiced.back();
             int next = top + 3;
             for (int i = 0; i < 12; ++i) // find the next scale tone at least a third above
             {
-                const int pc = ((next + i) - root) % 12;
-                const int norm = (pc + 12) % 12;
+                const int norm = ((((next + i) - root) % 12) + 12) % 12;
                 if (std::find(scale.begin(), scale.end(), norm) != scale.end())
                 {
                     next = next + i;
@@ -214,32 +250,25 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
             }
             if (next > 127 || next <= top)
                 break; // off the keyboard, or the search found nothing: stop rather than loop
-            c.notes.push_back(next);
+            voiced.push_back(next);
         }
 
-        // Shrink: from the top, so the root and third survive.
-        if ((int) c.notes.size() > want && want >= 1)
-            c.notes.resize((size_t) want);
-
-        // Inversion, for every source rather than the weighted pool alone. Normalised to root
-        // position first and then inverted, so this *replaces* whatever rotation the chord
-        // arrived in rather than compounding with it: tick R alone and you get root position,
-        // even from a pool that had already inverted the chord itself.
+        // Inversion, for every source rather than the weighted pool alone: tick R alone and you
+        // get root position, even from a pool that had already inverted the chord itself. Last,
+        // so it rotates the chord you actually asked for rather than the one the source happened
+        // to hand over.
         if (! inversions.empty())
         {
             const int inv = inversions[(size_t) rng.nextInt((int) inversions.size())];
-            auto base = chordgen::rootPosition(c.notes, c.rootPc);
-            if (! base.empty())
-            {
-                auto voiced = chordgen::applyInversion(base, inv);
-                bool fits = true;
-                for (const int n : voiced)
-                    if (n < 0 || n > 127)
-                        fits = false;
-                if (fits)
-                    c.notes = std::move(voiced);
-            }
+            auto rotated = chordgen::applyInversion(voiced, inv);
+            bool fits = true;
+            for (const int n : rotated)
+                if (n < 0 || n > 127)
+                    fits = false;
+            if (fits)
+                voiced = std::move(rotated);
         }
+        c.notes = std::move(voiced);
 
         // Register: move the whole chord so its lowest note sits in an octave inside the range.
         // The chord moves in one piece, so its shape and its voice leading are untouched.
@@ -301,11 +330,10 @@ std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
             break;
     }
 
-    // Order matters: fit the voicing first, then smooth it. fitVoicing moves whole chords
-    // between octaves, so running it after the smoothing pass would undo exactly what that pass
-    // had just worked out.
-    // Bias the thirds, then fit the voicing, then smooth it. Bias first because it changes which
-    // notes a chord holds and the other two only move them about.
+    // Bias the thirds, then fit the voicing, then smooth it, and the order is load-bearing in
+    // both joins. Bias first because it changes *which* notes a chord holds while the other two
+    // only move them about. Smoothing last because fitVoicing moves whole chords between
+    // octaves, so running it afterwards would undo exactly what the smoothing pass worked out.
     applyMajorMinorBias(out);
     fitVoicing(out);
     sources::applyVoiceLeading(out, a.getRawParameterValue("genSmooth")->load() * 0.01f);

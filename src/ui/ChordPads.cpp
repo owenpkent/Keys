@@ -807,6 +807,12 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
             // says which of the two it is doing.
         }
     }
+    // Whatever the gesture turned out to be, the drag is over: tell whoever lit up for it. This
+    // is unconditional and outside the branches above on purpose - only one of those three ends
+    // off the row, and the other two are exactly the paths that used to leave the generator's
+    // reference box glowing at nothing.
+    if (dragging && onDragEnd)
+        onDragEnd();
     dragging = false;
     dragSource = -1;
     repaint();

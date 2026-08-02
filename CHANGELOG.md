@@ -5,6 +5,35 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: Notes now really does go to 11
+
+The Notes range advertises 2 to 11 and the tooltip promises that above five "the stack keeps
+climbing in thirds through the mode, so 11 covers every degree". It did not: every count above
+seven came back as seven, and under a pentatonic mode as five, with the two-octave stack
+flattened into a one-octave cluster.
+
+`fitVoicing` grew the chord and *then* normalised it to root position for the inversion pass.
+`chordgen::rootPosition` collapses repeated pitch classes, and stacking thirds through a
+seven-note mode arrives back at the root's own pitch class on the eighth note, so notes 8 to 11
+were dropped every time and the register spread with them. The normalisation now runs first, the
+note count is fitted on root position (so shrinking still keeps the root and the third), and the
+inversion rotates the chord you actually asked for. Nothing about what the controls mean changed.
+
+### Fixed: the generator's reference box stayed lit after a drag that went elsewhere
+
+Dragging a pad off the strip lights the reference card so you can see where it would land. That
+highlight was only put back out by the drop itself, which runs only when the card is released
+*off* the row - so reaching for the reference box and then changing your mind, dropping back onto
+a pad or onto the live card, left the box glowing at nothing until the next drag. `ChordPads` now
+reports the end of every drag, whatever the gesture turned out to mean.
+
+Also fixed: a chord leaned by **Lean** kept the chord type it had before the third moved, so a
+major triad leaned minor still stored "Major" - the name under it is detected from the notes, so
+the two disagreed on the same card, and Next voicing and the suggestion table both read the stale
+one. And `sourceIndex()` clamped to a literal 6, which would have made an eighth generator source
+arrive silently reading as Planing; an unknown source now falls through to the weighted pool, as
+`generateChords` was always written to do.
+
 ### Removed: genTriads / genSevenths / genNinths
 
 The three note-count tick boxes became the Notes range, which left their parameters unreachable

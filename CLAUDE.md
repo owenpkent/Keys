@@ -105,13 +105,21 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   **The voicing is three post-passes, not seven implementations** (2026-08-01, Owen: "all of
   their options should have the option for how many notes and what inversion"). Note count
   (`genNotesMin`/`Max`, a range 2..11), register (`genOctave`/`genOctaveMax`) and inversions run
-  in `fitVoicing` over whatever any source produced, then `Lean` (`genMajMin`) moves the thirds,
-  then `applyVoiceLeading` picks the octaves. That order is load-bearing: Lean changes *which*
-  notes a chord holds and the other two only move them about. `fitPads` is the Markov twin, since
-  its chords carry a numeral `chordgen::Chord` has no field for. Growing stacks further thirds
-  **through the mode** so an eleven-note chord is still in the key; shrinking drops from the top so
-  the root and third survive. Inversions **replace** the rotation a chord arrived in (root position
-  first, then invert), so ticking R alone means root position even from a pool that had inverted.
+  in `fitVoicing` over whatever any source produced. **`Lean` (`genMajMin`) moves the thirds
+  first**, then `fitVoicing`, then `applyVoiceLeading` picks the octaves. That order is
+  load-bearing: Lean changes *which* notes a chord holds and the other two only move them about,
+  and smoothing has to be last because `fitVoicing` moves whole chords between octaves and would
+  undo it. `fitPads` is the Markov twin, since its chords carry a numeral `chordgen::Chord` has no
+  field for. Growing stacks further thirds **through the mode** so an eleven-note chord is still in
+  the key; shrinking drops from the top so the root and third survive. Inversions **replace** the
+  rotation a chord arrived in, so ticking R alone means root position even from a pool that had
+  inverted. **Inside `fitVoicing` the order is root position, then the count, then the inversion**,
+  and that is load-bearing too (2026-08-01): `chordgen::rootPosition` is what makes an inversion
+  replace rather than compound, but it also collapses repeated pitch classes and restacks what is
+  left inside one octave. It ran *after* the grow loop for a few hours, which quietly threw the
+  grow loop away - stacking thirds through a seven-note mode comes back to the root's own pitch
+  class on the eighth note, so every count above seven returned seven (five under a pentatonic
+  mode) and the two-octave stack returned a one-octave cluster.
   **Changing a setting generates nothing** (Owen, same day: "I don't want it to auto generate when
   you change a source"). `settingsMovedSinceFill()` only makes the tray caption say so. The tray
   rerolled on any settings change for part of that day, which threw it away six times while you
