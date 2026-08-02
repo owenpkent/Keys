@@ -5,6 +5,35 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: each line is its own boxed card, the bar carries what they share, and a pad click never feeds a line
+
+Owen, on the side-by-side first cut: "we need a bit more clear delineation between the two
+arpeggiators. They kinda look like one right now" - and two more calls in the same breath.
+
+- **LINE A and LINE B are boxes now.** Each card draws its own captioned, ruled frame with a
+  fill behind it - the band's group-frame look, one per line - and the outer LINES frame and
+  its caption are gone: a box drawn around both cards was the single strongest cue that they
+  were one thing.
+- **The A/B/All tabs, BPM and Launch Quantize moved up onto the ARP section bar**, left of
+  the line switches, so the All view is nothing but the two cards (~30 px shorter again; the
+  window has gone 1450 to 1192 across the day). The tabs are editor-owned now - the bar
+  outlives the panel - still named `Arp line A tab` / `Arp all tab` for the capture script,
+  still chord drop targets, and they hide when the section folds, the pad-pages rule. BPM
+  (a value bar with `<` `>` steppers) and Quantize stay when it folds: they are what you
+  reach for while playing.
+- **RATE and SHAPE are written over their arrows.** Two flanked `< >` pairs sitting side by
+  side read as one puzzle ("the arrows to adjust certain parameters are not clear as to what
+  they're adjusting"); the top line has the same micro-caps heading strip the knobs always
+  had.
+- **A click on a chord card never feeds a line any more** ("when an arpeggiator's running and
+  you click on a pad, I don't want it to send it to the arpeggiator unless you drag it").
+  Feeding a line is the drag - onto a line's card, its letter tab, or a slot - and the
+  per-card menu's *Send to arp slot* stays as the aimed accelerator. A click just plays the
+  pad, whatever the lines are doing. One stop survives on the left button: clicking a
+  *cleared* card that is still feeding a line (the ring with no notes behind it) still lets
+  that hold go. The Pads bar's letter chip now only names the line *Send to arp slot*
+  targets, cycles without yanking the panel out of the All view, and says so in its tooltip.
+
 ### Changed: the two lines sit side by side, and VEL actually gets quiet
 
 The follow-up to the entry below, both Owen's calls on the same day ("I was at negative 96,

@@ -433,10 +433,11 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // is one click where a combo is a click, a travel and a second click - the same argument the
     // < > steppers beside Shape are made of.
     genChip(arpTargetButton, "Arp target line",
-            "Which arpeggiator line a click on a chord card feeds. Click to cycle A, B. The "
-            "same choice as the A/B tabs in the arp panel, kept here so it is reachable with "
-            "the arp folded away - or drag a card straight onto a line's row instead, which "
-            "aims without changing what this says.",
+            "The current arpeggiator line: the one a card's Send to arp slot menu item "
+            "targets, and the one the arp panel's per-line view edits. Click to cycle A, B. "
+            "Kept here so it is reachable with the arp folded away. A click on a card never "
+            "feeds a line any more - drag the card onto a line's card or its letter tab "
+            "instead, which aims without changing what this says.",
             [this] { cycleArpTargetLine(); });
     refreshArpTargetButton();
     genChip(chordGenButton, "Chord generator window",
@@ -570,6 +571,78 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         keyboard.repaint(); // the flags did not move, so nothing else will ask for this frame
     };
     addAndMakeVisible(arpLightsButton);
+
+    // The A/B/All tabs, BPM and Launch Quantize, at the left end of the same bar (2026-08-02,
+    // Owen: "move the bpm and the a b and all into the header also. remove the 'lines'
+    // text"). See the header for the ownership and visibility story.
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
+    {
+        auto tab = std::make_unique<ArpBarTab>(*this, n);
+        const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
+        tab->setTooltip("Show line " + letter + "'s own controls, step editor and slots. Drop "
+                        "a chord card here to hand it to line " + letter + ".");
+        tab->onClick = [this, n]
+        {
+            if (arpPanel != nullptr)
+                arpPanel->setEditLine(n); // fires onEditLineChanged -> both refreshes below
+            else
+            {
+                processor.setArpCurrentLine(n);
+                refreshArpTargetButton();
+                refreshArpBarTabs();
+            }
+        };
+        addChildComponent(*tab); // syncSectionControls shows it while the section is open
+        arpBarTabs[(size_t) n] = std::move(tab);
+    }
+    arpBarAllTab = std::make_unique<ArpBarTab>(*this, -1);
+    arpBarAllTab->setTooltip("Both lines side by side, one card each: the view for building a "
+                             "polyrhythm. The letters beside it are where you go deep on one.");
+    arpBarAllTab->onClick = [this]
+    {
+        if (arpPanel != nullptr)
+            arpPanel->setMacroView(true);
+        refreshArpBarTabs();
+    };
+    addChildComponent(*arpBarAllTab);
+
+    bpmBarLabel.setText("BPM", juce::dontSendNotification);
+    bpmBarLabel.setFont(skin::micro(9.0f));
+    bpmBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
+    addAndMakeVisible(bpmBarLabel);
+    bpmBarSlider.setSliderStyle(juce::Slider::LinearBar);
+    bpmBarSlider.setSliderSnapsToMousePosition(false); // a click on a 48 px bar must not jump
+    bpmBarSlider.setTextBoxIsEditable(false);
+    bpmBarSlider.setTitle("Arp BPM");
+    bpmBarSlider.setTooltip("The tempo both lines run at when there is no transport to follow: "
+                            "always in the standalone, and whenever the host is stopped. A host "
+                            "that is playing always wins, and a line whose rate is in Hz follows "
+                            "neither. Drag to sweep, or step it with < and >.");
+    addAndMakeVisible(bpmBarSlider);
+    bpmBarAtt = std::make_unique<SliderAtt>(processor.apvts, "bpm", bpmBarSlider);
+    bpmBarPrev.onClick = [this] { nudgeBpm(-1); };
+    bpmBarNext.onClick = [this] { nudgeBpm(1); };
+    for (auto* b : { &bpmBarPrev, &bpmBarNext })
+    {
+        b->setTooltip("Nudge the tempo by one BPM.");
+        addAndMakeVisible(*b);
+    }
+
+    quantizeBarLabel.setText("QUANTIZE", juce::dontSendNotification);
+    quantizeBarLabel.setFont(skin::micro(9.0f));
+    quantizeBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
+    addAndMakeVisible(quantizeBarLabel);
+    // The list has to match the parameter's choices exactly, and in order: an attachment binds
+    // to items that already exist rather than creating them, so an empty box stays empty.
+    quantizeBarBox.addItemList({ "Off", "1/16", "1/8", "1/4", "1/2", "1 Bar", "2 Bars" }, 1);
+    quantizeBarBox.setTitle("Arp launch quantize");
+    quantizeBarBox.setTooltip("Hold a chord card, a slot launch or a drag onto a line until the "
+                              "next boundary, so it can only ever land on the grid - Ableton's "
+                              "Quantization, for the arp. Off fires the instant you click. It "
+                              "never delays the keys you play.");
+    addAndMakeVisible(quantizeBarBox);
+    quantizeBarAtt = std::make_unique<ComboAtt>(processor.apvts, "arpQuantize", quantizeBarBox);
+    refreshArpBarTabs();
 
     themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
@@ -827,12 +900,14 @@ void KeysEditor::cycleArpTargetLine()
 {
     const int next = (processor.arpCurrentLine() + 1) % KeysProcessor::uiArpLines;
     processor.setArpCurrentLine(next);
-    // Through the panel when it is open, so its tabs, its attachments and its step lanes all
-    // move with the chip. setEditLine writes the processor too, which is harmlessly the value
-    // it already holds.
+    // Through the panel when it is open, so its attachments and step lanes move with the
+    // chip. `leaveMacroView` false: the chip is routing state (which line Send to arp slot
+    // targets), not navigating, and cycling it out of the All view would be the drop-on-a-
+    // card rule broken from a different button.
     if (arpPanel != nullptr)
-        arpPanel->setEditLine(next);
+        arpPanel->setEditLine(next, /*leaveMacroView*/ false);
     refreshArpTargetButton();
+    refreshArpBarTabs();
     chordPads.repaint(); // the corner marks say which line each card was last sent to
 }
 
@@ -840,6 +915,87 @@ void KeysEditor::refreshArpTargetButton()
 {
     const int line = processor.arpCurrentLine();
     arpTargetButton.setButtonText(juce::String::charToString((juce::juce_wchar) ('A' + line)));
+}
+
+// ---------------------------------------------------------------------------
+// The arp bar's A/B/All tabs (2026-08-02). TextButtons like every other bar chip, with the
+// toggle state saying which view the panel is showing, and a drop target apiece.
+
+KeysEditor::ArpBarTab::ArpBarTab(KeysEditor& o, int n)
+    : juce::TextButton(n < 0 ? juce::String("All")
+                             : juce::String::charToString((juce::juce_wchar) ('A' + n))),
+      owner(o), line(n)
+{
+    // The names the capture script has always used for the tabs, kept through the move from
+    // the panel to the bar; the " tab" suffix is still what keeps a tab from colliding with
+    // the On chip that shares its letter.
+    setTitle(n < 0 ? juce::String("Arp all tab") : "Arp line " + getButtonText() + " tab");
+}
+
+void KeysEditor::ArpBarTab::paintButton(juce::Graphics& g, bool over, bool down)
+{
+    juce::TextButton::paintButton(g, over, down);
+    if (dropTarget)
+    {
+        g.setColour(skin::accentOf(*this).base);
+        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), skin::radius, 2.0f);
+    }
+}
+
+bool KeysEditor::ArpBarTab::isInterestedInDragSource(const SourceDetails& details)
+{
+    // The All tab refuses everything: it selects a view, and there is no line behind it to
+    // hand a chord to.
+    auto* p = chorddrag::chordBeingDragged(details);
+    return line >= 0 && p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+}
+
+void KeysEditor::ArpBarTab::itemDragEnter(const SourceDetails&) { dropTarget = true; repaint(); }
+void KeysEditor::ArpBarTab::itemDragExit(const SourceDetails&) { dropTarget = false; repaint(); }
+
+void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
+{
+    dropTarget = false;
+    repaint();
+    if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
+    {
+        // Through the panel when it is open, the same path a drop on a macro card takes; the
+        // tabs are only on screen while the section is, so the fallback is for safety, not
+        // for a state the UI can reach.
+        if (owner.arpPanel != nullptr)
+            owner.arpPanel->takeChordOnLine(line, *p);
+        else
+        {
+            owner.processor.holdArpChordFromPad(p->index, line);
+            owner.processor.setArpCurrentLine(line);
+            owner.refreshArpTargetButton();
+            owner.refreshArpBarTabs();
+        }
+        p->taken = true;
+    }
+}
+
+void KeysEditor::refreshArpBarTabs()
+{
+    // Derived from the processor rather than remembered here, so a click, a drop, a session
+    // load and the panel's own view changes all land in the same place.
+    const bool macro = processor.layout.arpMacro;
+    const int line = processor.arpCurrentLine();
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
+        if (arpBarTabs[(size_t) n] != nullptr)
+            arpBarTabs[(size_t) n]->setToggleState(! macro && line == n, juce::dontSendNotification);
+    if (arpBarAllTab != nullptr)
+        arpBarAllTab->setToggleState(macro, juce::dontSendNotification);
+}
+
+void KeysEditor::nudgeBpm(int delta)
+{
+    if (auto* p = dynamic_cast<juce::AudioParameterInt*>(processor.apvts.getParameter("bpm")))
+    {
+        p->beginChangeGesture();
+        *p = juce::jlimit(p->getRange().getStart(), p->getRange().getEnd(), p->get() + delta);
+        p->endChangeGesture();
+    }
 }
 
 void KeysEditor::refreshArpPanel()
@@ -857,9 +1013,10 @@ void KeysEditor::refreshArpPanel()
 
     arpPanel = std::make_unique<ArpPanel>(processor);
     arpPanel->setInlineMode(true);
-    // The tabs and the Pads-bar chip are one state behind two surfaces, so each has to move
-    // the other. This is the tabs' half; cycleArpTargetLine is the chip's.
-    arpPanel->onEditLineChanged = [this] { refreshArpTargetButton(); };
+    // The bar tabs and the Pads-bar chip are each a view of the same processor state, so
+    // every path that moves it has to refresh both. This is the panel's half (drops on cards
+    // land here); cycleArpTargetLine is the chip's, and the tabs' own clicks do it directly.
+    arpPanel->onEditLineChanged = [this] { refreshArpTargetButton(); refreshArpBarTabs(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -960,6 +1117,16 @@ void KeysEditor::syncSectionControls()
     // visibility.
     knobsButton.setVisible(lay.controls);
     knobBank.setVisible(lay.knobs);
+
+    // The arp bar's A/B/All tabs navigate the panel, so they hide when it folds - the pad
+    // pages' rule. BPM and Quantize beside them stay put: they are parameters you reach for
+    // while playing, which is arp On's own argument for living on a bar at all.
+    for (auto& t : arpBarTabs)
+        if (t != nullptr)
+            t->setVisible(lay.arp);
+    if (arpBarAllTab != nullptr)
+        arpBarAllTab->setVisible(lay.arp);
+    refreshArpBarTabs();
 
     // The pads' page buttons stay on their bar in the main window even when the strip is
     // off in one of its own: they page the cards, and paging from the window you are
@@ -1718,6 +1885,33 @@ void KeysEditor::resized()
         // Light keys last, so the two stop buttons sit together at the right end where the
         // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
         arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
+
+        // The tabs, BPM and Quantize, from the left (2026-08-02). The tabs are laid out only
+        // while the section is open - they hide with it, and laying them out regardless would
+        // leave BPM orbiting a hole where they were, the pageButtons lesson next door.
+        if (processor.layout.arp)
+        {
+            for (auto& t : arpBarTabs)
+            {
+                if (t == nullptr)
+                    continue;
+                t->setBounds(bar.removeFromLeft(40).withSizeKeepingCentre(38, 24));
+                bar.removeFromLeft(4);
+            }
+            if (arpBarAllTab != nullptr)
+                arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
+            bar.removeFromLeft(14);
+        }
+        bpmBarLabel.setBounds(bar.removeFromLeft(30).withSizeKeepingCentre(30, 24));
+        bpmBarPrev.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        bar.removeFromLeft(2);
+        bpmBarSlider.setBounds(bar.removeFromLeft(48).withSizeKeepingCentre(48, 24));
+        bar.removeFromLeft(2);
+        bpmBarNext.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        bar.removeFromLeft(14);
+        quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
+        quantizeBarBox.setBounds(bar.removeFromLeft(92).withSizeKeepingCentre(90, 24));
+        bar.removeFromLeft(8);
         section(secArp).caption = bar;
     }
     if (const int h = sectionHeight(secArp); h > 0)

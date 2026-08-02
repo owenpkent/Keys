@@ -353,6 +353,46 @@ private:
     // Keyboard bar because it is a fact about the arp: it is the arp's notes it shows, and it
     // is meaningless with both lines off.
     juce::ToggleButton arpLightsButton;
+    // The A/B/All tabs, BPM and Launch Quantize, on the arp bar since 2026-08-02 (Owen: "move
+    // the bpm and the a b and all into the header also"): the All view is just the two cards,
+    // and what the cards share rides the bar above them. The tabs select what the *panel*
+    // shows, so they hide when the section folds - a tab that navigates a panel that is not
+    // on screen is a control with nothing behind it - while BPM and Quantize stay, the arp
+    // On's own argument: they are what you reach for while playing. Editor-owned, all of it,
+    // because the panel dies with the fold and the bar does not.
+    //
+    // Each tab is also a DragAndDropTarget: dropping a chord card on a letter hands the chord
+    // to that line, the same gesture the panel's own tabs took before the bar absorbed them
+    // (a macro card is still the bigger target for the same drop).
+    struct ArpBarTab : public juce::TextButton,
+                       public juce::DragAndDropTarget
+    {
+        ArpBarTab(KeysEditor&, int line); // line < 0 is the All tab
+        void paintButton(juce::Graphics&, bool over, bool down) override;
+        bool isInterestedInDragSource(const SourceDetails&) override;
+        void itemDragEnter(const SourceDetails&) override;
+        void itemDragExit(const SourceDetails&) override;
+        void itemDropped(const SourceDetails&) override;
+        KeysEditor& owner;
+        int line;
+        bool dropTarget = false;
+    };
+    std::array<std::unique_ptr<ArpBarTab>, KeysProcessor::uiArpLines> arpBarTabs;
+    std::unique_ptr<ArpBarTab> arpBarAllTab;
+    // Which tab is lit, derived from the processor's state so a drop, a session load and a
+    // click all land in the same place.
+    void refreshArpBarTabs();
+    void nudgeBpm(int delta);
+    juce::Label bpmBarLabel, quantizeBarLabel;
+    // LinearBar with setSliderSnapsToMousePosition(false): the value reads inside the bar,
+    // a drag nudges it relatively rather than jumping to wherever the click landed (a click
+    // must never be a jump on a bar this small), and the < > beside it are the click-only
+    // path a drag target always needs.
+    juce::Slider bpmBarSlider;
+    juce::TextButton bpmBarPrev { "<" }, bpmBarNext { ">" };
+    juce::ComboBox quantizeBarBox;
+    std::unique_ptr<SliderAtt> bpmBarAtt;
+    std::unique_ptr<ComboAtt> quantizeBarAtt;
     // Which arp line a click on a chord card feeds, shown as its letter and cycled A->B->C by
     // clicking. It rides the *Pads* bar, next to Fill / Regen / Generator, because it is a
     // fact about the cards rather than about the arp: the control that says where a card goes

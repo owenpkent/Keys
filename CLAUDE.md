@@ -173,14 +173,15 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   **`noteRefs` is per destination stream** for the same reason: "one note-on per sounding pitch"
   is a statement about one stream, and a pitch held into line B must not suppress the same pitch
   played to the output. On screen: **A/B on the arp bar** (one per line's On, and Hold off is
-  still one button that releases both), **a tab per line at the left of the slot row** choosing
-  which line the panel edits (34 px inside a row already 58 tall, so the panel's height is
-  unchanged; a tab change rebuilds every APVTS attachment against the new ids, the same move
-  `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** saying which
-  line a chord-card click feeds. **Dragging a chord card onto an arp slot binds it there**, or
-  onto a tab - or onto a line's **row in the macro view**, which is the same target the size of
-  a row rather than the size of a tab - to hand it over now. The left-click twin *Send to arp
-  slot* never had. The slot cards, the tabs and the macro rows are each a
+  still one button that releases both), **a tab per line on that same bar** choosing which
+  line the panel edits (they lived at the left of the slot row until the fourth 2026-08-02
+  pass; a tab change rebuilds every APVTS attachment against the new ids, the same move
+  `refreshRateMode` makes for the rate dial), and **a letter chip on the Pads bar** naming the
+  line *Send to arp slot* targets (it named what a card *click* feeds until clicks stopped
+  feeding, same pass). **Dragging a chord card onto an arp slot binds it there**, or
+  onto a tab - or onto a line's **card in the macro view**, which is the same target the size
+  of half the panel rather than the size of a tab - to hand it over now. The left-click twin
+  *Send to arp slot* never had. The slot cards, the tabs and the macro cards are each a
   `juce::DragAndDropTarget` (2026-08-02, see the chord-drag bullet below); JUCE walks *up* from
   whatever is under the point, which is what makes the whole macro row a target including the
   knobs on it. A drop sets the current line and never changes the view
@@ -208,7 +209,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
   symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
   ruled box is drawn beside the band on every plain shape.
-- **The All view is the header and the two rows, nothing else** (2026-08-02, second pass, Owen:
+- **The All view is the header and the two rows, nothing else** (2026-08-02, second pass -
+  and by the fourth pass, below, the header itself left for the section bar and the rows
+  became boxed cards, so the view is now literally the two cards) (Owen:
   "we need to make the window shorter ... remove the chain button, maybe the play and the
   [latch] button, move the BPM up into the title ... and remove everything on the bottom. Copy,
   clear, stop, chain"). The twelve slot cards and the Copy / Clear / Stop / Chain action row
@@ -253,6 +256,34 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   The honest limit, worth repeating to Owen when it comes up: velocity is all MIDI has, so a
   patch with no velocity sensitivity flattens every velocity control in Keys, and only the
   -100 mute (which emits nothing) cuts through that.
+- **Each card is a box, the bar carries what they share, and a click never feeds a line**
+  (2026-08-02, fourth pass, Owen: "we need a bit more clear delineation between the two
+  arpeggiators. They kinda look like one right now"). Three changes, one review:
+  1. *Delineation.* Each `MacroRow` draws its own captioned ruled frame ("LINE A" punched
+     through the top rule, group-box style) with a fill behind it, and the outer LINES frame
+     and caption are gone - a box around both cards was the strongest cue they were one thing.
+     RATE and SHAPE micro-caps sit over the top line's stepper groups, because two flanked
+     `< >` pairs touching read as one puzzle without names ("the arrows ... are not clear as
+     to what they're adjusting").
+  2. *The bar.* The A/B/All tabs, the BPM cell and Launch Quantize moved from the panel to
+     the ARP section bar, left end after the fold zone. **Editor-owned** (`KeysEditor::
+     ArpBarTab`, `bpmBarSlider`, `quantizeBarBox`): the panel dies with the fold and the bar
+     does not. The tabs hide when the section folds (a tab that navigates a panel that is not
+     on screen is a control with nothing behind it - the pad-pages rule) and are laid out only
+     while it is open so BPM slides left rather than orbiting a hole; BPM and Quantize stay,
+     arp On's own argument. Each tab is still a chord drop target and still answers to
+     `Arp line A tab` / `Arp all tab`. BPM is a LinearBar with
+     `setSliderSnapsToMousePosition(false)` - on a 48 px bar a click must nudge, never jump -
+     plus `<` `>` as the click-only path. The tabs' lit state is *derived* from
+     `layout.arpMacro` + `arpCurrentLine` in `refreshArpBarTabs()`, so clicks, drops and
+     session loads all land in one place. The panel's `LineTab` class, its slot-row cells and
+     its header strip are deleted; the twelve slots now share the whole row.
+  3. *The click.* `ChordPads` no longer hands a clicked card to a line ("I don't want it to
+     send it to the arpeggiator unless you drag it") - a click plays the pad whatever the
+     lines are doing, `toArp()` is gone, and the one surviving left-click arp behaviour is a
+     stop: clicking a *cleared* card that still feeds a line (the ring with no notes) releases
+     that hold, because a dead click on a lit target is worse. The Pads bar's letter chip now
+     only names *Send to arp slot*'s target and cycles without leaving the All view.
 - **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
   the setting Owen described and could not name: "if you start a new note or something that goes
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
@@ -597,9 +628,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      job and the exception is retired. The menu item stays as the accelerator it always was.
      This is the one entry on this list that closed rather than opened, and it closed because
      the thing it was waiting for got built, not because anybody changed their mind: do not
-     re-open it by removing the drag. A left click on a card with a line **On** is still the
-     left-click way to get a chord into the arp without naming a slot - it goes to the current
-     line, and a drag onto that line's tab is the aimed version of the same thing.
+     re-open it by removing the drag. A left click on a card with a line On used to be the
+     unaimed way to feed the current line; Owen retired that on 2026-08-02 ("I don't want it
+     to send it to the arpeggiator unless you drag it"), so the drag - onto a line's card,
+     its letter tab on the arp bar, or a slot - is now the *only* left-click path into a
+     line, and a click just plays the pad. Still mouse-only clean: a drag is a left gesture.
   3. ***Lock / Unlock has no left-click twin*** (2026-07-30, Owen: "I don't want the lock
      button to be visible. I only want it to be in right click"). This is the one path where a
      left-click twin was **built and then deliberately taken away**: a lock chip sat in the
@@ -697,10 +730,12 @@ Four things will bite otherwise:
   can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
   match; set the other one out of the way first.
 - **The arp's own controls are named per line**, for the same first-match reason: the bar
-  chips are `Arp line A` / `B`, the panel's line tabs are `Arp line A tab` and so on
+  chips are `Arp line A` / `B`, and the tabs *on the same bar* (since the fourth 2026-08-02
+  pass; they hide when the section folds) are `Arp line A tab` and so on
   (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
   the slot cards are `Arp slot 1`..`12`, and the Pads bar's cycling letter is
-  `Arp target line`. Hold off is `Arp hold off`. The fourth tab is `Arp all tab`, and the macro
+  `Arp target line`. Hold off is `Arp hold off`. BPM on the bar is `Arp BPM` and the Quantize
+  combo is `Arp launch quantize`. The fourth tab is `Arp all tab`, and the macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
   `Macro line A`, `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
   `Macro dot A` / `Macro trip A` / `Macro anchor A`, and `Macro OCT A` / `Macro GATE A` /

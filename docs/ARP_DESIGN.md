@@ -212,21 +212,26 @@ Two things this deliberately does not change:
 Owen: *"a fourth option for a simplified version that shows a little bit of all of them ... the
 goal is to be able to create complex polyrhythms from one view."*
 
-**All** sits after the line tabs and swaps the per-line band and the step editor for one
-card per line, **side by side** (2026-08-02, Owen: *"parallel to each other instead of one on
-top of the other"*), under a 34 px header carrying the **A/B/All tabs**, the **BPM** cell and
-**Launch Quantize**. It is the view Keys opens in, and since the second 2026-08-02 pass (Owen:
-*"we need to make the window shorter"*) it is *all* the view holds: the twelve slots and the
-Copy / Clear / Stop / Chain action row belong to the per-line tabs, and the header carries the
-tabs because they are the way there. A card is three stacked lines, because half the panel's
-width cannot hold what used to be one full-width row: the line switch, a detented rate knob
-with `<` `>` and its Sync/Hz switch, and the shape with steppers of its own; **eight knobs**
-under their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel; and the
-rate's **Dot / Trip / Anchor** with the held chord along the bottom. Owen's brief when the
-first cut carried three lines: *"what other knobs can we have? should be like regular arp
-settings."* The row carried Latch, PLAY and Chain for a day; all three still live with the
-line - Latch and **Play** on the band (Play beside Retrigger, the same `arpKeys`), Chain on
-the action row.
+**All** swaps the per-line band and the step editor for one card per line, **side by side**
+(2026-08-02, Owen: *"parallel to each other instead of one on top of the other"*), and that is
+the whole view: the **A/B/All tabs**, the **BPM** cell and **Launch Quantize** ride the ARP
+section bar (fourth pass, same day: *"move the bpm and the a b and all into the header also.
+remove the 'lines' text"* - they are editor-owned there, because the bar outlives the panel),
+and the twelve slots and the Copy / Clear / Stop / Chain action row belong to the per-line
+tabs. Each card draws its own captioned ruled frame - **LINE A**, **LINE B**, filled, with the
+old outer LINES box gone, since a frame around both was what made two arpeggiators read as one
+(*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
+panel's width cannot hold what used to be one full-width row: the line switch, a detented rate
+knob with `<` `>` and its Sync/Hz switch, and the shape with steppers of its own, under
+**RATE / SHAPE** micro-caps so the two stepper pairs read as belonging to their words;
+**eight knobs** under their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time,
+H.Vel; and the rate's **Dot / Trip / Anchor** with the held chord along the bottom. Owen's
+brief when the first cut carried three lines: *"what other knobs can we have? should be like
+regular arp settings."* The row carried Latch, PLAY and Chain for a day; all three still live
+with the line - Latch and **Play** on the band (Play beside Retrigger, the same `arpKeys`),
+Chain on the action row. And since the same fourth pass, **a click on a chord card never
+feeds a line** - the drag (onto a card, a letter tab, or a slot) is the only way in, and a
+click just plays the pad.
 
 Four of those knobs are not what the first cut had (both passes 2026-08-02). **Oct** is
 `arpOctShift`, a transpose centred at zero, not `arpOctaves`, which stacks copies upward and

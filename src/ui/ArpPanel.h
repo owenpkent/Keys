@@ -57,11 +57,11 @@ public:
     int preferredHeight() const;
     std::function<void()> onPreferredHeightChanged;
 
-    // Which of the three arpeggiator lines everything on this panel is editing: the band, the
-    // step lanes, the twelve slots, Bars and Chain. One row of controls, three lines behind
-    // it, chosen by the A/B/C tabs at the left of the slot row. It is the processor's state
-    // rather than the panel's, because a click on a chord card feeds the same line and the
-    // Pads bar has to be able to say so with this panel folded away.
+    // Which of the arpeggiator lines everything on this panel is editing: the band, the
+    // step lanes, the twelve slots, Bars and Chain. One row of controls, the lines behind
+    // it, chosen by the A/B/All tabs on the ARP section bar (editor-owned since 2026-08-02).
+    // It is the processor's state rather than the panel's, because the Pads bar's letter chip
+    // and the per-card Send to arp slot read it with this panel folded away.
     int editLine() const;
     // `leaveMacroView` false sets the line without changing what is on screen. A drop passes
     // false: it is routing a chord, not navigating, and in the macro view all three lines are
@@ -166,6 +166,10 @@ public:
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
         std::array<juce::Slider, numKnobs> knobs;
         std::array<juce::Label, numKnobs> knobLabels;
+        // RATE and SHAPE, over the top line's two stepper groups (2026-08-02, Owen: "the
+        // arrows to adjust certain parameters are not clear as to what they're adjusting"):
+        // two flanked `< >` pairs side by side read as one puzzle without names above them.
+        juce::Label rateHeadLabel, shapeHeadLabel;
         juce::Label chordLabel;
 
         std::unique_ptr<ButtonAtt> onAtt, rateModeAtt;
@@ -285,39 +289,11 @@ public:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SlotCard)
     };
 
-    // One of the three A/B/C tabs at the left of the slot row. It selects the line the whole
-    // panel edits, and says what that line is doing: lit when the line is on, and carrying the
-    // name of the chord it is holding, so three tabs read as three arpeggiators at a glance.
-    // A chord card can also be dropped straight onto one.
-    class LineTab : public juce::Button,
-                    public juce::DragAndDropTarget
-    {
-    public:
-        // `line` < 0 is the macro tab: the fourth one, which selects the all-three view
-        // rather than a line. One class for both because they are one row of targets and have
-        // to look like one.
-        LineTab(ArpPanel&, KeysProcessor&, int line);
-
-        void paintButton(juce::Graphics&, bool over, bool down) override;
-
-        // A chord card dropped on a tab is handed to that line there and then, without going
-        // through a slot. The macro tab (`line` < 0) selects a view rather than a line, so it
-        // takes no chord and never lights.
-        bool isInterestedInDragSource(const SourceDetails&) override;
-        void itemDragEnter(const SourceDetails&) override;
-        void itemDragExit(const SourceDetails&) override;
-        void itemDropped(const SourceDetails&) override;
-
-    private:
-        void setDropTarget(bool);
-
-        ArpPanel& owner;
-        KeysProcessor& processor;
-        int line;
-        bool dropTarget = false;
-
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LineTab)
-    };
+    // The A/B/All tabs left this class on 2026-08-02 (Owen: "move the bpm and the a b and
+    // all into the header also"): they ride the ARP section bar now, owned by the editor
+    // (KeysEditor::ArpBarTab), because the bar outlives the panel and the tabs are how you
+    // come back to it. The panel keeps setEditLine/setMacroView as the entry points the bar
+    // calls.
 
 private:
     // One lane: the tab that selects it and the grid it shows. Length and clock
@@ -450,23 +426,10 @@ private:
     // Twelve slot cards, alive in both shapes: launching a chord is as useful on a plain
     // "Up" as it is on an edited pattern, so unlike the lane editor these never hide.
     std::array<std::unique_ptr<SlotCard>, KeysProcessor::numArpPatterns> slotCards;
-    // The three line tabs, at the left of that same row. They cost no height: the slot row is
-    // 58 px and a tab is the mouse-only 34, centred in it.
-    std::array<std::unique_ptr<LineTab>, KeysProcessor::numArpLines> lineTabs;
-    // The fourth tab. It selects a *view*, not a line: the current line stays whatever it was,
-    // so a chord card click still has somewhere unambiguous to go while all three are on screen.
-    std::unique_ptr<LineTab> macroTab;
     bool macroView = false;
     std::array<std::unique_ptr<MacroRow>, KeysProcessor::numArpLines> macroRows;
-    // Shared by all three lines, and the reason the macro view is more than three rows: one
-    // tempo they all run at, and one quantize that lands their changes together.
-    okstudio::RotaryKnob bpmKnob;
-    juce::TextButton bpmPrev { "<" }, bpmNext { ">" };
-    juce::Label bpmLabel, quantizeLabel;
-    juce::ComboBox quantizeBox;
-    std::unique_ptr<SliderAtt> bpmAtt;
-    std::unique_ptr<ComboAtt> quantizeAtt;
-    void nudgeBpm(int delta);
+    // The tabs, BPM and Launch Quantize all moved to the ARP section bar on 2026-08-02
+    // (editor-owned; see KeysEditor), so the macro view is nothing but the two cards.
     void refreshMacro();
     juce::TextButton copyButton { "Copy" };
     juce::TextButton clearButton { "Clear" };
