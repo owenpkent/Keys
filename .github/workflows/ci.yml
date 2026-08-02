@@ -35,12 +35,12 @@ jobs:
     name: windows-latest
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Checkout JUCE
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: juce-framework/JUCE
           ref: 8.0.8
@@ -51,7 +51,7 @@ jobs:
       # ("Keys CI (read-only)"), stored here as the KIT_DEPLOY_KEY secret. No PAT
       # and no user identity involved; revoke by deleting the deploy key.
       - name: Checkout okstudio-juce-kit
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: owenpkent/okstudio-juce-kit
           ssh-key: ${{ secrets.KIT_DEPLOY_KEY }}
