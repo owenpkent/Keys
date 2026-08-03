@@ -94,9 +94,10 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(InstrumentWindow)
 };
 
-// The plugin window itself is the full Keys editor plus a slim top bar; the hosted
-// instrument's GUI lives in the floating InstrumentWindow above. The top bar is
-// mouse-only like everything else: single left-click, targets >= 34 px.
+// The plugin window itself is just the full Keys editor; instrument loading, eject
+// and show/hide live behind an Instrument chip on the Keys Controls bar instead of a
+// bar of their own. The hosted instrument's GUI lives in the floating InstrumentWindow
+// above. Everything here is still mouse-only: single left-click, targets >= 34 px.
 class KeysHostEditor : public juce::AudioProcessorEditor,
                        public juce::FileDragAndDropTarget,
                        private juce::ChangeListener
@@ -128,20 +129,15 @@ private:
     void openInstrumentEditor();  // (re)build the hosted GUI + its window from the current instance
     void closeInstrumentEditor(); // must run before the instance goes away
     void setInstrumentShown(bool shown);
-    void updateBar();
+    void refreshInstrumentUi(); // chip caption tracks host state; menu content is built fresh per click
     void placeInstrumentWindow(); // above the keyboard window, clamped on-screen
 
     KeysHostProcessor& host;
 
-    // The bar and the picker draw with the same skin as the embedded editor (which
-    // only applies its own LookAndFeel to its subtree, not to this parent).
+    // The picker overlay draws with the same skin as the embedded editor (which only
+    // applies its own LookAndFeel to its subtree, not to this parent).
     KeysLookAndFeel hostLnf;
     juce::Component::SafePointer<juce::DocumentWindow> styledWindow; // standalone chrome we skinned
-
-    juce::TextButton loadButton { "Load Instrument..." };
-    juce::TextButton showHideButton;
-    juce::TextButton ejectButton { "Eject" };
-    juce::Label instLabel;
 
     std::unique_ptr<juce::AudioProcessorEditor> instEditor;
     std::unique_ptr<InstrumentWindow> instWindow;

@@ -111,6 +111,13 @@ public:
         MacroRow(ArpPanel&, KeysProcessor&, int line);
 
         void paint(juce::Graphics&) override;
+        // Scrims the card body (not the LINE A / LINE B caption strip) when this line is off.
+        // Drawn over the children rather than gating setEnabled(false) on them: every control
+        // has to stay live and clickable even while the line is off, both to dial in a rate
+        // before switching it on and because a chord dropped onto an off line is load-bearing
+        // (CLAUDE.md: "A line that is off still takes chords in") - a disabled component takes
+        // no mouse events, which would kill the drop target along with everything else.
+        void paintOverChildren(juce::Graphics&) override;
         void resized() override;
         // Readouts that no attachment drives: the rate text (it spans two parameters and two
         // units), the shape, and the chord this line is holding. Called by the panel's timer.
@@ -148,11 +155,12 @@ public:
         KeysProcessor& processor;
         int line;
 
-        // Just the line switch: LTCH, PLAY and Chain were on the row until 2026-08-02, when
-        // Owen had the rows slimmed to what you reach for while two lines are running. All
-        // three still live with the line - Latch and PLAY on its tab's band, Chain on the
-        // action row under its slots.
-        juce::ToggleButton onButton;
+        // LTCH, PLAY and Chain were on the row until 2026-08-02, when Owen had the rows
+        // slimmed to what you reach for while two lines are running. All three still live
+        // with the line - Latch and PLAY on its tab's band, Chain on the action row under its
+        // slots. The line switch itself (onButton) left on 2026-08-02 too, the day the A/B
+        // chips on the ARP section bar became the per-line On toggles: two on-switches for the
+        // same parameter, one of them buried in a card, was a control to get wrong twice.
         okstudio::RotaryKnob rateKnob;
         juce::TextButton ratePrev { "<" }, rateNext { ">" };
         juce::TextButton rateModeButton { "Sync" };
@@ -162,6 +170,10 @@ public:
         // height: putting them beside the rate would drive the knobs under the mouse-only
         // minimum, and height is the cheap axis inside a card.
         juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
+        // Opens this line's detailed view (the band and, on Pattern, the step editor). Added
+        // beside Anchor once the A/B chips stopped navigating anything: with the tabs gone,
+        // this button is the only way back from the macro cards to the deep view.
+        juce::TextButton detailsButton { "Details" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
         std::array<juce::Slider, numKnobs> knobs;
@@ -172,7 +184,7 @@ public:
         juce::Label rateHeadLabel, shapeHeadLabel;
         juce::Label chordLabel;
 
-        std::unique_ptr<ButtonAtt> onAtt, rateModeAtt;
+        std::unique_ptr<ButtonAtt> rateModeAtt;
         std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
@@ -183,6 +195,10 @@ public:
         int lastRateFree = -1;      // -1 = no attachment installed yet
         bool rateDragging = false;  // an open gesture; the swap defers until it closes
         bool dropTarget = false;
+        // The scrim's own cache, compared in refresh() (driven by the panel's 10 Hz timer while
+        // the macro view is up) so repaint() is only called on an actual change rather than
+        // every tick.
+        bool lastLineOn = true;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MacroRow)
     };

@@ -273,11 +273,16 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      on screen is a control with nothing behind it - the pad-pages rule) and are laid out only
      while it is open so BPM slides left rather than orbiting a hole; BPM and Quantize stay,
      arp On's own argument. Each tab is still a chord drop target and still answers to
-     `Arp line A tab` / `Arp all tab`. BPM is a LinearBar with
+     `Arp line A tab` / `Arp all tab`. **No longer true of A/B from 2026-08-02, seventh pass**
+     (see **The arp bar's A / B become the line switch**, below): A and B became that
+     line's own On switch, dropped the " tab" suffix, and never hide with the fold any more -
+     only `Arp all tab` still describes this paragraph as written. BPM is a LinearBar with
      `setSliderSnapsToMousePosition(false)` - on a 48 px bar a click must nudge, never jump -
      plus `<` `>` as the click-only path. The tabs' lit state is *derived* from
      `layout.arpMacro` + `arpCurrentLine` in `refreshArpBarTabs()`, so clicks, drops and
-     session loads all land in one place. The panel's `LineTab` class, its slot-row cells and
+     session loads all land in one place. **Also no longer true of A/B**: they answer to their
+     own `ButtonAttachment` now and would fight a second writer, so only the All tab's toggle
+     state is still derived there. The panel's `LineTab` class, its slot-row cells and
      its header strip are deleted; the twelve slots now share the whole row.
   3. *The click.* `ChordPads` no longer hands a clicked card to a line ("I don't want it to
      send it to the arpeggiator unless you drag it") - a click plays the pad whatever the
@@ -301,18 +306,25 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   drag, `setMouseDragSensitivity` tuned to about a BPM per 4 px. **The `<` `>` pair beside it
   is not optional**: a drag is a drag, and the mouse-only contract wants a click-only path to
   every value - this is the part of "just a number" Keys cannot copy from Ableton, which
-  expects a keyboard for that field. Row B of the Controls band keeps the 170 px the old
-  slider held.
+  expects a keyboard for that field. Row B of the Controls band kept the 170 px the old
+  slider held - for one build: two passes later Humanize and Velocity left that row too, and
+  Size and Octave left Row A, which is what collapsed the band to the single row it is now (see
+  **Size, Octave and Humanize leave the Controls band**, below).
 - **The keyboard's own settings ride the Controls bar too** (2026-08-02, sixth pass, Owen:
   "add the scale, root and scale lock, voices and MIDI channel into the controls header").
   Root, Scale, Scale Lock, Voices and MIDI Ch left the band for the bar beside the tempo, so
-  the band's first row is Size and Octave alone. Same never-hides rule as the tempo, and for a
-  sharper reason: folding the settings band away is exactly when you still want to change key.
+  the band's first row is Size and Octave alone - **true for one build only**: the very next
+  pass moved both of those off the band too, to the *Keyboard* bar rather than this one (see
+  **Size, Octave and Humanize leave the Controls band**, below). Same never-hides rule as the
+  tempo, and for a sharper reason: folding the settings band away is exactly when you still
+  want to change key.
   **The group has two sizes and measures which one it can afford.** They did not fit at the
   editor's floor, and Owen's call was "I think we can resize the elements down" rather than a
   wider window - so `roomy` captions Root, Voices and CH (because "C", "Off" and "1" say
-  nothing alone) while `tight` drops every caption, and `resized()` picks by comparing the
-  bar's actual width against the roomy total. That test is not decoration: the **update
+  nothing alone) while `tight` dropped every caption, and `resized()` picks by comparing the
+  bar's actual width against the roomy total - **true for this pass only**: the Tempo Sync
+  bullet below moves Voices and CH into `tight` too, so only Root's caption is left to drop.
+  That test is not decoration: the **update
   button** claims 170 px of this same bar the day a release lands, and without it that day
   would starve the last combo to zero width - the 2026-08-02 Shape trap, which had no visible
   symptom. Scale and Lock never get a caption in either set: "Major" and "Lock" are their own.
@@ -321,6 +333,127 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   whole phrase in the tooltip. **Measure, do not assume**: `Voices` was built at 52 px and drew
   `"..."`, because "Off" plus a chevron is wider than the digits either side of it in the list,
   and a `juce::ComboBox` ellipsises rather than complaining.
+- **`bpmSync` is the escape hatch, not the feature** (2026-08-02, Owen: "BPM and Off and one in
+  the controls header needs labels. and we need BPM sync toggle to sync with DAW"). Keys already
+  followed the host's tempo whenever the transport rolled and reported a valid bpm - the new
+  `AudioParameterBool` ("Tempo Sync", appended last, default on) is not what adds that, it is
+  the ability to turn it off and keep the arp on Keys' own tempo while the DAW plays. It is
+  threaded through the two places that used to read `clock.playing && clock.bpm > 0` outright:
+  `ArpEngine::Params::followHost` in `ArpEngine.h`, and `KeysProcessor::advanceChainClock`. The
+  Hz free-rate path is deliberately deaf to it, the same as it always was to `fallbackBpm` and
+  the host's own bpm: a subdivision of a beat means nothing where there is no beat.
+  `migrateBpmSync` backfills an older session's absent parameter to the default, the
+  `migrateRateMode` / `migrateVelTrim` shape.
+  A **Sync** chip beside the tempo field (accessible name `Tempo sync`) is the on-screen switch.
+  While it is on and a host tempo is actually live this block (`KeysProcessor::hostTempoLive()`,
+  published next to `arpBeatsBpm`), the field shows the host's own number and its drag and its
+  `<` `>` steppers grey out - none of the three can change anything while the host owns the
+  tempo. `BpmField::paint` dims itself explicitly for this, since overriding `paint` (see the
+  tempo bullet above) means the LookAndFeel's own disabled dim never reaches it either. In the
+  standalone there is no host transport, so Sync being lit changes nothing there.
+  **BPM, Voices and CH are honest captions now, not bare controls** - the gap Owen was pointing
+  at ("BPM and Off and one ... needs labels"). Voices and CH move into the `tight` cell set too,
+  so their captions survive the narrow case that used to drop every caption there (see the
+  sixth-pass bullet above); Root's stays roomy-only, and is the first thing to give way when the
+  update button claims its 170 px.
+  **The floor moves to 1280, up from 1070.** BPM's label, the Sync chip and the two newly
+  captioned tight cells cost the Controls bar 186 px more than the 87 px of slack it had at the
+  old floor, and CLAUDE.md's own rule is that a shortfall must not be paid by a starved control -
+  so the floor rises instead. `KeysEditor::minWidthForView()` carries the arithmetic in full in
+  its own comment. The standing lesson, worth repeating: when a bar outgrows its floor, raise
+  the floor.
+  `ArpTests.cpp` adds four cases pinning the tempo-source matrix (166 total, all passing). All
+  four force `anchored = false`: the anchored branch reads `clock.ppq` straight off the playhead
+  for step position and never touches bpm at all, so testing `followHost` through it would prove
+  nothing about which bpm actually fed the step period.
+- **The arp bar's A / B become the line switch; Details opens the deep view** (2026-08-02,
+  seventh pass, Owen: "the A and B on the left side of the header, I want those to be on and
+  off buttons to turn on or off the ARP, and if it's turned off, gray it out below. And then we
+  can remove the a and b check mark on the right side of the header and in the arpeggio window
+  themselves. Maybe we can add another button on the bottom by anchor, like details, and that
+  can open up the detailed arpeggiator view"). Four changes from one ask:
+  1. **A and B stop navigating and start switching.** They used to be a pure tab, selecting
+     which line the panel edited (accessible name `Arp line A tab`), with a separate lettered
+     On chip doing the actual switching a few pixels away near Hold off. The chip
+     (`arpOnButtons`/`arpOnAtts`) is deleted; A and B are bound straight to that line's `arpOn`
+     / `arp2On` through an ordinary `ButtonAttachment` instead, the accessible name drops the
+     " tab" suffix (there is nothing left to collide with), and there is no `onClick` left on
+     them at all. Being a power switch rather than a navigation control changes what folding
+     means for them too: they never hide with the section fold any more, the same "reach for
+     it while playing" case Hold off and Quantize already made for staying on a folded bar.
+     They remain a `DragAndDropTarget` apiece.
+  2. **The macro card's own On toggle (`MacroRow::onButton`, "Macro line A" / "Macro line B")
+     is deleted outright**, for the same reason: two switches bound to the same parameter, one
+     of them buried in a card, was a control to get wrong twice. Its 40 px on the card's top
+     row is not replaced with a spacer - everything shifts left and Shape, the tightest control
+     on that row, gets the width instead.
+  3. **An off line scrims its whole card instead of losing a control.**
+     `MacroRow::paintOverChildren` fills the card body - not its `LINE A` / `LINE B` caption
+     strip, which stays legible - with `skin::bgBot` at 0.38 alpha, skipped while the card is a
+     drop target so a drop highlight is never muddied by it. Nothing on the card is ever
+     `setEnabled(false)`: every knob, the rate dial and the card itself as a drop target stay
+     fully live while greyed, both so a rate can be dialled in before switching the line on and
+     because a chord dropped onto an off line has to land ("A line that is off still takes
+     chords in", above - a disabled component takes no mouse events, which would have broken
+     exactly that). The scrim's own cache (`lastLineOn`) is compared in `refresh()`, driven by
+     the panel's 10 Hz timer while the macro view is up, so a repaint is asked for only on an
+     actual change.
+  4. **Each macro card gains a Details button** beside Anchor in its bottom sub-row (accessible
+     name `Macro details A` / `Macro details B`), calling the same `setEditLine` a tab click
+     used to call - the only way left from a macro card to that line's full detailed view, now
+     that A and B navigate nothing. The per-line panel itself paints a small `LINE A` / `LINE B`
+     caption in its own top margin (`ArpPanel::paint`, only outside the macro view, costing no
+     extra height), because nothing on the arp bar names the edited line any more.
+- **Size, Octave and Humanize leave the Controls band; the Knobs chip is gone** (2026-08-02,
+  eighth pass, Owen: "I think we can remove the octave setting and the size can go down to the
+  header of the keyboard button and remove the knobs button and make the knobs visible when you
+  open controls," then, on Humanize: "I'm not sure what to do about the humanize section in
+  controls. Maybe that could go in the pad header," and, choosing that, "make smaller to fit").
+  **Size and Octave** move to the *Keyboard* bar, which never hides with that section for the
+  same reason Root/Scale/CH never hide with Controls: Octave is the keybed's only pitch-range
+  control (25 keys cannot pan; the keybed is C3..C5 by construction), and folding the band away
+  is exactly when you still want it. Octave is not the band's `IncDecButtons` slider on the
+  bar - a bar control is 24 px tall, and those arrows would stack to 12 px each, under the
+  mouse-only floor - it is the BPM field's own shape instead: `octPrevButton` / `octaveReadout`
+  / `octNextButton`, a `<` value `>` trio driven by the new `nudgeOctave()` (the same shape as
+  `nudgeBpm`), reading a signed "+2" / "0" / "-3". **Humanize** and its velocity range move to
+  the *Pads* bar instead, Owen's own pick once asked, after the pad page buttons and before the
+  generator cluster so that cluster stays intact on the right; the on-bar label drops
+  "VELOCITY" to fit a 36 px cell beside a 24 px toggle, and the slider's own tooltip keeps the
+  full word. With both gone, the Controls band is down to **one row** (Strum and its
+  direction): `headerH` drops from 112 to 52 px, and `sectionHeight(secControls)` and the
+  editor's default `idealHeight()` both drop by 60. **The Knobs chip that folded the CC knob
+  row is deleted**, not merely hidden: the row is unconditional now, whenever Controls itself
+  is open, and `sectionHeight(secControls)` no longer branches on `layout.knobs`. That field
+  stays in `LayoutState` only so a session's tree keeps round-tripping cleanly -
+  `layoutFromTree` forces it `true` on every load regardless of what was saved, since there is
+  no control left on screen that could turn the row back off. The detached Keyboard window's
+  own second Size combo (`detachedSizeBox`, accessible name "Keybed size") - built only because
+  Size used to live in the section you would fold away before detaching the keyboard - is
+  deleted along with `Section::Traveller::detachedOnly`, which had no other user: Size now
+  lives on the Keyboard bar directly and simply travels with it, the way Wheels always has.
+- **An Instrument chip on the Controls bar, for a host that wants one** (2026-08-02, Owen: "the
+  load instrument section with all that should go in the controls submenu"). `KeysEditor`
+  grows its first-ever extension point for something embedding it: `onBuildInstrumentMenu`
+  (fills a `juce::PopupMenu`), `instrumentName` (supplies the chip's caption) and
+  `refreshInstrumentChip()` (call after a load or an eject so the caption catches up) - the
+  same functional shape `ChordPads::onExtraMenuItems` already used internally, now exposed
+  outward. Plain Keys (the VST3, the plain Standalone) never sets these, so `instrumentChip`
+  stays invisible there (`addChildComponent`, not `addAndMakeVisible`) and their Controls bar
+  is otherwise unchanged. It takes the cell the Knobs chip vacated and is the one *elastic*
+  control on the bar: `resized()` measures the tempo group and the Root…MIDI Ch group first
+  (both fixed-width), and the chip gets whatever is left over, clamped to `[80, 150]` px -
+  reserve the fixed-size controls first, always, or the elastic one starves its neighbours
+  instead of the other way round.
+  **Keys Host's own 44 px top bar is deleted along with it** (`loadButton`, `instLabel`,
+  `showHideButton`, `ejectButton`, the `barHeight` constant and the gradient `paint()` that
+  went with them): `KeysHostEditor::resized()` is now just one line,
+  `keysEditor.setBounds(getLocalBounds())`, and Load/Show-Hide/Eject move into a popup menu
+  off the new chip instead. Every window-height calculation that used to add `barHeight` on top
+  of `KeysEditor::idealHeight()` - `maxWindowHeight()`, `fitToKeysHeight()`, the constructor's
+  initial `setResizeLimits` - drops it, since there is no bar left to account for.
+  `KeysHostEditor::updateBar()` is renamed `refreshInstrumentUi()` to match: there is no bar
+  left to update, only the chip's caption.
 - **Launch Quantize is Ableton's transport Quantization, for the arp** (`arpQuantize`, 2026-08-01,
   the setting Owen described and could not name: "if you start a new note or something that goes
   into the next sequence, so it sounds good always"). Off - the default, and what Keys always did
@@ -392,6 +525,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   a screen shorter than that content is the same bug by another route. `KeysEditor::idealHeight`
   went public for it, next to `minWidthForView`, which was made public in 2026-07-30 for exactly
   the same reason: a host that embeds the editor must *ask* it for its size and never copy it.
+  `barHeight` itself is gone as of 2026-08-02 too, along with the bar it measured - see
+  **An Instrument chip on the Controls bar**, above - so every one of these calculations is
+  `KeysEditor::idealHeight()` alone now, with nothing added on top of it.
 - **A line that is off still takes chords in; `enabled` gates only firing** (2026-08-02, Owen:
   "when you drag your chord onto an arp, I don't want it to play the chord sound when you
   release" and "when you turn on the arp, it should start playing whatever card is loaded").
@@ -578,21 +714,29 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   the section it was reaching into. This **reverses the 2026-07-27 removal** of the same
   override; any doc still saying the whole bar is the target is describing that three-day
   window. **Detach hides with its section**, and so does every control that would be reaching
-  into content that is not on screen: the pad pages, Knobs, Wheels, and the arp bar's A/B/All
-  *tabs* (which navigate a panel that is not there). What stays on a folded
-  bar is what you reach for while playing or generating - the arp's A / B line switches, All Off,
-  Light keys, Hold off and Launch Quantize; the Controls bar's tempo, Root, Scale, Lock, Voices
-  and CH (2026-08-02: a settings band you have folded away is exactly when you still want to
-  change key); the Pads bar's Fill / Regen / Generator and its Key combo; the Keyboard bar's
-  Exclusive / Sustain / Latch /
-  All Off - plus the theme swatch, which belongs to the plugin rather than to any one section. Open and folded bars are painted at different weights on
-  purpose; `captionWidth()` and `paintButton()` must use the one `captionFont()`,
-  or the caption ellipsises and the controls beside it shift as a section folds.
+  into content that is not on screen: the pad pages, Wheels, and the arp bar's **All**
+  tab (which navigates a panel that is not there). The Knobs chip that used to be in this list
+  is gone outright since 2026-08-02, not merely hidden: the row it folded is unconditional now,
+  so there is nothing left for a chip to hide. The arp bar's A / B used to be in this list too,
+  as a second, separate navigation tab beside their own On chip; since 2026-08-02, seventh
+  pass, they are that line's On switch and nothing else, so they moved to the "stays" list
+  below instead. What stays on a folded bar is what you reach for while playing or generating - the
+  arp's A / B switches, All Off, Light keys, Hold off and Launch Quantize; the Controls bar's
+  tempo, Root, Scale, Lock, Voices, CH and, in Keys Host, the Instrument chip (2026-08-02: a
+  settings band you have folded away is exactly when you still want to change key); the Pads
+  bar's Humanize and its velocity range, Fill / Regen / Generator and its Key combo; the
+  Keyboard bar's Size, Octave, Exclusive / Sustain / Latch / All Off - plus the theme swatch,
+  which belongs to the plugin rather than to any one section. Open and folded bars are painted
+  at different weights on purpose; `captionWidth()` and `paintButton()` must use the one
+  `captionFont()`, or the caption ellipsises and the controls beside it shift as a section folds.
 - **The knob bank is the bottom row of the Controls section**, not a band of its own:
-  `knobRowH` is 110, which gives 60 px knobs. The Knobs chip that folds just that row rides
-  the Controls bar, so the row can go without the two header rows going with it. It is one of
-  the bar controls that *does* hide with its section: a chip that folds a row of a band which
-  is not on screen would be a control with nothing behind it.
+  `knobRowH` is 110, which gives 60 px knobs. **The Knobs chip that used to fold just that row
+  is gone** (2026-08-02, Owen: "remove the knobs button and make the knobs visible when you
+  open controls"): the row is unconditional now, whenever Controls itself is open, and
+  `sectionHeight(secControls)` no longer branches on it. `layout.knobs` stays in
+  `LayoutState` only so the session tree keeps round-tripping - `layoutFromTree` forces it
+  `true` on every load regardless of what was saved, since there is no control left on screen
+  that could turn the row back off.
 - **Keys watches its MIDI input but never consumes it.** `watchInputNotes()` runs first
   thing in `processBlock`, before the collector drains, and records which pitches the
   incoming stream turns on (a flag per pitch, not a count). `isNoteSounding()` answers
@@ -769,27 +913,37 @@ Four things will bite otherwise:
   boxes are reachable by their *current* text (`-SetValues "Up=Pattern"`), but two combos
   can read the same thing (Shape and the strum Dir were both "Up"), and it takes the first
   match; set the other one out of the way first.
-- **The arp's own controls are named per line**, for the same first-match reason: the bar
-  chips are `Arp line A` / `B`, and the tabs *on the same bar* (since the fourth 2026-08-02
-  pass; they hide when the section folds) are `Arp line A tab` and so on
-  (the " tab" suffix is what keeps a tab from colliding with the chip that shares its letter),
-  and the slot cards are `Arp slot 1`..`12`. (The Pads bar's cycling letter, `Arp target
-  line`, is **gone** since 2026-08-02 - do not look for it.)
-  Hold off is `Arp hold off`, and the Quantize combo beside the tabs is
+- **The arp's own controls are named per line**, for the same first-match reason: on the bar,
+  `Arp line A` / `B` are that line's own On switch (2026-08-02, seventh pass) as well as a
+  chord-drop target, and the slot cards are `Arp slot 1`..`12`. **`Arp line A` used to carry a
+  " tab" suffix** (`Arp line A tab`), back when a separate On chip did the switching and the
+  tab only navigated the panel; the chip is gone, the tab absorbed its job, and the suffix went
+  with it - do not look for `Arp line A tab` any more, and do not expect it to hide when the
+  section folds, since it is a power switch now and stays on the bar folded or not. (The Pads
+  bar's cycling letter, `Arp target line`, is **gone** since 2026-08-02 too - do not look for
+  that either.) Hold off is `Arp hold off`, and the Quantize combo beside A, B and All is
   `Arp launch quantize`. The tempo is **`Tempo`, on the Controls bar** - it answered to
-  `Arp BPM` on the arp bar for one build. Beside it on that bar, and reachable by their
+  `Arp BPM` on the arp bar for one build. Beside it, the **Sync** chip (2026-08-02) that opts
+  out of following the host's tempo answers to `Tempo sync`, on-screen word "Sync". Beside that
+  on the bar, and reachable by their
   *current text* the way every combo is, sit Root, Scale, Voices and the MIDI channel; Scale
   Lock is a toggle whose on-screen word is **"Lock"** but whose accessible name is still
-  `Scale Lock`, so a script asks for the full phrase and a reader hears it. The fourth tab is
-  `Arp all tab`, and the macro
-  view's own controls are prefixed `Macro` so they never collide with the bar chips or the tabs:
-  `Macro line A`, `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
+  `Scale Lock`, so a script asks for the full phrase and a reader hears it. In Keys Host only,
+  the same bar also carries `Instrument`, the chip whose menu holds Load/Show-Hide/Eject - it
+  is invisible in plain Keys, so a script targeting it there will not find it, by design. The
+  one tab left on the arp bar is `Arp all tab`, and the macro
+  view's own controls are prefixed `Macro` so they never collide with the bar chips or the tab:
+  `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
   `Macro dot A` / `Macro trip A` / `Macro anchor A`, and `Macro OCT A` / `Macro GATE A` /
-  `Macro VEL A` / `Macro H.TIME A` / `Macro H.VEL A` / ... one per knob heading.
-  `Macro latch A`, `Macro keys A` and `Macro chain A` went with the row controls on 2026-08-02;
-  the per-line band's Play toggle answers to `Arp play` (the parameter is still `arpKeys` - the
-  accessible name follows the label here because "keys" already means two other things in this
-  window). On the arp bar: `Arp all off` and `Arp light keys`.
+  `Macro VEL A` / `Macro H.TIME A` / `Macro H.VEL A` / ... one per knob heading, plus
+  `Macro details A` / `B` (2026-08-02, seventh pass), the button that opens that line's deep
+  view now that A and B on the bar no longer do. **`Macro line A` / `B` no longer exist**: that
+  was the macro card's own On toggle, deleted the same pass, replaced by a scrim over the whole
+  card rather than a second control. `Macro latch A`, `Macro keys A` and `Macro chain A` went
+  with the row controls on 2026-08-02; the per-line band's Play toggle answers to `Arp play`
+  (the parameter is still `arpKeys` - the accessible name follows the label here because
+  "keys" already means two other things in this window). On the arp bar: `Arp all off` and
+  `Arp light keys`.
 - **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
   applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
   the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that

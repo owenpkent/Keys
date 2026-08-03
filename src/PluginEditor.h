@@ -46,6 +46,17 @@ public:
     // the keybed off the bottom. Keys Host grows itself to fit.
     std::function<void(int)> onIdealHeightChanged;
 
+    /** Set by a host that embeds Keys and wants an Instrument chip on the Controls bar.
+        While this is set the chip is shown; clicking it calls this to fill the popup. */
+    std::function<void (juce::PopupMenu&)> onBuildInstrumentMenu;
+
+    /** Supplies the chip's caption: the loaded instrument's name, or an empty
+        string for "nothing loaded". Only read while onBuildInstrumentMenu is set. */
+    std::function<juce::String()> instrumentName;
+
+    /** Call after a load or an eject so the chip's caption catches up. */
+    void refreshInstrumentChip();
+
     // The narrowest this editor can be laid out at, which is the Pads bar's own arithmetic
     // (see the definition). Public because Keys Host embeds one of these and has to set its
     // window's floor from it - it held a copy of the number until 2026-07-30, and the copy
@@ -157,13 +168,14 @@ private:
         juce::Point<int> minSize { 480, 200 }, defaultSize { 900, 420 };
 
         // Bar controls that follow the content into its window, placed right to left after
-        // the Re-dock button. `detachedOnly` ones exist for the window alone and are dropped
-        // again when the section re-docks (the keybed's second Size selector).
+        // the Re-dock button. Wheels is the only one now (2026-08-02): the keybed's second
+        // Size selector, the one traveller that only ever existed for the detached window,
+        // is gone - Size lives on the Keyboard bar itself now and travels with the section
+        // like every other bar control, so the window needs nothing extra for it.
         struct Traveller
         {
             juce::Component* c = nullptr;
             int width = 0;
-            bool detachedOnly = false;
         };
         std::vector<Traveller> travellers;
 
@@ -240,8 +252,17 @@ private:
     // No BPM slider in the band since 2026-08-02: the tempo is a number on the Controls
     // *bar* now (bpmField, below), which is where Owen wanted it and what freed row B's
     // last 170 px.
-    juce::Slider octaveSlider;
-    juce::Label octaveLabel, chordStrumLabel;
+    //
+    // Size and Octave left the band the same day for the *Keyboard* bar (Owen: "the size can
+    // go down to the header of the keyboard button"). sizeBox above is reparented there
+    // rather than duplicated - see the ctor and resized(). Octave is not a slider on that bar:
+    // a bar control is 24 px tall and JUCE's IncDecButtons arrows would stack to 12 px each,
+    // under the mouse-only floor - so it is the BPM field's own shape instead, a `<` value `>`
+    // trio (octPrevButton / octaveReadout / octNextButton) driven by nudgeOctave().
+    juce::Label octaveBarLabel;     // "OCT", the Keyboard bar's own caption
+    juce::Label octaveReadout;      // "+2" / "0" / "-3", refreshed in timerCallback()
+    juce::TextButton octPrevButton { "<" }, octNextButton { ">" };
+    juce::Label chordStrumLabel;
     // Strum is a range, the same two-handle band as the humanize velocity beside it: each
     // chord rakes at a speed drawn from it, so repeated stabs are not identical.
     RangeSlider chordStrumSlider;
@@ -323,21 +344,16 @@ private:
     // folded shut.
     SectionBar arpBar { "Arp" };
     SectionBar keyboardBar { "Keyboard" };
-    // Folds the knob row off the bottom of the Controls band. It rides the Controls bar,
-    // which had a wide dead caption zone and now spends it on the one thing inside that
-    // section worth hiding on its own: the knob row is 110 px, the two header rows are the
-    // section itself. It hides with Controls like every other bar control.
-    juce::TextButton knobsButton { "Knobs" };
-    // The arp's power switch, and now also the thing that decides what a click on a chord
-    // card means: with it lit, a card hands its chord to the arp instead of playing it while
-    // the button is down. That used to be a separate "To Arp" toggle on the Pads bar, which
-    // did nothing visible whenever the arp was off (removed 2026-07-27, Owen's call).
-    // Three of them since 2026-08-01, one per arpeggiator line: A, B, C. Each is that line's
-    // own power switch, so bringing a line in and out is one click on a bar that survives the
-    // section being folded - which is how a polyrhythm is actually performed. A is `arpOn`,
-    // the same parameter the single On always was.
-    std::array<juce::ToggleButton, KeysProcessor::numArpLines> arpOnButtons;
-    std::array<std::unique_ptr<ButtonAtt>, KeysProcessor::numArpLines> arpOnAtts;
+    // The Knobs chip that used to fold the knob row off the bottom of the Controls band is
+    // gone (2026-08-02, Owen: "remove the knobs button and make the knobs visible when you
+    // open controls"): the row is unconditional now, whenever the section itself is open. Its
+    // 66 + 14 px on the Controls bar became the Instrument chip's cell (instrumentChip, above).
+    // The arp's power switch used to be a separate lettered chip here, one per line
+    // (2026-08-01), sitting a few pixels from the A/B/All tabs that also named a line. Owen
+    // pointed at the redundancy on 2026-08-02 ("I want those to be on and off buttons to turn
+    // on or off the ARP ... we can remove the a and b check mark on the right side of the
+    // header") and the chip is gone: the tabs are the switch now. See ArpBarTab below.
+    //
     // Lets go of the chord being held into the arp, and nothing else. It rides the arp bar
     // beside On for the same reason On does: with the section folded it is the only way out
     // of a hold. A click on a chord card retriggers the hold rather than ending it, the arp's
@@ -357,17 +373,26 @@ private:
     // Keyboard bar because it is a fact about the arp: it is the arp's notes it shows, and it
     // is meaningless with both lines off.
     juce::ToggleButton arpLightsButton;
-    // The A/B/All tabs, BPM and Launch Quantize, on the arp bar since 2026-08-02 (Owen: "move
-    // the bpm and the a b and all into the header also"): the All view is just the two cards,
-    // and what the cards share rides the bar above them. The tabs select what the *panel*
-    // shows, so they hide when the section folds - a tab that navigates a panel that is not
-    // on screen is a control with nothing behind it - while BPM and Quantize stay, the arp
-    // On's own argument: they are what you reach for while playing. Editor-owned, all of it,
-    // because the panel dies with the fold and the bar does not.
+    // The A/B tabs are the arp's own On switches now (2026-08-02, Owen: "the A and B on the
+    // left side of the header, I want those to be on and off buttons to turn on or off the
+    // ARP ... we can remove the a and b check mark on the right side of the header"). A
+    // lettered On toggle used to live at each end of this bar at once - a navigation tab here,
+    // a checkmark by Hold off - and Owen called that redundant; the checkmark is gone
+    // (arpOnButtons, above) and clicking a tab now toggles that line's `arpOn` / `arp2On`
+    // through an ordinary ButtonAttachment, the pattern every other APVTS-backed toggle in
+    // this file already uses. The navigation job the tabs used to do moved to each MacroRow's
+    // own Details button (ArpPanel.h), which is why a click on A or B no longer calls
+    // setEditLine. That also changes what folding the section means for them: an On switch is
+    // exactly the "reach for it while playing" case CLAUDE.md carves out for a folded bar, so
+    // A and B never hide and are laid out whether or not the section is open. All is not a
+    // line and has nothing to switch on or off - it still only chooses the macro view, so it
+    // still hides and its cell still collapses with the fold, the pageButtons rule. BPM and
+    // Quantize beside them never hid either, for the same reach-for-it-while-playing reason.
     //
-    // Each tab is also a DragAndDropTarget: dropping a chord card on a letter hands the chord
-    // to that line, the same gesture the panel's own tabs took before the bar absorbed them
-    // (a macro card is still the bigger target for the same drop).
+    // Each tab is still a DragAndDropTarget: dropping a chord card on a letter hands the
+    // chord to that line whether the line is on or off (CLAUDE.md: "A line that is off still
+    // takes chords in"), the same gesture a macro card's own drop takes and still the bigger
+    // target for it.
     struct ArpBarTab : public juce::TextButton,
                        public juce::DragAndDropTarget
     {
@@ -380,6 +405,9 @@ private:
         KeysEditor& owner;
         int line;
         bool dropTarget = false;
+        // Only for line >= 0: the On/off switch itself, bound to that line's `On` parameter.
+        // Null on the All tab, which is a plain view toggle with no parameter behind it.
+        std::unique_ptr<ButtonAtt> onAtt;
     };
     std::array<std::unique_ptr<ArpBarTab>, KeysProcessor::uiArpLines> arpBarTabs;
     std::unique_ptr<ArpBarTab> arpBarAllTab;
@@ -387,6 +415,7 @@ private:
     // click all land in the same place.
     void refreshArpBarTabs();
     void nudgeBpm(int delta);
+    void nudgeOctave(int delta); // the Keyboard bar's < > pair beside the octave read-out
 
     // The tempo, on the **Controls** bar (2026-08-02, Owen: "I think the bpm should live in
     // the controls header. I want it to be like the bpm in ableton, just a number"). It sat
@@ -404,13 +433,37 @@ private:
     {
         BpmField();
         void paint(juce::Graphics&) override;
+        // Tempo Sync on and a host tempo actually live (KeysProcessor::hostTempoLive()): the
+        // field shows this instead of its own value (the "bpm" parameter's), set every
+        // KeysEditor::timerCallback() alongside setEnabled(false) on this and the two
+        // steppers beside it - none of the three can change anything while the host is the
+        // one setting the tempo. Overriding paint means the LookAndFeel's disabled dim never
+        // applies here (that dim is only ever painted by the base Slider::paint this
+        // replaces), so paint() has to check isEnabled() itself.
+        bool showingHost = false;
+        double hostBpm = 0.0;
     };
     BpmField bpmField;
+    // "BPM", unconditional like the field it labels (2026-08-02, Owen: "BPM ... needs
+    // labels"). Styled like quantizeBarLabel beside it on the arp bar: the same shape, a
+    // caption immediately left of the control group it names.
+    juce::Label bpmBarLabel;
     // The click-only path. A drag is a drag, and the mouse-only contract says every value a
     // slider holds must also be reachable by clicking - the same reason the arp's rate dial
     // has its pair. This is the part of "just a number" that Keys cannot copy from Ableton,
-    // which expects a keyboard for its tempo field.
+    // which expects a keyboard for its tempo field. Both grey out with the field itself while
+    // a live host tempo is showing (see BpmField::showingHost) - stepping a number the host
+    // is setting would lie about what the click just did.
     juce::TextButton bpmPrevButton { "<" }, bpmNextButton { ">" };
+    // Tempo Sync (2026-08-02, Owen: "we need a BPM sync toggle to sync with DAW"). On (the
+    // default) reproduces what Keys always did - a rolling host with a valid tempo wins over
+    // the "bpm" parameter; see ArpEngine::Params::followHost and KeysProcessor::
+    // advanceChainClock. Off is the escape hatch: Keys keeps its own tempo regardless of what
+    // the host's transport is doing. A plain TextButton toggle, not a checkbox ToggleButton -
+    // the same compact chip shape as the arp's A/B line switches, sized like Fill/Regen
+    // beside it rather than a checkbox-plus-label control this bar has no width to spare for.
+    juce::TextButton bpmSyncButton { "Sync" };
+    std::unique_ptr<ButtonAtt> bpmSyncAtt;
     juce::Label quantizeBarLabel;
     juce::ComboBox quantizeBarBox;
     std::unique_ptr<SliderAtt> bpmAtt;
@@ -425,25 +478,37 @@ private:
     // feeds a line at all, and the arp bar's A/B tabs name the current one.
     juce::TextButton wheelsButton { "Wheels" };
 
-    // A second Size selector, for the detached keyboard window. The keybed's key count
-    // lives in the Controls section, which is exactly the section you fold away once the
-    // keyboard is in its own window - so the detached window carries its own, attached to
-    // the same parameter. Two attachments on one parameter is fine; both follow it.
-    juce::ComboBox detachedSizeBox;
-    std::unique_ptr<ComboAtt> detachedSizeAtt;
+    // The detached keyboard window used to carry a second Size selector of its own, because
+    // the keybed's key count lived in the Controls section - exactly the section you fold
+    // away once the keyboard is in its own window. Gone on 2026-08-02: Size lives on the
+    // Keyboard bar itself now (sizeBox, above), which travels with the section like every
+    // other bar control, so the window needs nothing extra.
 
     // Which colour this instance wears. Lives on the Controls bar rather than inside the
     // Controls section, so it stays reachable with that section folded away - the whole
     // point is telling one track's Keys from another's at a glance.
     juce::TextButton themeButton;
     void showThemeMenu();
+
+    // The Instrument chip (2026-08-02, Owen: "the load instrument section with all that
+    // should go in the controls submenu"). Keys Host is the only thing that ever sets
+    // onBuildInstrumentMenu / instrumentName; plain Keys (the VST3, the plain standalone)
+    // never does, so the chip stays invisible and this bar is exactly what it always was
+    // there. It rides the left end, in the cell the Knobs chip vacated the same day, and it
+    // is the one *elastic* control on this bar - see resized() for why the tempo group and
+    // the keyboard-settings combos beyond it have to be measured first.
+    juce::TextButton instrumentChip;
     void applyAccent(int index);
 
+    // Humanize and its velocity range live on the *Pads* bar now (2026-08-02, Owen picked
+    // that bar and asked to "make smaller to fit"), not in the Controls band: a playing-feel
+    // control, the same reason the arp's On stays on a folded bar. The label lost "VELOCITY"
+    // to fit a 36 px cell beside a 24 px button - it reads as a bare number/range now, and
+    // the slider's own tooltip still spells the whole thing out.
     RangeSlider humanizeVelSlider; // a two-value range whose band drags as one; see RangeSlider.h
     juce::Label humanizeVelLabel;
 
     std::unique_ptr<ComboAtt> sizeAtt, rootAtt, scaleAtt, channelAtt, chordStrumDirAtt, polyphonyAtt;
-    std::unique_ptr<SliderAtt> octaveAtt; // strum has two values; synced by hand
     std::unique_ptr<ButtonAtt> scaleLockAtt, sustainAtt, latchAtt, humanizeAtt, chordExclusiveAtt;
 
     okstudio::updater::Config updaterConfig;

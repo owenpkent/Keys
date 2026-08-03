@@ -46,11 +46,12 @@ src/
 │   │                         # touch; both belong to no pad and are thrown away when the
 │   │                         # window closes
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
-│   │                         # plus the control band and twelve launchable slots.
-│   │                         # Which of the two lines it edits is chosen by A/B tabs
-│   │                         # that live on the editor's arp bar, not this panel, since
-│   │                         # 2026-08-02; a macro view (both lines side by side) is
-│   │                         # the third choice there
+│   │                         # plus the control band and twelve launchable slots. Which
+│   │                         # of the two lines it edits is chosen by that line's own
+│   │                         # Details button in the macro view since 2026-08-02, second
+│   │                         # pass - A and B on the editor's arp bar are that line's
+│   │                         # On switch now, not a way to pick one; the macro view
+│   │                         # (both lines side by side) is the third choice on the bar
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── StepComboBox.h        # a combo that reports every pick, including one already
@@ -63,7 +64,9 @@ src/
 │   └── KeysLookAndFeel.{h,cpp} # the skin: tokens, raised fills, accent glow
 ├── host/                     # Keys Host only (docs/KEYS_HOST_DESIGN.md)
 │   ├── KeysHostProcessor.{h,cpp} # KeysProcessor + one hosted instrument VST3
-│   └── KeysHostEditor.{h,cpp}    # top bar, instrument picker, floating instrument window
+│   └── KeysHostEditor.{h,cpp}    # instrument picker and floating instrument window; no
+│                                 # bar of its own since 2026-08-02 - see KeysEditor's
+│                                 # onBuildInstrumentMenu below
 └── mcp/
     └── KeysMcp.{h,cpp}       # MCP tool registrations; every handler runs on the
                               # message thread (docs/MCP.md)
@@ -392,11 +395,16 @@ All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`
 
 The editor is a stack of **four** sections, each of which folds away so the window can be
 squeezed small when the screen is busy, and, since 2026-07-27, each of which also detaches
-into a window of its own: **Controls** (the two header rows plus the knob bank under them,
-which has its own Knobs sub-fold), the **Arp**, the **Pads**, and the **Keyboard** (with the
-wheels as a sub-fold). It was six until 2026-07-30, when the centre view and Transcribe both
+into a window of its own: **Controls** (one header row - Strum and its direction - plus the
+knob bank under them, unconditional now that the Knobs chip that used to fold it is gone), the
+**Arp**, the **Pads**, and the **Keyboard** (with the wheels, Size and Octave as bar controls
+that never fold with it). It was six until 2026-07-30, when the centre view and Transcribe both
 went; the centre's knob bank became the bottom row of Controls rather than a section of its
-own, because it is two rows of settings and eight knobs, not a view you switch to.
+own, because it is a row of settings and eight knobs, not a view you switch to. The Controls
+band was two rows of settings for most of its life; Size, Octave and Humanize left it on
+2026-08-02 for the Keyboard and Pads bars respectively (Owen: "the size can go down to the
+header of the keyboard button ... remove the knobs button and make the knobs visible when you
+open controls"), which is what took it down to one.
 
 `SectionBar` is the fold affordance: a `juce::Button`, so the mouse-only contract and the
 accessible name come for free. It calls `setTitle(caption + " section")`, which means the
@@ -411,54 +419,77 @@ on the bar shifts when the section folds.
 The **arpeggiator is a section of its own** rather than a centre view (changed 2026-07-25).
 Competing with the knobs and the generator was backwards for a panel that runs while you
 play, and the arp is the one thing you want on screen *next to* a chord. Its bar carries the
-**A** and **B** toggles - one per arpeggiator line on screen (a third, C, still exists in the
+**A** and **B** buttons - one per arpeggiator line on screen (a third, C, still exists in the
 engine and the parameter layout for session compatibility; `KeysProcessor::uiArpLines` is what
 keeps it off this bar and everywhere else since 2026-08-02, see `docs/ARP_DESIGN.md`) - the
 **Hold off** chip and a **Detach**; everything but Detach survives folding
 the panel away, because folding it destroys the view and never the arpeggiator, and a chord
 held into a folded arp needs a way out that is still on screen. **Hold off is deliberately
 still one button**: it releases every line and stops every chain, because a per-line release
-would leave the other droning with nothing on a folded bar to stop them. **All Off** beside it
+would leave the other droning with nothing on a folded bar to stop it. **All Off** beside it
 does that *and* switches the lines off, and **Light keys** beside that is a display toggle.
-Which line the *panel* edits is chosen by the **A / B tabs**, which moved onto this same bar
-on 2026-08-02 (Owen: "move the bpm and the a b and all into the header also") from the panel's
-own slot row; unlike the toggles and Hold off, the tabs hide when the section folds, since a
-tab exists only to point at a panel a fold has just taken off screen.
 
-A **third tab, All**, is the macro view: the band and the step editor give way to one boxed
-card per line, side by side, each with that line's switch, a detented rate knob, its shape and
-eight knobs (Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel). The tabs and **Launch
-Quantize** ride the arp's section bar; the **tempo** rides the *Controls* bar instead, one
-build later than the tabs (both 2026-08-02; see `docs/ARP_DESIGN.md` for the passes). It is a
-*view* rather than a fourth line - `editedLine` is untouched by it, so a chord card drag keeps
-one unambiguous target - and it takes the band's space rather than adding to it, so the panel
-does not grow. Each row's attachments bind to its own line for the row's life, where the
-band's rebind on every tab change: two lines on screen at once cannot each be "the current
-line".
+**A and B are that line's own On switch** (2026-08-02, seventh pass, Owen: "the A and B on the
+left side of the header, I want those to be on and off buttons to turn on or off the ARP ...
+we can remove the a and b check mark on the right side of the header"). They used to be a pure
+navigation tab choosing which line the *panel* edited, moved onto this bar 2026-08-02 (Owen:
+"move the bpm and the a b and all into the header also") from the panel's own slot row, with a
+separate lettered On toggle doing the actual switching a few pixels away near Hold off - two
+controls for one job. The toggle is deleted; A and B are bound via `ButtonAttachment` straight
+to that line's On parameter, which means they no longer select a line for editing (no
+`onClick`) and, being a power switch rather than a navigation control, they never hide with the
+section fold any more - the same case Hold off and Quantize already made for staying on a
+folded bar. They remain a `DragAndDropTarget` apiece: dropping a chord card on a letter still
+hands it to that line, on or off.
+
+Which line the *panel* edits is chosen by that line's own **Details** button instead, in the
+macro view (2026-08-02, seventh pass, Owen: "maybe we can add another button on the bottom by
+anchor, like details, and that can open up the detailed arpeggiator view"), and the panel
+paints a small **LINE A** / **LINE B** caption in its own top margin so something on screen
+still says which line you are looking at, now that A and B no longer do.
+
+The **macro view (All)** is the third choice on the bar - **All** is the one navigation control
+left there, and the only one that still hides with the section fold, since it is the only one
+still pointing at a panel that a fold takes off screen. It replaces the band and the step
+editor with one boxed card per line, side by side, each with a detented rate knob, its shape,
+eight knobs (Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel) and, since the same pass, a
+**Details** button beside Anchor - the card's own On toggle is gone the same way the bar's
+separate chip is, and an off line scrims the whole card body instead (`paintOverChildren`,
+skipping every control's `setEnabled` so a chord can still be dropped on it and a rate still
+dialled in before switching it on). **Launch Quantize** rides the arp's section bar alongside
+A, B and All; the **tempo** rides the *Controls* bar instead, one build earlier (both
+2026-08-02; see `docs/ARP_DESIGN.md` for the passes). The macro view is a *view* rather than a
+fourth line - `editedLine` is untouched by it, so a chord card drag keeps one unambiguous
+target - and it takes the band's space rather than adding to it, so the panel does not grow.
+Each row's attachments bind to its own line for the row's life, unlike the band's, which rebind
+whenever the edited line changes (a Details click, where a tab click used to do it): two lines
+on screen at once cannot each be "the current line".
 
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
 chord) was also the one place you could not reach a chord. Their page buttons ride on the
-Pads bar from the left, and the generator's **Fill**, **Regen** and **Generator** chips with
-its **Key** combo come off the right end (the pages hide with the strip, that whole
-right-hand group never does). **Mode**, **Scale Compliance** and the arp's old target-line
-letter chip left this end of the bar on 2026-08-02 (Owen: "remove the scale and percentage and
-letter b from pads header"); Mode and Compliance are still in the generator's window, which
-holds every setting it has, and which line a chord card feeds is named by the arp bar's **A /
-B** tabs now instead.
+Pads bar from the left, **Humanize** and its velocity range sit after them since 2026-08-02
+(moved off the Controls band, Owen: "make smaller to fit"), and the generator's **Fill**,
+**Regen** and **Generator** chips with its **Key** combo come off the right end (the pages hide
+with the strip, everything else on this bar never does). **Mode**, **Scale Compliance** and the
+arp's old target-line letter chip left this end of the bar on 2026-08-02 (Owen: "remove the
+scale and percentage and letter b from pads header"); Mode and Compliance are still in the
+generator's window, which holds every setting it has, and the arp bar's **A / B** switches no
+longer name which line a card feeds, since they read On/Off rather than a selection - the
+panel's own **LINE A** / **LINE B** caption does that now.
 
 **A click never hands a chord to a line any more** (2026-08-02, Owen: "when an arpeggiator's
 running and you click on a pad, I don't want it to send it to the arpeggiator unless you drag
 it"): `ChordPads::mouseUp` plays the pad for a short audition exactly as it would with every
 line off, regardless of what `KeysProcessor::cardsFeedArp` says. Feeding a line is a **drag** -
-onto a card in the macro view, onto a line's tab on the arp bar, or onto a slot - and each
-names a different "which line": a tab or a slot's own line makes that line current, a macro
-card is already labelled with its own. Dragging a card onto an arp slot binds the chord there,
-and onto a line's tab or macro card hands it over immediately; both are ordinary JUCE
-drag-and-drop targets rather than something the editor mediates in screen coordinates by hand
-(`src/ui/ChordDrag.h`, 2026-08-02 - see the chord generator section below for why that
-mattered), the same mechanism the audition tray's own drags use, and both suppress the strip's
-drag-off-to-clear so a gesture aimed at the arp can never delete a chord.
+onto a card in the macro view, onto A or B on the arp bar, or onto a slot - and each names a
+different "which line": A/B or a slot's own line makes that line current, a macro card is
+already labelled with its own. Dragging a card onto an arp slot binds the chord there, and onto
+A/B or a macro card hands it over immediately; both are ordinary JUCE drag-and-drop targets
+rather than something the editor mediates in screen coordinates by hand (`src/ui/ChordDrag.h`,
+2026-08-02 - see the chord generator section below for why that mattered), the same mechanism
+the audition tray's own drags use, and both suppress the strip's drag-off-to-clear so a gesture
+aimed at the arp can never delete a chord.
 
 **Only the left end of a bar folds it** (2026-07-30, Owen's ask). `SectionBar::hitTest`
 narrows the button to `foldZone()`, the chevron and the caption, 92 px wide at the narrowest
@@ -533,23 +564,44 @@ the table instead. `sectionHeight()` is a switch (Controls adds the knob row whe
 unfolded, the arp asks its panel; Pads is a fixed `padRowH` now that Big is gone), and
 `resized()` lays each bar out in a block of its own, because what rides each bar differs.
 
-The keybed was the first to do this and keeps two extras. Detached, `PianoKeyboard`'s 185 px
+The keybed was the first to do this and keeps one extra. Detached, `PianoKeyboard`'s 185 px
 key-height cap comes off: dragging that window is meant to resize the keys, which is the whole
-point of the feature for a player working with one mouse. And the **Wheels** chip and a second
-**Size** selector travel with it (`Section::travellers`), because they are the keybed's, not
-the editor's. Every detached window carries the button that undoes the detach on a strip at
-the top, so the control that re-docks a section is never in the window you are not looking at.
+point of the feature for a player working with one mouse. And the **Wheels** chip travels with
+it (`Section::travellers`), because it is the keybed's, not the editor's. Size and Octave used
+to need a second, `detachedOnly` traveller of their own for exactly the same reason - the
+keybed's key count lived in the Controls section, which is precisely what you fold away before
+detaching the keyboard - but since 2026-08-02 both live directly on the Keyboard bar itself
+(Owen: "the size can go down to the header of the keyboard button"), so they simply travel with
+the bar like Wheels always has; `Section::Traveller::detachedOnly` and the second Size combo it
+existed for (`detachedSizeBox`, accessible name "Keybed size") are both deleted. Every detached
+window carries the button that undoes the detach on a strip at the top, so the control that
+re-docks a section is never in the window you are not looking at.
 
 Controls that belong to the *editor* rather than to the content stay behind on the bar: the
-arp's **A** / **B** line switches, its **A / B** tabs, **Hold off** and **Launch Quantize**,
-the pads' page buttons, the generator's **Fill** / **Regen** / **Generator** chips and its
-**Key** combo, and the Controls bar's **Knobs** chip, **Tempo**, **Root**, **Scale**, **Scale
-Lock**, **Voices**, **MIDI Ch** and theme swatch (the last six moved from the Controls band
-onto this bar 2026-08-02, alongside the generator's **Mode** and **Scale Compliance** leaving
-the Pads bar for its window alone, and the arp's old target-line chip leaving it for the arp
-bar's own tabs). Paging a strip that is off in a window of its own is one click either
+arp's **A** / **B** switches, **Hold off** and **Launch Quantize**, the pads' page buttons,
+**Humanize** and its velocity range, the generator's **Fill** / **Regen** / **Generator** chips
+and its **Key** combo, and the Controls bar's **Tempo**, **Sync**, **Root**, **Scale**, **Scale
+Lock**, **Voices**, **MIDI Ch**, **Instrument** chip (Keys Host only) and theme swatch. Tempo
+through MIDI Ch moved from the Controls band onto this bar 2026-08-02, alongside the generator's
+**Mode** and **Scale Compliance** leaving the Pads bar for its window alone, and the arp's old
+target-line chip leaving it for the arp bar's own A/B; Size, Octave and Humanize left the
+Controls band the same day for the Keyboard and Pads bars, and the **Knobs** chip that used to
+fold the Controls knob row is deleted outright rather than moved, since that row is
+unconditional now. Paging a strip that is off in a window of its own is one click either
 way, so the pages are no more the content's than the swatch is. A bar whose section is away
 says so, in the space its own controls did not use.
+
+**A host embedding `KeysEditor` can add to a bar too, since 2026-08-02.** `onBuildInstrumentMenu`,
+`instrumentName` and `refreshInstrumentChip()` are public hooks a host sets to get an
+**Instrument** chip on the Controls bar - Keys Host is the one that does, reproducing its old
+Load/Show-Hide/Eject controls as a popup menu off the chip instead of a bar of its own (see
+`docs/KEYS_HOST_DESIGN.md`). Plain Keys (the VST3, the plain Standalone) never sets these, so
+the chip stays invisible and their Controls bar is unchanged. This is the first extension point
+`KeysEditor` has ever exposed to something embedding it - the same functional shape
+`ChordPads::onExtraMenuItems` already used internally - and it is the one *elastic* control on
+the Controls bar: `resized()` measures the tempo group and the Root…MIDI Ch group first (both
+fixed-width), and the chip gets whatever space is left over, clamped to a readable range, so a
+long instrument name can never push the fixed groups around.
 
 All of it (folds, detached window bounds) is in `KeysProcessor::LayoutState` rather than the
 editor, so it survives the window closing, and it is saved in the session tree rather than as
@@ -796,9 +848,11 @@ coming back:
   back onto it. That wiring left with Compliance; `StepComboBox.h` is unused now, kept for
   whichever future control needs the same trick (see **Files** above). All four remaining
   controls stay live with the Pads section folded, so folding the strip cannot take the card
-  menu and the bar together, which would be the whole generator. `minWidthForView()` still
-  returns 1070, the floor set the day the Generator chip joined Fill and Regen (2026-07-30) -
-  Keys Host asks for that number rather than copying it.
+  menu and the bar together, which would be the whole generator. The Pads bar's own arithmetic
+  in `minWidthForView()` still wants 1070, the floor set the day the Generator chip joined Fill
+  and Regen (2026-07-30) - but the function itself returns 1280 now, since the Controls bar
+  overtook it as the binding constraint on 2026-08-02, the day the Tempo Sync chip and three
+  more captions joined that bar. Keys Host asks for that number rather than copying it.
 - **Clear page is removed** (2026-08-01). It had already moved once, from a chip on the Pads
   bar to a button in the generator's window (2026-07-30), because it wiped every unlocked pad
   on the page with no `juce::UndoManager` anywhere in Keys to catch a slip. The tray gave the
@@ -929,15 +983,23 @@ and — the point that matters — every session written *by* those builds loads
 migration at all: no `line` children means B and C keep their defaults, which with both
 switched off is precisely the arpeggiator that session was saved from.
 
-`bpm` (40..240, default 120) is registered last, though it stopped being the newest when the
-rate's two arrived. Last is tidiness and not compatibility: JUCE derives a VST3 parameter's
-id by hashing its string id, so saved state and existing automation follow that id rather
-than the position, and all a position still decides is the order a host's generic list comes
-out in. `chordStrumMax` inserts mid-list regardless. It is the tempo anything timed in beats
+`bpm` (40..240, default 120) was registered last, though it stopped being the newest when the
+rate's two arrived, until `bpmSync` (`AudioParameterBool`, "Tempo Sync", default true) was
+appended right after it 2026-08-02, so `bpmSync` holds that spot now. Last is tidiness and not
+compatibility: JUCE derives a VST3 parameter's id by hashing its string id, so saved state and
+existing automation follow that id rather than the position, and all a position still decides
+is the order a host's generic list comes out in. `chordStrumMax` inserts mid-list regardless.
+`bpm` is the tempo anything timed in beats
 runs at when there is no transport to follow, which is every
-moment in the standalone and every stopped transport in a DAW; a host that is *playing*
-still wins, and the arp in Hz follows neither. It replaced the arp's last-known-host-tempo
-fallback, which nothing in the standalone could ever reach and nobody anywhere could change.
+moment in the standalone and every stopped transport in a DAW, or whenever `bpmSync` is off; a
+host that is *playing* still wins while `bpmSync` is on (the default, and exactly what Keys did
+before the parameter existed), and the arp in Hz follows neither one. `bpm` replaced the arp's
+last-known-host-tempo fallback, which nothing in the standalone could ever reach and nobody
+anywhere could change; `bpmSync` is the opt-out from the host tempo that `bpm` alone never had.
+It is threaded into `ArpEngine::Params::followHost` and `KeysProcessor::advanceChainClock`
+(the progression chain reads the same escape hatch), and `migrateBpmSync` backfills a session
+saved before it to the default, the same shape `migrateRateMode` uses for the rate's own two
+appended parameters above.
 
 A growing set is **registered but no longer read**, kept only so a session (and any host
 automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,

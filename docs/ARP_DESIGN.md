@@ -60,11 +60,13 @@ came out, and the count now lives in one place, `KeysProcessor::uiArpLines`.
   counting it, Hold off greys correctly. A session saved with C running opens with C silent,
   which is the right trade against an arpeggiator no control on screen can stop.
 - **`arpCurrentLine()` clamps to `uiArpLines`**, so a session saved with C current opens on B -
-  a current line nothing on screen can point at would leave the arp bar's A/B tabs (and a pad's
-  **Send to arp slot** menu item) with no line to default to.
+  a current line nothing on screen can point at would leave a pad's **Send to arp slot** menu
+  item with no line to default to. The arp bar's A/B tabs no longer read it at all (2026-08-02,
+  seventh pass): they became each line's own On switch, so there is nothing left on that bar for
+  a "current line" to mean.
 - **`layout.arpMacro` defaults true**, so a fresh instance opens with both lines on screen over
-  the strip you drag from. The A/B tabs are still how you reach a line's step lanes and twelve
-  slots, which are per-line and have nowhere to live in a row.
+  the strip you drag from. Each macro card's own **Details** button is how you reach a line's
+  step lanes and twelve slots, which are per-line and have nowhere to live in a row.
 
 Raising `uiArpLines` back to 3 is all it would take to bring C back.
 
@@ -182,24 +184,36 @@ Two things this deliberately does not change:
 
 ### On screen
 
-- **A and B on the arp bar**, one per line's `arpOn`. On the bar, like the single On was, so
-  a line can be brought in or out with the section folded. **Hold off stays one button** and
-  releases every line and every chain. Beside it since 2026-08-02: **All Off**, which switches
-  every line off *and* lets go of everything, and **Light keys**, a display toggle - see their
-  own sections below.
-- **A tab per line** selects which line the panel edits - band, step lanes, the twelve slots,
-  Bars, Chain. They started on the slot row and moved onto the **Arp section bar** 2026-08-02
-  (see **The macro view (the fourth tab)** below), and unlike the bar's A/B switches they hide
-  when the section folds: a tab only says which line the panel is showing, and there is nothing
-  to point at once the panel is off screen. Changing the tab tears down every APVTS attachment
-  and rebuilds it against the new line's ids, which is the same move `refreshRateMode` has
-  always made for the rate dial's two units, guard against swapping under an open drag included.
+- **A and B on the arp bar are that line's own On switch** (2026-08-02, seventh pass, Owen: "the
+  A and B on the left side of the header, I want those to be on and off buttons to turn on or
+  off the ARP ... we can remove the a and b check mark on the right side of the header"). They
+  used to be a pure navigation tab - selecting which line the panel edited - with a separate
+  lettered On chip doing the actual switching a few pixels away, near Hold off: two controls for
+  one job, one of them a checkmark easy to miss. The chip is gone; clicking A or B now toggles
+  that line's `arpOn` / `arp2On` through an ordinary `ButtonAttachment`, the same shape every
+  other APVTS-backed bar toggle in this file uses. Being a power switch rather than a navigation
+  control changes what folding the section means for them too: they **never hide with the
+  fold**, the same "reach for it while playing" case BPM and Quantize already had on this bar,
+  and they no longer select a line for editing at all - there is no `onClick` left on them.
+  They stay chord drop targets regardless: dropping a card on a letter still hands it to that
+  line whether it is on or off. **Hold off stays one button** and releases every line and every
+  chain. Beside it since 2026-08-02: **All Off**, which switches every line off *and* lets go of
+  everything, and **Light keys**, a display toggle - see their own sections below.
+- **Each macro card's own Details button opens that line's deep view** - band, step lanes, the
+  twelve slots, Bars, Chain - now that A and B no longer do (2026-08-02, seventh pass, Owen:
+  "maybe we can add another button on the bottom by anchor, like details, and that can open up
+  the detailed arpeggiator view"). It sits beside Anchor in the card's bottom sub-row and calls
+  the same `setEditLine` a tab click used to call. Changing the edited line still tears down
+  every APVTS attachment in the single-line band and rebuilds it against the new line's ids -
+  the same move `refreshRateMode` has always made for the rate dial's two units, guard against
+  swapping under an open drag included - only the control that triggers it moved.
 - **The Pads bar's letter chip, which used to say which line a chord-card click fed, is gone**
   (2026-08-02, same pass that moved the tabs). A click stopped feeding a line at all earlier the
   same day (see **A click never feeds a line** below), which left the chip naming nothing but a
   right-click menu's default target - Owen asked for it removed along with Mode and Scale
   Compliance ("remove the scale and percentage and letter b from pads header"). The current line
-  is the arp bar's own A/B tabs now.
+  is set only by a drop or a Details click now; nothing on the arp bar shows it, since A and B
+  read as On/Off rather than as a selection.
 - **Drag a chord card onto a slot** to bind it there, **onto a tab**, or **onto a line's row in
   the macro view**, to hand it over now. Stock `juce::DragAndDropTarget` on each of the three
   (2026-08-02): the slot cards, the line tabs and the macro rows take the drop themselves, and
@@ -229,17 +243,27 @@ Quantize stayed behind), and the twelve slots and the Copy / Clear / Stop / Chai
 belong to the per-line tabs. Each card draws its own captioned ruled frame - **LINE A**, **LINE B**, filled, with the
 old outer LINES box gone, since a frame around both was what made two arpeggiators read as one
 (*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
-panel's width cannot hold what used to be one full-width row: the line switch, a detented rate
-knob with `<` `>` and its Sync/Hz switch, and the shape with steppers of its own, under
-**RATE / SHAPE** micro-caps so the two stepper pairs read as belonging to their words;
-**eight knobs** under their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time,
-H.Vel; and the rate's **Dot / Trip / Anchor** with the held chord along the bottom. Owen's
+panel's width cannot hold what used to be one full-width row: a detented rate knob with `<`
+`>` and its Sync/Hz switch, and the shape with steppers of its own, under **RATE / SHAPE**
+micro-caps so the two stepper pairs read as belonging to their words; **eight knobs** under
+their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel; and the rate's
+**Dot / Trip / Anchor**, a **Details** button and the held chord along the bottom. Owen's
 brief when the first cut carried three lines: *"what other knobs can we have? should be like
-regular arp settings."* The row carried Latch, PLAY and Chain for a day; all three still live
-with the line - Latch and **Play** on the band (Play beside Retrigger, the same `arpKeys`),
-Chain on the action row. And since the same fourth pass, **a click on a chord card never
-feeds a line** - the drag (onto a card, a letter tab, or a slot) is the only way in, and a
-click just plays the pad.
+regular arp settings."* The row carried Latch, PLAY, Chain and its own On switch for a day;
+Latch and **Play** still live on the band (Play beside Retrigger, the same `arpKeys`) and Chain
+on the action row, but the card's own On switch (`onButton`) is gone outright (2026-08-02,
+seventh pass) - the day the A/B tabs on the bar became that line's actual On switch, two
+on-switches for the same parameter, one of them buried in a card, was a control to get wrong
+twice. **A line that is off scrims its card instead of losing a control.**
+`paintOverChildren` fills the card body (not the LINE A / LINE B caption strip, which stays
+legible) with a translucent grey, skipped while the card is a drop target, and touches no
+control's `setEnabled` - every knob, the rate dial and the card itself as a drop target stay
+fully live, both so a rate can be dialled in before switching the line on and because a chord
+dropped onto an off line has to land (see **A line that is off holds its chord**, above).
+**Details**, added the same day beside Anchor, is now the only way from a macro card back to
+that line's deep view, since A and B stopped navigating anything. And since the fourth pass,
+**a click on a chord card never feeds a line** - the drag (onto a card, onto A or B, or onto a
+slot) is the only way in, and a click just plays the pad.
 
 Four of those knobs are not what the first cut had (both passes 2026-08-02). **Oct** is
 `arpOctShift`, a transpose centred at zero, not `arpOctaves`, which stacks copies upward and
@@ -270,10 +294,11 @@ Four decisions worth keeping:
 2. **The panel does not grow.** `arpMacroTotalH` replaces the two band rows rather than joining
    them. A fourth band would have taken Pattern shape past the default window height, which is
    the whole reason this is a tab and not a section.
-3. **Each row's attachments are bound to its own line for good**, where the band's rebind on
-   every tab change. Two lines at once cannot each be "the current line", so the two cannot
-   share a mechanism - and the rows are built once and hidden rather than created on demand, so
-   nothing churns when the tab moves.
+3. **Each row's attachments are bound to its own line for good**, unlike the band's, which
+   rebind whenever the edited line changes - a Details click now, where a tab click used to do
+   it. Two lines at once cannot each be "the current line", so the two cannot share a mechanism
+   - and the rows are built once and hidden rather than created on demand, so nothing churns
+   when the edited line moves.
 
 4. **The knob strip is reserved out of the row before Shape takes its cut.** Laying the knobs
    last and giving the last one "whatever remains" starved it to nothing as soon as the row got
@@ -400,6 +425,18 @@ math was adversarially refuted as a pattern to copy. Requirements:
   became **Tempo**, a plain draggable number with `<` `>` steppers on the *Controls bar* itself
   (Owen: "the bpm should live in the controls header. I want it to be like the bpm in ableton,
   just a number") - it stays reachable with that section folded now, where the slider did not.
+  **A host that is playing still wins only while Tempo Sync is on** (`bpmSync`, appended
+  2026-08-02, default on - Owen: "we need a BPM sync toggle to sync with DAW"). Keys had no
+  opt-out from the host's tempo until this parameter existed; on reproduces exactly the
+  behaviour above, off pins the arp (and the progression chain, `advanceChainClock`) to the
+  Tempo field even while the host rolls, for someone who wants Keys' own clock regardless of
+  the DAW's transport. `ArpEngine::Params::followHost` carries it into the engine, replacing
+  the bare `clock.playing && clock.bpm > 0` check the branch used to make. A **Sync** chip
+  beside Tempo is the on-screen switch; while it is on and a host tempo is actually live
+  (`KeysProcessor::hostTempoLive()`), the Tempo field shows the host's own number and greys out,
+  since none of the field or its steppers can change anything in that state. Read only in Sync
+  mode - the Hz free-rate path below never looked at the host clock to begin with, so the
+  toggle changes nothing there.
 - Engine is a pure class (`ArpEngine.h`, UI-free, unit-tested like ChordGen):
   inputs = sounding-note set + params + (ppq, bpm, numSamples); output = timestamped
   note events.
@@ -560,7 +597,9 @@ and launches each in turn. One click plays the row as a twelve-chord song, which
 row of cards showing chord names has looked like it should do since the slots stopped being
 eight lettered buttons. It is **per line**: each of the three has its own chain over its own
 twelve slots, its own bar count and its own position, so three progressions can run against
-each other at three rates. The button starts the chain of whichever line the tabs are showing. `Bars` (1..16, on the action row) edits the **active** slot - the one
+each other at three rates. The button starts the chain of whichever line's detail view is open
+- reached by that card's **Details** button now, where a bar tab used to point at it. `Bars`
+(1..16, on the action row) edits the **active** slot - the one
 whose lanes the editor is showing - which a click on a card already makes it, so setting a
 length is click the card, click the plus. A card shows `x2` and up; twelve cards each saying
 `x1` would be twelve pieces of noise for the one case where the answer does not matter.
@@ -641,8 +680,8 @@ Originally 8 lettered patterns (A-H) per session. **Twelve launchable slots sinc
 cards you fire rather than letters you recall.
 
 There are twelve **per line** since 2026-08-01, so thirty-six in a session. A slot belongs to
-one arpeggiator, which is what lets the single row on screen be whichever line the tabs have
-selected rather than a shared pool the lines fight over.
+one arpeggiator, which is what lets the single row on screen be whichever line's detail view is
+open rather than a shared pool the lines fight over.
 
 A slot carries its lane data *and* a chord, a shape and a rate - the rate meaning the
 division, the unit it was captured in and, when that unit was Hz, the frequency. Launching it
@@ -732,9 +771,11 @@ line today is a **drag**, and that took the last of them off the left click 2026
   the chord to that line there and then, without going through a slot at all.
 
 Every one of these names a line. The two menu items go to the **current** line
-(`arpCurrentLine`, shown by the Arp bar's A/B tabs - it left the Pads bar with the letter chip
-2026-08-02); a drag goes to the line whose tab, macro card or slot it landed on, and makes
-that line current, because you aimed at it.
+(`arpCurrentLine` - it left the Pads bar with the letter chip 2026-08-02, and since the second
+2026-08-02 pass it is shown by the per-line panel's own **LINE A** / **LINE B** caption rather
+than the arp bar, now that A and B read as On/Off instead of a selection); a drag goes to the
+line whose tab, macro card or slot it landed on, and makes that line current, because you
+aimed at it.
 
 The held chord is tagged `arpChordTag - line` (-3, -4, -5) so it never collides with pad or
 live-card scheduling *or with another line's hold* - each is released independently, and
@@ -751,9 +792,9 @@ on the bar and not in the panel for the same reason those are: a chord can be he
 folded arp, and the only exit from it cannot be inside the section that is folded away.
 
 **It releases every line, and stops every chain.** With more than one line that is a decision rather
-than an accident: a Hold off that let go of only the line the panel happened to be showing
-would leave the other two droning, and the tabs that would name them are exactly what folding
-the section takes away. One button, one meaning. The editor's timer enables it whenever *any*
+than an accident: a Hold off that let go of only the line whose panel happened to be open would
+leave the other one droning, and the arp bar's A/B switches say nothing about which panel that
+is any more - they read On/Off, not a selection. One button, one meaning. The editor's timer enables it whenever *any*
 line has something to let go of (`processor.anyArpHold()`, plus a launched slot on any line)
 and greys it otherwise, so it never reads as a dead target. Its accessible name is "Arp hold off", because "Hold off"
 alone says nothing to a script driving the plugin through UI Automation.
@@ -810,14 +851,21 @@ switches for a day after that, down to two when line C left the UI 2026-08-02), 
 chip, **All Off**, **Light keys**, **Launch Quantize** and a **Detach** button on its own bar.
 Folding the section destroys the editor, never the arpeggiators, which is why the switches live
 on the bar rather than inside the panel, and why they, Hold off and Quantize stay put when
-their section folds. They are not alone in that any more: the theme swatch, Tempo, Root,
-Scale, Scale Lock, Voices and MIDI Ch on the Controls bar, and Fill, Regen, Generator and Key
-on the Pads bar, all outlive their fold for the same kind of reason. **Mode**, **Scale
-Compliance** and the arp's old target-line letter chip left the Pads bar 2026-08-02 for the
-generator's window and the arp bar's own tabs respectively - the tabs are the one addition to
-this bar that does **not** outlive the fold, since they only say which line the (now hidden)
-panel below is showing. What hides with a fold is what would be a control with nothing behind
-it - the pad pages, Knobs, Wheels, and now the A/B tabs. Detach hides with it too.
+their section folds. They are not alone in that any more: the theme swatch, Tempo, Sync, Root,
+Scale, Scale Lock, Voices, MIDI Ch and the Instrument chip on the Controls bar, and Fill,
+Regen, Generator, Key and Humanize on the Pads bar, all outlive their fold for the same kind of
+reason. **Mode**, **Scale Compliance** and the arp's old target-line letter chip left the Pads
+bar 2026-08-02 for the generator's window and the arp bar's own A/B tabs respectively, and the
+tabs themselves changed jobs the same day, seventh pass: they used to be the one addition to
+this bar that did **not** outlive the fold, since all they did was say which line the (then
+hidden) panel below was showing. Owen called that redundant with the separate lettered On chip
+sitting a few pixels away ("we can remove the a and b check mark on the right side of the
+header") - that chip is gone, the tabs are the switch it used to be now, and so they outlive
+the fold too. **All** is the one navigation control left on this bar, and it alone still hides
+with the fold. What hides with a fold is what would be a control with nothing behind it - the
+pad pages, Wheels, and All. The Knobs chip that used to hide with the Controls fold is deleted
+outright (2026-08-02): the row it hid is unconditional now, so there is nothing left of it to
+hide. Detach hides with its own section too.
 Detach moves the whole panel into a resizable window (`DetachedWindow`, shared with every
 other section since 2026-07-27); a detached section takes no height in the main window, and
 the Re-dock button travels into the window with it.

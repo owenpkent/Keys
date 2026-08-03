@@ -15,7 +15,6 @@ namespace keys
 {
 namespace
 {
-    constexpr int barHeight = 44;
     constexpr int keysHeight = 640;      // the embedded editor's comfortable height
     // The height Keys Host opens at. It is no longer a *floor*: every section of the Keys
     // editor folds away, and the window follows what the folds add up to, so the real
@@ -31,7 +30,7 @@ namespace
     int maxWindowHeight()
     {
         if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-            return juce::jmax(barHeight + absMinKeysHeight, d->userArea.getHeight() - 48);
+            return juce::jmax(absMinKeysHeight, d->userArea.getHeight() - 48);
         return fallbackMaxHeight;
     }
 
@@ -386,21 +385,33 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     : juce::AudioProcessorEditor(p), host(p), keysEditor(p)
 {
     setLookAndFeel(&hostLnf);
-    instLabel.setColour(juce::Label::textColourId, skin::textDim);
-    instLabel.setFont(skin::ui(13.5f));
 
-    addAndMakeVisible(loadButton);
-    loadButton.onClick = [this] { openPicker(); };
+    // The instrument controls used to live on a bar of their own above the editor;
+    // Owen asked for them folded into the Controls section instead ("the load
+    // instrument section with all that should go in the controls submenu"). KeysEditor
+    // shows an Instrument chip only while onBuildInstrumentMenu is set, so plain Keys
+    // (no host wrapper) is untouched. We only supply the caption text and the menu
+    // contents; KeysEditor owns the chip, builds the juce::PopupMenu and shows it.
+    keysEditor.instrumentName = [this]() -> juce::String
+    {
+        // Reuse the same source of truth updateBar() used to read from: the loaded
+        // instrument's name, or the last load error when there is one. An empty
+        // string here falls through to KeysEditor's own "No instrument" caption.
+        return host.hasInstrument() ? host.instrumentName() : host.lastError();
+    };
+    keysEditor.onBuildInstrumentMenu = [this](juce::PopupMenu& m)
+    {
+        const bool loaded = host.hasInstrument();
+        if (loaded)
+            m.addSectionHeader(host.instrumentName());
 
-    addAndMakeVisible(showHideButton);
-    showHideButton.onClick = [this] { setInstrumentShown(! instShown); };
-
-    addAndMakeVisible(ejectButton);
-    ejectButton.onClick = [this] { host.ejectInstrument(); };
-
-    instLabel.setJustificationType(juce::Justification::centredLeft);
-    instLabel.setMinimumHorizontalScale(0.8f);
-    addAndMakeVisible(instLabel);
+        m.addItem("Load instrument...", true, false, [this] { openPicker(); });
+        m.addItem(instShown ? "Hide instrument GUI" : "Show instrument GUI", loaded, false,
+                  [this] { setInstrumentShown(! instShown); });
+        m.addSeparator();
+        m.addItem("Eject", loaded, false, [this] { host.ejectInstrument(); });
+    };
+    keysEditor.refreshInstrumentChip();
 
     // The full Keys editor rides along as an ordinary child; the window, not the
     // child, owns resizing (setEmbedded stops it from ever calling setSize itself).
@@ -423,7 +434,7 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     // host window narrower than the editor it embeds carves controls off the right-hand end of
     // that bar with nothing to say so.
     const int keysMinWidth = keysEditor.minWidthForView();
-    setResizeLimits(keysMinWidth, barHeight + absMinKeysHeight, 2600, maxWindowHeight());
+    setResizeLimits(keysMinWidth, absMinKeysHeight, 2600, maxWindowHeight());
     // **Open at what the editor actually needs**, not at a literal. This was
     // `barHeight + minKeysHeight` - a constant 620 that no longer had anything to do with the
     // content, so the window opened too short for it and the keyboard was simply carved off the
@@ -432,7 +443,7 @@ KeysHostEditor::KeysHostEditor(KeysHostProcessor& p)
     // what pushed it over, but the literal was the bug: any section that ever grows re-opens it.
     fitToKeysHeight(keysEditor.idealHeight());
     juce::ignoreUnused(keysHeight, minKeysHeight);
-    openInstrumentEditor(); // reflects "no instrument" too (label + bar state)
+    openInstrumentEditor(); // reflects "no instrument" too (chip caption + menu state)
 }
 
 KeysHostEditor::~KeysHostEditor()
@@ -498,9 +509,10 @@ void KeysHostEditor::closePicker()
 
 void KeysHostEditor::loadAndReport(const juce::File& file)
 {
-    const auto error = host.loadInstrument(file);
-    if (error.isNotEmpty())
-        instLabel.setText(error, juce::dontSendNotification);
+    host.loadInstrument(file);
+    // Immediate feedback (success or error, loadInstrument is synchronous); the
+    // change broadcast below repeats this once the instrument GUI has been rebuilt.
+    keysEditor.refreshInstrumentChip();
 }
 
 bool KeysHostEditor::isInterestedInFileDrag(const juce::StringArray& files)
@@ -552,7 +564,7 @@ void KeysHostEditor::openInstrumentEditor()
         instWindow->setVisible(instShown);
     }
 
-    updateBar();
+    refreshInstrumentUi();
 }
 
 void KeysHostEditor::closeInstrumentEditor()
@@ -611,21 +623,15 @@ void KeysHostEditor::setInstrumentShown(bool shown)
         if (shown)
             instWindow->toFront(false);
     }
-    updateBar();
+    refreshInstrumentUi();
 }
 
-void KeysHostEditor::updateBar()
+// The chip caption (instrumentName()) and its menu (onBuildInstrumentMenu) both read
+// live host/instShown state on demand, so there is nothing to precompute here beyond
+// asking KeysEditor to repaint the chip with whatever they currently say.
+void KeysHostEditor::refreshInstrumentUi()
 {
-    const bool loaded = host.hasInstrument();
-    showHideButton.setEnabled(loaded);
-    ejectButton.setEnabled(loaded);
-    showHideButton.setButtonText(instShown ? "Hide Instrument" : "Show Instrument");
-    if (loaded)
-        instLabel.setText(host.instrumentName(), juce::dontSendNotification);
-    else
-        instLabel.setText(host.lastError().isNotEmpty() ? host.lastError()
-                                                        : "No instrument loaded - everything still works like plain Keys",
-                          juce::dontSendNotification);
+    keysEditor.refreshInstrumentChip();
 }
 
 void KeysHostEditor::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -650,7 +656,7 @@ void KeysHostEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 void KeysHostEditor::fitToKeysHeight(int keysWanted)
 {
     const int ceiling = maxWindowHeight();
-    const int needed = juce::jlimit(barHeight + absMinKeysHeight, ceiling, barHeight + keysWanted);
+    const int needed = juce::jlimit(absMinKeysHeight, ceiling, keysWanted);
     // jmax on the max: JUCE asserts, and then misbehaves, if a minimum is ever above a maximum,
     // and `needed` is already clamped to the ceiling so the two can only meet, never cross.
     setResizeLimits(keysEditor.minWidthForView(), needed, 2600, juce::jmax(needed, ceiling));
@@ -660,32 +666,14 @@ void KeysHostEditor::fitToKeysHeight(int keysWanted)
 
 void KeysHostEditor::paint(juce::Graphics& g)
 {
+    // No header band any more: the embedded KeysEditor fills the whole window, so this
+    // is only the fallback behind it (its own background is opaque once laid out).
     g.fillAll(skin::bgBot);
-
-    // The instrument bar is a header band, same language as the editor below it.
-    const auto bar = getLocalBounds().toFloat().withHeight((float) barHeight);
-    g.setGradientFill({ skin::headerTop, 0.0f, 0.0f, skin::headerBot, 0.0f, bar.getBottom(), false });
-    g.fillRect(bar);
-    g.setColour(juce::Colours::black.withAlpha(0.55f));
-    g.fillRect(0.0f, bar.getBottom(), bar.getWidth(), 1.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.04f));
-    g.fillRect(0.0f, bar.getBottom() + 1.0f, bar.getWidth(), 1.0f);
 }
 
 void KeysHostEditor::resized()
 {
-    auto area = getLocalBounds();
-
-    auto bar = area.removeFromTop(barHeight).reduced(8, 5);
-    loadButton.setBounds(bar.removeFromLeft(160));
-    bar.removeFromLeft(8);
-    ejectButton.setBounds(bar.removeFromRight(80));
-    bar.removeFromRight(8);
-    showHideButton.setBounds(bar.removeFromRight(150));
-    bar.removeFromRight(8);
-    instLabel.setBounds(bar);
-
-    keysEditor.setBounds(area);
+    keysEditor.setBounds(getLocalBounds());
 
     if (picker != nullptr)
         picker->setBounds(getLocalBounds()); // the overlay always covers the whole editor

@@ -247,6 +247,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // does insert mid-list, so this branch moves that order regardless.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
 
+    // Tempo Sync (2026-08-02, Owen: "we need a BPM sync toggle to sync with DAW"). Keys
+    // already followed the host's tempo whenever the transport rolled and reported one - the
+    // "host that is playing always wins" comment above this parameter is describing that -
+    // so this does not add following, it adds an *escape hatch* from it. True reproduces
+    // today's behaviour exactly: the host wins while it plays a valid tempo, "bpm" above
+    // otherwise. False pins the engine to "bpm" even with the host rolling.
+    //
+    // Appended last, same reasoning as "bpm" itself just above: keep the shuffling of this
+    // layout to a minimum, since a VST3 id is a hash of the string id and does not move, but
+    // a host's generic parameter list order does.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "bpmSync", 1 }, "Tempo Sync", true));
+
     return layout;
 }
 
@@ -1407,6 +1419,8 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // be the host's last-known tempo, which was unreachable in the standalone (where
         // there is no host at all) and unchangeable everywhere.
         ap.fallbackBpm = (double) apvts.getRawParameterValue("bpm")->load();
+        // Tempo Sync: off pins every line to fallbackBpm above even with the host rolling.
+        ap.followHost = apvts.getRawParameterValue("bpmSync")->load() > 0.5f;
 
         // The engine's input is this line's buffer alone, never the merged stream: that is the
         // whole of the routing. Its output goes into midi with everything the other lines and
@@ -1427,19 +1441,29 @@ void KeysProcessor::advanceChainClock(int numSamples)
     // Tempo and bar length are the same question whichever line is asking, so they are asked
     // once and the three chains are stepped against the same answer.
     double bpm = (double) apvts.getRawParameterValue("bpm")->load();
+    // Tempo Sync: off keeps the parameter above even with the host rolling, the same escape
+    // hatch ArpEngine::process reads via Params::followHost. hostBpmLive is published below
+    // for the Controls bar to show and to grey its own stepper: neither the parameter nor a
+    // stepper drag can change anything while the host is the one actually setting the tempo.
+    const bool followHost = apvts.getRawParameterValue("bpmSync")->load() > 0.5f;
+    bool hostBpmLive = false;
     double beatsPerBar = 4.0;
     if (auto* playHead = getPlayHead())
         if (auto pos = playHead->getPosition())
         {
-            if (pos->getIsPlaying())
+            if (followHost && pos->getIsPlaying())
                 if (auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
+                {
                     bpm = *hostBpm;
+                    hostBpmLive = true;
+                }
             // A bar is four beats only in four-four. Asking the host costs nothing and is
             // the difference between a chain that lands on the bar in 3/4 and one that does
             // not; with no host to ask, four it is.
             if (auto sig = pos->getTimeSignature(); sig && sig->denominator > 0)
                 beatsPerBar = 4.0 * (double) sig->numerator / (double) sig->denominator;
         }
+    arpHostBpmLive.store(hostBpmLive, std::memory_order_relaxed);
 
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
     const double blockBeats = bpm / 60.0 / sr * numSamples;
@@ -2186,6 +2210,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     migrateStrumRange(root);
     migrateRateMode(root);
     migrateVelTrim(root);
+    migrateBpmSync(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -2339,6 +2364,31 @@ void KeysProcessor::migrateVelTrim(const juce::ValueTree& root)
     }
 }
 
+void KeysProcessor::migrateBpmSync(const juce::ValueTree& root)
+{
+    // Tempo Sync joined the tempo control on 2026-08-02: "bpmSync" decides whether a rolling
+    // host tempo can override the "bpm" parameter, and true reproduces exactly what Keys
+    // always did before this parameter existed. A session saved before it is absent, not
+    // "off" - and as ever, an absent parameter keeps the live instance's current value rather
+    // than resetting (see migrateRateMode). The repair is the same one line: write the
+    // default explicitly.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    bool saw = false;
+    for (int i = 0; i < params.getNumChildren(); ++i)
+        if (params.getChild(i).getProperty("id").toString() == "bpmSync")
+        {
+            saw = true;
+            break;
+        }
+
+    if (! saw)
+        if (auto* param = apvts.getParameter("bpmSync"))
+            param->setValueNotifyingHost(param->getDefaultValue());
+}
+
 juce::ValueTree KeysProcessor::layoutToTree() const
 {
     juce::ValueTree tree { "layout" };
@@ -2373,7 +2423,12 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     const auto flag = [&tree](const char* id, bool fallback)
     { return (bool) tree.getProperty(id, fallback); };
     layout.controls = flag("controls", true);
-    layout.knobs = flag("knobs", true);
+    // The Knobs chip that folded the knob row off is gone (2026-08-02, Owen: "make the knobs
+    // visible when you open controls"): the row is unconditional now, so a session saved with
+    // it off (knobs=false, from before the chip left) must not reopen with the knobs hidden -
+    // there is no control left on screen that could turn them back on. The field stays so the
+    // tree still round-trips cleanly; nothing reads it as false again.
+    layout.knobs = true;
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
     layout.wheels = flag("wheels", true);

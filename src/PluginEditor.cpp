@@ -26,7 +26,12 @@ namespace
     // Fixed heights of the editor's bands, shared by idealHeight() and resized() so the
     // window the folds ask for and the layout they get can never drift apart.
     constexpr int rowH = 46;                          // one row of header controls
-    constexpr int headerH = 14 + rowH * 2 + 6;        // both of them, plus label lead-in
+    // One row now, not two (2026-08-02, Owen: "I think we can remove the octave setting and
+    // the size can go down to the header of the keyboard button"): Size and Octave left for
+    // the Keyboard bar and Humanize left for the Pads bar, so what used to be Row A emptied
+    // out and Row B - Strum and its direction - is the whole band now. The few px above rowH
+    // are what the title's 48 px pair needs to centre in the band without touching either edge.
+    constexpr int headerH = rowH + 6;
     // The knob row, the bottom band of the Controls section. KnobBank::resized() spends 6 + 6
     // on the outer inset, 34 on the CC label button and 4 on the gap above it, so the knob
     // gets knobRowH - 50: 110 makes it 60 px square, and 98 makes it exactly 48.
@@ -58,20 +63,21 @@ namespace
     // because applyLayout() passes that same worst case in as the *minimum*: at 1400 the two
     // crossed over and every fully-open layout asked JUCE for a minimum above its maximum.
     //
-    // Worst case, everything open and docked, knobs on, the arp in Pattern shape (the one
-    // that opens the step editor):
+    // Worst case, everything open and docked, the arp in Pattern shape (the one that opens
+    // the step editor - the knob row no longer has an off state to leave out of this):
     //     margins            10 + 10                        =   20
     //     four bars          4 * SectionBar::height (34)     =  136
     //     three gaps         3 * 6                           =   18
-    //     Controls           4 + headerH 112 + 6 + 110       =  232
+    //     Controls           4 + headerH 52 + 6 + 110        =  172
     //     Arp                4 + ArpPanel::preferredHeight() =  584   (arpPatternH 564 + 16)
     //     Pads               4 + padRowH                     =  100
     //     Keyboard           4 + dockedKeybedH               =  193
     //                                                          ----
-    //                                                          1283
-    // It was 1473 while Big cards existed and the Pads line could read 290. 1800 leaves room
-    // for the arp to grow a lane row or two without this becoming a bug again, and the slack
-    // above idealHeight() is all instrument body under the keys.
+    //                                                          1223
+    // It was 1283 with the Controls band's second row still in it, and 1473 before that while
+    // Big cards existed and the Pads line could read 290. 1800 leaves room for the arp to grow
+    // a lane row or two without this becoming a bug again, and the slack above idealHeight()
+    // is all instrument body under the keys.
     constexpr int maxEditorHeight = 1800;
 
     juce::StringArray channelItems()
@@ -176,10 +182,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     wire(secKeyboard, keyboardBar, lay.keyboard, lay.detached, lay.detachedBounds,
          "Keyboard", "Keys Keyboard", { 420, 190 }, { 1000, 300 });
 
-    // Wheels and the second Size selector belong to the keybed, not to the window it happens
-    // to be in, so they follow it out. Owen asked for this: with them left behind, the
-    // keyboard window had nothing on it but a close box.
-    section(secKeyboard).travellers = { { &wheelsButton, 84, false }, { &detachedSizeBox, 104, true } };
+    // Wheels belongs to the keybed, not to the window it happens to be in, so it follows it
+    // out. Owen asked for this: with it left behind, the keyboard window had nothing on it
+    // but a close box. Size travelled the same way here until 2026-08-02, via a second combo
+    // built for the detached window alone; it is a plain bar control now (sizeBox, laid out
+    // above) and travels through the ordinary bar mechanism instead.
+    section(secKeyboard).travellers = { { &wheelsButton, 84 } };
 
     // The pad strip paints no card of its own, so its holder draws one behind it.
     padsHolder.painter = [this](juce::Graphics& g)
@@ -217,7 +225,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     title.setColour(juce::Label::textColourId, skin::text);
     controlsHolder.addAndMakeVisible(title);
 
-    addCombo(controlsHolder, sizeBox, sizeLabel, "Size", sizeItems(), "size", sizeAtt);
+    // Size moved off this band entirely on 2026-08-02 (Owen: "the size can go down to the
+    // header of the keyboard button") - see the Keyboard section below, where it is built as
+    // an editor child alongside Octave rather than here.
     // Root, Scale, Voices and MIDI Ch ride the Controls *bar* (2026-08-02, Owen's ask), so
     // they are the editor's children rather than the holder's: a holder travels into a
     // detached window and these must stay on the bar in the main one, the theme swatch's
@@ -240,17 +250,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // whole of it, and "CH" beside a channel number is unambiguous in context.
     channelLabel.setText("CH", juce::dontSendNotification);
 
-    styleLabel(octaveLabel, "Octave");
-    controlsHolder.addAndMakeVisible(octaveLabel);
-    octaveSlider.setSliderStyle(juce::Slider::IncDecButtons);
-    octaveSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 46, 26);
-    octaveSlider.setRange(-5, 5, 1);
-    controlsHolder.addAndMakeVisible(octaveSlider);
-    octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "octave", octaveSlider);
+    // Octave went with Size the same day, to the Keyboard bar - see below.
 
-    // Scale Lock rides the Controls bar beside the Scale it locks to (2026-08-02); Humanize
-    // stays in the band. Sustain and Exclusive ride the Keyboard bar, outside every fold,
-    // because they are what you reach for while playing.
+    // Scale Lock rides the Controls bar beside the Scale it locks to (2026-08-02). Humanize
+    // rides the *Pads* bar now (2026-08-02, second pass - see below). Sustain and Exclusive
+    // ride the Keyboard bar, outside every fold, because they are what you reach for while
+    // playing.
     //
     // "Lock", not "Scale Lock": the bar cannot spare the width for both words, and it sits
     // immediately right of the Scale box it belongs to. The accessible name keeps the full
@@ -258,7 +263,6 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     scaleLockButton.setButtonText("Lock");
     scaleLockButton.setTitle("Scale Lock");
     addAndMakeVisible(scaleLockButton);
-    controlsHolder.addAndMakeVisible(humanizeButton);
     addAndMakeVisible(sustainButton);
     addAndMakeVisible(latchButton);
     addAndMakeVisible(chordExclusiveButton);
@@ -281,8 +285,18 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Humanize amounts: each note picks a random velocity in the [min, max] range (a
     // two-handle slider) and a micro-timing offset up to Timing ms. The range slider has
     // no APVTS attachment (two values), so it is synced to the params by hand.
-    styleLabel(humanizeVelLabel, "Velocity");
-    controlsHolder.addAndMakeVisible(humanizeVelLabel);
+    //
+    // Humanize and this range moved to the *Pads* bar on 2026-08-02 (Owen picked that bar,
+    // "make smaller to fit"), so both are editor children rather than the holder's - the
+    // theme swatch's rule, since a holder travels into a detached window and these must stay
+    // on the bar in the main one. "VELOCITY" does not fit the 36 px cell the label gets
+    // beside a 24 px button, so it reads as a bare number/range now; the slider's own tooltip
+    // still spells the whole thing out.
+    addAndMakeVisible(humanizeButton);
+    humanizeVelLabel.setFont(skin::micro(9.0f));
+    humanizeVelLabel.setColour(juce::Label::textColourId, skin::text);
+    humanizeVelLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(humanizeVelLabel);
     humanizeVelSlider.setRange(1, 127, 1); // style/textbox are RangeSlider's own
     humanizeVelSlider.setTooltip("Each note takes a random velocity in this range. "
                                  "Drag an end to resize it, or the middle to move it.");
@@ -294,7 +308,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         writeParam("humanizeVelMin", humanizeVelSlider.getMinValue());
         writeParam("humanizeVelMax", humanizeVelSlider.getMaxValue());
     };
-    controlsHolder.addAndMakeVisible(humanizeVelSlider);
+    addAndMakeVisible(humanizeVelSlider);
 
     // Chord-pad strum (Octavium "Drift"): spread a pad's note-ons over N ms, in a direction.
     // A range rather than one number, like Velocity above it - each chord rakes at a speed
@@ -325,6 +339,36 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // survives folding the Controls section - see bpmField.
 
     // --- Keyboard section ------------------------------------------------------------
+    // Size and Octave, on this bar (2026-08-02, Owen: "the size can go down to the header of
+    // the keyboard button"). Editor children, not the holder's, so both stay on the bar when
+    // the section detaches - the theme swatch's rule. "25 keys" etc. need no caption of their
+    // own, the way "Major" needs none beside it on the Controls bar.
+    addCombo(*this, sizeBox, sizeLabel, "Size", sizeItems(), "size", sizeAtt);
+    sizeLabel.setVisible(false);
+
+    // Octave is not a slider here: a bar control is 24 px tall, and JUCE's IncDecButtons
+    // arrows would stack to 12 px each, under the mouse-only floor. It is the BPM field's own
+    // shape instead - a caption, a `<` `>` pair and a plain read-out kept current by
+    // timerCallback(), since nothing here is an APVTS attachment.
+    octaveBarLabel.setText("OCT", juce::dontSendNotification);
+    octaveBarLabel.setFont(skin::micro(9.0f));
+    octaveBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
+    addAndMakeVisible(octaveBarLabel);
+    octPrevButton.setTitle("Octave down");
+    octNextButton.setTitle("Octave up");
+    octPrevButton.setTooltip("Shift the keybed down an octave.");
+    octNextButton.setTooltip("Shift the keybed up an octave.");
+    octPrevButton.onClick = [this] { nudgeOctave(-1); };
+    octNextButton.onClick = [this] { nudgeOctave(1); };
+    addAndMakeVisible(octPrevButton);
+    addAndMakeVisible(octNextButton);
+    octaveReadout.setTitle("Octave");
+    octaveReadout.setTooltip("How far the keybed is shifted from its default range, in octaves.");
+    octaveReadout.setFont(skin::uiSemi(14.0f));
+    octaveReadout.setColour(juce::Label::textColourId, skin::text);
+    octaveReadout.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(octaveReadout);
+
     // Performance wheels, left of the keyboard. Transient (no params/persistence): Mod
     // holds its value (CC1); Pitch bend glides back to centre when you let go.
     modWheel.setSliderStyle(juce::Slider::LinearVertical);
@@ -471,28 +515,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // ComboBoxAttachment made picking the step already showing a no-op - went with it; the
     // window drives that parameter with a plain slider and never needed it.
 
-    // On rides on the Arp *bar*, not inside the section, so folding the editor away does not
-    // take the arp's power switch with it. Same reasoning as Sustain and All Off living on
-    // the Keyboard bar.
-    // One chip per line, so bringing a line in or out of a polyrhythm is a single click on a
-    // bar that is still there with the section folded. A is the switch that has always been
-    // here, under the same parameter; B and C are new and start off, which is what makes a
-    // session saved before them sound identical.
-    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
-    {
-        const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
-        auto& b = arpOnButtons[(size_t) n];
-        b.setButtonText(letter);
-        // Distinct accessible names: two buttons reading "On" are two identical names to
-        // UI Automation, which takes the first match (see the Detach buttons for the same rule).
-        b.setTitle("Arp line " + letter);
-        b.setTooltip("Arpeggiator line " + letter + ". Lit, it arpeggiates what you play and "
-                     "whatever chord card you send it. Two lines at two rates is the "
-                     "polyrhythm; Hold off, at the end of this bar, lets both go.");
-        addAndMakeVisible(b);
-        arpOnAtts[(size_t) n] = std::make_unique<ButtonAtt>(
-            processor.apvts, KeysProcessor::arpParamId(n, KeysProcessor::apOn), b);
-    }
+    // The arp's power switch used to be a separate lettered chip here, one per line, right
+    // beside the A/B/All tabs that also named a line - Owen called that redundant on
+    // 2026-08-02 and it is gone. The tabs (`arpBarTabs`, built below) are the switch now.
 
     // Hold off rides the same bar, for the same reason (see the member declaration). It is
     // the only exit from a held chord that is on screen in the default layout, so it cannot
@@ -536,26 +561,23 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addAndMakeVisible(arpLightsButton);
 
-    // The A/B/All tabs, BPM and Launch Quantize, at the left end of the same bar (2026-08-02,
+    // The A/B tabs, BPM and Launch Quantize, at the left end of the same bar (2026-08-02,
     // Owen: "move the bpm and the a b and all into the header also. remove the 'lines'
-    // text"). See the header for the ownership and visibility story.
+    // text" - and later the same day, "I want those to be on and off buttons to turn on or
+    // off the ARP"). See the header for the ownership and visibility story: A and B are the
+    // arp's own On switches now (the ArpBarTab ctor builds the ButtonAttachment), never hide,
+    // and no longer navigate anything - that job moved to each macro card's own Details
+    // button - so there is no onClick left to give them here.
     for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
     {
         auto tab = std::make_unique<ArpBarTab>(*this, n);
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
-        tab->setTooltip("Show line " + letter + "'s own controls, step editor and slots. Drop "
-                        "a chord card here to hand it to line " + letter + ".");
-        tab->onClick = [this, n]
-        {
-            if (arpPanel != nullptr)
-                arpPanel->setEditLine(n); // fires onEditLineChanged -> refreshArpBarTabs
-            else
-            {
-                processor.setArpCurrentLine(n);
-                refreshArpBarTabs();
-            }
-        };
-        addChildComponent(*tab); // syncSectionControls shows it while the section is open
+        tab->setTooltip("Arpeggiator line " + letter + ". Lit, it arpeggiates what you play "
+                        "and whatever chord card you send it. Two lines at two rates is the "
+                        "polyrhythm; Hold off, at the end of this bar, lets both go. Drop a "
+                        "chord card here to hand it to line " + letter + " whether it is on "
+                        "or off.");
+        addAndMakeVisible(*tab); // never hides - see syncSectionControls
         arpBarTabs[(size_t) n] = std::move(tab);
     }
     arpBarAllTab = std::make_unique<ArpBarTab>(*this, -1);
@@ -569,11 +591,18 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addChildComponent(*arpBarAllTab);
 
+    bpmBarLabel.setText("BPM", juce::dontSendNotification);
+    bpmBarLabel.setFont(skin::micro(9.0f));
+    bpmBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
+    bpmBarLabel.setJustificationType(juce::Justification::centredRight);
+    addAndMakeVisible(bpmBarLabel);
+
     bpmField.setTitle("Tempo");
-    bpmField.setTooltip("The tempo Keys runs at when there is no transport to follow: always in "
-                        "the standalone, and whenever the host is stopped. A host that is playing "
-                        "always wins, and an arp line whose rate is in Hz follows neither. Drag "
-                        "up or down to sweep it, or step it with < and >.");
+    bpmField.setTooltip("The tempo Keys runs at when there is no transport to follow, or when "
+                        "Tempo Sync beside it is off: always in the standalone, and whenever the "
+                        "host is stopped. With Sync on, a host that is playing always wins, and "
+                        "an arp line whose rate is in Hz follows neither. Drag up or down to "
+                        "sweep it, or step it with < and >.");
     addAndMakeVisible(bpmField);
     bpmAtt = std::make_unique<SliderAtt>(processor.apvts, "bpm", bpmField);
     bpmPrevButton.onClick = [this] { nudgeBpm(-1); };
@@ -583,6 +612,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         b->setTooltip("Nudge the tempo by one BPM.");
         addAndMakeVisible(*b);
     }
+
+    bpmSyncButton.setTitle("Tempo sync");
+    bpmSyncButton.setClickingTogglesState(true);
+    bpmSyncButton.setTooltip("On follows the host's tempo whenever it is playing one - what Keys "
+                             "has always done. Off keeps Keys at its own BPM control regardless "
+                             "of what the host's transport is doing.");
+    addAndMakeVisible(bpmSyncButton);
+    bpmSyncAtt = std::make_unique<ButtonAtt>(processor.apvts, "bpmSync", bpmSyncButton);
 
     quantizeBarLabel.setText("QUANTIZE", juce::dontSendNotification);
     quantizeBarLabel.setFont(skin::micro(9.0f));
@@ -605,14 +642,24 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     themeButton.onClick = [this] { showThemeMenu(); };
     addAndMakeVisible(themeButton);
 
-    // The detached keyboard's own Size selector (see the member declaration for why).
-    detachedSizeBox.addItemList(sizeItems(), 1);
-    // "Keybed size", not "Size": addCombo already titles the Controls-section one "Size", and
-    // both exist at once while the keyboard is detached. UI Automation takes the first match,
-    // so a script setting one would have been writing to whichever it found.
-    detachedSizeBox.setTitle("Keybed size");
-    detachedSizeBox.setTooltip("How many keys the keybed shows.");
-    detachedSizeAtt = std::make_unique<ComboAtt>(processor.apvts, "size", detachedSizeBox);
+    // The Instrument chip (2026-08-02, Owen: "the load instrument section with all that
+    // should go in the controls submenu"). Hidden until a host supplies
+    // onBuildInstrumentMenu; plain Keys never does. refreshInstrumentChip() owns the visible
+    // flag and the caption from there on, but the click handler and the accessible name are
+    // fixed for the chip's whole life, so they are set once, here.
+    instrumentChip.setTitle("Instrument");
+    instrumentChip.setTooltip("Load or eject the hosted instrument, or show its own window. "
+                              "Only appears when Keys is hosting one, in Keys Host.");
+    instrumentChip.onClick = [this]
+    {
+        if (! onBuildInstrumentMenu)
+            return; // the chip is hidden whenever this is null; a stray click is a no-op
+        juce::PopupMenu menu;
+        menu.setLookAndFeel(&lnf);
+        onBuildInstrumentMenu(menu);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&instrumentChip));
+    };
+    addChildComponent(instrumentChip);
 
     const auto chip = [this](juce::TextButton& b, bool& flag, const juce::String& tip)
     {
@@ -621,8 +668,6 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         b.onClick = [this, &b, &flag] { flag = b.getToggleState(); applyLayout(); };
         addAndMakeVisible(b);
     };
-    chip(knobsButton, lay.knobs, "Show or hide the eight CC knobs, the bottom row of "
-                                 "the controls band.");
     chip(wheelsButton, lay.wheels, "Show or hide the mod and pitch wheels.");
 
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
@@ -857,18 +902,34 @@ void KeysEditor::refreshSectionPanels()
 // the current line now, and refreshArpBarTabs() is what keeps them honest.
 
 // ---------------------------------------------------------------------------
-// The arp bar's A/B/All tabs (2026-08-02). TextButtons like every other bar chip, with the
-// toggle state saying which view the panel is showing, and a drop target apiece.
+// The arp bar's A/B/All tabs (2026-08-02). TextButtons like every other bar chip, with a drop
+// target apiece. A and B are the arp's own On switches (2026-08-02, second pass); All is a
+// plain view toggle with a toggle state that says whether the macro view is showing.
 
 KeysEditor::ArpBarTab::ArpBarTab(KeysEditor& o, int n)
     : juce::TextButton(n < 0 ? juce::String("All")
                              : juce::String::charToString((juce::juce_wchar) ('A' + n))),
       owner(o), line(n)
 {
-    // The names the capture script has always used for the tabs, kept through the move from
-    // the panel to the bar; the " tab" suffix is still what keeps a tab from colliding with
-    // the On chip that shares its letter.
-    setTitle(n < 0 ? juce::String("Arp all tab") : "Arp line " + getButtonText() + " tab");
+    if (line < 0)
+    {
+        // The " tab" suffix is what used to keep this from colliding with an On chip sharing
+        // its letter; there is no such chip on the All tab (it never had one), but the name
+        // stays for the capture script that already knows it.
+        setTitle("Arp all tab");
+    }
+    else
+    {
+        // A and B dropped the " tab" suffix along with the job it named: they no longer
+        // navigate the panel (that moved to each macro card's own Details button), they are
+        // the line's power switch, so the name is just the line now - no collision left to
+        // avoid. setClickingTogglesState plus this attachment is the whole control: no
+        // onClick is set anywhere, the same pattern Sustain and Exclusive use.
+        setTitle("Arp line " + getButtonText());
+        setClickingTogglesState(true);
+        onAtt = std::make_unique<ButtonAtt>(owner.processor.apvts,
+            KeysProcessor::arpParamId(n, KeysProcessor::apOn), *this);
+    }
 }
 
 void KeysEditor::ArpBarTab::paintButton(juce::Graphics& g, bool over, bool down)
@@ -915,15 +976,12 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
 
 void KeysEditor::refreshArpBarTabs()
 {
-    // Derived from the processor rather than remembered here, so a click, a drop, a session
-    // load and the panel's own view changes all land in the same place.
-    const bool macro = processor.layout.arpMacro;
-    const int line = processor.arpCurrentLine();
-    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
-        if (arpBarTabs[(size_t) n] != nullptr)
-            arpBarTabs[(size_t) n]->setToggleState(! macro && line == n, juce::dontSendNotification);
+    // A and B answer to their own ButtonAttachment now (each bound to that line's On
+    // parameter), so writing their toggle state here would fight it. Only the All tab is
+    // ours to drive: whether the macro view is showing, derived from the processor so a
+    // click, a drop and a session load all agree.
     if (arpBarAllTab != nullptr)
-        arpBarAllTab->setToggleState(macro, juce::dontSendNotification);
+        arpBarAllTab->setToggleState(processor.layout.arpMacro, juce::dontSendNotification);
 }
 
 // ---------------------------------------------------------------------------
@@ -958,14 +1016,31 @@ void KeysEditor::BpmField::paint(juce::Graphics& g)
         g.drawRoundedRectangle(b.reduced(0.5f), skin::radius, 1.0f);
     }
 
-    g.setColour(skin::text);
+    // The LookAndFeel's own disabled dim never reaches this control - it is only ever applied
+    // by the base Slider::paint, which overriding paint replaces outright - so a disabled
+    // field (Tempo Sync showing the host's number) dims its own text here instead.
+    g.setColour(isEnabled() ? skin::text : skin::textDim);
     g.setFont(skin::uiSemi(15.0f));
-    g.drawText(getTextFromValue(getValue()), getLocalBounds(), juce::Justification::centred, false);
+    g.drawText(showingHost ? juce::String(juce::roundToInt(hostBpm)) : getTextFromValue(getValue()),
+               getLocalBounds(), juce::Justification::centred, false);
 }
 
 void KeysEditor::nudgeBpm(int delta)
 {
     if (auto* p = dynamic_cast<juce::AudioParameterInt*>(processor.apvts.getParameter("bpm")))
+    {
+        p->beginChangeGesture();
+        *p = juce::jlimit(p->getRange().getStart(), p->getRange().getEnd(), p->get() + delta);
+        p->endChangeGesture();
+    }
+}
+
+// The Keyboard bar's octave stepper: the same shape as nudgeBpm, on the "octave" parameter
+// instead. No attachment reads this one - octaveReadout is a plain Label, kept current by
+// timerCallback() - so a click here only ever has this to go through.
+void KeysEditor::nudgeOctave(int delta)
+{
+    if (auto* p = dynamic_cast<juce::AudioParameterInt*>(processor.apvts.getParameter("octave")))
     {
         p->beginChangeGesture();
         *p = juce::jlimit(p->getRange().getStart(), p->getRange().getEnd(), p->get() + delta);
@@ -1003,6 +1078,21 @@ void KeysEditor::refreshArpPanel()
     arpHolder.addAndMakeVisible(*arpPanel);
     arpPanel->sendLookAndFeelChange();
     layoutArpHolder();
+}
+
+void KeysEditor::refreshInstrumentChip()
+{
+    // Visible iff a host wants the chip at all; plain Keys never sets the hook, so this is
+    // permanently false there and the click handler (built once, in the ctor) is dead code
+    // it never reaches.
+    const bool shown = onBuildInstrumentMenu != nullptr;
+    instrumentChip.setVisible(shown);
+    if (shown)
+    {
+        const juce::String name = instrumentName ? instrumentName() : juce::String();
+        instrumentChip.setButtonText(name.isNotEmpty() ? name : "No instrument");
+    }
+    resized(); // the Controls bar's own elastic width depends on whether this chip is shown
 }
 
 void KeysEditor::showThemeMenu()
@@ -1074,7 +1164,6 @@ void KeysEditor::syncSectionControls()
             s.window->setVisible(*s.open);
     }
 
-    knobsButton.setToggleState(lay.knobs, juce::dontSendNotification);
     wheelsButton.setToggleState(lay.wheels, juce::dontSendNotification);
 
     // The theme button is its own swatch: it wears the colour it sets, so the control and
@@ -1084,20 +1173,15 @@ void KeysEditor::syncSectionControls()
     themeButton.setColour(juce::TextButton::buttonColourId, ac.deep);
     themeButton.setColour(juce::TextButton::textColourOffId, ac.hot);
 
-    // Knobs rides the Controls bar and folds the bottom row of that section, so it hides
-    // with it: a chip that hid a row of a band that is not on screen would be a control with
-    // nothing behind it. The bank itself only has to answer for its own fold - the holder is
-    // already hidden with the section, and being detached is a change of parent, not of
-    // visibility.
-    knobsButton.setVisible(lay.controls);
-    knobBank.setVisible(lay.knobs);
+    // The knob bank is unconditional now (2026-08-02: the Knobs chip that used to fold it is
+    // gone), so it only has to answer for its section's own fold - the holder is already
+    // hidden with the section, and being detached is a change of parent, not of visibility.
+    knobBank.setVisible(true);
 
-    // The arp bar's A/B/All tabs navigate the panel, so they hide when it folds - the pad
-    // pages' rule. BPM and Quantize beside them stay put: they are parameters you reach for
-    // while playing, which is arp On's own argument for living on a bar at all.
-    for (auto& t : arpBarTabs)
-        if (t != nullptr)
-            t->setVisible(lay.arp);
+    // A and B never hide (2026-08-02, second pass): they are the arp's own On switches now,
+    // exactly the "reach for it while playing" case that keeps arp On and BPM live on a
+    // folded bar, and their toggle state comes from a ButtonAttachment rather than from here.
+    // All still only navigates the panel, so it keeps the pad-pages rule: hide with the fold.
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setVisible(lay.arp);
     refreshArpBarTabs();
@@ -1143,11 +1227,12 @@ int KeysEditor::sectionHeight(SectionId id) const
 
     switch (id)
     {
-        // The two header rows, plus the knob row when it is unfolded. This one expression is
-        // the whole answer for Controls: idealHeight() sums it, resized() hands it back to the
-        // holder, and layoutControlsHolder() carves it up in the same order. Write the
-        // arithmetic anywhere else and the window is the wrong size with nothing to say so.
-        case secControls:   return headerH + (processor.layout.knobs ? knobGap + knobRowH : 0);
+        // The header row, plus the knob row - unconditional since 2026-08-02, when the Knobs
+        // chip that used to fold it went. This one expression is the whole answer for
+        // Controls: idealHeight() sums it, resized() hands it back to the holder, and
+        // layoutControlsHolder() carves it up in the same order. Write the arithmetic
+        // anywhere else and the window is the wrong size with nothing to say so.
+        case secControls:   return headerH + knobGap + knobRowH;
         case secArp:        return arpHeight();
         case secPads:       return padRowH;
         case secKeyboard:   return dockedKeybedH;
@@ -1172,36 +1257,59 @@ int KeysEditor::idealHeight() const
 
 int KeysEditor::minWidthForView() const
 {
-    // One floor now, and the Pads bar is what set it (2026-07-30). It used to be 960, with the
-    // arp asking 1010 while it was docked because it carries far more controls than the player
-    // and every one of them has to stay at a full-size target. Then Root, Mode and Compliance
-    // joined Fill and Regen on the Pads bar, and that bar came out wanting the same 1010, folded
-    // or not - its controls are laid out whether or not the strip is open, and the three new
-    // ones never hide at all. So the two floors met and there is a single number again.
+    // 1280 now (2026-08-02, sixth pass): the Controls bar overtook the Pads bar as the
+    // binding constraint the day BPM's caption, Voices' and CH's captions, and the Sync chip
+    // joined it. The Pads bar's own arithmetic (below, unchanged) still wants 1070; Controls
+    // wants more, and the floor is whichever bar asks for the most.
     //
-    // The arithmetic, at the bar's own contentArea() (the window less 20 of margin, less the
-    // 92 px fold zone and the 8 px each side of it):
+    // The Pads bar, as it has since 2026-07-30 - the arithmetic, at the bar's own
+    // contentArea() (the window less 20 of margin, less the 92 px fold zone and the 8 px each
+    // side of it):
     //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 10,
     //             Compliance 74, 6, Mode 148, 6, Key 58                        = 644
     //     left    four pages at 46 + 4, 14                                     = 214
     //                                                                    total = 858
     // 1070 hands it 942, so the bar fits with 84 px of caption zone left over when the section
-    // is docked. Nothing is drawn in that zone while it is: paint() only writes "IN ITS OWN
-    // WINDOW" there, needs 90 px for it, and gets Detach's 104 back the moment the section
-    // leaves - which is 188 and fits.
+    // is docked.
     //
-    // The left group was 286 until the Big switch left it (2026-07-31). The floor stays at
-    // 1070 rather than following it down: what set 1070 is the right-hand group, which is the
-    // whole generator's reach and has not moved.
+    // The Controls bar, measured off the running app rather than assumed (Owen's window is
+    // 1072 px, essentially the old 1070 floor): at that width, after Detach 104 and Theme's
+    // 6 + 112 + 6, the bar hands resized() 711 px, of which 624 was spent (instrument chip
+    // 150 + 14, tempo group 114 + 14, tight combos 332) - 87 px of slack.
     //
-    // It was 1010 until 2026-07-30, and moved when the Generator button joined Fill and Regen
-    // on this bar. The floor is worth spending on that: everything on this end of the bar
-    // survives folding the pads away, so it is the whole generator's reach.
+    // What grew and by how much, all fixed-width and reserved before the elastic Instrument
+    // chip (see resized() - "reserve the fixed-size control first, always"):
+    //     bpm group   34 ("BPM") + 4, then the same prev/field/next as always (114),
+    //                 then 8 + 62 (Sync)              114 -> 222      (+108)
+    //     tight cells Voices and CH each gain their roomy label (44+4, 26+4)
+    //                                                  332 -> 410      (+78)
+    //                                                              total  +186
+    // 186 px more than before against 87 px of slack - the shortfall is 99, and CLAUDE.md's
+    // rule is that it must not be a starved control that pays it, so the floor rises instead.
     //
-    // The knob bank does not raise it. It wants 532 px (eight columns of 64, so each knob
-    // clears the kit's 48 px rotary floor after the column's own 16 px of inset), and the
-    // Controls holder is the full window width less 20, so this hands it 1050.
-    return 1070;
+    // The floor has to clear two cases at once, both at the *same* window width - Owen's
+    // 1070-ish, since that is what "the editor's minimum width" means:
+    //   normal day     bar = F - 359 (the offset the 1072-wide/711-bar pair above fixes),
+    //                  fixed cost with the tight cells = 222 + 14 + 14 + 410 = 660, and the
+    //                  Instrument chip absorbs whatever the bar has beyond that.
+    //   update-button  the button itself still costs 170, plus the 6 px gap already
+    //   day            reserved ahead of it, so this day has 176 px less bar to spend.
+    // Solving for the chip to still clear its own floor (60, unchanged - the one corner it
+    // was built for) on the update-button day, with a margin rather than the bare minimum
+    // (an estimate this close to the wall is not worth trusting without Owen's own window to
+    // measure against): F = 60 + 660 + 176 + 359 = 1255 at zero margin; 1280 leaves the chip
+    // at 85 px that day (25 px of slack above its floor) rather than pinned to it.
+    //
+    // What 1280 buys, worked back out at that width: the normal day actually clears the
+    // *roomy* cells (Root's caption too, the one Owen did not ask for and did not need to
+    // drop) with the chip at its full 150 px max and 33 px of bar left spare; the
+    // update-button day falls back to the tight cells - dropping Root's caption, exactly the
+    // one CLAUDE.md says to drop first - and the chip shrinks to 85 px rather than its 60 px
+    // floor. One clearly-documented degrade, and it is a tier the bar was already choosing
+    // between rather than a third one invented for this.
+    //
+    // 1400 (checked, not assumed): plenty of slack either way, same as it always was here.
+    return 1280;
 }
 
 void KeysEditor::applyLayout()
@@ -1276,7 +1384,7 @@ void KeysEditor::setSectionDetached(SectionId id, bool detach)
 
         // The Detach button travels with the section, so the window carries the control that
         // undoes it - along with anything else that belongs to the content rather than to
-        // the editor around it (the keybed's wheels and Size).
+        // the editor around it (the keybed's Wheels).
         s.holder.addAndMakeVisible(s.detachButton);
         for (auto& t : s.travellers)
         {
@@ -1297,12 +1405,7 @@ void KeysEditor::setSectionDetached(SectionId id, bool detach)
         addAndMakeVisible(s.holder);
         addAndMakeVisible(s.detachButton); // back onto the section bar
         for (auto& t : s.travellers)
-        {
-            if (t.detachedOnly)
-                s.holder.removeChildComponent(t.c); // the window's own; nothing docked shows it
-            else
-                addAndMakeVisible(*t.c);
-        }
+            addAndMakeVisible(*t.c);
     }
 
     syncSectionControls();
@@ -1403,12 +1506,6 @@ juce::Rectangle<int> KeysEditor::layoutDetachRow(SectionId id, juce::Rectangle<i
     s.detachButton.setBounds(row.removeFromRight(detachWidth).reduced(2, vInset));
     for (auto& t : s.travellers)
     {
-        // A detachedOnly traveller has no parent at all while the section is docked, so
-        // spending bar width on it buys nothing but a hole. The keybed's second Size box is
-        // 104 px of one: laid out on the bar it left a visible gap between Wheels and All Off,
-        // for a combo that is only ever shown inside the detached window.
-        if (onBar && t.detachedOnly)
-            continue;
         row.removeFromRight(6);
         t.c->setBounds(row.removeFromRight(t.width).reduced(2, vInset));
     }
@@ -1438,9 +1535,9 @@ juce::Rectangle<int> KeysEditor::holderContent(SectionId id)
 
 void KeysEditor::layoutControlsHolder()
 {
-    // The holder is the painted band, so the rows sit inside it with the same margins the
-    // editor uses. Two rows, down from three: dropping the fixed Velocity slider and the
-    // Latch toggle emptied the middle one, so the remaining controls close up.
+    // The holder is the painted band, so the row sits inside it with the same margins the
+    // editor uses. One row now, down from two: Size, Octave and Humanize all left for a bar
+    // (2026-08-02), which is what emptied Row A and shrank Row B's neighbour to nothing.
     auto header = holderContent(secControls).reduced(10, 6);
     if (header.isEmpty())
         return;
@@ -1448,8 +1545,8 @@ void KeysEditor::layoutControlsHolder()
     // The knob row comes off the bottom first, in the same order and by the same numbers
     // sectionHeight(secControls) added them, so the two cannot drift. Before the title
     // column below, which takes its full height: with the knobs still in it, the wordmark
-    // would centre itself over the whole band instead of over the two rows.
-    if (processor.layout.knobs)
+    // would centre itself over the whole band instead of over the row above it. Unconditional
+    // since 2026-08-02 - the Knobs chip that used to fold it is gone.
     {
         auto knobRow = header.removeFromBottom(knobRowH);
         header.removeFromBottom(knobGap);
@@ -1465,36 +1562,22 @@ void KeysEditor::layoutControlsHolder()
     }
     header.removeFromLeft(6);
 
-    auto rowA = header.removeFromTop(rowH);
-    header.removeFromTop(3);
-    auto rowB = header.removeFromTop(rowH);
+    // One row: Strum and its direction, the chord-pad rake. Everything else that used to
+    // share these two rows - Size, Octave, Humanize and its velocity range, Root, Scale,
+    // Scale Lock, Voices, MIDI Ch, BPM - has a bar of its own now. A control has one home,
+    // and a second setBounds would fight it.
+    auto row = header.removeFromTop(rowH);
 
-    const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
+    const auto cell = [](juce::Rectangle<int>& r, int w, juce::Label& lab, juce::Component& ctl)
     {
-        auto c = row.removeFromLeft(w);
-        row.removeFromLeft(8);
+        auto c = r.removeFromLeft(w);
+        r.removeFromLeft(8);
         lab.setBounds(c.removeFromTop(14));
         ctl.setBounds(c);
     };
-    const auto toggleCell = [](juce::Rectangle<int>& row, int w, juce::Component& ctl)
-    {
-        auto c = row.removeFromLeft(w);
-        row.removeFromLeft(8);
-        ctl.setBounds(c.withTrimmedTop(14));
-    };
 
-    // Root, Scale, Scale Lock, Voices and MIDI Ch left this row for the bar on 2026-08-02,
-    // which is why it is down to two cells. They are not laid out here at all any more: a
-    // control has one home, and a second setBounds would fight the bar's.
-    cell(rowA, 88, sizeLabel, sizeBox);
-    cell(rowA, 120, octaveLabel, octaveSlider);
-
-    toggleCell(rowB, 96, humanizeButton);
-    cell(rowB, 208, humanizeVelLabel, humanizeVelSlider);
-    cell(rowB, 150, chordStrumLabel, chordStrumSlider);
-    cell(rowB, 100, chordStrumDirLabel, chordStrumDirBox);
-    // BPM's 170 px cell was the last thing on this row until 2026-08-02; the tempo is a
-    // number on this section's bar now, and the row keeps the slack.
+    cell(row, 150, chordStrumLabel, chordStrumSlider);
+    cell(row, 100, chordStrumDirLabel, chordStrumDirBox);
 }
 
 void KeysEditor::layoutPadsHolder()
@@ -1584,6 +1667,29 @@ void KeysEditor::timerCallback()
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());
     keyboard.setRange(sizeSpecs[sizeIdx].low, sizeSpecs[sizeIdx].count);
 
+    // The Keyboard bar's octave read-out: no attachment drives it (it is a plain Label, not
+    // a slider), so it is kept current here like every other live number on a bar.
+    const int oct = (int) apvts.getRawParameterValue("octave")->load();
+    octaveReadout.setText((oct > 0 ? "+" : "") + juce::String(oct), juce::dontSendNotification);
+
+    // Tempo Sync (2026-08-02, Owen: "we need a BPM sync toggle to sync with DAW"). Sync on and
+    // a host tempo actually live this block: the field shows the host's number and the drag
+    // and the < > steppers grey out, since none of the three can change anything while the
+    // host is the one setting the tempo. Otherwise the field edits "bpm" exactly as it always
+    // has. Polled here like every other live bar readout: hostTempoLive() is written on the
+    // audio thread every block and can flip on its own as a host starts or stops rolling.
+    {
+        const bool hostLive = apvts.getRawParameterValue("bpmSync")->load() > 0.5f
+                             && processor.hostTempoLive();
+        bpmField.showingHost = hostLive;
+        bpmField.hostBpm = processor.currentTempo();
+        bpmField.setEnabled(! hostLive);
+        bpmPrevButton.setEnabled(! hostLive);
+        bpmNextButton.setEnabled(! hostLive);
+        if (hostLive)
+            bpmField.repaint(); // the only thing that can move this number is the host itself
+    }
+
     // Push shared performance config into the playing surface.
     const bool sus = apvts.getRawParameterValue("sustain")->load() > 0.5f;
     keyboard.setScaleLock(apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
@@ -1666,13 +1772,15 @@ void KeysEditor::timerCallback()
 
     // Keep the two-handle velocity range synced to its params and show the numbers. With
     // Humanize off the two ends are one value as far as playing goes, so read out the
-    // midpoint rather than a range that is not being spread over.
+    // midpoint rather than a range that is not being spread over. No "VELOCITY" prefix since
+    // this moved to the Pads bar (2026-08-02): a bare number/range is what fits a 36 px cell,
+    // and humanizeVelSlider's own tooltip still spells the whole thing out.
     const int vmin = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
     const int vmax = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
     humanizeVelSlider.setMinAndMaxValues(vmin, vmax, juce::dontSendNotification);
-    humanizeVelLabel.setText(hum ? "VELOCITY  " + juce::String(juce::jmin(vmin, vmax)) + "-"
+    humanizeVelLabel.setText(hum ? juce::String(juce::jmin(vmin, vmax)) + "-"
                                        + juce::String(juce::jmax(vmin, vmax))
-                                 : "VELOCITY  " + juce::String((vmin + vmax) / 2),
+                                 : juce::String((vmin + vmax) / 2),
                              juce::dontSendNotification);
 
     // Strum is the same shape: two params, one band, the numbers in the label. Both ends
@@ -1806,53 +1914,106 @@ void KeysEditor::resized()
         bar.removeFromRight(6);
         if (updateButton.isVisible())
             updateButton.setBounds(bar.removeFromRight(170).reduced(0, 1));
-        // Knobs folds the bottom row of this section. It sits at the left end of the bar's
-        // free space, which on this bar was several hundred px of caption zone doing nothing:
-        // a chip riding a bar costs the window no height, which is what let the knobs give up
-        // a section of their own without giving up the fold.
-        knobsButton.setBounds(bar.removeFromLeft(66).reduced(0, 2));
-        bar.removeFromLeft(14);
+
+        // Root, Scale, Lock, Voices and MIDI Ch's two sizes, decided by measuring rather than
+        // assuming (2026-08-02, Owen's ask - and "I think we can resize the elements down"
+        // when they would not fit at his window width). Computed *before* laying anything out
+        // on the left: the Instrument chip below needs to know how much room this group and
+        // the tempo group are about to claim before it can work out what is left for it.
+        //
+        // Root keeps a caption in the roomy set alone now - "C" says nothing on its own, but
+        // it is the one caption Owen did not ask for (2026-08-02: "BPM and Off and [Voices]
+        // ... needs labels"), so it is the one that drops first under width pressure. Voices
+        // and CH are captioned in *both* sets: Keys Host runs in tight, and a caption that
+        // only ever showed in the roomy set nobody reaches was not a caption Owen could see.
+        // Scale and Lock never get one: "Major" and "Lock" are their own labels.
+        constexpr int gap = 8, lblGap = 4;
+        struct Cell { int label, box; };
+        // Voices is the widest of the small boxes because "Off" plus a chevron is wider
+        // than the digits either side of it in the list - measured, not guessed: at 52 it
+        // drew "..." while every other value fitted, which is the failure a combo makes
+        // instead of complaining.
+        //
+        // Root and CH were 48 and 48 here (44 and 44 tight) and both drew "..." in every
+        // state, which is the same failure again and had been there since they moved to the
+        // bar: a chevron plus JUCE's own padding costs a combo about 38 px before a single
+        // glyph is drawn, so 48 cannot hold even "C". Root has to fit "A#" and CH has to fit
+        // "16", so they are sized for their *widest* value, not the one selected when you
+        // happen to look. The 44/26 label widths are proven at this same font from the
+        // roomy set they were built for - reused rather than re-guessed for tight's copies.
+        constexpr Cell roomy[] = { { 34, 58 }, { 0, 96 }, { 0, 62 }, { 44, 68 }, { 26, 56 } };
+        constexpr Cell tight[] = { {  0, 54 }, { 0, 76 }, { 0, 56 }, { 44, 62 }, { 26, 52 } };
+        const auto widthOf = [](const Cell (&cells)[5])
+        {
+            int w = gap * 4;
+            for (const auto& c : cells)
+                w += c.box + (c.label > 0 ? c.label + lblGap : 0);
+            return w;
+        };
+
+        // The Instrument chip (2026-08-02, Owen: "the load instrument section with all that
+        // should go in the controls submenu"), in the cell Knobs vacated. It is the only
+        // *elastic* control left on this bar, so - "reserve the fixed-size control first,
+        // always" - the tempo/sync group and the keyboard-settings combos above (one of two
+        // fixed widths) are measured first, and the chip gets whatever the bar has left over,
+        // clamped to a readable range. Getting this backwards is the Shape trap CLAUDE.md
+        // logs twice: an elastic control asked to leave room for its neighbours can starve
+        // one of them to a combo drawing "...". Reserve it at its *widest*, so a long
+        // instrument name never pushes the combos to a different size than a short one, but
+        // reserve it only when a host has actually supplied the hook: the chip and its
+        // trailing gap are both inside the `if` below, so charging plain Keys 164 px for a
+        // chip it never shows would drop Voices and CH to the caption-less tight set on the
+        // bar Owen ships, to buy nothing.
+        //
+        // BPM's caption and the Sync chip (2026-08-02, this bullet) grew this group from 114
+        // to 222: label "BPM" (34, reusing Root's own roomy width - both are three-to-four
+        // letters at the same font, and Root's is already proven not to ellipsise) + 4 px
+        // gap, then the same prev/field/next as always, then an 8 px gap and Sync at 62 (Fill
+        // and Regen's own proven width for a four-letter bar chip, not a checkbox-style
+        // ToggleButton - there is no width here for one).
+        constexpr int bpmGroupW = 34 + 4          // "BPM" + gap
+                                 + 26 + 3 + 56 + 3 + 26  // prev, gap, field, gap, next
+                                 + 8 + 62;          // gap, Sync
+        // chipMin stays 60 (unchanged since the update-button corner it was built for) - see
+        // minWidthForView() for why the floor, not this clamp, absorbs the growth above.
+        // Everywhere but that one corner the clamp still lands on chipMax.
+        constexpr int chipMin = 60, chipMax = 150, bigGap = 14;
+        const int chipCell = onBuildInstrumentMenu != nullptr ? chipMax + bigGap : 0;
+        const int spareForChipAndCombos = bar.getWidth() - bpmGroupW - bigGap;
+        const bool roomForLabels = (spareForChipAndCombos - chipCell) >= widthOf(roomy);
+        const auto& cells = roomForLabels ? roomy : tight;
+        const int chipW = juce::jlimit(chipMin, chipMax,
+                                       spareForChipAndCombos - bigGap - widthOf(cells));
+
+        instrumentChip.setVisible(onBuildInstrumentMenu != nullptr);
+        if (onBuildInstrumentMenu)
+        {
+            instrumentChip.setBounds(bar.removeFromLeft(chipW).withSizeKeepingCentre(chipW, 24));
+            bar.removeFromLeft(bigGap);
+        }
+        // No host hook: plain Keys. The cell the chip would have taken is simply not spent,
+        // and the tempo group below starts where Knobs used to sit - the bar is otherwise
+        // exactly what it always was here.
+
         // The tempo, at the head of the plugin the way a DAW puts it at the head of the
         // transport (2026-08-02, Owen's ask). Never hidden with this section: it is a
         // parameter you reach for while playing, the arp On argument, and the arp reads it
-        // with its own section folded away.
+        // with its own section folded away. BPM's caption sits right against the stepper the
+        // way Root's does against its combo (place(), below); Sync follows the field it
+        // labels rather than leading it, since it is a modifier on the number beside it and
+        // not a fifth thing to read before the number itself.
+        bpmBarLabel.setBounds(bar.removeFromLeft(34).withSizeKeepingCentre(34, 24));
+        bar.removeFromLeft(lblGap);
         bpmPrevButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
         bar.removeFromLeft(3);
         bpmField.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
         bar.removeFromLeft(3);
         bpmNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
-        bar.removeFromLeft(14);
+        bar.removeFromLeft(gap);
+        bpmSyncButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        bar.removeFromLeft(bigGap);
 
-        // Root, Scale, Lock, Voices and MIDI Ch (2026-08-02, Owen's ask - and "I think we can
-        // resize the elements down" when they would not fit at his window width). Two sizes,
-        // and which one is used is decided by measuring, never assumed: at the editor's floor
-        // this bar has ~506 px free here, the roomy set needs 462, and the *update* button
-        // takes 170 of it the day a release lands. Rather than let that day starve the last
-        // control to nothing (the 2026-08-02 Shape trap, which had no visible symptom), the
-        // labels are what give way first - the combos keep full-size targets either way.
-        //
-        // Root, Voices and CH keep a caption in the roomy set because "C", "Off" and "1" say
-        // nothing on their own. Scale and Lock never get one: "Major" and "Lock" are their
-        // own labels.
         {
-            constexpr int gap = 8, lblGap = 4;
-            struct Cell { int label, box; };
-            // Voices is the widest of the small boxes because "Off" plus a chevron is wider
-            // than the digits either side of it in the list - measured, not guessed: at 52 it
-            // drew "..." while every other value fitted, which is the failure a combo makes
-            // instead of complaining.
-            constexpr Cell roomy[] = { { 34, 48 }, { 0, 96 }, { 0, 62 }, { 44, 68 }, { 26, 48 } };
-            constexpr Cell tight[] = { {  0, 44 }, { 0, 76 }, { 0, 56 }, {  0, 62 }, {  0, 44 } };
-            const auto widthOf = [](const Cell (&cells)[5])
-            {
-                int w = gap * 4;
-                for (const auto& c : cells)
-                    w += c.box + (c.label > 0 ? c.label + lblGap : 0);
-                return w;
-            };
-            const bool roomForLabels = bar.getWidth() >= widthOf(roomy);
-            const auto& cells = roomForLabels ? roomy : tight;
-
             const auto place = [&bar](const Cell& c, juce::Label* lab, juce::Component& ctl)
             {
                 if (lab != nullptr && c.label > 0)
@@ -1864,8 +2025,12 @@ void KeysEditor::resized()
                 bar.removeFromLeft(gap);
             };
             scaleLabel.setVisible(false); // "Major" is its own caption, in both sets
-            for (juce::Label* l : { &rootLabel, &polyphonyLabel, &channelLabel })
-                l->setVisible(roomForLabels);
+            // Root's caption is the one Owen did not ask for, so it is the one that tracks
+            // the tier switch; Voices and CH are captioned in both cells[] sets now (see
+            // above) and so are simply always on.
+            rootLabel.setVisible(roomForLabels);
+            polyphonyLabel.setVisible(true);
+            channelLabel.setVisible(true);
             place(cells[0], &rootLabel, rootBox);
             place(cells[1], nullptr, scaleBox);
             place(cells[2], nullptr, scaleLockButton);
@@ -1888,25 +2053,12 @@ void KeysEditor::resized()
     area.removeFromTop(6);
     arpBar.setBounds(area.removeFromTop(SectionBar::height));
     {
-        // On and Hold off sit on the bar, so they survive folding the section away. 24 px
-        // tall, like every other control on a bar that acts rather than folds (Sustain, All
-        // Off, Fill, Regen): contentArea() is the 34 px strip less 4 at each end, so 26 is
-        // the ceiling here and the mouse-only floor is bought in width instead - 86 px of
-        // Hold off is a bigger target than a 34 px square. The fold chips that hide with
-        // their section - the pad pages, Knobs - are still 22 (reduced(1, 2)).
+        // Hold off, All Off and Light keys sit on the bar, so they survive folding the section
+        // away. 24 px tall, like every other control on a bar that acts rather than folds
+        // (Sustain, Fill, Regen): contentArea() is the 34 px strip less 4 at each end, so 26
+        // is the ceiling here and the mouse-only floor is bought in width instead - 86 px of
+        // Hold off is a bigger target than a 34 px square.
         auto bar = layoutDetachRow(secArp, arpBar.contentArea(), true);
-        bar.removeFromRight(6);
-        // One line switch per line where a single On used to be, laid out from the right so
-        // they read A B left to right. 40 px each rather than the old 68: a letter needs no
-        // more, and the switches plus Hold off is already most of what this end of the bar can
-        // hold. Counted from uiArpLines, so a line the editor built no button for takes no
-        // width - the buttons are plain members rather than pointers, and an unbuilt one is
-        // simply never added to the editor.
-        for (int n = KeysProcessor::uiArpLines - 1; n >= 0; --n)
-        {
-            arpOnButtons[(size_t) n].setBounds(bar.removeFromRight(42).withSizeKeepingCentre(40, 24));
-            bar.removeFromRight(2);
-        }
         bar.removeFromRight(6);
         arpHoldOffButton.setBounds(bar.removeFromRight(88).withSizeKeepingCentre(86, 24));
         bar.removeFromRight(4);
@@ -1916,24 +2068,22 @@ void KeysEditor::resized()
         // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
         arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
 
-        // The tabs and Quantize, from the left (2026-08-02). The tabs are laid out only while
-        // the section is open - they hide with it, and laying them out regardless would leave
-        // Quantize orbiting a hole where they were, the pageButtons lesson next door. BPM was
-        // here for one build and is on the Controls bar now: it is the plugin's clock, and
-        // only Quantize is genuinely the arp's.
-        if (processor.layout.arp)
+        // A and B, from the left (2026-08-02, second pass): the arp's own On switches now, so
+        // - unlike All beside them - they are laid out whether or not the section is open,
+        // the same "reach for it while playing" case BPM and Quantize already were. 40 px
+        // each: a letter needs no more.
+        for (auto& t : arpBarTabs)
         {
-            for (auto& t : arpBarTabs)
-            {
-                if (t == nullptr)
-                    continue;
-                t->setBounds(bar.removeFromLeft(40).withSizeKeepingCentre(38, 24));
-                bar.removeFromLeft(4);
-            }
-            if (arpBarAllTab != nullptr)
-                arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
-            bar.removeFromLeft(14);
+            if (t == nullptr)
+                continue;
+            t->setBounds(bar.removeFromLeft(40).withSizeKeepingCentre(38, 24));
+            bar.removeFromLeft(4);
         }
+        // All still only navigates the panel, so its cell still collapses with the fold
+        // rather than leaving Quantize orbiting a hole where it was (the pageButtons lesson).
+        if (processor.layout.arp && arpBarAllTab != nullptr)
+            arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
+        bar.removeFromLeft(14);
         quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
         quantizeBarBox.setBounds(bar.removeFromLeft(92).withSizeKeepingCentre(90, 24));
         bar.removeFromLeft(8);
@@ -1987,6 +2137,21 @@ void KeysEditor::resized()
             bar.removeFromLeft(4);
         }
         bar.removeFromLeft(14);
+
+        // Humanize and its velocity range, on this bar since 2026-08-02 (Owen picked it and
+        // asked to "make smaller to fit"). A playing-feel control, the arp-On argument for
+        // never hiding with the strip. The label lost "VELOCITY" to fit a 36 px cell beside a
+        // 24 px button - it reads as a bare number/range now, and the slider keeps its own
+        // tooltip spelling the whole thing out.
+        humanizeButton.setBounds(bar.removeFromLeft(86).withSizeKeepingCentre(84, 24));
+        bar.removeFromLeft(6);
+        {
+            auto velCell = bar.removeFromLeft(140);
+            humanizeVelLabel.setBounds(velCell.removeFromLeft(36).withSizeKeepingCentre(36, 24));
+            velCell.removeFromLeft(4);
+            humanizeVelSlider.setBounds(velCell.withSizeKeepingCentre(velCell.getWidth(), 24));
+        }
+        bar.removeFromLeft(14);
         section(secPads).caption = bar;
     }
     if (const int h = sectionHeight(secPads); h > 0)
@@ -2016,6 +2181,23 @@ void KeysEditor::resized()
         sustainButton.setBounds(bar.removeFromRight(96).withSizeKeepingCentre(94, 24));
         bar.removeFromRight(6);
         chordExclusiveButton.setBounds(bar.removeFromRight(104).withSizeKeepingCentre(102, 24));
+
+        // Size and Octave, from the left (2026-08-02, Owen: "the size can go down to the
+        // header of the keyboard button"). Both stay put with the section folded, the same
+        // reach-for-it-while-playing argument as the tempo/Root/Scale group on the Controls
+        // bar: Octave is the keybed's only pitch-range control (25 keys cannot pan; it is
+        // C3..C5 by construction), and folding the band away is exactly when you still want
+        // it. Not a slider - a bar control is 24 px tall, and IncDecButtons' arrows would
+        // stack to 12 px each - so it is the BPM field's own shape: caption, `<`, read-out, `>`.
+        sizeBox.setBounds(bar.removeFromLeft(104).withSizeKeepingCentre(104, 24));
+        bar.removeFromLeft(6);
+        octaveBarLabel.setBounds(bar.removeFromLeft(30).withSizeKeepingCentre(30, 24));
+        octPrevButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        bar.removeFromLeft(3);
+        octaveReadout.setBounds(bar.removeFromLeft(42).withSizeKeepingCentre(42, 24));
+        bar.removeFromLeft(3);
+        octNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+
         section(secKeyboard).caption = bar;
     }
     if (sectionHeight(secKeyboard) > 0)

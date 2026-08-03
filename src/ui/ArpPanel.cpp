@@ -955,17 +955,15 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
         addAndMakeVisible(l);
     };
 
-    onButton.setButtonText(letter);
-    onButton.setTitle("Macro line " + letter); // the bar chips already answer to "Arp line A"
-    onButton.setTooltip("Arpeggiator line " + letter + " on or off.");
-    addAndMakeVisible(onButton);
-    onAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apOn), onButton);
-
     // No Latch, PLAY or Chain on the row since the second 2026-08-02 pass (Owen: "I think we
     // can remove the chain button, maybe the play and the [latch] button"): the rows keep
     // what you reach for while both lines run, and the set-and-forget switches live on the
     // line's own tab - Latch and Play on the band, Chain on the action row. PLAY's history
     // (it was KEYS, and collided with the bar's Light keys) moved to keysBandButton with it.
+    // The line switch itself (onButton) left the same way on 2026-08-02, the day the A/B
+    // chips on the ARP section bar became the per-line On toggles: the card's own On/Off is
+    // shown instead as a scrim over the whole body (paintOverChildren), never as a second
+    // control bound to the same parameter.
 
     // The rate's three modifiers, on the sub-row under it. Same three the band carries, same
     // parameters, and greyed by the same question - see refreshRateMode.
@@ -985,6 +983,14 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
     dotAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apDot), dotButton);
     tripAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apTrip), tripButton);
     anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apAnchor), anchorButton);
+
+    // Opens this line's own detailed view - the band, and the step editor once Shape is
+    // Pattern. With the A/B tabs gone as navigation (they are the section bar's On switches
+    // now), this is the only way from a macro card back to the deep controls.
+    detailsButton.setTitle("Macro details " + letter);
+    detailsButton.setTooltip("Open line " + letter + "'s detailed view.");
+    detailsButton.onClick = [this] { owner.setEditLine(line); };
+    addAndMakeVisible(detailsButton);
 
     // Rate: the same detented dial the band uses, so a division is a detent and the readout
     // under it says which one. The steppers beside it are the click-only path to every value,
@@ -1192,6 +1198,16 @@ void ArpPanel::MacroRow::refresh()
         chordLabel.setText(held.isNotEmpty() ? held : juce::String("--"), juce::dontSendNotification);
     chordLabel.setColour(juce::Label::textColourId,
                          held.isNotEmpty() ? skin::text : skin::textFaint);
+
+    // The scrim in paintOverChildren reads processor.arpLineOn() live, so this cache exists
+    // only to decide when to ask for a repaint - driven by the panel's 10 Hz timer while the
+    // macro view is up, which is the same tick that already moves the chord readout above.
+    const bool lineOn = processor.arpLineOn(line);
+    if (lineOn != lastLineOn)
+    {
+        lastLineOn = lineOn;
+        repaint();
+    }
 }
 
 void ArpPanel::MacroRow::setDropTarget(bool b)
@@ -1274,6 +1290,23 @@ void ArpPanel::MacroRow::paint(juce::Graphics& g)
                juce::Justification::centred);
 }
 
+// A line that is off still takes chords in (CLAUDE.md), so this greys the card without
+// touching setEnabled anywhere on it: every knob, the rate dial and the card itself as a drop
+// target all have to keep receiving mouse events. Painted over the children rather than under
+// them, and skipped while dropTarget is true so the drop highlight in paint() above is never
+// muddied by it.
+void ArpPanel::MacroRow::paintOverChildren(juce::Graphics& g)
+{
+    if (dropTarget || processor.arpLineOn(line))
+        return;
+
+    // Same inset and the same rounded body the fill in paint() uses, trimmed below the LINE A
+    // / LINE B caption strip so the name stays legible while everything under it dims.
+    const auto r = getLocalBounds().toFloat().reduced(1.0f);
+    g.setColour(skin::bgBot.withAlpha(0.38f));
+    g.fillRoundedRectangle(r.withTrimmedTop((float) arpMacroCap), skin::radius);
+}
+
 void ArpPanel::MacroRow::resized()
 {
     // Three lines inside one card (2026-08-02, Owen: "having the arpeggiators parallel to
@@ -1293,7 +1326,10 @@ void ArpPanel::MacroRow::resized()
     {
         auto r = line1;
         const auto take = [&r](int w) { auto c = r.removeFromLeft(w); r.removeFromLeft(6); return c; };
-        onButton.setBounds(centred(take(40)));
+        // onButton's 40 px (plus its 6 px gap) is gone from this line since 2026-08-02, and
+        // deliberately not replaced with a spacer: everything below simply shifts left, and
+        // that freed width lands on shapeBox, the one elastic control on this line and the
+        // tightest thing in the card before this.
         ratePrev.setBounds(centred(take(26)));
         rateKnob.setBounds(take(58));
         rateNext.setBounds(centred(take(26)));
@@ -1345,6 +1381,11 @@ void ArpPanel::MacroRow::resized()
     dotButton.setBounds(takeMod(62));
     tripButton.setBounds(takeMod(66));
     anchorButton.setBounds(takeMod(84));
+    // 76, after Anchor: at the editor's minimum width this sub-row is ~479 px wide (the
+    // card's ~499 less its own 10 px side insets), and the four fixed cells plus the chord
+    // readout spend ~390 of it, leaving room without touching chordLabel's 64 px - which
+    // ellipsises gracefully if that arithmetic ever tightens.
+    detailsButton.setBounds(takeMod(76));
 }
 
 // The LineTab class lived here until 2026-08-02, when the A/B/All tabs moved to the ARP
@@ -1925,6 +1966,21 @@ void ArpPanel::paint(juce::Graphics& g)
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
     skin::glowRect(g, b, skin::panelRadius, skin::accentOf(*this).base, inlineMode ? 0.30f : 0.55f);
+
+    // Which line the deep view below is showing. Nothing else says so any more: the A/B tabs
+    // that used to name it left for the ARP section bar as the per-line On switches on
+    // 2026-08-02, and the panel's own header strip and LineTab class went with an earlier pass
+    // the same day. Sits in the card's own top margin - the strip cardBounds().reduced(12)
+    // leaves blank above the band - so it costs no extra height, and uses the same micro-caps
+    // treatment the macro cards give their own "LINE A" / "LINE B".
+    if (! macroView)
+    {
+        const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + editedLine));
+        g.setFont(skin::micro(9.5f).withExtraKerningFactor(0.16f));
+        g.setColour(skin::textDim);
+        g.drawText("LINE " + letter, b.withHeight(12.0f).withTrimmedRight(10.0f).toNearestInt(),
+                   juce::Justification::centredRight);
+    }
 
     // The band's group boxes: a hairline frame and a micro-caps caption sitting in a gap
     // punched through the top rule, after the hardware panels this layout follows. Drawn

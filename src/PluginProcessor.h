@@ -300,6 +300,20 @@ public:
     int arpPendingSlot(int line) const;
     bool arpLaunchPending(int line) const;
 
+    // --- Tempo Sync -------------------------------------------------------------------------
+    // True the block a rolling host actually overrode the "bpm" parameter (bpmSync on, a
+    // transport playing, a valid tempo reported). Published so the Controls bar can show the
+    // host's tempo in the field and greys its own stepper and drag: neither can change
+    // anything while this is true. Written once a block in advanceChainClock, read on the
+    // message thread in KeysEditor::timerCallback - not a sample-accurate answer and does not
+    // need to be, the same contract as arpBeats beside it.
+    bool hostTempoLive() const { return arpHostBpmLive.load(std::memory_order_relaxed); }
+    // The tempo the arp's beat clock is actually running at this block: the host's own while
+    // hostTempoLive() is true, otherwise the "bpm" parameter's value (see arpBeatsBpm, which
+    // this reads). The Controls bar's tempo field reads this to show the host's number when
+    // Tempo Sync has actually taken over, rather than the "bpm" parameter it is not using.
+    double currentTempo() const { return arpBeatsBpm.load(std::memory_order_relaxed); }
+
     // What "let go of the held chord" means to a *user*, and the only thing the UI should
     // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
     // leaves chainOn set, so the next bar boundary launches the following slot and the chord
@@ -410,7 +424,11 @@ public:
     struct LayoutState
     {
         bool controls = true;   // the header rows and the knob bank under them
-        bool knobs = true;      // the CC knob bank, the bottom row of the controls band
+        // Vestigial since 2026-08-02: the Knobs chip that folded the CC knob bank off the
+        // bottom of the Controls band is gone, and the bank is unconditional whenever the
+        // section itself is open. Kept, always true, so layoutToTree()/layoutFromTree() keep
+        // round-tripping a session's tree without a special case for one dropped field.
+        bool knobs = true;
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
         bool wheels = true;     // mod + pitch, left of the keybed
@@ -476,6 +494,11 @@ protected:
     // so the session sounds identical) and put Volume back to 100, and write HumanVel's
     // default explicitly so it does not inherit the live instance's value.
     void migrateVelTrim(const juce::ValueTree& root);
+    // Same shape a third time: a session saved before Tempo Sync existed has no "bpmSync" at
+    // all, and its absence is not "off" - it is a live instance's *current* value, which the
+    // repair overwrites with the parameter's own default (true), reproducing exactly what
+    // Keys always did before this parameter existed.
+    void migrateBpmSync(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);
@@ -575,6 +598,7 @@ private:
     // wall-clock deadline that a 1 ms timer then waits out.
     std::atomic<double> arpBeats { 0.0 };
     std::atomic<double> arpBeatsBpm { 120.0 }; // the tempo those beats are running at
+    std::atomic<bool> arpHostBpmLive { false }; // see hostTempoLive()
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread

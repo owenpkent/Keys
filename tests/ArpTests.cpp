@@ -1376,6 +1376,88 @@ public:
             expect(onsetsOf(odd, slowHost, block, 8, steady) == still, "and neither is the host's bpm");
         }
 
+        // ---------------------------------------------------------------------------------
+        // Tempo Sync (bpmSync, Job 1): `followHost` is the escape hatch from a rolling host's
+        // tempo, not the thing that adds following - Sync already read the host whenever it
+        // was playing with a valid bpm, and followHost defaults true to reproduce exactly
+        // that. Off pins every line to fallbackBpm even while the host rolls.
+        //
+        // `anchored` is forced off in every case below. Anchored+playing+hasPpq reads
+        // `clock.ppq` straight off the playhead for step *position* - "Sync mode does follow
+        // the playhead" above already pins that - and `steady`'s ppq is bpm-independent, so
+        // testing followHost through the anchored branch would prove nothing about which bpm
+        // fed it. Free-running (anchored off) is the branch that actually turns bpm into a
+        // step period (`blockBeats = bpm/60/sr*numSamples`), which is the resolution this
+        // parameter changes.
+        // ---------------------------------------------------------------------------------
+        beginTest("followHost on: a rolling host with a valid bpm overrides fallbackBpm");
+        {
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = true;
+            sp.fallbackBpm = 90.0;
+            auto hostRolling = clock;
+            hostRolling.bpm = 150.0;
+            const auto on = onsetsOf(sp, hostRolling, block, 4, steady);
+            // 1/16 at 150 bpm: 0.25 beat * 60/150 s = 0.1 s = 4800 samples at 48 kHz, so five
+            // onsets land inside 4 * 6000 = 24000 samples (0, 4800, ..., 19200).
+            expectEquals((int) on.size(), 5);
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 4800, 2,
+                                          "sync on steps at the host's bpm, not fallbackBpm");
+        }
+
+        beginTest("followHost off: a rolling host is ignored in favour of fallbackBpm");
+        {
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = false;
+            sp.fallbackBpm = 90.0;
+            auto hostRolling = clock;
+            hostRolling.bpm = 150.0;
+            const auto on = onsetsOf(sp, hostRolling, block, 4, steady);
+            // 1/16 at 90 bpm: 0.25 beat * 60/90 s = 1/6 s = 8000 samples, so three onsets land
+            // inside 4 * 6000 = 24000 samples (0, 8000, 16000).
+            expectEquals((int) on.size(), 3);
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 8000, 2,
+                                          "sync off steps at fallbackBpm even though the host is rolling");
+        }
+
+        beginTest("followHost on, transport stopped: fallbackBpm runs the clock");
+        {
+            // The "on" in followHost only ever means "let the host in when it is actually
+            // there to ask" - a stopped transport has nothing to override with, on or off.
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = true;
+            sp.fallbackBpm = 100.0;
+            ArpEngine::HostClock stoppedHost;
+            stoppedHost.playing = false;
+            stoppedHost.hasPpq = false;
+            stoppedHost.bpm = 150.0; // stale; must not leak in while stopped
+            const auto on = onsetsOf(sp, stoppedHost, block, 4, steady);
+            expectEquals((int) on.size(), 4);
+            // 1/16 at 100 bpm: 0.25 beat * 60/100 s = 0.15 s = 7200 samples.
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 7200, 2,
+                                          "a stopped transport reads fallbackBpm whatever followHost says");
+        }
+
+        beginTest("Hz mode is deaf to followHost, exactly as it is to fallbackBpm and the host bpm");
+        {
+            auto hostRolling = clock;
+            hostRolling.bpm = 45.0;
+            auto spOn = hzp;
+            spOn.followHost = true;
+            auto spOff = hzp;
+            spOff.followHost = false;
+            const auto onA = onsetsOf(spOn, hostRolling, block, 8, steady);
+            const auto onB = onsetsOf(spOff, hostRolling, block, 8, steady);
+            expect(onA == onB, "followHost changes nothing while the rate is in Hz");
+            expectEquals((int) onA.size(), 8, "still one step per 6000-sample block at 8 Hz");
+        }
+
         // --- Three lines ------------------------------------------------------------------
         // The engine has never known how many of it there are, which is why three of them cost
         // nothing to build. What these check is that being three of them changes none of it:

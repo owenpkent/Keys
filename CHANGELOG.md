@@ -5,6 +5,116 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a Tempo Sync toggle, and labels for BPM, Voices and MIDI Ch on the Controls bar
+
+Owen: "BPM and Off and one in the controls header needs labels. and we need BPM sync toggle to
+sync with DAW."
+
+Keys already followed the host's tempo whenever the transport rolled and reported one - the new
+`bpmSync` parameter (default on, appended last, `migrateBpmSync` backfills it for an older
+session the same way `migrateVelTrim` does) is not what adds that, it is the escape hatch from
+it. Off pins every arp line and the chain clock to the "bpm" control even while the host rolls;
+on reproduces exactly what Keys always did. `ArpEngine::Params::followHost` carries it into the
+engine, `KeysProcessor::advanceChainClock` carries it into the chain, and neither touches the
+Hz rate path, which was never listening to the host's tempo to begin with.
+
+A **Sync** chip beside the tempo field is the on-screen switch, and while it is on and the host
+is actually the one setting the tempo this block (`KeysProcessor::hostTempoLive()`, published
+next to the existing `arpBeatsBpm`), the field shows the host's own number and its drag and its
+`<` `>` steppers grey out - none of the three can change anything while the host owns the tempo.
+`BpmField::paint` dims itself for this rather than relying on the LookAndFeel, which it never
+consults.
+
+**BPM**, **VOICES** and **CH** are now honest captions rather than bare controls: BPM gets its
+own label beside the tempo field, and Voices and CH are captioned in *both* of the bar's
+existing width tiers now, not only the roomy one Keys Host never reaches. Root's caption -
+which Owen did not ask for - stays roomy-only and is the one that drops first under width
+pressure, exactly the priority order asked for.
+
+Fitting BPM's label, the Sync chip and two more captions onto a bar that already had 87 px of
+slack at the old 1070 px floor and no more took 186 px, not 87, so **the floor is 1280 now**.
+The arithmetic is written out in full in `KeysEditor::minWidthForView()`: at 1280 the ordinary
+day clears every caption including Root's with the Instrument chip at its full width, and the
+one day the update button also claims its 170 px, Root's caption is what gives way and the chip
+shrinks to a still-comfortable 85 px rather than being starved to an ellipsis.
+
+### Changed: the arp bar's A/B tabs are now the line On switches
+
+Owen: "the A and B on the left side of the header, I want those to be on and off buttons to
+turn on or off the ARP ... we can remove the a and b check mark on the right side of the
+header."
+
+The lettered On chip that used to sit beside Hold off is gone; the A/B tabs at the left end of
+the arp bar are the switch now, each bound to that line's `arpOn` / `arp2On` parameter through
+an ordinary attachment. They no longer navigate the panel - that job moved to each macro card's
+own Details button, added the same day (see the next entry) - and because they are the arp's
+own power switch they never hide with the section, the same "reach for it while playing" case
+BPM and Quantize have always had on this bar. The All tab is unaffected: it still only chooses
+the macro view, so it still hides and collapses its cell when the section folds. Every
+chord-drop behaviour on A and B is unchanged, including dropping onto a line that is switched
+off.
+
+### Changed: the arp macro card drops its own On toggle; an off line is scrimmed, and gains a Details button
+
+Owen, the same ask, continued: "and if it's turned off, gray it out below ... maybe we can add
+another button on the bottom by anchor, like details, and that can open up the detailed
+arpeggiator view."
+
+`MacroRow::onButton` - the small on/off toggle each macro card carried, bound to the same `On`
+parameter the bar's A/B tabs now answer to - is deleted outright: two switches for one
+parameter, one of them buried in a card, was a control to get wrong twice. In its place,
+`MacroRow::paintOverChildren` scrims the card body (not the `LINE A` / `LINE B` caption strip,
+which stays legible) with a translucent fill whenever that line is off, skipped while the card
+is a drag-and-drop target so a drop highlight is never muddied by it. Nothing on the card is
+ever `setEnabled(false)`: every knob, the rate dial and the card itself as a drop target stay
+fully live while greyed, both so a rate can be dialled in before switching the line on and
+because a chord dropped onto an off line has to land (a line that is off still takes chords in).
+
+Each card also gains a **Details** button beside Anchor in its bottom sub-row - the only way
+left from a macro card to that line's full detailed view (the band, and the step editor on
+Pattern shape) now that A and B navigate nothing. It calls the same `setEditLine` a tab click
+used to call. The per-line panel itself gained a small `LINE A` / `LINE B` caption in its own
+top margin, drawn only outside the macro view, so something on screen still says which line you
+are editing.
+
+### Changed: Size, Octave and Humanize move off the Controls band; the Knobs chip is gone
+
+Owen: "I think we can remove the octave setting and the size can go down to the header of the
+keyboard button", and later the same day, "remove the knobs button and make the knobs visible
+when you open controls."
+
+**Size and Octave** left the Controls band for the **Keyboard** bar, which never hides with
+the section - Octave is the keybed's only pitch-range control, and folding the band away is
+exactly when you still want it. Octave is a `<` value `>` stepper rather than a slider (a bar
+control is 24 px tall, under what IncDecButtons needs), reading "+2" / "0" / "-3". **Humanize**
+and its velocity range left for the **Pads** bar instead, at Owen's pick, reworded to fit a
+much narrower cell. With both rows emptied, the Controls band drops to a single row (Strum and
+its direction), shrinking the section by 60 px. **The Knobs chip** that folded the CC knob row
+is deleted outright; the row is unconditional now whenever Controls itself is open. A session
+saved with the knobs hidden opens with them visible again - there is no control left that could
+turn them back off, so the persisted flag is ignored on load rather than honoured.
+
+### Added: an Instrument chip on the Controls bar; Keys Host's own top bar is gone
+
+Owen: "the load instrument section with all that should go in the controls submenu."
+
+`KeysEditor` grows `onBuildInstrumentMenu`, `instrumentName` and `refreshInstrumentChip()` -
+a host that embeds Keys (Keys Host) can set the first two to get an Instrument chip on the
+Controls bar; plain Keys never does, so the bar is unchanged there. The chip takes the cell
+the Knobs chip vacated and is the one elastic control on the bar: the tempo group and the
+keyboard-settings combos beside it are measured first, and the chip gets whatever is left,
+clamped to a readable range. This is the first extension point `KeysEditor` has ever exposed
+to something embedding it.
+
+Keys Host's own 44 px top bar - **Load Instrument...**, the instrument name/error label,
+**Show/Hide Instrument**, **Eject** - is deleted along with it. `KeysHostEditor::resized()` is
+now just `keysEditor.setBounds(getLocalBounds())`, the embedded editor fills the whole window,
+and Load/Show-Hide/Eject move into a popup menu off the new chip instead. `barHeight` is gone
+from every height calculation in `KeysHostEditor.cpp` - `maxWindowHeight()`, `fitToKeysHeight()`
+and the constructor's initial `setResizeLimits` no longer add it to `KeysEditor::idealHeight()`,
+since there is no bar left to account for. `KeysHostEditor::updateBar()` is renamed
+`refreshInstrumentUi()` to match: there is no bar left to update, only the chip's caption.
+
 ### Changed: the keyboard's own settings ride the Controls bar, and the Pads bar sheds three
 
 Owen: "let's also add the scale, root and scale lock, voices and MIDI channel into the controls

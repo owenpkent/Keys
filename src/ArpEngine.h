@@ -193,6 +193,13 @@ public:
         // emit loop - so a deep cut reaches MIDI velocity 1 instead of pinning at 6.
         int velTrim = 0;          // -100..+100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
+        // Tempo Sync (`bpmSync`, KeysProcessor::advanceChainClock/buildArpParams). True
+        // reproduces exactly what Keys always did before this parameter existed: a rolling
+        // host with a valid bpm wins over fallbackBpm below. False pins the engine to
+        // fallbackBpm even while the host is rolling, the escape hatch for someone who wants
+        // Keys' own clock regardless of what the DAW's transport says. Read only in Sync -
+        // Hz already ignores the host clock outright, so this changes nothing there.
+        bool followHost = true;
         // The slot chords, for the Chord lane. Null means the lane does nothing, which is
         // what every caller that has no slots (the tests) wants.
         const ChordTable* chords = nullptr;
@@ -309,7 +316,9 @@ public:
         // Ramp Time, therefore read as seconds while Hz is on. That is the honest reading:
         // there is no bar to restart on when nothing is following a transport.
         const double bpm = p.rateFree ? 60.0
-                                      : ((clock.playing && clock.bpm > 0) ? clock.bpm : p.fallbackBpm);
+                                      : ((p.followHost && clock.playing && clock.bpm > 0)
+                                             ? clock.bpm
+                                             : p.fallbackBpm);
         const double beatsPerSample = bpm / 60.0 / sr;
         const double stepBeats = stepLengthBeats(p);
         const double blockBeats = beatsPerSample * numSamples;
