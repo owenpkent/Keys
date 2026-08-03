@@ -1118,9 +1118,9 @@ public:
                    "a synced arp goes where the transport goes");
         }
 
-        beginTest("the Hz step is one over the rate, and Dot and Trip do not touch it");
+        beginTest("the Hz step is one over the rate, and Dot and Tuplet do not touch it");
         {
-            // Sync divides a beat, so Dot and Trip are subdivisions of one. Hz has no beat to
+            // Sync divides a beat, so Dot and Tuplet are subdivisions of one. Hz has no beat to
             // subdivide, and all a dotted 8 Hz could do is make the number on the dial a lie.
             const auto period = [&](const ArpEngine::Params& sp, int blocks)
             {
@@ -1138,20 +1138,157 @@ public:
             auto dot = hzp;
             dot.dotted = true;
             auto trip = hzp;
-            trip.triplet = true;
+            trip.tuplet = 3;
             auto both = hzp;
-            both.dotted = both.triplet = true;
+            both.dotted = true;
+            both.tuplet = 3;
             expectWithinAbsoluteError(period(dot, 4), 6000, 2, "Dot is not applied in Hz");
-            expectWithinAbsoluteError(period(trip, 4), 6000, 2, "and neither is Trip");
+            expectWithinAbsoluteError(period(trip, 4), 6000, 2, "and neither is Tuplet");
             expectWithinAbsoluteError(period(both, 4), 6000, 2, "nor the two together");
 
             // ...and both still mean exactly what they always did on the synced side.
             auto syncDot = p;
             syncDot.dotted = true;
             auto syncTrip = p;
-            syncTrip.triplet = true;
+            syncTrip.tuplet = 3;
             expectWithinAbsoluteError(period(syncDot, 4), 9000, 2, "a dotted 1/16 is a step and a half");
             expectWithinAbsoluteError(period(syncTrip, 4), 4000, 2, "a triplet 1/16 is two thirds of one");
+        }
+
+        beginTest("a Humanize range reaches back from the knob by its span");
+        {
+            // 2026-08-03, the range knobs (Owen: "a serum style knob where you can set a range
+            // in the knob ... when the outer ring is enabled, moving the dial moves the outer
+            // ring with it"). Humanize was always "uniform between nothing and the knob"; the
+            // span says how far under the knob the draw may fall, so the knob stays the
+            // ceiling and the *range travels with it* - which is the half of this that has to
+            // be pinned, because it is the half that is easy to build the other way round.
+            const auto onsets = [&](int amount, int spanPct)
+            {
+                auto sp = p;
+                sp.humanize = amount;
+                sp.humanizeSpan = spanPct;
+                sp.anchored = false;
+                return onsetsOf(sp, clock, block, 12, steady);
+            };
+
+            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - but
+            // the engine also caps a nudge at 40% of the gap to the next sub-hit, so the
+            // ceiling in force is min(1200, 2400) = 1200.
+            const auto closed = onsets(100, 0);
+            expect(closed.size() >= 4, "the run has to fire before this proves anything");
+            // A span of zero collapses the range onto the knob: no randomness left, every hit
+            // exactly 1200 late, so the gaps are all one step.
+            for (size_t i = 1; i < closed.size(); ++i)
+                expectWithinAbsoluteError((double) (closed[i] - closed[i - 1]), 6000.0, 2.0,
+                                          "a closed range is a fixed offset, not a draw");
+            // ... and it is pinned to the *knob*, not to zero.
+            expectWithinAbsoluteError((double) closed[0], 1200.0, 2.0,
+                                      "every hit is a full 25 ms late");
+
+            // Wide open is the old behaviour: somewhere in 0..1200, and different draws.
+            const auto open = onsets(100, 100);
+            expect(open.size() >= 4);
+            expect(open != closed, "a full span still randomizes");
+            for (const auto o : open)
+                expect(o % 6000 <= 1201, "and never past the ceiling it always had");
+
+            // **The range travels with the knob.** Halve the knob with the span closed and
+            // every hit lands at half the offset - the proof that the span is measured back
+            // from the knob rather than up from zero.
+            const auto halfClosed = onsets(50, 0);
+            expect(halfClosed.size() >= 4);
+            expectWithinAbsoluteError((double) halfClosed[0], 600.0, 2.0,
+                                      "the closed range moved with the dial");
+
+            // A span narrower than the knob is a floor under a draw: at least 30% of 25 ms.
+            const auto narrow = onsets(100, 70);
+            expect(narrow.size() >= 4);
+            for (const auto o : narrow)
+            {
+                expect(o % 6000 >= 359, "every hit is at least as late as the range's bottom");
+                expect(o % 6000 <= 1201, "and no later than the knob");
+            }
+
+            // Humanize itself off means the span does nothing: there is no draw to put a
+            // bottom under, and a range that nudged on its own would make a knob at zero audible.
+            const auto off = onsets(0, 0);
+            expect(off.size() >= 4);
+            expectWithinAbsoluteError((double) off[0], 0.0, 2.0,
+                                      "a closed range under a Humanize of zero is still zero");
+        }
+
+        beginTest("the rate readout is the step length as a fraction of a bar");
+        {
+            // 2026-08-03, Owen: "shouldn't it just be 1/5 not 1/4:5?" - it should, and this is
+            // what makes it so. The invariant worth pinning is that the *straight* readings are
+            // byte-identical to the division names the parameter carries, since that is what
+            // stops this from being a second, drifting copy of the rate list.
+            const auto text = [](int i, bool dot, int tup) { return ArpEngine::rateSyncText(i, dot, tup); };
+            expectEquals(text(0, false, 0), juce::String("16 bars"));
+            expectEquals(text(4, false, 0), juce::String("1 bar"), "singular at one");
+            expectEquals(text(5, false, 0), juce::String("1/2"));
+            expectEquals(text(7, false, 0), juce::String("1/8"));
+            expectEquals(text(10, false, 0), juce::String("1/64"));
+
+            // Owen's own example, and the reason the notation works: five steps in the space of
+            // four quarters is four fifths of a beat, which is one fifth of a bar.
+            expectEquals(text(6, false, 5), juce::String("1/5"), "a quarter in fives is 1/5");
+            expectEquals(text(7, false, 3), juce::String("1/12"), "an 1/8 in threes is 1/12");
+            expectEquals(text(7, false, 5), juce::String("1/10"), "an 1/8 in fives is 1/10");
+            expectEquals(text(8, false, 5), juce::String("1/20"), "a 1/16 in fives is 1/20");
+            expectEquals(text(6, false, 7), juce::String("1/7"), "a quarter in sevens is 1/7");
+            expectEquals(text(7, false, 9), juce::String("1/9"), "an 1/8 in nines is 1/9");
+
+            // Not every combination reduces to a unit fraction, and the honest answer is the
+            // one printed rather than a rounded note value.
+            expectEquals(text(5, false, 5), juce::String("2/5"), "a 1/2 in fives is two fifths");
+
+            // Dot stays a dot: universal, and instantly read where "3/16" would have to be
+            // worked out. It applies to whatever the tuplet already produced.
+            expectEquals(text(7, true, 0), juce::String("1/8."));
+            expectEquals(text(7, true, 5), juce::String("1/10."));
+        }
+
+        beginTest("a tuplet is N steps in the space of the power of two below N");
+        {
+            // 2026-08-03, the day Trip became Tuplet (Owen: "what if I want 1/5 or other
+            // division?"). The whole feature is one multiplier, so this pins the multiplier:
+            // a 1/16 is 6000 samples at this tempo, and N of them have to fill exactly the
+            // span that tupletSpace(N) straight ones would.
+            const auto period = [&](const ArpEngine::Params& sp, int blocks)
+            {
+                const auto on = onsetsOf(sp, clock, block, blocks, steady);
+                return on.size() >= 2 ? on[1] - on[0] : -1;
+            };
+            const auto withTuplet = [&p](int n) { auto q = p; q.tuplet = n; return q; };
+            // Doubles throughout: 7 in the space of 4 does not land on a whole sample, and
+            // expectWithinAbsoluteError takes all three of its arguments as one type.
+            const auto gap = [&](int n) { return (double) period(withTuplet(n), 4); };
+
+            // Off and 1 are both straight - the choice list's "Off" arrives here as 0, and 1
+            // is "one in the space of one", which is the same statement.
+            expectWithinAbsoluteError(gap(0), 6000.0, 2.0, "0 is straight");
+            expectWithinAbsoluteError(gap(1), 6000.0, 2.0, "and so is 1");
+            expectWithinAbsoluteError(gap(3), 4000.0, 2.0, "3 in the space of 2");
+            expectWithinAbsoluteError(gap(5), 4800.0, 2.0, "5 in the space of 4");
+            expectWithinAbsoluteError(gap(7), 3428.57, 2.0, "7 in the space of 4");
+            expectWithinAbsoluteError(gap(9), 5333.33, 2.0, "9 in the space of 8");
+
+            // The two axes compose rather than colliding: Dot lengthens a step by half, a
+            // tuplet divides a span into N. A dotted 1/16 quintuplet is 9000 * 4/5.
+            auto dotFive = p;
+            dotFive.dotted = true;
+            dotFive.tuplet = 5;
+            expectWithinAbsoluteError((double) period(dotFive, 4), 7200.0, 2.0,
+                                      "dotted and in fives at once");
+
+            // And the span is the point: five 1/16 quintuplet steps take exactly as long as
+            // four straight 1/16s, which is what makes it playable against another line.
+            expectWithinAbsoluteError(gap(5) * 5.0, 6000.0 * 4.0, 16.0,
+                                      "five quintuplet steps fill four straight ones");
+            expectWithinAbsoluteError(gap(7) * 7.0, 6000.0 * 4.0, 16.0,
+                                      "and seven septuplet steps do too");
         }
 
         beginTest("a rate-mode flip mid-note closes everything it owed, at offset 0");
@@ -1477,7 +1614,7 @@ public:
             pb.rateIndex = 7; // 1/8
             auto pc = p;
             pc.rateIndex = 7;
-            pc.triplet = true; // 1/8 triplet
+            pc.tuplet = 3; // 1/8 triplet
 
             int onsA = 0, onsB = 0, onsC = 0;
             auto held = chordOn({ 60, 64, 67 });

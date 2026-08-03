@@ -242,15 +242,18 @@ ordering and the scheduling are one implementation rather than two that drift.
 
 Pads live in the processor (`ChordPad`), so they persist and keep
 sounding independent of the editor; `ChordPads` is just the view. They are arranged as
-four pages of sixteen (`padsPerPage` × `numPadPages`, Octavium's 4x4 per page; drawn as two
-rows of eight, each card carrying the chord's name and its notes underneath). The alternate
+four pages of twelve (`padsPerPage` × `numPadPages`; drawn as two rows of six since
+2026-08-03, each card carrying the chord's name and its notes underneath — the two columns
+that freed up carry Strum and Humanize as `RangeKnob`s). The alternate
 4x4 arrangement, a full card and a mini keyboard per pad, was the Pads section's **Big**
 switch, and it went on 2026-07-31 once the note list fit under the name on the ordinary card
 too. The strip shows the page `padPage`
 selects and indexes by **absolute slot**, so a chord left ringing on another page keeps
-sounding and a drag can't land on the wrong pad. Sessions saved when pages held eight
-carry a `padsPerPage` marker (absent = 8) and each slot is re-based on load, so every
-pad stays on the page it was on. Build a chord on the
+sounding and a drag can't land on the wrong pad. Sessions carry a `padsPerPage` marker
+(absent = 8) and each slot is re-based on load, so every pad stays on the page it was on —
+**except when the page gets shorter**, which 16 → 12 was: a pad past the end of its page has
+nowhere to go and is dropped, where the widening the re-base was written for never lost one.
+Build a chord on the
 keyboard (Sustain or right-click), drag the live card onto a pad to `setChordPad` the notes
 (named by `keys::chords::detect`), then play it beat-pad style: mouse-down calls
 `pressChordPad` (fire, honouring the `chordExclusive` choke) and mouse-up calls
@@ -395,8 +398,9 @@ All these headers are pure logic with no UI, so they unit-test like `NoteMath.h`
 
 The editor is a stack of **four** sections, each of which folds away so the window can be
 squeezed small when the screen is busy, and, since 2026-07-27, each of which also detaches
-into a window of its own: **Controls** (one header row - Strum and its direction - plus the
-knob bank under them, unconditional now that the Knobs chip that used to fold it is gone), the
+into a window of its own: **Controls** (the CC knob bank alone since 2026-08-03, when Strum
+and its direction left for the pads strip and the header row had nothing left in it; the row
+is unconditional, the Knobs chip that used to fold it having gone in 2026-08-02), the
 **Arp**, the **Pads**, and the **Keyboard** (with the wheels, Size and Octave as bar controls
 that never fold with it). It was six until 2026-07-30, when the centre view and Transcribe both
 went; the centre's knob bank became the bottom row of Controls rather than a section of its
@@ -917,13 +921,19 @@ and neither does Algorithmic any more now that Notes, Inversions, Compliance and
 Influence sit on the two fixed rows above every source's band.
 
 The arp's own set is `arpOn`, `arpRate` / `arpRateFree` / `arpRateHz` / `arpDot` /
-`arpTrip` / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`
+`arpTrip` (retained; folded into `arpTuplet` on every load by `migrateTuplet` since
+2026-08-03) / `arpAnchor`, `arpDirection` (twelve shapes) + `arpPattern`, `arpOctaves`
 (Repeats) + `arpDistance`, `arpOffset`, `arpSwing`, `arpLatch`, `arpRetrigger` +
 `arpRetrigBars`, `arpGate`, `arpChance`, `arpVelRamp` + `arpRampBeats`, `arpHumanize`
 (timing-only since 2026-08-02, when `arpHumanVel` took the velocity half), `arpLinkLanes`,
 from 2026-08-01 `arpKeys` and `arpChannel`, and from 2026-08-02 `arpOctShift`, `arpVolume`
 (retained; folded into its replacement on every load by `migrateVelTrim`), `arpHumanVel` and
-`arpVelTrim` — every one of them appended. The six after
+`arpVelTrim`, and from 2026-08-03 `arpTuplet` (Straight / Triplet / 5-tuplet / 7-tuplet /
+9-tuplet, the general form of the `arpTrip` toggle it retired) plus `arpHumanizeSpan` and
+`arpHumanVelSpan` (how far under the knob each Humanize draw may fall, so each is a range that
+travels with its knob rather than "nothing up to the knob"; the ring of a `RangeKnob` sets
+them, default 100 = the whole scale = the old behaviour) — every one of them appended.
+The six after
 `arpChance` arrived on 2026-07-30 and are appended; the rate's two arrived the same day and
 sit beside `arpRate` instead, which costs nothing, because what a session and an automation
 lane follow is a parameter's string id and not its position (JUCE hashes that id for VST3).
@@ -956,7 +966,7 @@ The audio thread never builds one of those ids. Each line caches a
 second: 0.03125 to 32 Hz, mapped exponentially rather than skewed, which is exactly what the
 eleven divisions span at 120 bpm. In Hz the engine pins its own clock to 60 bpm, so one step
 is one period and every quantity measured as a fraction of a step keeps its meaning with no
-second code path; it reads nothing from the playhead there, and Dot, Trip and Anchor mean
+second code path; it reads nothing from the playhead there, and Dot, Tuplet and Anchor mean
 nothing without a beat to subdivide or a bar to anchor to (the panel greys all three). See
 `docs/ARP_DESIGN.md`.
 

@@ -5,6 +5,171 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: twelve pads a page, with Strum and Humanize in the columns that freed up
+
+Owen: "reduce the pads grid to 12 and move strum and humanize into that with the same style."
+
+The chord strip is **two rows of six**, and the two columns it gave up carry **Strum** and
+**Humanize** as `RangeKnob`s - the knob is the top of each range and the lamp beside it opens
+and closes the range. Both were already ranges (a two-handle `RangeSlider` each), and both shape
+what a chord *pad* does, so the strip is where they belong; the bar and the band were only where
+they fitted.
+
+**The lamp is also the switch**: a click turns the feature on or off, a drag still sets the
+range, and unlit means off (Owen: "clicking the blue satellite button should turn on or off the
+feature. And then I don't think we need the humanized check mark anymore"). So Humanize's tick
+box is gone - same parameter, same meaning, one fewer control. Strum needs no on/off parameter,
+since a strum of zero *is* off; its lamp parks the range at zero and puts back what it was.
+Four pixels of slop separate a click from a drag, because a click on a mouse-only surface is
+allowed to be untidy. **Switched off, the knob stops looking like a range** - the arc goes back
+to an ordinary one and the readout drops to a single number, since an unlit lamp over a range
+arc is the control saying two things at once.
+
+Strum's **Dir** combo became a `<` `>` pair beside the caption, and the caption reads the live
+direction (`STRUM UP` / `STRUM DOWN` / `STRUM RAND`) so nothing else has to. They **wrap**,
+unlike the arp's steppers: three values with no scale to them are a ring, not a ladder. With
+both the tick box and the combo gone, the row under each knob went too and that height is the
+face's - it lands near 60 px, comfortably past the arp's 40.
+
+One oddity this surfaced rather than caused: **with Humanize off, Keys plays the band's
+midpoint**, not the knob's value. The readout says that midpoint, so the number under the knob
+is what you hear; the knob itself still points at the top of the band.
+
+**This drops pads, and it is not reversible.** 12 x 4 pages is 48 slots where it was 64.
+`chordPadsFromTree` re-bases a saved session's slots into the current page width, and that code
+was written for 8 -> 16, where every old position still had a home. Narrowing does not: the old
+formula wrapped positions 12-15 onto the *front of the next page*, where they silently
+overwrote that page's own pads as the loop went on. A pad past the end of its page is now
+dropped instead, so each page keeps its first twelve and loses its last four. Owen's call, asked
+before it was built.
+
+With Strum gone the **Controls band has no rows left** - it was down to Strum and its direction
+after the 2026-08-02 passes - so that section is now its CC knob row alone. The Pads bar gets
+back the 232 px Humanize held, which goes to the section caption.
+
+### Added: `RangeKnob`, and Humanize Time and Velocity became ranges
+
+Owen: "for the humanized time and velocity knobs, I want to build a serum style knob where you
+can set a range in the knob. In serum they have like a little light next to it that sets the
+range ... I think this is gonna be a reusable component."
+
+**`src/ui/RangeKnob.h`** is a rotary that holds two values: the knob face sets one end and the
+span reaches back from it. **The knob's own arc is the range** - the lit stretch runs from the
+range's bottom to its top, and **travels with the face**, so turning the knob moves the whole
+range at its width. There is no second ring: a concentric one outside the face was tried and
+was one ring too many.
+
+Drawing it is one new line in the skin. `KeysLookAndFeel::drawRotarySlider` already computes
+where a lit arc *starts* - normally zero, or a bipolar knob's centre - so a slider can now
+override that proportion through the `skin::arcFromProperty` component property, and
+`RangeKnob` sets it to the range's bottom. Nothing is subclassed and no copy of the knob's look
+has to be kept in step.
+
+Painting over the arc afterwards was tried first and does not work: Keys draws a value arc as
+**three strokes** - a halo at 2.1x the line width, a body at 1.15, a hot core at 0.55 - so a
+mask sized to the line leaves the halo's edges showing all the way round. Owen's word for it
+was "a shadow of blue on the inner ring that isn't just the range".
+
+It is built from Serum's manual rather than from a guess at its screenshot, and the manual
+corrected the guess. Page 195: *"A smaller blue halo appears to the top left of the knob...
+Click and drag the arrow control to change the modulation depth amount. As you drag the arrow,
+notice how the halo shrinks or expands to show the range of modulation."* So the grab is a
+**satellite at the top left**, dragged vertically - not a dot sitting on the ring. That detail
+is what makes it buildable here: a satellite is a component of its own, so it can be sized to a
+real target instead of Serum's few pixels, and it goes in the corner a round knob leaves empty
+in a rectangular cell. It is a child *above* the face in z-order, because a Slider eats every
+press inside its rectangle, corners included.
+
+Two departures from Serum, both forced by the mouse-only contract. Serum's fallback for the
+fiddly satellite is Option/Alt-click-drag on the knob body; a modifier is not a gesture Keys may
+require, so the fallback here is that **the whole margin around the face drags the span too** -
+every pixel the face does not cover, corners included. The satellite is the affordance; the
+margin is the forgiveness. And there is no negative span: Serum flips the halo's hue for an
+inverted depth, but a range has nothing to invert into, so a `Direction` picks which side of the
+value it reaches instead. The satellite itself is a **plain LED** - solid, lit, unchanging. It
+carried a miniature arc filling with the span for one build (the span drawn twice), then an
+outline and a pip (which read as a tiny knob); the knob's own ring is the one that reads.
+
+The span is not a parameter the component owns - it comes in through `setSpan()` and goes out
+through three callbacks - so a consumer keeps the parameter, the gesture brackets and the undo
+story in one place. Written kit-ready but kept in Keys for now; promoting it means moving the
+file beside `okstudio/RotaryKnob.h` and swapping `skin::` for the theme's tokens.
+
+**`arpHumanizeSpan` and `arpHumanVelSpan`** (and their B and C twins) are the spans, appended,
+default 100. Humanize always drew uniformly between nothing and the knob; now it draws between
+`knob - span` and `knob`, so the knob keeps meaning "the most this ever does" and the range
+travels with it. A line can then be *always* a little late and a little softer with the
+variation on top, instead of everything anchored to dead-on. Span closed is a fixed offset with
+no randomness left; span at 100 puts the floor at zero wherever the knob sits, which is exactly
+what these did alone and is what makes them safe to append. The engine clamps the floor to its
+own ceiling, since either can be automated past the other and it is the only place that sees
+both at once. `migrateHumanSpans` backfills the defaults for an older session, the
+`migrateRateMode` shape - and matters more than most, since the default is the *top* of this
+range, so an absent parameter would inherit something narrower rather than wider.
+
+The macro card's knob row is 16 px taller to hold the rings, and the two range knobs reserve
+their ring width out of the row rather than taking it off a neighbour - so the face inside a
+range knob is exactly as wide as every plain one and the row still reads as eight knobs of one
+size. `ArpTests.cpp` pins the behaviour (169 cases, all passing), including the half that is
+easy to build the other way round: halving the knob with the span closed halves the offset, so
+the range provably travels with the dial rather than growing up from zero.
+
+Not done: the band's own **Human Time** and **Human Vel** sliders, on a line's Details view,
+still set the ceiling alone - they are linear sliders in a four-cell group, not knobs, so the
+floor is reachable from the macro card only for now.
+
+### Changed: Trip became a Tuplet combo, and the rate readout is a plain fraction
+
+Owen: "I think when triplet mode is enabled the division text should reflect. what if I want
+1/5 or other division?", then, on the first cut: "confusing UI. it's a check box but it changes.
+fraction confusing too. shouldn't it just be 1/5 not 1/4:5?"
+
+Two problems, one of them the other's cause. The dial's readout came straight from the
+`arpRate` choice parameter, which knows nothing about Dot or Trip, so a line playing dotted
+triplet 1/8s said "1/8" - and once the readout cannot describe a modified rate, there is not
+much point adding more modifiers.
+
+**The readout is now the step length as an exact fraction of a bar**, `ArpEngine::rateSyncText`:
+`1/8` straight, `1/12` in threes, `1/10` in fives, `1/5` for a quarter in fives, `1/8.` dotted,
+`1/10.` for both. This is the one notation that survives tuplets. The convention every DAW uses,
+`1/16T` and `1/16D`, has a letter for triplets and dotted and *no form at all* for a quintuplet,
+which is exactly why the first cut invented `1/4:5`; the fraction needs no letters, because a
+quarter-note quintuplet is five in the space of four quarters, which is four fifths of a beat,
+which is one fifth of a bar. FL Studio's grid ("1/3 beat", "1/6 beat") is the same system. Dot
+stays a dot rather than folding in - a dotted 1/8 is 3/16 of a bar, but `1/8.` is universal and
+`3/16` has to be worked out. Straight, every reading is byte-identical to the division names the
+parameter already carried. Hz is untouched: the engine ignores both modifiers there, so
+"4.00 Hz" was already the whole truth. Installed onto the dial after every attachment swap,
+since `SliderParameterAttachment` writes `textFromValueFunction` in its own constructor.
+
+**Trip is now Tuplet, an ordinary combo box** - Straight / Triplet / 5-tuplet / 7-tuplet /
+9-tuplet - on the band and on each macro card. It was briefly a check box that cycled its own
+text, which was a control lying about its own shape; a combo is what Keys already means by
+"pick from a list", the same idiom as Shape, Distance and Retrigger, and it takes an ordinary
+`ComboBoxAttachment` where a button could not bind a choice at all. A tuplet is N steps in the
+space of the largest power of two at or below N, so Triplet is exactly what the old toggle did.
+Dot stays a separate control: it lengthens a step by half where a tuplet divides a span, and the
+two compose. Both grey out in Hz as before.
+
+`arpTuplet` (and `arp2Tuplet`, `arp3Tuplet`) is **appended** to the parameter layout, so a
+saved session still loads. `arpTrip` stays registered but is read by nothing: `migrateTuplet`
+folds a set Trip into a Triplet - exact, not approximate, since `tupletFactor(3)` is the
+same 2/3 the old branch multiplied by - and returns Trip to its default, the same retirement
+`migrateVelTrim` gave Volume. `ArpTests.cpp` pins the notation and the multiplier for every
+value, the two axes composing, and the span identity (168 cases, all passing).
+
+Fixed on the way past: switching the panel from one line to another **left the rate dial
+attached to the line you had just left** whenever both were in the same rate mode.
+`refreshRateMode()` early-outs when the mode has not changed, and the dial's attachment lives
+there rather than in `buildAttachments()`, so it was the one control that never rebound.
+
+Not built, and deliberately: folding the tuplets into the rate list itself, so the dial walks
+1/4, 1/5, 1/6, 1/8, 1/10 and the second control disappears. It is the cleanest reading of "it
+should just say 1/5", but the list goes to about two dozen entries, which turns 1/4 to 1/64
+from four stepper clicks into fifteen - and the rate's click-only path is not something to make
+four times longer. Keeping the division and the tuplet as two short controls is also what Reaper,
+Cubase and Studio One do. See `docs/ARP_DESIGN.md`.
+
 ### Added: a Tempo Sync toggle, and labels for BPM, Voices and MIDI Ch on the Controls bar
 
 Owen: "BPM and Off and one in the controls header needs labels. and we need BPM sync toggle to

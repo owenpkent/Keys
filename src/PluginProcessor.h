@@ -151,7 +151,11 @@ public:
         juce::String numeral;   // Markov roman numeral ("" = not from the Markov source);
                                 // regeneration walks the chain from the previous pad's numeral
     };
-    static constexpr int padsPerPage = 16; // Octavium's 4x4 grid per page
+    // Twelve since 2026-08-03 (Owen: "reduce the pads grid to 12"), as two rows of six - the
+    // two columns that freed up carry Strum and Humanize as range knobs. It was 16 (Octavium's
+    // 4x4 page) and 8 before that; `chordPadsFromTree` re-bases a saved session's slots into
+    // whatever this is, and is the one place that has to know the count ever moved.
+    static constexpr int padsPerPage = 12;
     static constexpr int numPadPages = 4;
     static constexpr int numChordPads = padsPerPage * numPadPages;
 
@@ -180,7 +184,7 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     // The arpeggiator (docs/ARP_DESIGN.md). The editor writes lane atomics directly;
-    // globals live in the APVTS ("arpOn", "arpRate", "arpDot", "arpTrip",
+    // globals live in the APVTS ("arpOn", "arpRate", "arpDot", "arpTuplet",
     // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
     // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
     //
@@ -236,8 +240,35 @@ public:
                     // at 0 (as played), up boosts, down cuts. Volume stays registered - old
                     // sessions carry it - but migrateVelTrim folds it into VelTrim on load and
                     // nothing in the UI writes it any more.
-                    apHumanVel, apVelTrim, numArpParams };
+                    apHumanVel, apVelTrim,
+                    // Appended 2026-08-03 (Owen: "what if I want 1/5 or other division?").
+                    // Trip could only ever mean 3-in-the-space-of-2; Tuplet is a choice over
+                    // five and is what the combo on the sub-row writes now. Trip
+                    // stays registered above - old sessions carry it, and migrateTuplet folds
+                    // it into this on load - but nothing reads it after that, exactly as
+                    // Volume was retired into VelTrim.
+                    apTuplet,
+                    // Appended 2026-08-03 with the range knobs. Each Humanize control became a
+                    // range: the existing two stay the ceiling, and these say how far under it
+                    // the draw may fall. Default 100 - a span of the whole scale - leaves
+                    // exactly what those two did alone.
+                    apHumanizeSpan, apHumanVelSpan, numArpParams };
     static const char* arpParamSuffix(int which);
+    // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
+    // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
+    // Appending here is safe and is how a 11 or a 13 would arrive; inserting renumbers what
+    // every saved session and automation lane already holds.
+    //
+    // "Straight" and "Triplet" are the words Reaper's own straight/triplet/dotted selector
+    // uses, so the two everyone already knows read as they do everywhere else; the rest carry
+    // the number, since there is no household word for a 7. The combo names the *family* and
+    // the dial's readout names the resulting length ("1/10"), which is the division of labour
+    // the fraction notation makes possible - see ArpEngine::rateSyncText.
+    static juce::StringArray tupletChoices()
+    {
+        return { "Straight", "Triplet", "5-tuplet", "7-tuplet", "9-tuplet" };
+    }
+    static int tupletFor(int choiceIndex);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
     float arpParam(int line, ArpParam which) const;
@@ -499,6 +530,12 @@ protected:
     // repair overwrites with the parameter's own default (true), reproducing exactly what
     // Keys always did before this parameter existed.
     void migrateBpmSync(const juce::ValueTree& root);
+    // Trip became Tuplet on 2026-08-03. Same absence tell, same repair, plus the one fold that
+    // makes an old session sound identical: a set Trip is a Tuplet of 3.
+    void migrateTuplet(const juce::ValueTree& root);
+    // The Humanize spans, appended 2026-08-03. Absence is the tell and the default is the
+    // repair; there is no older parameter to fold, unlike the two above.
+    void migrateHumanSpans(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);

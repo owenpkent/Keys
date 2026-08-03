@@ -262,9 +262,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     return layout;
 }
 
-// One arpeggiator line's parameters. Dot/Trip are separate toggles rather than entries in the
-// rate list so automating the rate stays on even divisions (Serum's documented rationale);
-// Anchor picks bar-affixed vs free-running.
+// One arpeggiator line's parameters. Dot and Tuplet are separate controls rather than entries
+// in the rate list so automating the rate stays on even divisions (Serum's documented
+// rationale); Anchor picks bar-affixed vs free-running.
 //
 // Called three times (2026-08-01, the polyrhythm lines). Line 0 registers under exactly the
 // ids and names it always has - "arpRate", "Arp Rate" - so every saved session, every
@@ -436,6 +436,41 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // came, +100 doubles them, -100 mutes. Volume above stays registered for old sessions,
     // which migrateVelTrim folds into this on load; nothing in the UI writes Volume now.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelTrim"), 1 }, nm + " Velocity", -100, 100, 0));
+    // Tuplet, the general form of the Trip toggle above (Owen, 2026-08-03: "what if I want 1/5
+    // or other division?"). Trip could say one thing, 3-in-the-space-of-2; this says any of the
+    // odd divisions a beat is worth dividing into. Off is the default, so a session saved before
+    // it plays straight - which is what a session with Trip off did - and migrateTuplet turns a
+    // session with Trip *on* into a 3 so it plays the same too.
+    //
+    // A choice rather than an int 1..9: the even numbers are not tuplets. 4 in the space of 4 is
+    // straight and 6 in the space of 4 is the same length as a triplet at half the division, so
+    // an int would have spent half its travel on values that duplicate a division the dial can
+    // already reach. Appending to the list is safe; inserting is not (see tupletChoices).
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Tuplet"), 1 }, nm + " Tuplet",
+                                                      tupletChoices(), 0));
+    // The Humanize spans (2026-08-03, Owen: "a serum style knob where you can set a range in
+    // the knob"). Each Humanize control was "random between nothing and the knob"; the span
+    // says how far under the knob the draw may fall, so the knob keeps meaning "the most this
+    // ever does" and the range **travels with it** - which is the behaviour Serum's mod ring
+    // has and the half of this Owen asked for by name. A line can then be *always* a little
+    // late and a little softer with variation on top, rather than everything anchored to zero.
+    //
+    // Default 100 is what makes them safe to append: a span of the whole scale puts the floor
+    // at zero wherever the knob sits, which is exactly what these two did alone, so a session
+    // that never heard of them plays the same. The engine clamps the floor to its own ceiling
+    // (see ArpEngine::Params), so nothing here has to police the pair.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanizeSpan"), 1 },
+                                                   nm + " Human Time Range", 0, 100, 100));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVelSpan"), 1 },
+                                                   nm + " Human Velocity Range", 0, 100, 100));
+}
+
+// The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
+// against zero everywhere, and ArpEngine::tupletFactor treats both as straight.
+int KeysProcessor::tupletFor(int choiceIndex)
+{
+    static constexpr int values[] = { 0, 3, 5, 7, 9 };
+    return values[(size_t) juce::jlimit(0, (int) (sizeof(values) / sizeof(values[0])) - 1, choiceIndex)];
 }
 
 // The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
@@ -447,7 +482,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
-        "OctShift", "Volume", "HumanVel", "VelTrim"
+        "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1351,7 +1386,11 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.rateFree = arpParam(n, apRateFree) > 0.5f;
         ap.rateHz = (double) arpParam(n, apRateHz);
         ap.dotted = arpParam(n, apDot) > 0.5f;
-        ap.triplet = arpParam(n, apTrip) > 0.5f;
+        // apTrip is not read here any more: migrateTuplet folds it into Tuplet on load, and
+        // nothing on screen writes it. It stays registered so a saved session still parses.
+        ap.tuplet = tupletFor((int) arpParam(n, apTuplet));
+        ap.humanizeSpan = (int) arpParam(n, apHumanizeSpan);
+        ap.humanVelSpan = (int) arpParam(n, apHumanVelSpan);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;
@@ -1551,15 +1590,27 @@ void KeysProcessor::chordPadsFromTree(const juce::ValueTree& root)
     const auto pads = root.getChildWithName("chordPads");
     if (! pads.isValid())
         return;
-    // Sessions saved when pages held 8 pads store slots in 8-a-page terms; keep each
-    // pad on the page it was on by re-basing its slot into the current page width.
+    // A session stores its slots in its own page width; keep each pad on the page it was on by
+    // re-basing that slot into the current width.
+    //
+    // **Narrowing drops the overflow, and must.** This was written for 8 -> 16, where every old
+    // position still had a home; 16 -> 12 (2026-08-03) does not, and the old formula wrapped
+    // positions 12..15 onto the *front of the next page*, where they overwrote that page's own
+    // pads as the loop went on - silent, and worse than the loss it was trying to avoid. A pad
+    // past the end of its page now has nowhere to go and is dropped, which is Owen's call
+    // (2026-08-03) and is called out in the changelog: it is not reversible.
     const int savedPerPage = (int) pads.getProperty("padsPerPage", 8);
     for (int c = 0; c < pads.getNumChildren(); ++c)
     {
         const auto pad = pads.getChild(c);
         int slot = (int) pad.getProperty("slot", -1);
         if (slot >= 0 && savedPerPage > 0 && savedPerPage != padsPerPage)
-            slot = (slot / savedPerPage) * padsPerPage + (slot % savedPerPage);
+        {
+            const int pos = slot % savedPerPage;
+            if (pos >= padsPerPage)
+                continue; // the page got shorter under it
+            slot = (slot / savedPerPage) * padsPerPage + pos;
+        }
         if (slot < 0 || slot >= numChordPads)
             continue;
         ChordPad p;
@@ -2211,6 +2262,8 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     migrateRateMode(root);
     migrateVelTrim(root);
     migrateBpmSync(root);
+    migrateTuplet(root);
+    migrateHumanSpans(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -2387,6 +2440,75 @@ void KeysProcessor::migrateBpmSync(const juce::ValueTree& root)
     if (! saw)
         if (auto* param = apvts.getParameter("bpmSync"))
             param->setValueNotifyingHost(param->getDefaultValue());
+}
+
+void KeysProcessor::migrateTuplet(const juce::ValueTree& root)
+{
+    // Trip became Tuplet on 2026-08-03: "arpTuplet" is a choice over Straight / Triplet /
+    // 5-tuplet / 7-tuplet / 9-tuplet, and
+    // "arpTrip" - a bool that could only ever say 3 - is retired into it. A session saved before
+    // this has no Tuplet at all, and as ever an absent parameter keeps the live instance's
+    // current value rather than resetting (see migrateRateMode), so a preset load could leave
+    // the previous patch's quintuplets running under a session that never asked for one.
+    //
+    // The fold is exact, not approximate: index 1 is "3" and ArpEngine::tupletFactor(3) is the
+    // 2/3 the old triplet branch multiplied by, so an old session plays note for note as it did.
+    // Trip goes back to its default in the same breath - the migrateVelTrim shape, and for the
+    // same reason: two parameters saying the same thing, only one of them written, is a state
+    // that drifts the moment a host automates the dead one.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto tupId = arpParamId(line, apTuplet);
+        const auto tripId = arpParamId(line, apTrip);
+        bool sawTuplet = false, savedTrip = false;
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto child = params.getChild(i);
+            const auto id = child.getProperty("id").toString();
+            sawTuplet = sawTuplet || id == tupId;
+            if (id == tripId)
+                savedTrip = (double) child.getProperty("value", 0.0) > 0.5;
+        }
+
+        if (sawTuplet)
+            continue; // saved since the change; whatever it says is meant
+
+        if (auto* param = apvts.getParameter(tupId))
+            param->setValueNotifyingHost(param->convertTo0to1(savedTrip ? 1.0f : 0.0f));
+        if (auto* param = apvts.getParameter(tripId))
+            param->setValueNotifyingHost(param->getDefaultValue());
+    }
+}
+
+void KeysProcessor::migrateHumanSpans(const juce::ValueTree& root)
+{
+    // The two Humanize spans arrived 2026-08-03 and are absent from every session saved before
+    // them. Their default is 100 - the whole scale, so the floor is zero wherever the knob sits
+    // - which reproduces exactly what Humanize did alone. But an absent parameter is not a
+    // reset (see migrateRateMode), so without this a preset load would leave the previous
+    // patch's narrow span pinning every hit late in a session that never asked for one. That
+    // is a worse failure here than for most: the default is the *top* of the range, so an
+    // absent parameter inherits something quieter than the default rather than louder.
+    // Nothing to fold: there is no older parameter that meant this.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+        for (const auto which : { apHumanizeSpan, apHumanVelSpan })
+        {
+            const auto wanted = arpParamId(line, which);
+            bool saw = false;
+            for (int i = 0; i < params.getNumChildren() && ! saw; ++i)
+                saw = params.getChild(i).getProperty("id").toString() == wanted;
+            if (! saw)
+                if (auto* param = apvts.getParameter(wanted))
+                    param->setValueNotifyingHost(param->getDefaultValue());
+        }
 }
 
 juce::ValueTree KeysProcessor::layoutToTree() const

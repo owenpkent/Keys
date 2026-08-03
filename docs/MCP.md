@@ -85,7 +85,7 @@ A polyrhythm from a cold start is two `set_params` calls and a chord:
 
 ```
 set_params { "values": { "arpOn": true,  "arpRate": "1/8" } }
-set_params { "values": { "arp2On": true, "arp2Rate": "1/8", "arp2Trip": true } }
+set_params { "values": { "arp2On": true, "arp2Rate": "1/8", "arp2Tuplet": "Triplet" } }
 play_notes { "notes": [60, 64, 67], "durationMs": 4000 }
 ```
 

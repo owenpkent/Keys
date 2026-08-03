@@ -179,7 +179,18 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     // negative rather than as half full. Asked through the range rather than through a flag,
     // so any future bipolar knob gets it without opting in (the arp's Swing is the first).
     const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
-    const float originPos = bipolar ? (float) slider.valueToProportionOfLength(0.0) : 0.0f;
+    const float zeroPos = bipolar ? (float) slider.valueToProportionOfLength(0.0) : 0.0f;
+    const float zeroAngle = rotaryStartAngle + zeroPos * (rotaryEndAngle - rotaryStartAngle);
+
+    // Where the lit arc *starts*. Normally the origin above, but a slider may override it
+    // through this property: keys::RangeKnob does, so the lit stretch is its range rather than
+    // everything below its value. It has to be here rather than painted over afterwards,
+    // because the arc is three strokes and the widest of them is a halo at 2.1x the line - a
+    // mask sized to the line leaves that halo's edges showing, which is exactly the "shadow of
+    // blue" that sent this here (2026-08-03).
+    float originPos = zeroPos;
+    if (const auto* over = slider.getProperties().getVarPointer(skin::arcFromProperty))
+        originPos = juce::jlimit(0.0f, 1.0f, (float) (double) *over);
     const float originAngle = rotaryStartAngle + originPos * (rotaryEndAngle - rotaryStartAngle);
 
     // Groove.
@@ -193,7 +204,7 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     {
         juce::Path tick;
         tick.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f,
-                           originAngle - 0.012f, originAngle + 0.012f, true);
+                           zeroAngle - 0.012f, zeroAngle + 0.012f, true);
         g.setColour(skin::textFaint);
         g.strokePath(tick, { lw, juce::PathStrokeType::curved, juce::PathStrokeType::butt });
     }

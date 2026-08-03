@@ -117,7 +117,7 @@ combo the detached window used to build for itself back when Size lived in the C
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
 arp's **A** / **B** switches and **Hold off** chip, **Launch Quantize**, the pad page buttons,
-**Humanize** and its velocity range, the generator's **Fill**, **Regen** and **Generator** chips
+the generator's **Fill**, **Regen** and **Generator** chips
 with the **Key** combo beside them, **Tempo**, **Sync**, **Root**, **Scale**, **Scale Lock**,
 **Voices**, **MIDI Ch**, the **Instrument** chip (Keys Host only), and the theme swatch. All of them keep
 working while the section they name is off in a window.
@@ -131,8 +131,7 @@ survive: it exists to open the macro view, and there is nothing to open once the
 gone, so it hides with the section - the one navigation control left on this bar, and the one
 bar control here that folds. **Fill**, **Regen**, **Generator** and the **Key** combo with them
 (the whole left-click path into the chord generator - generating into a folded strip is a fine
-thing to mean, and the setting must not fold away with the cards), **Humanize** and its
-velocity range (a playing-feel control, the same argument as Fill and Regen), **Tempo**,
+thing to mean, and the setting must not fold away with the cards), **Tempo**,
 **Sync**, **Root**, **Scale**, **Scale Lock**, **Voices**, **MIDI Ch**, **Size** and **Octave**
 (parameters you reach for while playing, same as Sustain and Latch on the Keyboard bar), the
 **Instrument** chip, and the theme swatch (it colours the whole plugin). Everything else goes
@@ -170,7 +169,9 @@ theme swatch always has: **Tempo**, **Root**, **Scale**, **Scale Lock**, **Voice
 Ch**. A seventh, the **Instrument** chip, joined them the same day but only shows up in Keys
 Host. An eighth, **Sync**, joined the same day too, beside Tempo. Size and Octave left the band
 entirely later the same day, for the Keyboard bar; Humanize and its Velocity range left for the
-Pads bar. **Strum** and **Dir** are what remain of the band itself.
+Pads bar. **Strum** and **Dir** followed them into the *pads strip* on 2026-08-03, which left
+the band with nothing in it: this section is the CC knob bank alone now, plus everything on its
+bar.
 
 | Control | Type | What it does |
 |---------|------|--------------|
@@ -182,8 +183,8 @@ Pads bar. **Strum** and **Dir** are what remain of the band itself.
 | **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. On the *Controls bar*. |
 | **MIDI Ch** | dropdown | Output channel, 1–16. Its on-screen caption is "CH". On the *Controls bar*. |
 | **Instrument** | chip → menu | Keys Host only (2026-08-02, Owen: "the load instrument section with all that should go in the controls submenu"): Load instrument…, Show/Hide instrument GUI, and Eject, with the loaded instrument's name as the chip's own caption. Invisible in plain Keys, which never wires it up - the chip and its gap simply aren't reserved. The one *elastic* control on this bar: it gets whatever width the tempo group and the Root…MIDI Ch group leave over. |
-| **Strum** | range | Spread a chord's notes instead of playing them together, over a time drawn from this 0–200 ms band — so repeated stabs do not all rake at the same speed. Drag an end to resize the band or the middle to move it; both ends together is a fixed strum. Applies to chord pads and the live chord card. |
-| **Dir** | dropdown | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. |
+| **Strum** | range knob, in the *pads strip* | Spread a chord's notes instead of playing them together, over a time drawn from a 0–200 ms band — so repeated stabs do not all rake at the same speed. The knob is the longest it ever takes, the ring reaches back from it, and the **lamp** beside it switches strum off and on (off is simply zero: the chord lands all at once). Applies to chord pads and the live chord card. |
+| **Dir** | `<` `>` by the caption | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. The caption reads the live one — `STRUM UP`, `STRUM DOWN`, `STRUM RAND` — and the arrows wrap. |
 | **Theme** | swatch | Colours this instance (Cyan, Amber, Lime, Violet, Magenta, Orange, Rose, Ice), so you can tell it from Keys on your other tracks. Per instance, saved with the session. Sits on the *Controls bar*, so it stays reachable with that section folded. |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
@@ -207,8 +208,7 @@ the pad header", then "make smaller to fit" once it landed there):
 
 | Control | Type | What it does |
 |---------|------|--------------|
-| **Velocity** | two-handle slider | How hard Keys plays. With **Humanize** off, every note plays the band's midpoint (the readout shows it). With Humanize on, each note takes a random value inside the band. Drag an end to resize it, or **drag the middle to move the whole band**. Collapse it onto one value for a plain fixed velocity. Its on-bar label dropped the word "Velocity" to fit a 36 px cell beside a 24 px toggle; the slider's own tooltip still spells it out. |
-| **Humanize** | toggle | On: each note takes a random velocity from inside the Velocity band, so repeats and chords don't sound machine-perfect. Off: the band's midpoint. |
+| **Humanize** | range knob, in the *pads strip* | How hard Keys plays. The knob is the hardest a note ever lands and the ring reaches back from it, so each note takes a random velocity inside that band and a part stops sounding typed in. The **lamp** beside it is the on/off: lit, notes are drawn from the band; unlit, the arc collapses to an ordinary one and every note plays the band's **midpoint**, which is the single number the readout then shows. (It had a separate tick box until 2026-08-03; the lamp says the same thing without a second control.) |
 
 ## Holding notes
 
@@ -279,7 +279,7 @@ tone its own velocity and the **Strum** control spreads them into a strum. A pad
 respects the **Voices** limit: if a chord has more notes than the cap allows, its lowest
 notes are the ones that sound. The pads save with the DAW session.
 
-There are **four pages** of sixteen pads, picked by the four numbered buttons on the
+There are **four pages** of twelve pads (sixteen until 2026-08-03), picked by the four numbered buttons on the
 **Pads bar** above the strip. A chord left ringing on one page keeps sounding while you
 work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
@@ -648,9 +648,9 @@ holds:
 
 | | |
 |---|---|
-| **Rate** | a knob, detented onto the divisions, with `<` `>` beside it and a **Sync / Hz** switch. A time division in Sync, a frequency in Hz. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
+| **Rate** | a knob, detented onto the divisions, with `<` `>` beside it and a **Sync / Hz** switch. A time division in Sync, a frequency in Hz. The readout is the step length as a plain fraction of a bar, modifiers included: `1/8`, `1/8.` dotted, `1/10` in fives. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
 | **< shape >** | its shape, including Pattern (whose step editor is on that line's own Details view) |
-| **Dot / Trip / Anchor** | on a strip under the rate. Dotted steps, triplet steps, and whether the run locks to the host's bar grid. All three grey out in Hz, where there is no beat to divide and no grid to lock to |
+| **Dot / Tuplet / Anchor** | on a strip under the rate. Dotted steps, tuplet steps, and whether the run locks to the host's bar grid. Tuplet is a list — Straight, Triplet, 5-tuplet, 7-tuplet, 9-tuplet — fitting that many steps into the space a power of two would take; the rate readout shows the result, so 1/4 in fives reads `1/5`. All three grey out in Hz, where there is no beat to divide and no grid to lock to |
 | **Details** | opens that line's deep view - the band, and the step editor on Pattern shape. The only way there from this view (2026-08-02, seventh pass); A and B on the Arp bar used to do it and are that line's On switch now instead |
 | **Oct** | transposes that line's whole run up or down, centred at zero. (The upward-only stacking *range*, `arpOctaves`, is on the line's own Details view beside Distance - "how far does it reach" is a different question from "how high does it sit") |
 | **Gate** | how much of each step its notes fill. Short gates let the other line through |
@@ -658,11 +658,11 @@ holds:
 | **Swing** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
 | **Offset** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
 | **Vel** | how loud that line plays, bipolar around "as played": centre is unchanged, right boosts, left cuts, hard left mutes exactly. Squared rather than linear, so the fader's change is even across its travel instead of crammed into the last few degrees |
-| **H.Time** | nudges each hit a little late, at random. At 0 the line is dead on the grid |
-| **H.Vel** | shaves each hit's velocity, at random - independent of Vel and of H.Time, so level and humanize no longer fight over one knob |
+| **H.Time** | nudges each hit a little late, at random. At 0 the line is dead on the grid. A **range knob**: the knob is the most it ever nudges, and the ring around it is how far under that a hit can fall. Drag the little dial at its top left — or anywhere on the ring — to open and close it. Wide open it draws from nothing, which is what this did before it had a ring; closed it is a fixed nudge with no randomness left. Turn the knob and the whole range moves with it |
+| **H.Vel** | shaves each hit's velocity, at random - independent of Vel and of H.Time, so level and humanize no longer fight over one knob. A **range knob** like H.Time: knob for the most, ring for how far under it. Closed is a fixed cut, wide open is a draw from nothing |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
 
-Eight knobs, a rate with its three modifiers, a shape, Dot/Trip/Anchor and Details: every
+Eight knobs, a rate with its three modifiers, a shape, Dot/Tuplet/Anchor and Details: every
 setting a regular arpeggiator has, both lines deep, on one screen. Latch, **Play** and Chain
 still exist per line, just not on this card - Latch and Play live on that line's own Details
 view (the band), Chain on its action row under the twelve slots. The card's own On switch is
@@ -743,12 +743,12 @@ in seconds instead.
 | **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, **Random**, **Random Other** (never the same note twice running), **Random Once** (a shuffled order, kept for as long as the chord is held), **Chord** (every note of the chord on every step, so the arp plays rhythm instead of a run), or **Pattern** (opens the step editor). |
 | **Rate** | Pattern | A dial. In **Sync**, step length from 16 bars down to 1/64, detented onto the eleven divisions. In **Hz**, a free-running 0.031 to 32 Hz, which is the same span those divisions cover at 120 bpm. The Hz dial is exponential: ten octaves, a tenth of the travel each, so 1 Hz sits at the centre and a degree of the dial is the same *ratio* wherever you are on it. |
 | **Sync** / **Hz** | Pattern | Which unit the dial is in. Sync follows the host tempo and its bar grid; Hz ignores both and runs whether the transport rolls or not. The chip reads the live unit and lights in Hz. |
-| **Dot** / **Trip** | Pattern | Dotted or triplet feel on the rate. Greyed out in Hz: they subdivide a beat, and there is no beat there. |
+| **Dot** / **Tuplet** | Pattern | Dot lengthens each step by half, and reads as a dot on the rate: `1/8.`. Tuplet is a list — **Straight / Triplet / 5-tuplet / 7-tuplet / 9-tuplet** — fitting that many steps into the space the power of two below it would take, so five quintuplet 1/16s fill exactly the span four straight ones do. The rate readout shows the result as a plain fraction of a bar: 1/8 in threes is `1/12`, in fives `1/10`, and 1/4 in fives is `1/5`. They are different questions and stack. Both greyed out in Hz: they subdivide a beat, and there is no beat there. |
 | **Swing** | Playback | −0.75 – +0.75, starting centred. Shifts the offbeat steps: right delays them for a shuffle, left pulls them early to rush the beat, centre is dead straight. |
 | **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
 | **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
 | **Retrigger** | Playback | When the pattern starts over: **Off**, **Note** (a new chord restarts it), or a clock window — 1 or 2 beats, 1, 2 or 4 bars. A clock window is what makes a five-step lane still land on the bar. |
-| **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. Greyed out in Hz, alongside Dot and Trip: a free-running rate follows no bar grid, so there is nothing there to anchor to. |
+| **Anchor** | Playback | On: steps lock to the host's bar grid, so the arp lines up after a jump. Off: free-running, never jumps, may drift. Greyed out in Hz, alongside Dot and Tuplet: a free-running rate follows no bar grid, so there is nothing there to anchor to. |
 | **Latch** | Playback | Keep arpeggiating after you let go, until a new chord arrives. |
 | **Repeats** | Spread | 1–4. How many times the chord is stacked up the keyboard before the run repeats. (This was "Octaves", back when an octave was the only thing it could stack by.) |
 | **Distance** | Spread | How far each repeat goes: **Octave**, **5th**, **4th**, **Maj 3rd**, **min 3rd**, or the scale-relative **Scale 2nd / 3rd / 5th / 7th**. The scale entries count degrees of Root and Scale, so a third stays a third *of this key* — C lifts to E, D lifts to F — which is the one thing the stock arps cannot do. |

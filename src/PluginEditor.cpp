@@ -292,46 +292,110 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // on the bar in the main one. "VELOCITY" does not fit the 36 px cell the label gets
     // beside a 24 px button, so it reads as a bare number/range now; the slider's own tooltip
     // still spells the whole thing out.
-    addAndMakeVisible(humanizeButton);
-    humanizeVelLabel.setFont(skin::micro(9.0f));
-    humanizeVelLabel.setColour(juce::Label::textColourId, skin::text);
-    humanizeVelLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(humanizeVelLabel);
-    humanizeVelSlider.setRange(1, 127, 1); // style/textbox are RangeSlider's own
-    humanizeVelSlider.setTooltip("Each note takes a random velocity in this range. "
-                                 "Drag an end to resize it, or the middle to move it.");
-    humanizeVelSlider.setMinAndMaxValues(processor.apvts.getRawParameterValue("humanizeVelMin")->load(),
-                                         processor.apvts.getRawParameterValue("humanizeVelMax")->load(),
-                                         juce::dontSendNotification);
-    humanizeVelSlider.onValueChange = [this]
+    // Strum and Humanize are **range knobs in the pads section** since 2026-08-03 (Owen:
+    // "reduce the pads grid to 12 and move strum and humanize into that with the same style").
+    // Both were already ranges - a two-handle RangeSlider each, Strum on the Controls band and
+    // Humanize on the Pads bar - and both belong to what a chord *pad* does, which is where
+    // they now sit: in the two columns the grid gave up going from sixteen pads to twelve.
+    //
+    // Each is stored as a low/high pair, so the face attaches to the **high** and the low is
+    // written by hand from `rangeLo()` - on a span drag *and* on a face move, because the range
+    // travels with the knob and a low that stayed put would silently widen it.
+    const auto wireRange = [this](RangeKnob& rk, juce::Label& head, const juce::String& name,
+                                  const juce::String& loId, const juce::String& hiId,
+                                  double lo, double hi, const juce::String& unit,
+                                  std::unique_ptr<SliderAtt>& att, const juce::String& tip)
     {
-        writeParam("humanizeVelMin", humanizeVelSlider.getMinValue());
-        writeParam("humanizeVelMax", humanizeVelSlider.getMaxValue());
+        styleLabel(head, name);
+        padsHolder.addAndMakeVisible(head);
+        rk.face().setRange(lo, hi, 1.0);
+        rk.face().setTitle(name);
+        rk.face().setTooltip(tip);
+        rk.setTitle(name + " range");
+        rk.setTooltip(tip);
+        rk.spanHandle().setTitle(name + " range handle");
+        rk.setSpanTooltip("Drag up and down to open or close the range. Closed is a fixed "
+                          "value; open, every chord draws a new one inside it.");
+        rk.textFromRange = [unit](double a, double b)
+        { return juce::String((int) a) + "-" + juce::String((int) b) + unit; };
+        att = std::make_unique<SliderAtt>(processor.apvts, hiId, rk.face());
+        rk.setSpan(processor.apvts.getRawParameterValue(hiId)->load()
+                   - processor.apvts.getRawParameterValue(loId)->load());
+        const auto pushLow = [this, &rk, loId] { writeParam(loId.toRawUTF8(), rk.rangeLo()); };
+        rk.onValueChanged = pushLow;
+        rk.onSpanChanged = [pushLow](double) { pushLow(); };
+        rk.onSpanDragStart = [this, loId]
+        {
+            if (auto* p = processor.apvts.getParameter(loId))
+                p->beginChangeGesture();
+        };
+        rk.onSpanDragEnd = [this, loId]
+        {
+            if (auto* p = processor.apvts.getParameter(loId))
+                p->endChangeGesture();
+        };
+        padsHolder.addAndMakeVisible(rk);
     };
-    addAndMakeVisible(humanizeVelSlider);
 
-    // Chord-pad strum (Octavium "Drift"): spread a pad's note-ons over N ms, in a direction.
-    // A range rather than one number, like Velocity above it - each chord rakes at a speed
-    // drawn from the band, so a part played on one pad stops sounding stamped out. Two
-    // values means no APVTS attachment; synced to the pair of params by hand.
-    styleLabel(chordStrumLabel, "Strum");
-    controlsHolder.addAndMakeVisible(chordStrumLabel);
-    chordStrumSlider.setRange(0, 200, 1);
-    chordStrumSlider.setTooltip("Each chord spreads its notes over a time drawn from this "
-                                "range. Drag an end to resize it, or the middle to move it; "
-                                "both ends together is a fixed strum.");
-    chordStrumSlider.setMinAndMaxValues(processor.apvts.getRawParameterValue("chordStrum")->load(),
-                                        processor.apvts.getRawParameterValue("chordStrumMax")->load(),
-                                        juce::dontSendNotification);
-    chordStrumSlider.onValueChange = [this]
+    wireRange(strumKnob, strumHead, "Strum", "chordStrum", "chordStrumMax", 0.0, 200.0, " ms",
+              chordStrumAtt,
+              "How long a chord takes to rake, in milliseconds. The knob is the longest it "
+              "ever takes and the ring is how far under that it can fall, so every chord "
+              "strums at its own speed instead of sounding stamped out. Closed is a fixed "
+              "rake; at zero the chord lands all at once.");
+    wireRange(humanKnob, humanHead, "Humanize", "humanizeVelMin", "humanizeVelMax", 1.0, 127.0, "",
+              humanizeVelAtt,
+              "Velocity. The knob is the hardest a note ever lands and the ring is how far "
+              "under that it can fall, so a part stops sounding typed in. Closed is one fixed "
+              "velocity for everything.");
+    // **The lamp is the switch** (2026-08-03, Owen: "clicking the blue satellite button should
+    // turn on or off the feature. And then I don't think we need the humanized check mark
+    // anymore"). Humanize had a tick box; it is gone, and the lamp says lit-or-not instead,
+    // which is what a lamp is for. The tick box's parameter is unchanged and so is its
+    // meaning - only the control went.
+    humanKnob.isOn = [this]
+    { return processor.apvts.getRawParameterValue("humanize")->load() > 0.5f; };
+    // Off, every note takes the band's **midpoint** - not the knob's own value - so that is
+    // what the readout has to say. The knob still points at the top of the band, which is the
+    // one place this control is not literal; the number under it is what you will hear.
+    humanKnob.textWhenOff = [this](double)
     {
-        writeParam("chordStrum", chordStrumSlider.getMinValue());
-        writeParam("chordStrumMax", chordStrumSlider.getMaxValue());
+        auto& a = processor.apvts;
+        const auto lo = a.getRawParameterValue("humanizeVelMin")->load();
+        const auto hi = a.getRawParameterValue("humanizeVelMax")->load();
+        return juce::String((int) ((lo + hi) * 0.5f));
     };
-    controlsHolder.addAndMakeVisible(chordStrumSlider);
+    humanKnob.setOn = [this](bool on)
+    {
+        if (auto* p = processor.apvts.getParameter("humanize"))
+            p->setValueNotifyingHost(on ? 1.0f : 0.0f);
+    };
 
-    addCombo(controlsHolder, chordStrumDirBox, chordStrumDirLabel, "Dir",
-             { "Up", "Down", "Random" }, "chordStrumDir", chordStrumDirAtt);
+    // Strum has no on/off parameter and does not need one: a strum of zero *is* off, since the
+    // chord lands all at once. So the lamp parks the range at zero and puts it back where it
+    // was - remembered here rather than stored, because "what it was" is a UI convenience and
+    // a session that was saved off should open off.
+    strumKnob.isOn = [this] { return strumKnob.face().getValue() > 0.0; };
+    strumKnob.setOn = [this](bool on)
+    {
+        if (! on)
+            lastStrumMax = juce::jmax(1.0, strumKnob.face().getValue());
+        strumKnob.face().setValue(on ? lastStrumMax : 0.0, juce::sendNotificationSync);
+    };
+
+    // Strum direction: `<` `>` beside the caption, not a combo (Owen, same day: "could we make
+    // the random drop down just like a left and right toggle by the strum text?"). Three
+    // values with an order to them is what a stepper pair is for, and the caption says which
+    // one is live - see refreshStrumCaption(), so the word is never a second thing to read.
+    for (auto* b : { &strumDirPrev, &strumDirNext })
+    {
+        b->setTooltip("Which way a chord rakes: up, down, or a fresh direction each time.");
+        padsHolder.addAndMakeVisible(*b);
+    }
+    strumDirPrev.setTitle("Previous strum direction");
+    strumDirNext.setTitle("Next strum direction");
+    strumDirPrev.onClick = [this] { stepStrumDir(-1); };
+    strumDirNext.onClick = [this] { stepStrumDir(1); };
 
     // Tempo used to be a labelled drag slider here in row B of the band. It is a number on
     // this section's *bar* now (2026-08-02, Owen: "the bpm should live in the controls
@@ -1576,13 +1640,65 @@ void KeysEditor::layoutControlsHolder()
         ctl.setBounds(c);
     };
 
-    cell(row, 150, chordStrumLabel, chordStrumSlider);
-    cell(row, 100, chordStrumDirLabel, chordStrumDirBox);
+    juce::ignoreUnused(row, cell); // the band's last row went with Strum on 2026-08-03
+}
+
+// Wraps, unlike the arp's steppers, which stop at the ends. Three values with no scale to
+// them - up, down, random - are a ring, not a ladder: there is no "past the end" to protect
+// anyone from, and stopping would make one of the three reachable from one side only.
+void KeysEditor::stepStrumDir(int delta)
+{
+    if (auto* p = dynamic_cast<juce::AudioParameterChoice*>(processor.apvts.getParameter("chordStrumDir")))
+    {
+        const int n = juce::jmax(1, p->choices.size());
+        p->beginChangeGesture();
+        *p = (p->getIndex() + delta + n) % n;
+        p->endChangeGesture();
+    }
 }
 
 void KeysEditor::layoutPadsHolder()
 {
-    chordPads.setBounds(holderContent(secPads).reduced(4, 4));
+    auto area = holderContent(secPads).reduced(4, 4);
+
+    // Strum and Humanize take the right end of the strip - the space the grid gave up going
+    // from sixteen pads to twelve (2026-08-03). Reserved *first*, so the pads take what is
+    // left rather than the knobs taking what the pads did not want: the elastic control gives
+    // way, never the fixed one, which is this file's oldest lesson about rows.
+    auto strip = area.removeFromRight(214);
+    area.removeFromRight(8);
+    chordPads.setBounds(area);
+
+    // The strip is only about 100 px tall - the pad cards are ~50 - so the knob has to be
+    // budgeted for, not given what is left. Its face ends up `height - 11 - 24 - 14 - 2*inset`,
+    // and every one of those numbers is chosen to land it at the ~40 px the arp's macro knobs
+    // get: the same knob at the same size is what "the same style" means. Handing the column
+    // the arp's *cell* numbers instead (12 caption, 34 control, 15 readout, 8 inset) left a
+    // 26 px face floating in an empty column, which is what a first cut did.
+    // The row under each knob is gone with the Humanize tick box and the Dir combo
+    // (2026-08-03) - the lamp switches, and Dir stepped from the caption row - so all of that
+    // height is the knob's. The face lands near 60 px, comfortably past the arp's 40.
+    const auto column = [](juce::Rectangle<int>& r, int w, juce::Label& head, RangeKnob& knob,
+                           juce::Component* prev, juce::Component* next)
+    {
+        auto c = r.removeFromLeft(w);
+        r.removeFromLeft(6);
+        // 22, not the caption's usual 11: the row carries the two steppers on the Strum column
+        // and both columns keep the same knob size, so both rows are the same height.
+        auto cap = c.removeFromTop(22);
+        if (prev != nullptr && next != nullptr)
+        {
+            prev->setBounds(cap.removeFromLeft(22).reduced(1));
+            next->setBounds(cap.removeFromRight(22).reduced(1));
+        }
+        head.setBounds(cap);
+        knob.setFaceInset(7);
+        knob.setReadoutHeight(14);
+        knob.setBounds(c);
+    };
+
+    column(strip, 100, strumHead, strumKnob, &strumDirPrev, &strumDirNext);
+    column(strip, 100, humanHead, humanKnob, nullptr, nullptr);
 }
 
 void KeysEditor::layoutArpHolder()
@@ -1773,28 +1889,39 @@ void KeysEditor::timerCallback()
     // Keep the two-handle velocity range synced to its params and show the numbers. With
     // Humanize off the two ends are one value as far as playing goes, so read out the
     // midpoint rather than a range that is not being spread over. No "VELOCITY" prefix since
-    // this moved to the Pads bar (2026-08-02): a bare number/range is what fits a 36 px cell,
-    // and humanizeVelSlider's own tooltip still spells the whole thing out.
-    const int vmin = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
-    const int vmax = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
-    humanizeVelSlider.setMinAndMaxValues(vmin, vmax, juce::dontSendNotification);
-    humanizeVelLabel.setText(hum ? juce::String(juce::jmin(vmin, vmax)) + "-"
-                                       + juce::String(juce::jmax(vmin, vmax))
-                                 : juce::String((vmin + vmax) / 2),
-                             juce::dontSendNotification);
+    // Both ranges are knobs now (2026-08-03). Their *face* is on an attachment and needs
+    // nothing here; the **span** is not, so it is pushed in each tick - the same read-back the
+    // arp's two Humanize knobs need, and for the same reason: a session load, a host lane or
+    // an MCP client moves the low end and nothing else would tell the ring. setSpan no-ops
+    // when the value is unchanged, so this never fights an open drag.
+    //
+    // Sorted, because the pair can arrive the wrong way round from host automation and a
+    // negative span is not a thing to draw. Humanize's greying is unchanged: only the timing
+    // spread greys out, since the velocity range is the velocity control either way.
+    const auto spanOf = [&apvts](const char* loId, const char* hiId)
+    {
+        const auto a = apvts.getRawParameterValue(loId)->load();
+        const auto b = apvts.getRawParameterValue(hiId)->load();
+        return (double) std::abs(b - a);
+    };
+    humanKnob.setSpan(spanOf("humanizeVelMin", "humanizeVelMax"));
+    strumKnob.setSpan(spanOf("chordStrum", "chordStrumMax"));
 
-    // Strum is the same shape: two params, one band, the numbers in the label. Both ends
-    // equal is a fixed strum, and reads as one number rather than a range of nothing.
-    // Sorted before it reaches the slider: the pair can arrive the wrong way round from host
-    // automation, and a TwoValue slider handed max < min is not a defined thing to look at.
-    const int sa = (int) apvts.getRawParameterValue("chordStrum")->load();
-    const int sb = (int) apvts.getRawParameterValue("chordStrumMax")->load();
-    const int smin = juce::jmin(sa, sb), smax = juce::jmax(sa, sb);
-    chordStrumSlider.setMinAndMaxValues(smin, smax, juce::dontSendNotification);
-    chordStrumLabel.setText(smin == smax ? "STRUM  " + juce::String(smin) + " MS"
-                                         : "STRUM  " + juce::String(juce::jmin(smin, smax)) + "-"
-                                               + juce::String(juce::jmax(smin, smax)) + " MS",
-                            juce::dontSendNotification);
+    // The Strum caption carries its direction, since the `<` `>` beside it have to be stepping
+    // something visible and a third control saying so would be one more thing to read. Short
+    // forms: "STRUM RAND" is about as wide as a 100 px column takes at 9.5 px micro-caps.
+    if (const auto* dir = dynamic_cast<const juce::AudioParameterChoice*>(
+            apvts.getParameter("chordStrumDir")))
+    {
+        static const char* const shortDir[] = { "UP", "DOWN", "RAND" };
+        const auto want = "STRUM " + juce::String(shortDir[juce::jlimit(0, 2, dir->getIndex())]);
+        if (strumHead.getText() != want)
+            strumHead.setText(want, juce::dontSendNotification);
+    }
+    // Both lamps are switches over a parameter no attachment here watches, so the lamp *and*
+    // the arc are refreshed each tick - a host lane or a session load moves them too.
+    strumKnob.refresh();
+    humanKnob.refresh();
 
     // Pad page: label and the ends of the range.
     const int page = processor.padPage();
@@ -2137,21 +2264,10 @@ void KeysEditor::resized()
             bar.removeFromLeft(4);
         }
         bar.removeFromLeft(14);
-
-        // Humanize and its velocity range, on this bar since 2026-08-02 (Owen picked it and
-        // asked to "make smaller to fit"). A playing-feel control, the arp-On argument for
-        // never hiding with the strip. The label lost "VELOCITY" to fit a 36 px cell beside a
-        // 24 px button - it reads as a bare number/range now, and the slider keeps its own
-        // tooltip spelling the whole thing out.
-        humanizeButton.setBounds(bar.removeFromLeft(86).withSizeKeepingCentre(84, 24));
-        bar.removeFromLeft(6);
-        {
-            auto velCell = bar.removeFromLeft(140);
-            humanizeVelLabel.setBounds(velCell.removeFromLeft(36).withSizeKeepingCentre(36, 24));
-            velCell.removeFromLeft(4);
-            humanizeVelSlider.setBounds(velCell.withSizeKeepingCentre(velCell.getWidth(), 24));
-        }
-        bar.removeFromLeft(14);
+        // Humanize and its velocity range rode this bar from 2026-08-02 to 2026-08-03, when
+        // they became a range knob *in the strip* with Strum beside them. They are pad
+        // controls; the bar was only ever where they fitted. The 232 px they held here is the
+        // caption's now, so the section's name has room again.
         section(secPads).caption = bar;
     }
     if (const int h = sectionHeight(secPads); h > 0)

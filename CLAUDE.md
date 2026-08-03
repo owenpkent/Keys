@@ -193,7 +193,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   detented rate knob with its `<` `>` and Sync/Hz, and the shape with its own steppers; then
   **eight knobs** under their own headings (Oct, Gate, Chance, Swing, Offset, Vel, H.Time,
   H.Vel - Oct is the *transpose*, Vel is the bipolar level, and Humanize is split into its
-  halves; all three are the 2026-08-02 entries below); then Dot / Trip / Anchor with the held
+  halves; all three are the 2026-08-02 entries below); then Dot / Tuplet / Anchor with the held
   chord - because half the panel's width cannot hold what used to be one full-width row. It
   carried more for its first day - Latch, PLAY, Chain, a shared BPM row below and the slot row
   under that - and the slim-down bullet below is where all of it went. The knobs are the band's
@@ -487,7 +487,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   divisions, the same order, the same default - and a Sync / Hz switch beside the dial adds
   `arpRateFree` and `arpRateHz`, 0.03125 to 32 Hz mapped exponentially, which is exactly what
   those divisions span at 120 bpm. In Hz the engine pins its clock to 60 bpm, so a step is
-  simply the period, the playhead is not read at all, and Dot, Trip and Anchor grey out: a
+  simply the period, the playhead is not read at all, and Dot, Tuplet and Anchor grey out: a
   subdivision of a beat means nothing where there is no beat. The `<` `>` steppers beside the
   dial are load-bearing rather than a convenience, since a dial is a *drag* target and they are
   the click-only path to every value it can hold in either mode. A slot stores the mode and the
@@ -553,8 +553,174 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   *into* a line; `layout.arpLights` only decides whether the keybed lights *up*. They were
   labelled KEYS and "Show notes" and read as one idea - Owen asked what the difference was. Ids
   unchanged, labels renamed: a label names what the control touches.
-- **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip
-  and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
+- **Twelve pads a page, with Strum and Humanize in the columns that freed up** (2026-08-03,
+  Owen: "reduce the pads grid to 12 and move strum and humanize into that with the same
+  style"). The strip is two rows of six; the two columns it gave up carry Strum and Humanize
+  as `RangeKnob`s. Both were already ranges (a two-handle `RangeSlider` each) and both shape
+  what a chord *pad* does - the Controls band and the Pads bar were only where they fitted.
+  **This drops pads and is not reversible.** 12 x 4 pages is 48 slots where it was 64.
+  `chordPadsFromTree` re-bases a saved session's slots into the current page width, and that
+  code was written for 8 -> 16, where every old position still had a home. **Narrowing has
+  none**, and the old formula wrapped positions 12-15 onto the *front of the next page*, where
+  they silently overwrote that page's own pads as the loop went on. A pad past the end of its
+  page is dropped now: each page keeps its first twelve. Owen's call, asked before it was built.
+  **The lamp is the switch as well as the handle** (same day: "clicking the blue satellite
+  button should turn on or off the feature. And then I don't think we need the humanized check
+  mark anymore"). A click toggles, a drag sets the range, four pixels of slop tell them apart -
+  a click on a mouse-only surface is allowed to be untidy. `RangeKnob::isOn` / `setOn` are
+  **opt-in**: set both and the lamp switches, leave them null and it is a handle only, which is
+  what the arp's two want, since there "off" is just the knob at zero. Humanize's tick box is
+  gone; Strum needs no on/off parameter because a strum of zero *is* off, so its lamp parks the
+  range at zero and puts back what it was (`lastStrumMax`, a UI convenience, deliberately not
+  stored - a session saved off opens off).
+  **Switched off, the knob stops looking like a range**: the arc goes back to an ordinary one
+  and the readout drops to a single number (Owen: "when humanize is off, there's still a range
+  appearance"). An unlit lamp over a range arc is the control saying two things at once, and
+  the arc is the louder. What that single number *means* is `textWhenOff`, the consumer's -
+  **Humanize off plays the band's midpoint, not the knob's value**, so that is what it says.
+  Strum's Dir is a `<` `>` pair beside the caption, and the caption reads the live direction
+  (`STRUM RAND`) so no third control has to. They **wrap**, unlike the arp's steppers: three
+  values with no scale to them are a ring, not a ladder, and stopping would leave one of the
+  three reachable from one side only.
+  **Budget the knob, do not give it the remainder.** The strip is only ~100 px tall, and handing
+  the column the arp *card's* numbers (12 caption, 34 control, 15 readout, 8 inset) left a 26 px
+  face floating in an empty column. The face is sized backwards from the target instead.
+  With Strum gone the **Controls band has no rows left**, so that section is its CC knob row
+  alone. Left behind and worth tidying: `humanizeButton` and `chordStrumDirBox` still exist
+  with their attachments, simply parented to nothing.
+- **`RangeKnob` is a rotary with two ends, and Humanize uses it** (2026-08-03, Owen: "a serum
+  style knob where you can set a range in the knob. In serum they have like a little light next
+  to it that sets the range ... I think this is gonna be a reusable component"). The face sets
+  one end, the span reaches back from it, and **the range travels with the face** - turn the
+  knob and both ends move together, which is the half Owen asked for by name ("when the outer
+  ring is enabled, moving the dial moves the outer ring with it").
+  **The knob's own arc is the range; there is no second ring** (Owen, same day: "it looks like
+  there's two rings around the knob ... just have the inner ring have the features. Everything
+  should be reflected on that single ring"). A concentric ring outside the face was built first
+  and was one ring too many. What replaced it is **one line in the skin**:
+  `KeysLookAndFeel::drawRotarySlider` already works out where a lit arc *starts* (zero, or a
+  bipolar knob's centre), so a slider can now override that proportion through the
+  `skin::arcFromProperty` component property and `RangeKnob` sets it to the range's bottom.
+  Nothing is subclassed; no copy of the knob's look has to be kept in step.
+  **Painting over the arc does not work, and that is worth knowing before trying it again.**
+  Keys draws a value arc as **three strokes** - a halo at 2.1x the line width, a body at 1.15,
+  a hot core at 0.55 - so a `paintOverChildren` mask sized to the line leaves the halo's edges
+  showing all the way round the sweep. Owen's report was "a shadow of blue on the inner ring
+  that isn't just the range", and it is why the property exists. The first attempt also took
+  its geometry from the *kit's* `drawRotarySlider` (bounds reduced by 4, line a fifth of the
+  radius) when Keys' own overrides it with different numbers entirely - a second reason a mask
+  is the wrong tool here: it has to know how something else draws.
+  When the override is set, the bipolar detent tick still marks **real zero** (`zeroAngle`),
+  not the overridden origin: they were one variable, and sharing it would have moved the tick.
+  **`RangeKnob::faceArc()` must use Keys' rotary geometry, not the kit's.** The two differ (the
+  kit reduces the bounds by 4 and takes a fifth of the radius; Keys takes 3 off the radius and
+  a seventh of it), a Keys editor installs Keys', and copying the kit's put the satellite
+  *inside* the arc - "it's a little bit too close to the knob". What anything outside has to
+  clear is the **halo pass at 2.1x the line width**, not the line: that is `FaceArc::outer`,
+  and the lamp sits a further lamp-and-a-half beyond it, because touching the edge still reads
+  as touching.
+  **Built from the manual, which corrected the guess.** A first cut read the screenshot as a
+  dot sitting on the ring; `Serum 2 User Guide.pdf` p195 says otherwise: *"A smaller blue halo
+  appears to the top left of the knob ... Click and drag the arrow control to change the
+  modulation depth amount. As you drag the arrow, notice how the halo shrinks or expands."* So
+  the grab is a **satellite at the top left, dragged vertically** - and that is what makes it
+  buildable here, because a satellite is a component of its own and can be sized to a real
+  target instead of Serum's few pixels, in the corner a circle leaves empty in a rectangle. It
+  is a child **above the face in z-order**: a Slider eats every press inside its rectangle,
+  corners included, so anything drawn in that corner is dead unless it is a component on top.
+  **Two departures, both forced by the contract.** Serum's fallback for the fiddly satellite is
+  Option/Alt-click-drag on the knob body; a modifier is not a gesture Keys may require, so the
+  fallback here is that **the whole margin around the face drags the span too** - every pixel
+  the face does not cover, corners included, fallen onto rather than aimed at. The satellite
+  itself is a **plain LED - solid, lit, unchanging**. It carried a miniature arc filling with
+  the span for one build (the span drawn twice), then an outline and a pip, which read as a
+  tiny knob (Owen: "a dot with a circle around it. Just make it look like a plain LED light").
+  The knob's own ring is the one that reads. And there is no negative span:
+  Serum flips the halo's hue for an inverted depth, but a range has nothing to invert into, so
+  `Direction` picks which side of the value it reaches instead.
+  **The component owns no parameter.** The span arrives through `setSpan()` and leaves through
+  `onSpanChanged` / `onSpanDragStart` / `onSpanDragEnd`, so the consumer keeps the parameter,
+  the gesture brackets and the undo story; `MacroRow` wires those to begin/set/endChangeGesture
+  by hand, the shape Shape and the rate steppers already use. It lives in **Keys**
+  (`src/ui/RangeKnob.h`) and is written kit-ready; promotion means moving it beside
+  `okstudio/RotaryKnob.h` and swapping `skin::` for the theme's tokens, and is a deliberate
+  step, not an automatic one.
+  **`arpHumanizeSpan` / `arpHumanVelSpan` are the spans**, appended, **default 100**. The draw
+  is uniform between `knob - span` and `knob`: span closed is a fixed offset with no randomness
+  left, span at 100 puts the floor at zero wherever the knob sits, which is byte-for-byte what
+  Humanize did alone. That default is why the migration matters more than most - it is the
+  *top* of the range, so an absent parameter inherits something narrower rather than wider.
+  **The engine clamps the floor to its own ceiling**, not the parameter layout - either can be
+  automated past the other, and `process()` is the only place that sees both at once.
+  **The satellite is outside the ring, not on it**, and it is small - about a quarter of the
+  face, Serum's proportion. Two builds got this wrong before the screenshot showed it: the
+  first put it at `1.25pi` (JUCE measures a rotary's angles **clockwise from twelve o'clock**,
+  so that is the *bottom* left), and the second put it on the ring's own circle at 1.9x the
+  ring's thickness, which read as a lump growing out of the dial - Owen: "the satellite should
+  not be on the wheel". It is placed toward the dial box's **corner** rather than along a 45
+  degree line, because the box is wider than it is tall and the pocket a circle leaves empty
+  points at the corner; the distance clears the ring's stroke but is clamped so a narrow column
+  never pushes the dot out of its own cell. A hairline stem joins it back to the ring, or it
+  reads as an orphan floating between two columns. It is **drawn small and hit large** - the
+  component is 8 px bigger than the dot - and the padding only ever overlaps the ring, where a
+  press does the same job anyway, so nothing is stolen from anything.
+  **The knob row grew 16 px rather than the faces shrinking**: squeezing a ring out of the
+  space those two knobs already had would have taken them under the kit's 48 px advice and,
+  because the strip is uniform, every other knob with them. Height is the cheap axis in this
+  view; the same lesson as the sub-row strip. The two range knobs also **reserve their ring
+  width out of the row** rather than taking it off a neighbour, so the face inside one is
+  exactly as wide as every plain knob and the row still reads as eight of one size.
+  Still ceiling-only: the band's **Human Time** and **Human Vel** on a line's Details view are
+  linear sliders in a four-cell group, not knobs, so the floor is a macro-card control for now.
+- **Trip became a Tuplet combo, and the rate readout is a fraction of a bar** (2026-08-03,
+  Owen: "when triplet mode is enabled the division text should reflect. what if I want 1/5 or
+  other division?", then, on the first cut: "confusing UI. it's a check box but it changes.
+  fraction confusing too. shouldn't it just be 1/5 not 1/4:5?"). Two problems, one of them the
+  other's cause: the dial's readout came from the `arpRate` choice parameter, which knows
+  nothing about Dot or Trip, so a dotted triplet 1/8 read "1/8" - and a readout that cannot
+  describe a modified rate is a poor place to add more modifiers.
+  **`ArpEngine::rateSyncText` is the step length as an exact fraction of a bar**: `1/8`,
+  `1/12` in threes, `1/10` in fives, **`1/5`** for a quarter in fives, `1/8.` dotted. This is
+  the one notation that survives tuplets, and the reason the first cut had to invent `1/4:5`
+  is that the universal DAW convention (`1/16T`, `1/16D`) has a letter for triplets and dotted
+  and **no form at all** for a quintuplet. The fraction needs no letters: a quarter-note
+  quintuplet is five in the space of four quarters, four fifths of a beat, one fifth of a bar.
+  FL Studio's grid ("1/3 beat") is the same system. **Dot stays a dot** rather than folding in
+  - a dotted 1/8 is 3/16 of a bar, but `1/8.` is universal and `3/16` has to be worked out.
+  Straight, every reading is byte-identical to the division names the parameter already
+  carried, which is what stops this being a second, drifting copy of the rate list.
+  `installRateText()` runs **after every attachment swap**, because
+  `SliderParameterAttachment` writes `textFromValueFunction` in its own constructor and would
+  put the bare division back. Hz is untouched - the engine ignores both modifiers there.
+  **`arpTuplet` is a choice over Straight / Triplet / 5-tuplet / 7-tuplet / 9-tuplet**,
+  appended, and `ArpEngine::tupletFactor` is the whole feature: `tupletSpace(N)/N`, the largest
+  power of two at or below N over N. So Triplet is exactly the 2/3 the old `triplet` branch
+  hard-coded, and five quintuplet 1/16s fill the span four straight ones do. **Dot is a
+  separate axis and stays one**: it lengthens a step by half where a tuplet divides a span, and
+  folding them together would mean enumerating the product. The even numbers are absent on
+  purpose - 4-in-4 is straight and 6-in-4 is a triplet one division down, so an int 1..9 would
+  spend half its travel on rates the dial already has.
+  **It is an ordinary combo with an ordinary `ComboBoxAttachment`.** It was a `ToggleButton`
+  cycling its own text for one build, which is a control lying about its own shape; a combo is
+  what Keys already means by "pick from a list" (Shape, Distance, Retrigger), so it needs no
+  explaining, and a button could not have bound a choice parameter at all. The **entries name
+  themselves** ("Triplet", not "3") because the macro sub-row is one 34 px strip with no
+  caption anywhere on it. `refreshTuplet()` survives the change for one reason only: the
+  *readout* is a function of three parameters and an attachment binds it to one.
+  `arpTrip` stays registered and is read by nothing; `migrateTuplet` folds a set Trip into
+  Triplet and returns Trip to its default - the `migrateVelTrim` retirement, exact rather than
+  approximate.
+  **Folding the tuplets into the rate list itself is documented and deliberately unbuilt**
+  (`docs/ARP_DESIGN.md`): it is the cleanest reading of "it should just say 1/5" and the dial
+  would walk 1/4, 1/5, 1/6, 1/8, 1/10 with no second control at all, but the list goes to about
+  two dozen entries, and turning 1/4 to 1/64 from four stepper clicks into fifteen is not a
+  trade to make on the one click-only path the rate has.
+  Fixed on the way past: **`setEditLine` left the rate dial bound to the line you just left**
+  whenever both lines were in the same rate mode. `refreshRateMode()` early-outs on an unchanged
+  mode and the dial's attachment lives there rather than in `buildAttachments()`, so it was the
+  one control that never rebound; `lastRateFree = -1` before the call forces the swap.
+- **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip -
+  now Tuplet - and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
   window width, so two more 34 px targets in it would have driven the eight knobs under the
   mouse-only minimum - the row took a `arpMacroSubRow` strip at the bottom instead, removed
   *before* the main line is laid out so nothing above it moved. Height is the cheap axis in this
@@ -598,7 +764,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   (2026-07-30): the arp stopped being one on 2026-07-25, Chords went the day the generator lost
   its panel, Perform went with the Centre section itself, and there are no tabs left to switch.
   **There is exactly one set of chord *pads***: the generator draws no second view of the page,
-  because the grid it used to draw was the same sixteen pads of the same page as the strip below
+  because the grid it used to draw was the same pads of the same page as the strip below
   it, written through the same `setChordPad`. Its
   `Big` arrangement became the Pads section's, and went for good on 2026-07-31: every pad now
   carries its chord's notes under the name on the ordinary two-rows-of-eight card, so there is
@@ -724,7 +890,8 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   arp's A / B switches, All Off, Light keys, Hold off and Launch Quantize; the Controls bar's
   tempo, Root, Scale, Lock, Voices, CH and, in Keys Host, the Instrument chip (2026-08-02: a
   settings band you have folded away is exactly when you still want to change key); the Pads
-  bar's Humanize and its velocity range, Fill / Regen / Generator and its Key combo; the
+  bar's Fill / Regen / Generator and its Key combo (Humanize and its velocity range were on
+  this list until 2026-08-03, when they became a range knob in the strip itself); the
   Keyboard bar's Size, Octave, Exclusive / Sustain / Latch / All Off - plus the theme swatch,
   which belongs to the plugin rather than to any one section. Open and folded bars are painted
   at different weights on purpose; `captionWidth()` and `paintButton()` must use the one
@@ -934,8 +1101,16 @@ Four things will bite otherwise:
   one tab left on the arp bar is `Arp all tab`, and the macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or the tab:
   `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
-  `Macro dot A` / `Macro trip A` / `Macro anchor A`, and `Macro OCT A` / `Macro GATE A` /
-  `Macro VEL A` / `Macro H.TIME A` / `Macro H.VEL A` / ... one per knob heading, plus
+  `Macro dot A` / `Macro tuplet A` / `Macro anchor A` (`Macro trip A` until 2026-08-03, when
+  the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
+  it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
+  first-match caveat), and `Macro OCT A` / `Macro GATE A` /
+  `Macro VEL A` / `Macro H.TIME A` / `Macro H.VEL A` / ... one per knob heading - and from
+  2026-08-03 the two Humanize knobs each carry a *second* name for their ring,
+  `Macro H.TIME range A` / `Macro H.VEL range A`, and a third for the satellite,
+  `Macro H.TIME range handle A`, since face, ring and handle are three controls in one cell
+  (ring and handle are plain Components, so they answer to a name but offer no UIA pattern to
+  invoke - drive `arpHumanizeSpan` / `arpHumanVelSpan` directly instead) - plus
   `Macro details A` / `B` (2026-08-02, seventh pass), the button that opens that line's deep
   view now that A and B on the bar no longer do. **`Macro line A` / `B` no longer exist**: that
   was the macro card's own On toggle, deleted the same pass, replaced by a scrim over the whole

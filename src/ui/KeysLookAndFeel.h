@@ -100,6 +100,12 @@ namespace skin
     const juce::Colour textFaint { 0xff8a919c };
 
     constexpr float radius = 6.0f;       // controls
+
+    // A Slider component property: the proportion (0..1) its rotary arc should be lit *from*,
+    // instead of from zero or from a bipolar centre. keys::RangeKnob sets it so the lit
+    // stretch is its range. Named here rather than spelled out at both ends, since a typo in
+    // one of two string literals would fail silently by simply never matching.
+    inline const juce::Identifier arcFromProperty { "okArcFrom" };
     constexpr float panelRadius = 8.0f;  // panels / modules
 
     // Segoe UI keeps the panel crisp on Windows (the shipping target) and falls

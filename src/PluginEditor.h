@@ -8,6 +8,7 @@
 #include "ui/DetachedWindow.h"
 #include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
+#include "ui/RangeKnob.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
 // StepComboBox.h went with the Pads bar's Scale Compliance box on 2026-08-02. The class is
@@ -262,6 +263,21 @@ private:
     juce::Label octaveBarLabel;     // "OCT", the Keyboard bar's own caption
     juce::Label octaveReadout;      // "+2" / "0" / "-3", refreshed in timerCallback()
     juce::TextButton octPrevButton { "<" }, octNextButton { ">" };
+    // Strum and Humanize, as RangeKnobs in the pads section since 2026-08-03 - the knob is the
+    // top of each range and the ring reaches back from it. Both were two-handle RangeSliders,
+    // Strum on the Controls band and Humanize on the Pads bar; both belong with the pads,
+    // which is what they shape. See the wireRange lambda in the editor's constructor.
+    RangeKnob strumKnob, humanKnob;
+    juce::Label strumHead, humanHead;
+    std::unique_ptr<SliderAtt> chordStrumAtt, humanizeVelAtt;
+    // The strum direction's `< >` pair, which replaced its combo on 2026-08-03. The caption
+    // beside them reads the live direction, so there is no third control saying it.
+    juce::TextButton strumDirPrev { "<" }, strumDirNext { ">" };
+    void stepStrumDir(int delta);
+    // What the Strum lamp puts back when it switches on. A convenience, not state: a session
+    // saved with the strum at zero opens at zero, and this starts at the default again.
+    double lastStrumMax = 120.0;
+
     juce::Label chordStrumLabel;
     // Strum is a range, the same two-handle band as the humanize velocity beside it: each
     // chord rakes at a speed drawn from it, so repeated stabs are not identical.

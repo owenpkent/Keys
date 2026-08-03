@@ -3,6 +3,7 @@
 #include "../ArpEngine.h"
 #include "../PluginProcessor.h"
 #include "ChordDrag.h"
+#include "RangeKnob.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <okstudio/RotaryKnob.h>
 #include <array>
@@ -148,6 +149,13 @@ public:
         void applyShape();
         void stepShape(int delta);
         void stepRate(int delta);
+        // The rate readout under the dial, which says what the engine is actually playing
+        // rather than the bare division. The combo drives itself through its attachment; this
+        // exists because the readout depends on three parameters and is bound to one. Cached,
+        // since it runs off the 10 Hz timer.
+        void refreshTuplet();
+        // The dial's readout, reinstalled after every attachment swap - see ArpPanel's.
+        void installRateText();
         // Rate is one knob over two parameters and two units, exactly as the band's is: which
         // attachment exists depends on Sync or Hz, and the swap has to wait out an open drag.
         void refreshRateMode();
@@ -169,14 +177,28 @@ public:
         // They sit on the card's bottom line with the held chord, at the full 34 px hit
         // height: putting them beside the rate would drive the knobs under the mouse-only
         // minimum, and height is the cheap axis inside a card.
-        juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
+        juce::ToggleButton dotButton { "Dot" }, anchorButton { "Anchor" };
+        // Tuplet is a combo, not a tick: it picks one of five, and a check box that cycled its
+        // own text was a control lying about its own shape (2026-08-03, Owen: "it's a check box
+        // but it changes"). A combo is what Keys already means by "pick from a list" - Shape,
+        // Distance and Retrigger are all one - so it needs no explaining, and it takes an
+        // ordinary ComboBoxAttachment where a button could not bind a choice at all.
+        juce::ComboBox tupletBox;
         // Opens this line's detailed view (the band and, on Pattern, the step editor). Added
         // beside Anchor once the A/B chips stopped navigating anything: with the tabs gone,
         // this button is the only way back from the macro cards to the deep view.
         juce::TextButton detailsButton { "Details" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
+        // Six of the eight are plain rotaries. H.TIME and H.VEL are RangeKnobs, because each
+        // of them is a random draw and a draw has two ends (2026-08-03) - `ranges` holds one
+        // for those two indices and nullptr for the rest, and `knobFace()` is what everything
+        // else walks so the layout, the headings and the attachments stay one loop.
         std::array<juce::Slider, numKnobs> knobs;
+        std::array<std::unique_ptr<RangeKnob>, numKnobs> ranges;
+        juce::Component& knobCell(int k);
+        juce::Slider& knobFace(int k);
+        static bool isRangeKnob(int k) { return k == kHTime || k == kHVel; }
         std::array<juce::Label, numKnobs> knobLabels;
         // RATE and SHAPE, over the top line's two stepper groups (2026-08-02, Owen: "the
         // arrows to adjust certain parameters are not clear as to what they're adjusting"):
@@ -185,7 +207,8 @@ public:
         juce::Label chordLabel;
 
         std::unique_ptr<ButtonAtt> rateModeAtt;
-        std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt;
+        std::unique_ptr<ButtonAtt> dotAtt, anchorAtt;
+        std::unique_ptr<ComboAtt> tupletAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
 
@@ -199,6 +222,8 @@ public:
         // the macro view is up) so repaint() is only called on an actual change rather than
         // every tick.
         bool lastLineOn = true;
+        // The same trick for the rate readout, which no attachment drives: -1 = nothing drawn yet.
+        int lastTuplet = -1, lastDotted = -1;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MacroRow)
     };
@@ -345,6 +370,15 @@ private:
     // Rate spans two parameters and two units, so its < > pair cannot be stepCombo: in Sync it
     // walks the division list, in Hz it multiplies the frequency. See stepRate().
     void stepRate(int delta);
+    // The rate readout under the dial, which has to say what the engine is actually playing
+    // ("1/10") rather than the division on its own. Not the combo, which drives itself: this
+    // exists because the readout is a function of three parameters and bound to one. Cached
+    // against the last call, since the 10 Hz timer drives it.
+    void refreshTuplet();
+    // Installs the readout above onto the dial. Called after every attachment swap, because
+    // SliderParameterAttachment writes textFromValueFunction in its own constructor and would
+    // otherwise put the bare division back.
+    void installRateText();
     // Which of the two rate parameters the dial is attached to, plus everything that has to
     // say which unit is live. Driven off arpRateFree, so a host automating it lands here too.
     void refreshRateMode();
@@ -381,6 +415,7 @@ private:
     int editedLine = 0;
     int lastPatternMode = -1; // -1 = not yet laid out; else the last bool seen
     int lastRateFree = -1;    // same trick for the rate mode: -1 = no attachment installed yet
+    int lastTuplet = -1, lastDotted = -1; // ... and for the chip and the readout it decorates
     // Is the rate dial being dragged right now? A drag is an open parameter gesture, and the
     // attachment that opened it cannot be destroyed until it closes; refreshRateMode() defers
     // the swap while this is set, and rateKnob.onDragEnd calls it back on the mouse-up.
@@ -411,7 +446,11 @@ private:
     // than a convenience - a dial is a *drag* target, and these are the click-only path to
     // every value it can hold, in both modes.
     juce::TextButton shapePrev { "<" }, shapeNext { ">" }, ratePrev { "<" }, rateNext { ">" };
-    juce::ToggleButton dotButton { "Dot" }, tripButton { "Trip" }, anchorButton { "Anchor" };
+    juce::ToggleButton dotButton { "Dot" }, anchorButton { "Anchor" };
+    // Tuplet is a combo box, not a toggle: it picks one of five, and it writes a choice
+    // parameter. See MacroRow's twin, and ArpEngine::rateSyncText for what the dial then says.
+    juce::ComboBox tupletBox;
+    juce::Label tupletLabel;
     juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
     juce::Label octavesLabel, swingLabel, gateLabel, chanceLabel;
     juce::ToggleButton latchButton { "Latch" };
@@ -469,8 +508,8 @@ private:
     void setArmed(Armed, int fromIndex = -1);
     int copyFromIndex = -1;
 
-    std::unique_ptr<ButtonAtt> dotAtt, tripAtt, anchorAtt, latchAtt, keysBandAtt, linkAtt, rateModeAtt;
-    std::unique_ptr<ComboAtt> distanceAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, latchAtt, keysBandAtt, linkAtt, rateModeAtt;
+    std::unique_ptr<ComboAtt> distanceAtt, tupletAtt;
     // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
     std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
