@@ -32,18 +32,38 @@ public:
     // Sounding arp notes awaiting their note-off. Raised from 64 with the Chord shape and
     // the Harmony lane, which between them can put a spread chord's every note on one step.
     static constexpr int maxActive = 128;
-    static constexpr int numLanes = 10;
+    static constexpr int numLanes = 12;
 
     // The four after laneProbability arrived 2026-07-30. Appended, like everything else in
     // that round: a slot's lane data is serialized by index, so inserting would silently
     // reinterpret every pattern in every saved session.
+    // **Append only.** A lane's index is what a saved session stores it under (see
+    // arpLineToTree), so inserting one would silently move every older session's lane data.
+    // Lanes 10 and 11 arrived 2026-08-14 and an older session simply has no child for them,
+    // which reads back as ArpPattern's laneDefaults - inert, both of them.
     enum Lane { laneNote = 0, laneOctave, laneVelocity, laneGate, laneRatchet, laneProbability,
-                laneTranspose, laneLate, laneHarmony, laneChord };
+                laneTranspose, laneLate, laneHarmony, laneChord,
+                // Cthulhu's "Rand Sel" (its manual, p25): **how random each step is**, drawn
+                // per step rather than set by one knob for the whole line. Bipolar - above zero
+                // the played entry may come out higher than the one drawn in the Note lane,
+                // below zero lower, and the size is how far. Zero is exactly what is drawn.
+                //
+                // This is the one randomness in Keys that *is* allowed to change which note
+                // plays, and the reason is that you drew it on that step: it is intent, where
+                // Drift is a knob wandering over a part you did not aim at. See laneDrifts.
+                laneRand,
+                // The mute row's own lane. It used to write -1 straight into the Note lane,
+                // which destroyed whatever that step held - Cthulhu's manual names preserving
+                // it as the point of having mute buttons at all ("you can experiment with
+                // mutes, without losing the set-value of the steps"). Note keeps its value now
+                // and this says whether the step is heard. Note = -1 is still a *drawn* rest,
+                // which is a different thing and stays: Cthulhu has both too.
+                laneMute };
 
     // The value each lane holds when it is doing nothing. Also what every lane reads as
     // while Params::usePattern is false, which is how "Shape: Up" behaves like a plain
     // arpeggiator even after the step lanes have been edited.
-    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0 };
+    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0, 0, 0 };
 
     // What each lane can hold, low and high. **One copy** (2026-08-14): the grid that draws a
     // lane, the reroll that randomizes one and the drift that strays from one all need these,
@@ -62,6 +82,8 @@ public:
         { 0, 90 },   // Late, as a percentage of the step
         { 0, 7 },    // Harmony
         { 0, 12 },   // Chord: 0 is off, 1..12 call up that slot's chord
+        { -8, 8 },   // Rand: how far this step's note selection may stray, and which way
+        { 0, 1 },    // Mute: 1 silences the step without touching what it holds
     };
     // Stray from `value` by up to `reach`, staying inside `r`. `u01` is a draw in [0, 1).
     //
@@ -116,6 +138,8 @@ public:
         true,  // Late
         false, // Harmony
         false, // Chord
+        false, // Rand - drift must not rewrite how random you drew a step
+        false, // Mute - nor silence a step you did not silence
     };
 
     // The Hz mode's range, which is not a round number by choice: it is exactly what the
@@ -974,9 +998,32 @@ private:
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
                   int numSamples, juce::MidiBuffer& out)
     {
-        const int noteVal = laneValue(p, laneNote, globalStep);
+        // The mute lane first, and before anything else is resolved: a muted step costs
+        // nothing and must leave no trace. Separate from the Note lane's own -1 on purpose -
+        // that is a rest you *drew*, this is a switch you can flip back without having lost
+        // what the step held (Cthulhu's manual, p25, names that as the whole point of it).
+        if (laneValue(p, laneMute, globalStep) > 0)
+            return;
+
+        int noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal < 0)
-            return; // muted step
+            return; // a drawn rest
+
+        // Rand: how far this step's selection may stray from what is drawn, and which way
+        // (Cthulhu's "Rand Sel", its manual p25-26 - "if the Note Sel step is set to 2 and the
+        // random value is set to 2 above middle, the Arp will output 2, 3, or 4"). Drawn per
+        // step, so unlike Drift it is allowed to change which note plays: you aimed it there.
+        //
+        // Only meaningful on a fixed index. noteVal 0 means "follow the shape", and a shape is
+        // already a walk - randomising the *number zero* would silently turn Up into a fixed
+        // entry, which is not what drawing on this lane looks like it should do.
+        if (const int rand = laneValue(p, laneRand, globalStep); rand != 0 && noteVal >= 1)
+        {
+            const int lo = juce::jmax(1, rand < 0 ? noteVal + rand : noteVal);
+            const int hi = juce::jmin(laneRanges[laneNote].hi, rand > 0 ? noteVal + rand : noteVal);
+            if (hi > lo)
+                noteVal = lo + (int) (rng() % (unsigned) (hi - lo + 1));
+        }
         const int chance = driftedLane(p, laneProbability, globalStep)
                          * juce::jlimit(0, 100, p.chance) / 100;
         if ((int) (rng() % 100u) >= chance)

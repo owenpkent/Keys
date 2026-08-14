@@ -209,10 +209,23 @@ ArpPanel::MuteRow::MuteRow(KeysProcessor& p, const ArpPanel& o) : processor(p), 
     okstudio::ui::makeMouseOnly(*this);
 }
 
+// **The mute lane is the Note lane's companion, not a polymetric lane of its own.** It reads
+// and writes at the Note lane's length, and syncs its own to match (2026-08-14) - the engine
+// wraps every lane read by that lane's own length, so if the two ever disagreed a mute drawn
+// at step 20 of a 32-step pattern would be read back modulo 8 and silence the wrong step. It
+// has no tab and no STEPS control, so there is nowhere for a user to set it and nothing to
+// gain from letting it differ.
 int ArpPanel::MuteRow::currentLength() const
 {
-    return juce::jlimit(1, ArpEngine::maxSteps,
-                        processor.arpLine(owner.editLine()).lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    auto& lanes = processor.arpLine(owner.editLine()).lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps,
+                                 lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    // Cheap and idempotent, and this is the one place that knows both numbers. It also repairs
+    // a session saved before the lane existed, which comes back at the default 8 while the
+    // Note lane may be anything.
+    if (lanes.length[(size_t) ArpEngine::laneMute].load(std::memory_order_relaxed) != len)
+        lanes.length[(size_t) ArpEngine::laneMute].store(len, std::memory_order_relaxed);
+    return len;
 }
 
 int ArpPanel::MuteRow::stepAtX(float x) const
@@ -227,15 +240,17 @@ int ArpPanel::MuteRow::stepAtX(float x) const
 void ArpPanel::MuteRow::applyAtX(float x)
 {
     const int step = stepAtX(x);
-    processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].store(paintValue, std::memory_order_relaxed);
+    processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) step].store(paintValue, std::memory_order_relaxed);
     repaint();
 }
 
 void ArpPanel::MuteRow::mouseDown(const juce::MouseEvent& e)
 {
     const int step = stepAtX(e.position.x);
-    const int current = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].load(std::memory_order_relaxed);
-    paintValue = (current == -1) ? 0 : -1; // toggle, then paint every step the drag crosses to match
+    // Its own lane since 2026-08-14, where it used to toggle the Note lane between -1 and 0
+    // and so threw away whatever that step held. 1 is muted, 0 is heard.
+    const int current = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) step].load(std::memory_order_relaxed);
+    paintValue = (current > 0) ? 0 : 1; // toggle, then paint every step the drag crosses to match
     dragging = true;
     applyAtX(e.position.x);
 }
@@ -255,8 +270,8 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
 
     for (int i = 0; i < length; ++i)
     {
-        const int value = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) i].load(std::memory_order_relaxed);
-        const bool muted = value == -1;
+        const int value = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) i].load(std::memory_order_relaxed);
+        const bool muted = value > 0;
         auto cell = juce::Rectangle<float>(b.getX() + cellW * (float) i, b.getY(), cellW, b.getHeight()).reduced(2.0f);
 
         if (muted)
@@ -2013,6 +2028,9 @@ void ArpPanel::buildControls()
     buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late", 0, 90);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony", 0, 7);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord", 0, 12);
+    // Rand gets a tab; Mute deliberately does not - the MUTE row under the grid has always been
+    // its editor, and a tab as well would be two ways to draw one lane.
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand", -8, 8);
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);

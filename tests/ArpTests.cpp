@@ -1871,6 +1871,93 @@ public:
                 }
         }
 
+        beginTest("mute is its own lane and does not touch what the step holds");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            e.lanes.value[ArpEngine::laneNote][2].store(5); // a value worth keeping
+            e.lanes.value[ArpEngine::laneMute][2].store(1); // ...and mute that step
+            e.lanes.length[ArpEngine::laneNote].store(4);
+            e.lanes.length[ArpEngine::laneMute].store(4);
+
+            std::vector<int> fired;
+            for (int g = 0; g < 8; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 62, 64, 65, 67, 69, 71, 72 })
+                                               : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (const auto& ev : collect(out))
+                    if (ev.on)
+                        fired.push_back(g);
+            }
+            for (const int g : fired)
+                expect(g % 4 != 2, "step 2 of every pass is silent");
+            // The value survived the mute, which is the whole reason mute left the Note lane.
+            expectEquals(e.lanes.value[ArpEngine::laneNote][2].load(), 5, "the step kept its 5");
+        }
+
+        beginTest("rand strays the note selection, and only within the lane");
+        {
+            // Note lane fixed at 1 everywhere, Rand +3 on every step: the played entry must
+            // land in 1..4 and nowhere else. An eight-note chord, so every entry is reachable.
+            ArpEngine e;
+            e.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            dp.direction = ArpEngine::Direction::up;
+            for (int s = 0; s < 8; ++s)
+            {
+                e.lanes.value[ArpEngine::laneNote][(size_t) s].store(1);
+                e.lanes.value[ArpEngine::laneRand][(size_t) s].store(3);
+            }
+            e.lanes.length[ArpEngine::laneNote].store(8);
+            e.lanes.length[ArpEngine::laneRand].store(8);
+
+            std::set<int> heard;
+            for (int g = 0; g < 40; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 62, 64, 65, 67, 69, 71, 72 })
+                                               : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (const auto& ev : collect(out))
+                    if (ev.on)
+                        heard.insert(ev.note);
+            }
+            // Entries 1..4 of the chord as played: 60, 62, 64, 65.
+            for (const int n : heard)
+                expect(n == 60 || n == 62 || n == 64 || n == 65,
+                       "rand +3 on a fixed 1 stayed inside entries 1..4, heard " + juce::String(n));
+            expect(heard.size() > 1, "...and it did actually stray");
+        }
+
+        beginTest("rand 0 leaves a fixed note lane exactly as drawn");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            for (int s = 0; s < 8; ++s)
+                e.lanes.value[ArpEngine::laneNote][(size_t) s].store(2);
+            e.lanes.length[ArpEngine::laneNote].store(8);
+
+            for (int g = 0; g < 12; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (const auto& ev : collect(out))
+                    if (ev.on)
+                        expectEquals(ev.note, 64, "entry 2 every time, with Rand at its default");
+            }
+        }
+
         beginTest("laneRange covers every lane and none of them is empty");
         {
             for (int l = 0; l < ArpEngine::numLanes; ++l)
