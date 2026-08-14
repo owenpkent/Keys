@@ -779,6 +779,31 @@ follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
 The **Mute** row under the grid silences individual steps without disturbing their
 values, so you can take a step out and put it back unchanged.
 
+**Voice** appears beside Steps and Link, but only while the **Harmony** tab is the one
+selected - it is the panel's first control that depends on which lane you are looking at.
+Reads "Chord": the Harmony lane's second voice plays chord tones above the note the step
+plays, same as it always has. Click it and it reads "Sub": the second voice plays the
+subharmonic series below the root instead, an undertone rather than an overtone. Off is
+"Chord" - a session that never touches Voice cannot tell it exists.
+
+### Euclid and Clocks
+
+Two buttons on the action row, beside Randomize and Chain, each opening a strip of steppers
+above the row rather than a dialog. Opening a strip previews nothing on its own - only a
+stepper click writes - and the two strips are mutually exclusive, so the panel never grows by
+more than one of them at a time.
+
+**Euclid** (Pattern shape only) spreads a Euclidean rhythm into the **Prob** lane: **Hits**
+beats spread as evenly as possible across **Steps**, shifted by **Rotate**. Every click writes
+immediately and re-sizes the probability lane to match Steps, which is also why the strip
+closes itself if you leave Pattern shape - there is no lane on screen left to write into.
+
+**Clocks** (every shape, since the dividers act regardless of what Shape draws) holds four
+independent rhythm dividers layered under the pattern, **Div 1** through **Div 4**. Each runs
+0–16; 0 reads "Off" and is silent, same contract as Rhythm Div everywhere else in Keys. The
+button itself retitles to **Clocked** whenever any of the four is running, the same way Chain
+retitles to Chaining.
+
 ### Playing the row as a progression
 
 The twelve slot cards hold a chord each. **Chain** (on the button row) plays the ones that

@@ -692,8 +692,25 @@ v2 and later (nice-to-have per the research ranking), with what became of each:
 A third research round, sourced from hardware rather than the v2 ranking: the Moog
 Subharmonicon (its manual sits in the repo root), whose whole design is division - pitch
 from the undertone series, rhythm from OR-ed clock dividers. Three additions, engine and
-MCP only so far; the UI pass is still owed and is gated by the mouse-only contract like
-everything else.
+MCP first; the UI pass landed after, in `src/ui/ArpPanel.{h,cpp}`, following the mouse-only
+contract like everything else.
+
+Euclid and Clocks each open as a strip above the action row - the same "height is the cheap
+axis" rule the macro view's own growth already follows, applied here for the first time to a
+per-line control rather than a whole view: opening one closes the other, so the panel never
+grows by more than one strip's height at once, and the strip's own steppers are laid out
+regardless of which is open (the closed one just gets a zero-width row, which is harmless
+since its components are invisible too). Euclid is gated to Pattern shape, since it writes
+into a lane that only exists there, and closes its own strip if Shape leaves Pattern out from
+under it; Clocks stays open in every shape, since the dividers act regardless of what Shape
+draws. Voice, beside it in the shared Steps/Speed/Link row, is the panel's first
+**lane-contextual** control - visible only with the Harmony lane itself selected, which
+needed a visibility rule of its own (`refreshShape()` and `selectLane()` both gate it,
+independently, since a lane click cannot change Shape and a Shape change cannot change the
+lane) rather than reusing an existing one. Fitting Voice into that row's already-tight width
+at the editor's 1280 px floor was the one real layout squeeze in this pass: the STEPS group
+grows a third row for it (Pattern shape only) rather than shrinking Link below its own
+working width, the same "grow height, not width" call the two strips make.
 
 - **Euclidean generator** (`EuclidGen.h`, `apply_euclid` over MCP,
   `applyEuclidToActiveArpPattern` on the processor). Writes hit/rest into the

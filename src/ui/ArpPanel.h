@@ -499,6 +499,41 @@ private:
     juce::Label barsReadout;
     void nudgeBars(int delta);
 
+    // Euclid: a non-destructive preview strip (2026-08-14 generative round, see
+    // docs/ARP_DESIGN.md). Hits/steps/rotate are panel-level browse state, never persisted -
+    // opening the strip applies nothing; only a stepper click writes, straight into the
+    // probability lane via KeysProcessor::applyEuclidToActiveArpPattern. Visible only under
+    // the same condition as Randomize (slots view, Pattern shape); see refreshShape().
+    juce::TextButton euclidButton { "Euclid" };
+    bool euclidStripOpen = false;
+    int euclidHits = 3, euclidSteps = 8, euclidRotate = 0;
+    juce::Label euclidHitsLabel, euclidStepsLabel, euclidRotateLabel;
+    juce::Label euclidHitsReadout, euclidStepsReadout, euclidRotateReadout;
+    juce::TextButton euclidHitsMinus { "-" }, euclidHitsPlus { "+" };
+    juce::TextButton euclidStepsMinus { "-" }, euclidStepsPlus { "+" };
+    juce::TextButton euclidRotateMinus { "-" }, euclidRotatePlus { "+" };
+    void openEuclidStrip(bool open); // toggles the strip; closes Clocks, since only one strip is ever open
+    void nudgeEuclid(int which, int delta); // 0 = hits, 1 = steps, 2 = rotate
+    void refreshEuclidReadouts();
+
+    // Clocks: the four rhythm dividers (ArpEngine::rhythmDiv, 0 = off), same strip mechanism
+    // as Euclid and mutually exclusive with it. Visible whenever the slot row is (every
+    // shape, not just Pattern - the dividers act regardless of what Shape draws).
+    juce::TextButton clocksButton { "Clocks" };
+    bool clocksStripOpen = false;
+    std::array<juce::Label, 4> clockDivLabels, clockDivReadouts;
+    std::array<juce::TextButton, 4> clockDivMinus, clockDivPlus;
+    void openClocksStrip(bool open);
+    void nudgeClockDiv(int index, int delta);
+    void refreshClockDivReadouts();
+
+    // Voice: harmony mode (ArpEngine::harmonyMode - chord tones or the subharmonic voice),
+    // the panel's first lane-contextual control. Visible only with the Harmony lane selected
+    // and the STEPS group itself showing (Pattern shape); see refreshShape() and selectLane().
+    juce::Label voiceLabel;
+    juce::TextButton voiceButton;
+    void refreshVoiceButton();
+
     // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
     // mouse-only contract wants a left-click path for everything). Both arm: click the
     // button, then click the slot. One state, not two flags, so arming one disarms the

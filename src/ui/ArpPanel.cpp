@@ -409,6 +409,10 @@ void ArpPanel::setEditLine(int line, bool leaveMacroView)
     refreshRetrig();
     refreshLaneReadouts();
     refreshPatternButtons();
+    refreshVoiceButton();       // reads the new line's harmonyMode
+    refreshClockDivReadouts();  // reads the new line's rhythmDiv - the documented rate-dial
+                                // bug (a control that kept showing the old line) is exactly
+                                // what skipping this would repeat
     if (onEditLineChanged)
         onEditLineChanged();
     resized();  // Shape may have changed the panel's height with the line
@@ -436,6 +440,13 @@ void ArpPanel::selectLane(int lane)
             row.grid->setVisible(patternMode() && i == selectedLane);
     }
     refreshLaneReadouts();
+    // Voice is lane-contextual: only the Harmony lane means anything to harmonyMode. Set here
+    // as well as in refreshShape(), which gates it on Pattern shape - the two conditions are
+    // independent (a lane click cannot change Shape, a Shape change cannot change the lane).
+    const bool voiceOn = patternMode() && selectedLane == (int) ArpEngine::laneHarmony;
+    voiceLabel.setVisible(voiceOn);
+    voiceButton.setVisible(voiceOn);
+    refreshVoiceButton();
     resized();
 }
 
@@ -572,6 +583,12 @@ void ArpPanel::refreshShape()
         c->setVisible(pattern);
     groups[2].visible = pattern;
 
+    // Voice rides the STEPS group's own gate plus the Harmony lane; see selectLane() for the
+    // other half of this condition.
+    const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
+    voiceLabel.setVisible(voiceOn);
+    voiceButton.setVisible(voiceOn);
+
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
     // a thing you do as launching one through an edited pattern, and hiding the row was what
     // made the old A-H buttons feel like an appendix to the step editor rather than the way
@@ -586,9 +603,15 @@ void ArpPanel::refreshShape()
             c->setVisible(slotsOn);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &copyButton, &clearButton, &stopButton, &chainButton,
-             &barsMinus, &barsPlus, &barsReadout })
+             &barsMinus, &barsPlus, &barsReadout, &clocksButton })
         c->setVisible(slotsOn);
+    if (! slotsOn && clocksStripOpen)
+        openClocksStrip(false); // dividers act in every shape, but not in the macro view
+
     randomizeButton.setVisible(pattern);
+    euclidButton.setVisible(pattern);
+    if (! pattern && euclidStripOpen)
+        openEuclidStrip(false); // Euclid only means anything with the probability lane on screen
 
     // The card changes height with the mode, so relayout and repaint - but only on an
     // actual change, since refreshShape() runs on the 10 Hz timer.
@@ -894,6 +917,15 @@ void ArpPanel::refreshPatternButtons()
     const int activeBars = processor.arpSlotBars(processor.arpActivePattern(editLine()), editLine());
     barsReadout.setText(juce::String(activeBars) + (activeBars == 1 ? " bar" : " bars"),
                         juce::dontSendNotification);
+
+    // Clocks retitles the same way Chain does, but on whether any divider is running rather
+    // than on the strip being open - the toggle glow already says that (openClocksStrip). Not
+    // setToggleState here: that would fight the strip-open state the same button also shows.
+    const auto& engine = processor.arpLine(editLine());
+    bool anyDividerOn = false;
+    for (int i = 0; i < 4; ++i)
+        anyDividerOn |= engine.rhythmDiv[(size_t) i].load(std::memory_order_relaxed) != 0;
+    clocksButton.setButtonText(anyDividerOn ? "Clocked" : "Clocks");
 }
 
 // ---------------------------------------------------------------------------
@@ -2026,6 +2058,84 @@ void ArpPanel::buildControls()
         addAndMakeVisible(*b);
     }
 
+    // Euclid: opens a non-destructive preview strip of three steppers (HITS/STEPS/ROTATE).
+    // A click on any stepper writes straight into the probability lane; opening the strip on
+    // its own writes nothing. setClickingTogglesState mirrors rateModeButton's own toggle
+    // chip above: the button flips its own state on click, and the handler reads it back
+    // rather than tracking a second boolean.
+    euclidButton.setClickingTogglesState(true);
+    euclidButton.setTitle("Euclid pattern");
+    euclidButton.setTooltip("A Euclidean rhythm, spread into the probability lane: HITS beats "
+                            "spaced as evenly as possible across STEPS, shifted by ROTATE.");
+    euclidButton.onClick = [this] { openEuclidStrip(euclidButton.getToggleState()); };
+    addAndMakeVisible(euclidButton);
+
+    const auto buildStepper = [this](juce::Label& cap, const juce::String& capText,
+                                     juce::TextButton& minus, const juce::String& minusName,
+                                     juce::TextButton& plus, const juce::String& plusName,
+                                     juce::Label& readout)
+    {
+        styleLabel(cap, capText);
+        addChildComponent(cap); // strips lay out regardless; visibility follows the strip
+        minus.setButtonText("-");
+        plus.setButtonText("+");
+        minus.setTitle(minusName);
+        plus.setTitle(plusName);
+        addChildComponent(minus);
+        addChildComponent(plus);
+        readout.setJustificationType(juce::Justification::centred);
+        readout.setFont(juce::Font(juce::FontOptions(13.0f)));
+        addChildComponent(readout);
+    };
+    buildStepper(euclidHitsLabel, "Hits", euclidHitsMinus, "Fewer hits", euclidHitsPlus, "More hits", euclidHitsReadout);
+    buildStepper(euclidStepsLabel, "Steps", euclidStepsMinus, "Fewer steps", euclidStepsPlus, "More steps", euclidStepsReadout);
+    buildStepper(euclidRotateLabel, "Rotate", euclidRotateMinus, "Rotate left", euclidRotatePlus, "Rotate right", euclidRotateReadout);
+    euclidHitsMinus.onClick = [this] { nudgeEuclid(0, -1); };
+    euclidHitsPlus.onClick = [this] { nudgeEuclid(0, 1); };
+    euclidStepsMinus.onClick = [this] { nudgeEuclid(1, -1); };
+    euclidStepsPlus.onClick = [this] { nudgeEuclid(1, 1); };
+    euclidRotateMinus.onClick = [this] { nudgeEuclid(2, -1); };
+    euclidRotatePlus.onClick = [this] { nudgeEuclid(2, 1); };
+    refreshEuclidReadouts();
+
+    // Clocks: the four rhythm dividers, same strip mechanism, mutually exclusive with Euclid.
+    clocksButton.setClickingTogglesState(true);
+    clocksButton.setTitle("Rhythm dividers");
+    clocksButton.setTooltip("Four independent clock dividers layered under the pattern - "
+                            "0 is off, higher numbers slow that voice down further.");
+    clocksButton.onClick = [this] { openClocksStrip(clocksButton.getToggleState()); };
+    addAndMakeVisible(clocksButton);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        buildStepper(clockDivLabels[(size_t) i], "Div " + juce::String(i + 1),
+                    clockDivMinus[(size_t) i], "Divider " + juce::String(i + 1) + " slower",
+                    clockDivPlus[(size_t) i], "Divider " + juce::String(i + 1) + " faster",
+                    clockDivReadouts[(size_t) i]);
+        const int idx = i;
+        clockDivMinus[(size_t) i].onClick = [this, idx] { nudgeClockDiv(idx, -1); };
+        clockDivPlus[(size_t) i].onClick = [this, idx] { nudgeClockDiv(idx, 1); };
+    }
+    refreshClockDivReadouts();
+
+    // Voice: harmony mode, the panel's first lane-contextual control (visible only with the
+    // Harmony lane selected). "Chord" plays the held chord's own tones in the second voice;
+    // "Sub" plays the undertone series instead.
+    styleLabel(voiceLabel, "Voice");
+    addChildComponent(voiceLabel);
+    voiceButton.setTitle("Harmony voice");
+    voiceButton.setTooltip("The Harmony lane's second voice: chord tones, or the subharmonic "
+                           "series below the root.");
+    voiceButton.onClick = [this]
+    {
+        auto& engine = processor.arpLine(editLine());
+        const int next = engine.harmonyMode.load(std::memory_order_relaxed) == 0 ? 1 : 0;
+        engine.harmonyMode.store(next, std::memory_order_relaxed);
+        refreshVoiceButton();
+    };
+    addChildComponent(voiceButton);
+    refreshVoiceButton();
+
     // One macro card per line, hidden until the All view asks for them. Built once and kept,
     // so their attachments never churn: each one is bound to its own line for good.
     //
@@ -2054,6 +2164,108 @@ void ArpPanel::nudgeBars(int delta)
     for (auto& c : slotCards)
         if (c != nullptr)
             c->repaint();
+}
+
+// Euclid and Clocks are mutually exclusive: the panel never grows by more than one strip's
+// height at a time. Opening one closes the other; each strip's own components are the only
+// place their visibility is set, since resized() lays them out regardless (they read a
+// possibly-empty rectangle when closed, which is harmless because nothing sees it).
+void ArpPanel::openEuclidStrip(bool open)
+{
+    euclidStripOpen = open;
+    euclidButton.setToggleState(open, juce::dontSendNotification);
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &euclidHitsLabel, &euclidStepsLabel, &euclidRotateLabel,
+             &euclidHitsReadout, &euclidStepsReadout, &euclidRotateReadout,
+             &euclidHitsMinus, &euclidHitsPlus, &euclidStepsMinus, &euclidStepsPlus,
+             &euclidRotateMinus, &euclidRotatePlus })
+        c->setVisible(open);
+    if (open)
+        openClocksStrip(false);
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
+    resized();
+    repaint();
+}
+
+// which: 0 = hits, 1 = steps, 2 = rotate. Every click is immediately audible - that is the
+// point of a preview strip, not a bug - so this both writes through the processor and
+// refreshes the probability lane's own readout (applyEuclidToActiveArpPattern changes that
+// lane's length).
+void ArpPanel::nudgeEuclid(int which, int delta)
+{
+    switch (which)
+    {
+        case 0: euclidHits += delta; break;
+        case 1: euclidSteps += delta; break;
+        default: euclidRotate += delta; break;
+    }
+    // Re-clamp hits and rotate against the possibly-changed steps value, whichever stepper
+    // moved: a STEPS click can leave either of the other two out of range.
+    euclidSteps = juce::jlimit(1, ArpEngine::maxSteps, euclidSteps);
+    euclidHits = juce::jlimit(0, euclidSteps, euclidHits);
+    euclidRotate = juce::jlimit(0, euclidSteps - 1, euclidRotate);
+
+    processor.applyEuclidToActiveArpPattern(editLine(), euclidHits, euclidSteps, euclidRotate,
+                                            ArpEngine::laneProbability);
+    refreshLaneReadouts();
+    refreshEuclidReadouts();
+}
+
+void ArpPanel::refreshEuclidReadouts()
+{
+    euclidHitsReadout.setText(juce::String(euclidHits), juce::dontSendNotification);
+    euclidStepsReadout.setText(juce::String(euclidSteps), juce::dontSendNotification);
+    euclidRotateReadout.setText(juce::String(euclidRotate), juce::dontSendNotification);
+}
+
+void ArpPanel::openClocksStrip(bool open)
+{
+    clocksStripOpen = open;
+    clocksButton.setToggleState(open, juce::dontSendNotification);
+    for (int i = 0; i < 4; ++i)
+    {
+        clockDivLabels[(size_t) i].setVisible(open);
+        clockDivReadouts[(size_t) i].setVisible(open);
+        clockDivMinus[(size_t) i].setVisible(open);
+        clockDivPlus[(size_t) i].setVisible(open);
+    }
+    if (open)
+    {
+        openEuclidStrip(false);
+        refreshClockDivReadouts();
+    }
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
+    resized();
+    repaint();
+}
+
+// Writes straight to the atomic - no snapshot, no dirty flag, same contract as Randomize.
+void ArpPanel::nudgeClockDiv(int index, int delta)
+{
+    auto& engine = processor.arpLine(editLine());
+    const int next = juce::jlimit(0, 16,
+                                  engine.rhythmDiv[(size_t) index].load(std::memory_order_relaxed) + delta);
+    engine.rhythmDiv[(size_t) index].store(next, std::memory_order_relaxed);
+    refreshClockDivReadouts();
+    refreshPatternButtons(); // the Clocks/Clocked retitle depends on all four
+}
+
+void ArpPanel::refreshClockDivReadouts()
+{
+    auto& engine = processor.arpLine(editLine());
+    for (int i = 0; i < 4; ++i)
+    {
+        const int v = engine.rhythmDiv[(size_t) i].load(std::memory_order_relaxed);
+        clockDivReadouts[(size_t) i].setText(v == 0 ? "Off" : juce::String(v), juce::dontSendNotification);
+    }
+}
+
+void ArpPanel::refreshVoiceButton()
+{
+    const int mode = processor.arpLine(editLine()).harmonyMode.load(std::memory_order_relaxed);
+    voiceButton.setButtonText(mode == 1 ? "Sub" : "Chord");
 }
 
 void ArpPanel::timerCallback()
@@ -2132,7 +2344,17 @@ namespace
     // size with nothing to say so.
     constexpr int arpMacroBelow = 8;
     constexpr int arpMacroTotalH = 12 + (arpMacroH + arpMacroBelow) + 12;
-    constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10);
+    // Voice's own row inside the STEPS group (2026-08-14): one more arpBandRow plus its 6 px
+    // gap, the same cost STEPS' own two rows already pay each. Pattern shape only - Voice
+    // needs the Harmony lane tab, which only exists once the step editor does - so this adds
+    // to arpPatternH and never to arpShapeH. Pattern and Playback simply carry the same extra
+    // height as blank frame below their own two rows; see resized().
+    constexpr int arpVoiceRowH = arpBandRow + 6;
+    constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10) + arpVoiceRowH;
+    // Euclid and Clocks each open into one 34 px row plus its 8 px gap above the action row,
+    // and the two are mutually exclusive (openEuclidStrip/openClocksStrip each close the
+    // other), so at most one of them is ever open at once.
+    constexpr int arpStripH = 34 + 8;
 
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
     // groups share whatever that is. Row one is Pattern / Playback / Steps, row two is
@@ -2157,12 +2379,15 @@ int ArpPanel::preferredHeight() const
     return contentHeight() + 16; // + the 8 px margin at both ends
 }
 
-// One answer for the three views: the macro rows, a plain shape, or the step editor.
+// One answer for the three views: the macro rows, a plain shape, or the step editor. Neither
+// strip ever shows in the macro view (both are forced closed on the way in - see
+// refreshShape()), so that branch returns before the strip's height would apply.
 int ArpPanel::contentHeight() const
 {
     if (macroView)
         return arpMacroTotalH;
-    return patternMode() ? arpPatternH : arpShapeH;
+    const int stripExtra = (euclidStripOpen || clocksStripOpen) ? arpStripH : 0;
+    return (patternMode() ? arpPatternH : arpShapeH) + stripExtra;
 }
 
 juce::Rectangle<int> ArpPanel::cardBounds() const
@@ -2271,7 +2496,11 @@ void ArpPanel::resized()
     }
 
     // --- The control band: three captioned groups sharing the width ---------------
-    auto band = macroView ? juce::Rectangle<int>() : area.removeFromTop(arpBandH);
+    // Pattern shape only, band grows by arpVoiceRowH for Voice's own row inside STEPS -
+    // Pattern and Playback simply carry the same extra height as blank frame below their two
+    // rows (see contentHeight(), which has to agree with this exactly).
+    const int bandHNow = (! macroView && patternMode()) ? arpBandH + arpVoiceRowH : arpBandH;
+    auto band = macroView ? juce::Rectangle<int>() : area.removeFromTop(bandHNow);
     if (! macroView)
         area.removeFromTop(8);
     auto band2 = macroView ? juce::Rectangle<int>() : area.removeFromTop(arpBand2H);
@@ -2450,10 +2679,22 @@ void ArpPanel::resized()
     }
 
     // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives
-    // rather than floating under the grid where it used to.
+    // rather than floating under the grid where it used to. A third row joins the usual two
+    // in Pattern shape, for VOICE (2026-08-14) - not groupInner(), whose height is fixed at
+    // arpBandInner for every group: this group alone needs the taller arpBandInner +
+    // arpVoiceRowH that bandHNow above already reserved in its bounds.
     {
-        juce::Rectangle<int> rowA, rowB;
-        splitRows(groupInner(groups[2].bounds), rowA, rowB);
+        auto stepsBounds = groups[2].bounds.reduced(10, 0).withTrimmedTop(arpBandTop)
+                                .withHeight(patternMode() ? arpBandInner + arpVoiceRowH : arpBandInner);
+        juce::Rectangle<int> rowA, rowB, rowC;
+        rowA = stepsBounds.removeFromTop(arpBandRow);
+        stepsBounds.removeFromTop(6);
+        rowB = stepsBounds.removeFromTop(arpBandRow);
+        if (patternMode())
+        {
+            stepsBounds.removeFromTop(6);
+            rowC = stepsBounds.removeFromTop(arpBandRow);
+        }
         auto stepsCell = rowA.removeFromLeft(juce::jlimit(120, 150, rowA.getWidth()));
         stepsLabel.setBounds(stepsCell.removeFromTop(14));
         stepsCell = stepsCell.withSizeKeepingCentre(stepsCell.getWidth(), juce::jmin(stepsCell.getHeight(), 28));
@@ -2466,6 +2707,13 @@ void ArpPanel::resized()
         speedButton.setBounds(speedCell.withSizeKeepingCentre(speedCell.getWidth(),
                                                               juce::jmin(speedCell.getHeight(), 28)));
         linkButton.setBounds(rowB.withTrimmedTop(14));
+
+        // VOICE: laid out regardless of the Harmony-lane gate (harmless while invisible),
+        // width-limited to 84 rather than jlimit'd like STEPS - it never needs to stretch.
+        auto voiceCell = rowC.removeFromLeft(juce::jmin(84, rowC.getWidth()));
+        voiceLabel.setBounds(voiceCell.removeFromTop(14));
+        voiceButton.setBounds(voiceCell.withSizeKeepingCentre(voiceCell.getWidth(),
+                                                              juce::jmin(voiceCell.getHeight(), 28)));
     }
 
     // --- The slot row and its buttons, at the bottom of both per-line shapes -------
@@ -2477,6 +2725,21 @@ void ArpPanel::resized()
     {
         auto actionRow = area.removeFromBottom(34);
         area.removeFromBottom(8);
+        // Euclid and Clocks open a strip directly above the action row, which stays put at
+        // the bottom edge - the row that grows is the one above it, not the one the toggle
+        // buttons live in. At most one of these is ever non-empty; the other is a zero-height
+        // rect, which is harmless since its strip's components are invisible too.
+        juce::Rectangle<int> euclidRow, clocksRow;
+        if (euclidStripOpen)
+        {
+            euclidRow = area.removeFromBottom(34);
+            area.removeFromBottom(8);
+        }
+        if (clocksStripOpen)
+        {
+            clocksRow = area.removeFromBottom(34);
+            area.removeFromBottom(8);
+        }
         auto slotRow = area.removeFromBottom(arpSlotsH);
         area.removeFromBottom(12);
 
@@ -2505,15 +2768,40 @@ void ArpPanel::resized()
         stopButton.setBounds(actionRow.removeFromLeft(84));
         actionRow.removeFromLeft(12);
         randomizeButton.setBounds(actionRow.removeFromLeft(110));
+        actionRow.removeFromLeft(8);
+        euclidButton.setBounds(actionRow.removeFromLeft(110));
 
         // Chain and its Bars stepper sit at the far end, away from the four that act on one
-        // slot: these two are about the row as a whole.
+        // slot: these two are about the row as a whole. Clocks joins them, for the same
+        // reason - it acts on the line, not on one slot.
         auto barsCell = actionRow.removeFromRight(126);
         barsPlus.setBounds(barsCell.removeFromRight(34));
         barsMinus.setBounds(barsCell.removeFromLeft(34));
         barsReadout.setBounds(barsCell); // says "2 bars", so it needs no caption beside it
         actionRow.removeFromRight(8);
         chainButton.setBounds(actionRow.removeFromRight(96));
+        actionRow.removeFromRight(8);
+        clocksButton.setBounds(actionRow.removeFromRight(96));
+
+        // Each strip: three or four [caption][-][readout][+] groups left to right, laid out
+        // regardless of which one is actually open this frame (the closed one's row is
+        // zero-width, so its removeFromLeft calls are simple no-ops).
+        const auto stepperGroup = [](juce::Rectangle<int>& row, int w, juce::Label& cap,
+                                     juce::TextButton& minus, juce::Label& readout, juce::TextButton& plus)
+        {
+            auto cell = row.removeFromLeft(w);
+            row.removeFromLeft(8);
+            cap.setBounds(cell.removeFromLeft(40));
+            minus.setBounds(cell.removeFromLeft(34));
+            plus.setBounds(cell.removeFromRight(34));
+            readout.setBounds(cell);
+        };
+        stepperGroup(euclidRow, 156, euclidHitsLabel, euclidHitsMinus, euclidHitsReadout, euclidHitsPlus);
+        stepperGroup(euclidRow, 156, euclidStepsLabel, euclidStepsMinus, euclidStepsReadout, euclidStepsPlus);
+        stepperGroup(euclidRow, 156, euclidRotateLabel, euclidRotateMinus, euclidRotateReadout, euclidRotatePlus);
+        for (int i = 0; i < 4; ++i)
+            stepperGroup(clocksRow, 140, clockDivLabels[(size_t) i], clockDivMinus[(size_t) i],
+                        clockDivReadouts[(size_t) i], clockDivPlus[(size_t) i]);
     }
 
     // Everything left exists only in Pattern shape. Laying it out regardless is harmless
