@@ -45,8 +45,8 @@ writing into the probability lane; Clocks stays available in every shape, since 
 act regardless of what Shape draws, and its own button retitles to "Clocked" while any divider
 is running, the same way Chain retitles to "Chaining". **Voice** switches the Harmony lane's
 second voice between chord tones and the subharmonic series, and is the panel's first control
-that depends on which lane is selected rather than which shape is - it shows up beside Steps,
-Speed and Link, but only with the Harmony tab itself picked.
+that depends on which lane is selected rather than which shape is - it shows up in its own row
+under Steps and Speed/Link, but only with the Harmony tab itself picked.
 
 ### Changed: twelve pads a page, with Strum and Humanize in the columns that freed up
 
