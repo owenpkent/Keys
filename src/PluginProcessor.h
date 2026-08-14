@@ -252,7 +252,7 @@ public:
                     // range: the existing two stay the ceiling, and these say how far under it
                     // the draw may fall. Default 100 - a span of the whole scale - leaves
                     // exactly what those two did alone.
-                    apHumanizeSpan, apHumanVelSpan, numArpParams };
+                    apHumanizeSpan, apHumanVelSpan, apDrift, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).

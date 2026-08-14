@@ -91,7 +91,7 @@ public:
         true,  // Gate
         false, // Ratchet
         true,  // Chance
-        true,  // Transpose
+        false, // Transpose - scale degrees, so this picks a different note
         true,  // Late
         false, // Harmony
         false, // Chord
@@ -352,6 +352,16 @@ public:
         // floor at zero for any knob position, which is the behaviour these two had alone.
         int humanizeSpan = 100;   // 0..100
         int humanVelSpan = 100;   // 0..100
+        // Drift (2026-08-14, Owen: "there should be, like, a more random feature in the
+        // drawing, like cthulu"). Strays from what the lanes hold *while it plays*, by up to
+        // this percentage of each lane's own range - so the part never repeats exactly and the
+        // lane on screen never changes. Roll is the other half of the same ask and is its
+        // opposite in every way: one reroll, visible, permanent.
+        //
+        // Only the lanes `laneDrifts` allows, which is the whole design in one line: **drift
+        // changes how a step plays, never which note it plays.** 0 is the engine bit-identical
+        // to before, which is what makes it safe to append.
+        int drift = 0;            // 0..100
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
         // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
@@ -610,7 +620,7 @@ public:
                 // step order however the lane is drawn (step n at n+0.9 still precedes step
                 // n+1 at n+1.0). An early half would need the whole close-what-you-land-on
                 // rule in emitHit rewritten, for a shift Swing already offers.
-                fireBeats += stepBeats * juce::jlimit(0, 90, laneValue(p, laneLate, stepIndex)) / 100.0;
+                fireBeats += stepBeats * juce::jlimit(0, 90, driftedLane(p, laneLate, stepIndex)) / 100.0;
                 const double offsetBeats = fireBeats - pos;
                 const int offset = (int) std::floor(offsetBeats / beatsPerSample);
                 if (offset >= numSamples)
@@ -791,6 +801,30 @@ private:
         return lanes.value[li][(size_t) idx].load(std::memory_order_relaxed);
     }
 
+    // laneValue plus Drift (2026-08-14). Every lane read that feeds *how a step plays* goes
+    // through here instead; the four that choose content still call laneValue directly, and
+    // `laneDrifts` is the table that says which is which.
+    //
+    // Non-const where laneValue is const, on purpose: this draws from `rng`, and a lane read
+    // that can return a different answer twice is not the same kind of thing as one that
+    // cannot. It is called exactly once per lane per fired step, so a step's drift is settled
+    // before any of it is heard.
+    int driftedLane(const Params& p, Lane l, long long globalStep)
+    {
+        const int v = laneValue(p, l, globalStep);
+        const int amt = juce::jlimit(0, 100, p.drift);
+        if (amt <= 0 || ! laneDrifts[l])
+            return v;
+        // Half the reach either side, so the drawn value stays the centre of what you hear
+        // rather than the floor of it - the opposite of Humanize, which is deliberately
+        // one-sided (late and quieter, never early and never louder) because it models a
+        // player. Drift models a *machine* wandering, and a wander has no preferred direction.
+        const auto r = laneRange(l);
+        const double reach = (double) (r.hi - r.lo) * (amt / 100.0) * 0.5;
+        const double u = (double) (rng() % 2001u) / 1000.0 - 1.0; // -1..+1
+        return juce::jlimit(r.lo, r.hi, (int) std::llround((double) v + u * reach));
+    }
+
     // Walk `degrees` scale steps from `note`, using the mask of in-scale pitch classes. A
     // note that is not itself in the scale lands on the next one in the direction of travel,
     // which is the same rounding Scale Lock does upstream.
@@ -923,7 +957,7 @@ private:
         const int noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal < 0)
             return; // muted step
-        const int chance = laneValue(p, laneProbability, globalStep)
+        const int chance = driftedLane(p, laneProbability, globalStep)
                          * juce::jlimit(0, 100, p.chance) / 100;
         if ((int) (rng() % 100u) >= chance)
             return; // 100 always fires, 0 never does
@@ -952,7 +986,7 @@ private:
         // The Octave lane's per-step shift plus the line's own, both in octaves. Summed rather
         // than one overriding the other: the knob says where the run sits, the lane says how a
         // particular step departs from that, and they are different questions.
-        const int octaveShift = 12 * (juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep))
+        const int octaveShift = 12 * (juce::jlimit(-3, 3, driftedLane(p, laneOctave, globalStep))
                                       + juce::jlimit(-3, 3, p.octShift));
         const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
@@ -960,12 +994,12 @@ private:
         // The line's own fader (velTrim) is deliberately NOT in velScale: velScale feeds the
         // 0.05 audibility floor below, which protects programmed dynamics, and the fader is
         // applied after that floor precisely so it is not protected by it.
-        const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale
+        const float velScale = (float) driftedLane(p, laneVelocity, globalStep) / 100.0f * rampScale
                              * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
         const float trimT = (100.0f + (float) juce::jlimit(-100, 100, p.velTrim)) / 100.0f;
         const float trimScale = trimT * trimT; // squared: see the Params comment
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
-        const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
+        const double gate = juce::jlimit(5, 200, driftedLane(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
 
         const double subLen = stepSamplesF / ratchets;

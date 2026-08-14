@@ -580,7 +580,8 @@ void ArpPanel::refreshShape()
                     &swingSlider, &gateSlider, &chanceSlider, &octavesLabel, &swingLabel,
                     &gateLabel, &chanceLabel, &latchButton, &keysBandButton, &offsetSlider,
                     &rampSlider, &rampTimeSlider, &humanSlider, &humanVelSlider, &offsetLabel,
-                    &rampLabel, &rampTimeLabel, &humanLabel, &humanVelLabel }, ! macroView);
+                    &rampLabel, &rampTimeLabel, &humanLabel, &humanVelLabel,
+                    &driftSlider, &driftLabel }, ! macroView);
     // The STEPS group is the only part of the band that belongs to the step editor, so it
     // is the only part that goes with it.
     for (juce::Component* c : std::initializer_list<juce::Component*> {
@@ -1734,6 +1735,7 @@ void ArpPanel::buildAttachments()
     rampTimeAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apRampBeats), rampTimeSlider);
     humanAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apHumanize), humanSlider);
     humanVelAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apHumanVel), humanVelSlider);
+    driftAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apDrift), driftSlider);
     keysBandAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apKeys), keysBandButton);
     swingAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apSwing), swingSlider);
     gateAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apGate), gateSlider);
@@ -1900,6 +1902,10 @@ void ArpPanel::buildControls()
     bar(humanVelSlider, humanVelLabel, "Human Vel", 0.0, 100.0, "%",
         "Takes a little off each hit's velocity, by a different amount every time. Every hit "
         "lands at full strength at 0.");
+    bar(driftSlider, driftLabel, "Drift", 0.0, 100.0, "%",
+        "Strays from what the lanes hold while it plays, so the part never repeats exactly. "
+        "Octave, velocity, gate, lateness and chance wander; the notes never do. "
+        "The lanes on screen are not changed - use Roll on the Draw page for that.");
 
     // Swing, Gate and Chance as knobs with the value in the middle: three continuous
     // controls side by side, where three labelled horizontal sliders would have eaten the
@@ -2216,6 +2222,7 @@ void ArpPanel::buildPageLists()
         &octavesLabel, &octavesSlider, &distanceLabel, &distanceBox, &offsetLabel, &offsetSlider,
         &rampLabel, &rampSlider, &rampTimeLabel, &rampTimeSlider,
         &humanLabel, &humanSlider, &humanVelLabel, &humanVelSlider,
+        &driftLabel, &driftSlider,
     };
 
     pageSlots = {
@@ -2895,11 +2902,12 @@ void ArpPanel::resized()
     {
         auto inner = groupInner(groups[4].bounds).withHeight(arpBandRow);
         auto row = inner;
-        const int each = juce::jmax(120, (row.getWidth() - 24) / 4);
+        const int each = juce::jmax(120, (row.getWidth() - 32) / 5); // five since Drift joined
         cell(row, each, rampLabel, rampSlider);
         cell(row, each, rampTimeLabel, rampTimeSlider);
         cell(row, each, humanLabel, humanSlider);
-        cell(row, juce::jmax(120, row.getWidth()), humanVelLabel, humanVelSlider);
+        cell(row, each, humanVelLabel, humanVelSlider);
+        cell(row, juce::jmax(120, row.getWidth()), driftLabel, driftSlider);
     }
 
     // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives
