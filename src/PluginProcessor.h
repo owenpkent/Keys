@@ -503,7 +503,14 @@ public:
         // slots, which are per-line and have nowhere to live in a row.
         bool arpMacro = true;
         // Which page of a line's deep view is showing (2026-08-14, Owen: "can we simplify the
-        // detail view or organize into pages"). 0 = Steps, 1 = Slots, 2 = Setup.
+        // detail view or organize into pages"). Values are ArpPanel::Page: 0 = Draw (the step
+        // lanes), 1 = Cards (the twelve slots), 2 = Play (rate, shape, feel).
+        //
+        // **Defaults to 2, Play**, and that is not arbitrary: Draw does nothing until you have
+        // drawn on it *and* set Shape to Pattern, so opening there is opening on a blank page
+        // with no way to tell why. Owen landed on exactly that - one step long, Shape on
+        // Pattern - and said "I don't understand this layout. how to get the sound I want".
+        // Play is where rate and shape are, which is the answer to that question.
         //
         // The deep view used to be all four blocks at once - band, lanes, slots, actions - at
         // 612 px against the macro view's 240, so clicking Details grew the *window* by 372 px
@@ -511,7 +518,7 @@ public:
         // height, and the window stops moving between views entirely. Same reason this lives
         // here rather than in the panel as arpMacro does: the panel is destroyed every time
         // the section folds, and Owen should get back the page he left.
-        int  arpPage = 0;
+        int  arpPage = 2;
         // Whether the keybed lights up for the notes the arp is *playing*, as opposed to the
         // chord it was handed (which lights it either way, through noteRefs). Layout state and
         // not a parameter: it changes what is drawn and nothing that is heard, so there is

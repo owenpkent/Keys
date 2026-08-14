@@ -655,13 +655,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addChildComponent(*arpBarAllTab);
 
-    // The page tabs, right of All. Steps first because it is the one you open Details for.
+    // The page tabs, right of All, most-used first. See arpPageForTab for why the bar's order
+    // is not the enum's, and for where the names came from.
     {
-        static const char* const names[3] = { "Steps", "Slots", "Setup" };
+        static const char* const names[3] = { "Play", "Cards", "Draw" };
         static const char* const tips[3] = {
-            "The step lanes: ten of them, the one you pick, and its mute row. Pattern shape only.",
+            "How the line plays: rate, shape, swing, gate and feel. Most of what you want is here.",
             "The twelve slot cards, plus Copy, Clear, Randomize, Euclid, Clocks and Chain.",
-            "Rate, Shape and everything about how the line plays: the band's two rows."
+            "Draw a rhythm by hand, one step at a time, on any of the ten lanes. Pattern shape only."
         };
         for (int i = 0; i < 3; ++i)
         {
@@ -676,7 +677,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
                     // line's deep view and looking at both lines at once. setMacroView first,
                     // so setPage's own relayout is the last one and sees the final state.
                     arpPanel->setMacroView(false);
-                    arpPanel->setPage((ArpPanel::Page) i);
+                    arpPanel->setPage(arpPageForTab(i));
                 }
                 refreshArpBarTabs();
             };
@@ -1068,6 +1069,14 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
     }
 }
 
+ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)
+{
+    static const ArpPanel::Page order[3] = { ArpPanel::Page::setup,   // "Play"
+                                             ArpPanel::Page::slots,   // "Cards"
+                                             ArpPanel::Page::steps }; // "Draw"
+    return order[(size_t) juce::jlimit(0, 2, tabIndex)];
+}
+
 void KeysEditor::refreshArpBarTabs()
 {
     // A and B answer to their own ButtonAttachment now (each bound to that line's On
@@ -1084,21 +1093,21 @@ void KeysEditor::refreshArpBarTabs()
     // plain shape has no lanes - rather than vanishing, so the group never reflows under the
     // mouse and the tab is still there to say why.
     const bool onPage = processor.layout.arp && ! processor.layout.arpMacro;
-    const bool stepsLive = arpPanel != nullptr && arpPanel->pageAvailable(ArpPanel::Page::steps);
     bool shownChanged = false;
     for (int i = 0; i < 3; ++i)
     {
         auto* t = arpPageTabs[(size_t) i].get();
         if (t == nullptr)
             continue;
+        const auto page = arpPageForTab(i); // bar order is not enum order - see the header
         if (t->isVisible() != onPage)
         {
             t->setVisible(onPage);
             shownChanged = true;
         }
-        t->setToggleState(onPage && processor.layout.arpPage == i, juce::dontSendNotification);
-        if (i == (int) ArpPanel::Page::steps)
-            t->setEnabled(stepsLive);
+        t->setToggleState(onPage && processor.layout.arpPage == (int) page,
+                          juce::dontSendNotification);
+        t->setEnabled(arpPanel == nullptr || arpPanel->pageAvailable(page));
     }
     // Their cell collapses with them (see resized()), so BPM and Quantize slide back rather
     // than orbiting a hole - the pageButtons lesson, one more time.
