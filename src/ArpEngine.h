@@ -32,7 +32,7 @@ public:
     // Sounding arp notes awaiting their note-off. Raised from 64 with the Chord shape and
     // the Harmony lane, which between them can put a spread chord's every note on one step.
     static constexpr int maxActive = 128;
-    static constexpr int numLanes = 12;
+    static constexpr int numLanes = 13;
 
     // The four after laneProbability arrived 2026-07-30. Appended, like everything else in
     // that round: a slot's lane data is serialized by index, so inserting would silently
@@ -58,21 +58,47 @@ public:
                 // mutes, without losing the set-value of the steps"). Note keeps its value now
                 // and this says whether the step is heard. Note = -1 is still a *drawn* rest,
                 // which is a different thing and stays: Cthulhu has both too.
-                laneMute };
+                laneMute,
+                // Stochas' chain dependency (its manual p3: a cell "will play or not play
+                // depending on whether another cell has played"), reduced to the one form that
+                // needs no second coordinate: 0 always, 1 only if the step before it fired,
+                // 2 only if the step before it did not. Chance says "maybe"; this says "only
+                // if", which is what turns a probabilistic pattern into one that answers itself.
+                //
+                // **It is the one thing in the engine that is not stateless from the playhead.**
+                // Everything else here is computed from the step index alone so a transport jump
+                // lands right without having walked there; a condition has to remember one bit
+                // about the step before. It self-corrects within a single step, which is the
+                // cheapest possible break of that rule and is why this form was chosen over
+                // Stochas' arbitrary cell-to-cell reference.
+                laneChain };
 
     // The value each lane holds when it is doing nothing. Also what every lane reads as
     // while Params::usePattern is false, which is how "Shape: Up" behaves like a plain
     // arpeggiator even after the step lanes have been edited.
-    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0, 0, 0 };
+    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0, 0, 0, 0 };
 
     // What each lane can hold, low and high. **One copy** (2026-08-14): the grid that draws a
     // lane, the reroll that randomizes one and the drift that strays from one all need these,
     // and three tables that must agree is three tables that will not. The numbers are the ones
     // ArpPanel's lane rows were built with; ChordTable::numSlots for the Chord lane, since that
     // is what it indexes.
+    // The Note lane's vocabulary (2026-08-14, from Kirnu Cream's ORDER lane - its manual p9:
+    // "Prev - Arp plays same note it played in previous step... Hi... Low... Rnd"). Keys' own
+    // -1 and 0 keep their meanings and the modes were **appended above 8**, not below -1, for
+    // two reasons: every saved session's values stay exactly what they were, and dragging a
+    // cell to the bottom of the grid still reaches the rest rather than landing on a mode.
+    static constexpr int noteRest = -1;      // a drawn rest; the step is silent
+    static constexpr int noteFollow = 0;     // whatever the Shape's walk says next
+    static constexpr int noteMaxFixed = 8;   // 1..8 are fixed sequence entries
+    static constexpr int notePrev = 9;       // play what the last step that sounded played
+    static constexpr int noteHi = 10;        // the highest note of the held chord, whatever it is
+    static constexpr int noteLow = 11;       // ...and the lowest
+    static constexpr int noteRnd = 12;       // any entry, drawn fresh each time
+
     struct LaneRange { int lo, hi; };
     static constexpr LaneRange laneRanges[numLanes] = {
-        { -1, 8 },   // Note: -1 is a rest, 0..8 pick a sequence entry
+        { -1, 12 },  // Note: -1 rest, 0 follow the shape, 1..8 a fixed entry, 9..12 a mode
         { -3, 3 },   // Octave
         { 10, 200 }, // Velocity, as a percentage of what was played
         { 5, 200 },  // Gate
@@ -84,6 +110,7 @@ public:
         { 0, 12 },   // Chord: 0 is off, 1..12 call up that slot's chord
         { -8, 8 },   // Rand: how far this step's note selection may stray, and which way
         { 0, 1 },    // Mute: 1 silences the step without touching what it holds
+        { 0, 2 },    // Chain: 0 always, 1 only after a step that fired, 2 only after one that did not
     };
     // Stray from `value` by up to `reach`, staying inside `r`. `u01` is a draw in [0, 1).
     //
@@ -140,6 +167,7 @@ public:
         false, // Chord
         false, // Rand - drift must not rewrite how random you drew a step
         false, // Mute - nor silence a step you did not silence
+        false, // Chain - a condition is structure, not feel
     };
 
     // The Hz mode's range, which is not a round number by choice: it is exactly what the
@@ -491,6 +519,8 @@ public:
         stepCounter = 0;
         dirCursor = 0;
         stepBase = 0;
+        lastStepFired = false; // a restart has no step before it
+        lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
         heldBeats = 0.0;
@@ -510,6 +540,8 @@ public:
         stepCounter = 0;
         dirCursor = 0;
         stepBase = 0;
+        lastStepFired = false; // a restart has no step before it
+        lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
         heldBeats = 0.0;
@@ -998,16 +1030,32 @@ private:
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
                   int numSamples, juce::MidiBuffer& out)
     {
+        // The chain condition, first of all: a step whose condition fails did not happen, and
+        // must not spend a chance draw or advance anything. `lastStepFired` is the one bit of
+        // playhead-dependent state in this engine - see laneChain for why that is affordable.
+        if (const int chain = laneValue(p, laneChain, globalStep); chain != 0)
+            if ((chain == 1) != lastStepFired)
+            {
+                lastStepFired = false;
+                return;
+            }
+
         // The mute lane first, and before anything else is resolved: a muted step costs
         // nothing and must leave no trace. Separate from the Note lane's own -1 on purpose -
         // that is a rest you *drew*, this is a switch you can flip back without having lost
         // what the step held (Cthulhu's manual, p25, names that as the whole point of it).
         if (laneValue(p, laneMute, globalStep) > 0)
+        {
+            lastStepFired = false;
             return;
+        }
 
         int noteVal = laneValue(p, laneNote, globalStep);
-        if (noteVal < 0)
+        if (noteVal <= noteRest)
+        {
+            lastStepFired = false;
             return; // a drawn rest
+        }
 
         // Rand: how far this step's selection may stray from what is drawn, and which way
         // (Cthulhu's "Rand Sel", its manual p25-26 - "if the Note Sel step is set to 2 and the
@@ -1017,17 +1065,22 @@ private:
         // Only meaningful on a fixed index. noteVal 0 means "follow the shape", and a shape is
         // already a walk - randomising the *number zero* would silently turn Up into a fixed
         // entry, which is not what drawing on this lane looks like it should do.
-        if (const int rand = laneValue(p, laneRand, globalStep); rand != 0 && noteVal >= 1)
+        if (const int rand = laneValue(p, laneRand, globalStep);
+            rand != 0 && noteVal >= 1 && noteVal <= noteMaxFixed)
         {
             const int lo = juce::jmax(1, rand < 0 ? noteVal + rand : noteVal);
-            const int hi = juce::jmin(laneRanges[laneNote].hi, rand > 0 ? noteVal + rand : noteVal);
+            const int hi = juce::jmin(noteMaxFixed, rand > 0 ? noteVal + rand : noteVal);
             if (hi > lo)
                 noteVal = lo + (int) (rng() % (unsigned) (hi - lo + 1));
         }
         const int chance = driftedLane(p, laneProbability, globalStep)
                          * juce::jlimit(0, 100, p.chance) / 100;
         if ((int) (rng() % 100u) >= chance)
+        {
+            lastStepFired = false;
             return; // 100 always fires, 0 never does
+        }
+        lastStepFired = true; // everything below this point sounds
 
         buildSequence(p);
         if (seqCount == 0)
@@ -1046,8 +1099,45 @@ private:
         }
         else
         {
-            playIdx[playCount++] = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
+            // 1..8 name an entry; 9..12 are the modes borrowed from Kirnu's ORDER lane, which
+            // ask a question of the chord rather than counting into it - so they keep meaning
+            // the same thing when the chord under them changes.
+            int chosen;
+            switch (noteVal)
+            {
+                case notePrev:
+                    // The last entry that actually sounded, or the shape's next if nothing has
+                    // yet - a Prev on the first step of a fresh hold has nothing to repeat.
+                    chosen = lastPlayedIdx >= 0 ? juce::jlimit(0, seqCount - 1, lastPlayedIdx)
                                                 : nextDirectionIndex(p);
+                    break;
+                case noteHi:
+                case noteLow:
+                {
+                    // Scanned rather than assumed to be the ends of `seq`: buildSequence sorts
+                    // by pitch only for the shapes that walk by pitch, and stacks octaves on
+                    // top, so neither end is reliably the extreme.
+                    int best = 0;
+                    for (int i = 1; i < seqCount; ++i)
+                    {
+                        const int a = held[(size_t) seq[(size_t) i].heldIndex].note + seq[(size_t) i].semitoneOffset;
+                        const int b = held[(size_t) seq[(size_t) best].heldIndex].note + seq[(size_t) best].semitoneOffset;
+                        if (noteVal == noteHi ? a > b : a < b)
+                            best = i;
+                    }
+                    chosen = best;
+                    break;
+                }
+                case noteRnd:
+                    chosen = (int) (rng() % (unsigned) seqCount);
+                    break;
+                default:
+                    chosen = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
+                                          : nextDirectionIndex(p);
+                    break;
+            }
+            playIdx[playCount++] = chosen;
+            lastPlayedIdx = chosen; // what a later Prev repeats
         }
 
         // The Octave lane's per-step shift plus the line's own, both in octaves. Summed rather
@@ -1376,6 +1466,13 @@ private:
     std::array<SeqEntry, maxHeld * 4> seq {};
     int seqCount = 0;
     long long stepCounter = 0;
+    // Did the step before this one sound? The chain lane's whole state (see laneChain), and
+    // the only thing in this engine that a transport jump cannot reconstruct from the step
+    // index. It self-corrects within one step, which is why it is affordable.
+    bool lastStepFired = false;
+    // Which sequence entry last sounded, for the Note lane's Prev. -1 until something has.
+    int lastPlayedIdx = -1;
+
     long long dirCursor = 0;
     // Where the lanes count from: the step index of the last restart, so Retrigger and the
     // beat-retrigger window both mean "step 1 next", and Offset counts from a known origin.
