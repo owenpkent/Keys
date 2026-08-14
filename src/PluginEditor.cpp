@@ -655,6 +655,36 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addChildComponent(*arpBarAllTab);
 
+    // The page tabs, right of All. Steps first because it is the one you open Details for.
+    {
+        static const char* const names[3] = { "Steps", "Slots", "Setup" };
+        static const char* const tips[3] = {
+            "The step lanes: ten of them, the one you pick, and its mute row. Pattern shape only.",
+            "The twelve slot cards, plus Copy, Clear, Randomize, Euclid, Clocks and Chain.",
+            "Rate, Shape and everything about how the line plays: the band's two rows."
+        };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto b = std::make_unique<juce::TextButton>(names[i]);
+            b->setTitle(juce::String("Arp page ") + names[i]);
+            b->setTooltip(tips[i]);
+            b->onClick = [this, i]
+            {
+                if (arpPanel != nullptr)
+                {
+                    // A page click also leaves the macro view: you cannot be on a page of a
+                    // line's deep view and looking at both lines at once. setMacroView first,
+                    // so setPage's own relayout is the last one and sees the final state.
+                    arpPanel->setMacroView(false);
+                    arpPanel->setPage((ArpPanel::Page) i);
+                }
+                refreshArpBarTabs();
+            };
+            addChildComponent(*b); // navigates the panel, so it hides with the fold
+            arpPageTabs[(size_t) i] = std::move(b);
+        }
+    }
+
     bpmBarLabel.setText("BPM", juce::dontSendNotification);
     bpmBarLabel.setFont(skin::micro(9.0f));
     bpmBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
@@ -1046,6 +1076,34 @@ void KeysEditor::refreshArpBarTabs()
     // click, a drop and a session load all agree.
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setToggleState(processor.layout.arpMacro, juce::dontSendNotification);
+
+    // The page tabs are ours to drive too, and their *visibility* is derived here rather than
+    // in syncSectionControls alone: entering or leaving the macro view has to show or hide
+    // them at once, not on the next 10 Hz tick, or the bar visibly catches up after the view
+    // has already changed. Steps greys outside Pattern shape - it is the lane editor and a
+    // plain shape has no lanes - rather than vanishing, so the group never reflows under the
+    // mouse and the tab is still there to say why.
+    const bool onPage = processor.layout.arp && ! processor.layout.arpMacro;
+    const bool stepsLive = arpPanel != nullptr && arpPanel->pageAvailable(ArpPanel::Page::steps);
+    bool shownChanged = false;
+    for (int i = 0; i < 3; ++i)
+    {
+        auto* t = arpPageTabs[(size_t) i].get();
+        if (t == nullptr)
+            continue;
+        if (t->isVisible() != onPage)
+        {
+            t->setVisible(onPage);
+            shownChanged = true;
+        }
+        t->setToggleState(onPage && processor.layout.arpPage == i, juce::dontSendNotification);
+        if (i == (int) ArpPanel::Page::steps)
+            t->setEnabled(stepsLive);
+    }
+    // Their cell collapses with them (see resized()), so BPM and Quantize slide back rather
+    // than orbiting a hole - the pageButtons lesson, one more time.
+    if (shownChanged)
+        resized();
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,6 +1188,7 @@ void KeysEditor::refreshArpPanel()
     // The bar tabs are a view of the processor's current line, so every path that moves it
     // has to say so. This is the panel's half - a chord dropped on a macro card lands here.
     arpPanel->onEditLineChanged = [this] { refreshArpBarTabs(); };
+    arpPanel->onPageChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -1248,6 +1307,11 @@ void KeysEditor::syncSectionControls()
     // All still only navigates the panel, so it keeps the pad-pages rule: hide with the fold.
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setVisible(lay.arp);
+    // The page tabs follow All's rule and add one of their own: a page picker is meaningless
+    // while the macro view is up, since no page is showing. So the bar reads "A B All" in the
+    // overview and "A B All Steps Slots Setup" in a line's deep view, which is what makes All
+    // visible as the way back rather than as a third letter. refreshArpBarTabs() owns that
+    // decision, here as everywhere else.
     refreshArpBarTabs();
 
     // The pads' page buttons stay on their bar in the main window even when the strip is
@@ -2210,6 +2274,21 @@ void KeysEditor::resized()
         // rather than leaving Quantize orbiting a hole where it was (the pageButtons lesson).
         if (processor.layout.arp && arpBarAllTab != nullptr)
             arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
+        // The three page tabs, in the same collapsing cell as All and for the same reason:
+        // they navigate a panel, so with the section folded there is nothing behind them.
+        // A small gap first, so All reads as the head of this group rather than as one more
+        // letter beside A and B.
+        if (processor.layout.arp && ! processor.layout.arpMacro)
+        {
+            bar.removeFromLeft(6);
+            for (auto& t : arpPageTabs)
+            {
+                if (t == nullptr)
+                    continue;
+                t->setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+                bar.removeFromLeft(3);
+            }
+        }
         bar.removeFromLeft(14);
         quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
         quantizeBarBox.setBounds(bar.removeFromLeft(92).withSizeKeepingCentre(90, 24));

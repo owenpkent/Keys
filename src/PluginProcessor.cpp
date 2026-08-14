@@ -2552,6 +2552,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
+    tree.setProperty("arpPage", layout.arpPage, nullptr);
     tree.setProperty("arpLights", layout.arpLights, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
@@ -2591,6 +2592,9 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
     layout.arpMacro = flag("arpMacro", true);
+    // Absent before the deep view was paged (2026-08-14), and Steps is the right answer for
+    // those: it is the page the step editor those sessions were showing lives on.
+    layout.arpPage = juce::jlimit(0, 2, (int) tree.getProperty("arpPage", 0));
     layout.arpLights = flag("arpLights", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the

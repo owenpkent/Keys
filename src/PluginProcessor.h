@@ -502,6 +502,16 @@ public:
         // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
         // slots, which are per-line and have nowhere to live in a row.
         bool arpMacro = true;
+        // Which page of a line's deep view is showing (2026-08-14, Owen: "can we simplify the
+        // detail view or organize into pages"). 0 = Steps, 1 = Slots, 2 = Setup.
+        //
+        // The deep view used to be all four blocks at once - band, lanes, slots, actions - at
+        // 612 px against the macro view's 240, so clicking Details grew the *window* by 372 px
+        // and clicking All shrank it back. Paged, every page fits inside one fixed panel
+        // height, and the window stops moving between views entirely. Same reason this lives
+        // here rather than in the panel as arpMacro does: the panel is destroyed every time
+        // the section folds, and Owen should get back the page he left.
+        int  arpPage = 0;
         // Whether the keybed lights up for the notes the arp is *playing*, as opposed to the
         // chord it was handed (which lights it either way, through noteRefs). Layout state and
         // not a parameter: it changes what is drawn and nothing that is heard, so there is

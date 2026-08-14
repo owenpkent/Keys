@@ -209,6 +209,46 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
   symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
   ruled box is drawn beside the band on every plain shape.
+- **A line's deep view is three pages, and the arp panel is one fixed height** (2026-08-14,
+  Owen: "when you click details it shouldn't resize the whole window, just the full arp
+  section. and we need a way to get out the detail view", then "can we simplify the detail
+  view or organize into pages"). The deep view was every block at once - band 112, band2 64,
+  lane tabs 34, grid 140, mute 46, slots 58, action row 34 - **612 px** against the macro
+  view's 240, so Details grew the *window* by 372 px and All shrank it back. Paged by what you
+  are doing rather than by what fits, the blocks come apart at **Steps 258 / Slots 124 /
+  Setup 208**, and the tallest is eighteen over the macro view rather than 372. So the panel
+  takes **one height for every view and page** and the window stops moving between them.
+  **`contentHeight()` and `pageHeight()` are a pair and the split is the point**:
+  `contentHeight()` returns the constant and feeds the editor's `idealHeight()`, so a fold is
+  the only thing that can move the window; `pageHeight()` returns what the current page needs
+  and feeds `cardBounds()`, so the drawn card is only as tall as its content. Without the
+  second one the Slots page drew its 154 px of content pinned to the bottom of a 258 px box,
+  because that block lays out from the bottom up.
+  **The page tabs ride the ARP section bar**, right of All, and that is what makes paging pay:
+  the bar is 34 px that already exists, so the picker costs the panel nothing - putting it
+  inside would have taken 34 px off the very budget paging was buying back. Same rule that put
+  Fill/Regen/Generator on the Pads bar. They show only in a deep view, so the bar reads
+  `A B All` in the overview and `A B All Steps Slots Setup` in a page. **That is the "way
+  out"**: All stops reading as a third letter beside two power switches and becomes the first
+  entry of one view group, which is the honest fix rather than a second control doing All's
+  job. `refreshArpBarTabs()` owns their visibility as well as their lit state, so entering or
+  leaving the macro view shows or hides them at once instead of on the next 10 Hz tick.
+  **`applyPageVisibility()` only ever hides.** `refreshShape()` is still the one place a
+  control is turned *on*, on its own Shape and lane gates, and this runs at the end of it to
+  take back what is off the current page - so the order is what makes it correct, and a second
+  writer that could also show things would be the macro card's deleted On toggle all over
+  again. The three `pageSteps` / `pageSlots` / `pageSetup` lists are built once in
+  `buildPageLists()`, after every control exists, and name each control exactly once.
+  Steps greys outside Pattern shape rather than vanishing (the group must not reflow under the
+  mouse), and leaving Pattern with it up falls back to Setup. `LayoutState::arpPage` keeps it
+  across a fold and a session, the `arpMacro` precedent; absent reads back as Steps.
+  **Voice left the STEPS band group for the lane-tab row** the same day, one day after it
+  arrived there. It costs no height at all now, sits beside the Harmony lane it is contextual
+  on, and reads `Voice: Chord` / `Voice: Sub` - a 12 px caption over it left the button 22 px,
+  under the 34 px floor, and dropping the caption is what gave the target the whole row. Its
+  cell is reserved **before** the tabs take their cut and **whether or not it is showing**:
+  reserve-first is the standing rule, and reserving unconditionally is what stops all ten tabs
+  resizing under the mouse the moment you select Harmony.
 - **The All view is the header and the two rows, nothing else** (2026-08-02, second pass -
   and by the fourth pass, below, the header itself left for the section bar and the rows
   became boxed cards, so the view is now literally the two cards) (Owen:
