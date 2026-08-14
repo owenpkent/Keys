@@ -744,6 +744,112 @@ All three serialize append-only on the `"pattern"` node (`rhythmDivs`, `harmonyM
 absence reading back as off, per the standing rule that old sessions must not be able to
 tell a new feature exists.
 
+## The manual round (2026-08-14, second pass)
+
+Owen, looking at a randomness feature that had shipped as a global knob: *"not good UI. look at
+reference manuals"*. Seven manuals sit in the repo root and `docs/REFERENCES.md` now records
+what each one contributes. Two of them corrected features that were already built and looked
+right on screen, which is why that file exists and why reading comes before designing.
+
+### The Rand lane, and what "like Cthulhu" actually means
+
+Cthulhu's randomness is **not a knob**. Its "Rand Sel" tab (manual p25-26) is a graph where you
+draw *how random each step is*: centred is none, above centre the output step may come out
+higher than the one assigned, below lower, and the size is how far. Step 3 can be locked while
+step 7 is wide open.
+
+Keys had built two global controls instead - **Roll**, a one-time reroll of a lane, and
+**Drift**, a wander applied while it plays. Both are useful and both stayed. Neither is what the
+reference does, so `laneRand` was added as an eleventh lane: bipolar -8..+8, default 0.
+
+It is **the one randomness in Keys allowed to change which note plays**, and the reason is that
+you drew it on that step. Drift is a knob wandering over a part you did not aim at, so it is
+confined to the lanes that decide *how* a step plays (`laneDrifts`); Rand is intent. It acts
+only on a fixed 1-8 index: a Note of 0 means "follow the shape", and randomising the number zero
+would quietly turn Up into a fixed entry.
+
+### Mute stops eating the step
+
+The mute row wrote -1 into the Note lane, which destroyed whatever that step held. Cthulhu's
+manual names preserving it as the entire reason mute buttons exist: *"you can experiment with
+mutes, without losing the set-value of the steps, in case you wish to undo this action."*
+
+`laneMute` is its own lane now. A Note of -1 is still a **drawn rest**, which is a different
+thing, and Cthulhu has both too. It gets no tab - the MUTE row under the grid has always been
+its editor, and a tab as well would be two ways to draw one lane. It is the Note lane's
+companion rather than a polymetric lane of its own: it reads, writes and syncs at the Note
+lane's length, because the engine wraps every lane read by that lane's own length and a
+disagreement would silence the wrong step.
+
+### A richer Note lane (Kirnu Cream)
+
+Kirnu's ORDER lane (manual p9) is not a list of indices - it has `Prev`, `Hi`, `Low` and `Rnd`
+alongside them. Those **ask the chord a question** rather than counting into it, so they keep
+meaning the same thing when the chord under them changes: Hi is the top note of whatever is
+held, not entry 3.
+
+Appended as 9..12, **above** the fixed indices rather than below -1, for two reasons that are
+both load-bearing: every saved session's values stay exactly what they were, and dragging a cell
+to the bottom of the grid still reaches the rest instead of landing on a mode.
+
+Hi and Low scan the sequence rather than taking its ends: `buildSequence` sorts by pitch only
+for the shapes that walk by pitch, and stacks octaves on top, so neither end is reliably the
+extreme.
+
+### The Chain lane (Stochas)
+
+Stochas' chain dependency (manual p3): a cell *"will play or not play depending on whether
+another cell has played"*. Chance says *maybe*; a condition says *only if*, and that is what
+turns a probabilistic pattern into one that answers itself.
+
+`laneChain` is that idea in the one form needing no second coordinate: `0` always, `1` only if
+the step before it sounded, `2` only if it did not. Draw Chance 50 on one step and Chain 2 on
+the next and the pattern fills its own gaps.
+
+**It is the only thing in the engine that is not stateless from the playhead.** Everything else
+is computed from the step index alone, so a transport jump lands right without having walked
+there; a condition has to remember one bit about the step before it. It self-corrects within a
+single step, which is the cheapest possible break of that rule and is exactly why this form was
+chosen over Stochas' arbitrary cell-to-cell reference.
+
+### Select: the missing primitive
+
+Kirnu's grid has a tool palette - Draw, Select, Random, Copy, Paste, Clear - and its Random tool
+acts on *selected steps*. Keys' Roll and Reset acted on a whole lane because there was nothing
+smaller to act on, and that same absence is why there is no Copy, Paste or Clear inside a lane
+either. One concept unlocks four tools.
+
+**Select** is a mode, not a modifier: the mouse-only contract has no Alt-drag to offer, and
+Kirnu itself models this as a tool you pick rather than a chord you hold. Lit, a drag marks a
+span; Roll and Reset narrow to it.
+
+### Two fixes the round forced
+
+**A value at the edge of its lane ignored both Roll and Drift.** Each built a window of
+`[value +/- reach/2]` and clamped the result, which is fine mid-lane and broken at the ends: a
+value at the bottom had half of every draw fall outside the range and clamp back to itself.
+Late, Harmony and Chord all default to 0 and Chance sits at its *top*, so "a lane of zeroes
+barely moves" was the common case. `ArpEngine::strayWithin` is the one copy of the rule now, and
+the window **slides** rather than the result clamping.
+
+**A drag edited every step it crossed.** The grid painted whatever step was under the pointer,
+so a hand travelling up to set a height and drifting sideways rewrote its neighbours. The step
+is captured on the press and held for the gesture. The MUTE row still paints across steps and
+should - there the value is a toggle and a swipe means "all of these".
+
+### Lanes appended after a session was saved
+
+Rand, Mute and Chain all arrive at `ArpPattern`'s defaults in an older session, which is inert -
+but their *lengths* arrive at the default 8 while the rest of the pattern may be at 16 or 32,
+and the grid draws each lane at its own length. Three lanes a fraction of the length of their
+neighbours, with nothing on screen to say why.
+
+`nudgeLength` has always written every lane when Link is on; the hole is that it cannot write a
+lane that did not exist when it last ran. `ArpPanel::enforceLinkedLengths` pushes the Note
+lane's length and speed onto every lane whenever the readouts refresh, so the repair lands on
+load rather than waiting for a nudge. **This is the shape of the problem for every future lane**,
+not a one-off.
+
 ## Scale awareness
 
 Keys already owns Root/Scale. The arp editor flags out-of-key results visually

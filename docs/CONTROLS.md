@@ -755,53 +755,101 @@ in seconds instead.
 | **Offset** | Spread | 0–31. Start the run further in. Rotates the step lanes and the walk together, so the same pattern can be heard from a different foot without redrawing it. |
 | **Ramp** | Feel | −100 – +100%. Velocity change over **Time**, counted from the moment a chord starts. Left fades a held chord away, right swells it, centre is flat. |
 | **Time** | Feel | 1–32 beats. How long the Ramp takes. |
-| **Human** | Feel | 0–100%. Nudges each hit a little late and a little quieter, by a different amount every time. At 0 the arp is dead on the grid, which is what it always was before this control existed. |
+| **Human Time** | Feel | 0-100%. Nudges each hit a little late, by a different amount every time. At 0 the arp is dead on the grid. |
+| **Human Vel** | Feel | 0-100%. Takes a little off each hit's velocity, by a different amount every time. Late and quieter, never early and never louder - a *player* wandering. |
+| **Drift** | Feel | 0-100%. Strays from what the lanes hold **while it plays**, either side of the drawn value, so the part never repeats exactly and the lane on screen never changes. Octave, velocity, gate, lateness and chance wander; the notes never do. A *machine* wandering, which is why it is bipolar where Humanize is one-sided. |
 
-### The step editor (Shape → Pattern)
+### The three pages of a line (2026-08-14)
 
-Ten lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. Click a
-step to set it, or drag across the grid to paint several in one gesture; a readout
+A line's deep view is three pages, picked on the ARP bar beside **All**. It used to be every
+block at once, which made the window jump 372 px whenever you opened it; each page fits inside
+one fixed panel height now, so the window does not move between views at all.
+
+| Page | What is on it |
+|------|----------------|
+| **Play** | How the line plays: Rate, Shape, Tuplet/Dot, Swing, Gate, Chance, Retrigger, Spread and Feel. Most of what you want is here. |
+| **Cards** | The twelve slot cards, plus Copy, Clear, Stop, Randomize, Euclid, Clocks and Chain. |
+| **Draw** | The step lanes. Pattern shape only - its tab greys out otherwise, and leaving Pattern with it up drops you back to Play. |
+
+**All** is the way back out to both lines side by side. It sits at the head of the same group,
+which is what makes it read as the fourth view rather than a third letter beside A and B.
+
+### The step editor (Draw page, Shape -> Pattern)
+
+Twelve lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. A readout
 follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
+
+**A drag edits the step it started on, and only that one.** Move up and down to set the value;
+sideways travel is ignored, so a hand drifting on its way to a height cannot rewrite the
+neighbours it crosses. The **Mute** row below is the exception and paints across steps, because
+there the value is a toggle and a swipe genuinely means "all of these".
 
 | Lane | Range | Meaning |
 |------|-------|---------|
-| **Note** | 1–8, or follow | Which note of the held chord this step plays. "Follow" (the dot) leaves it to the shape. |
-| **Octave** | −3 – +3 | Octaves added to this step. |
-| **Velocity** | 10–200% | Scales the velocity you played at. |
-| **Gate** | 5–200% | Note length as a share of the step. Over 100% ties into the next step. |
-| **Ratchet** | 1–4 | Sub-hits packed into this step. |
-| **Prob** | 0–100% | Chance this step fires at all. |
-| **Transpose** | −7 – +7 | Scale **degrees**, not semitones: +2 lifts each note a third *of your key*, so it can never land outside it. |
-| **Late** | 0–90% | Pushes this step later by that share of a step. Draw a little on the offbeats for a lazy feel, or a lot on one step to make it stumble. Late only — Swing is the control that can also rush. |
-| **Harmony** | 0–7 | Adds a second voice this many chord tones above the note the step plays. Off at 0. |
-| **Chord** | 1–12, or off | This step plays the chord stored in that **arp slot** instead of a note of what you are holding. Draw four of them across a lane and the arp plays a progression on its own. Off (the dot) is a normal step, and a slot with no chord in it is left alone rather than silenced. |
+| **Note** | rest, follow, 1-8, P/H/L/R | Which note of the held chord this step plays. `X` rests, the dot follows the shape, 1-8 pick a fixed one. **P** repeats whatever last sounded, **H** and **L** take the highest and lowest note of the chord, **R** picks any of them - those four ask the chord a question rather than counting into it, so they keep meaning the same thing when the chord changes. |
+| **Octave** | -3 - +3 | Octaves added to this step. |
+| **Velocity** | 10-200% | Scales the velocity you played at. |
+| **Gate** | 5-200% | Note length as a share of the step. Over 100% ties into the next step. |
+| **Ratchet** | 1-4 | Sub-hits packed into this step. |
+| **Chance** | 0-100% | Odds this step fires at all, multiplied by the CHANCE knob on the Play page. Called **Prob** until 2026-08-14; one word for one idea. |
+| **Transpose** | -7 - +7 | Scale **degrees**, not semitones: +2 lifts each note a third *of your key*, so it can never land outside it. |
+| **Late** | 0-90% | Pushes this step later by that share of a step. Draw a little on the offbeats for a lazy feel, or a lot on one step to make it stumble. Late only - Swing is the control that can also rush. |
+| **Harmony** | 0-7 | Adds a second voice this many chord tones above the note the step plays. Off at 0. |
+| **Chord** | 1-12, or off | This step plays the chord stored in that **arp slot** instead of a note of what you are holding. Draw four of them across a lane and the arp plays a progression on its own. Off (the dot) is a normal step, and a slot with no chord in it is left alone rather than silenced. |
+| **Rand** | -8 - +8 | How far this step's note selection may stray, and which way. Drawn per step, so step 3 can be locked and step 7 wide open. Only acts on a fixed 1-8; a step following the shape is left to walk. |
+| **Chain** | 0, 1, 2 | Play this step only on a condition. `0` always, `1` only if the step before it sounded, `2` only if it did not. Chance says *maybe*; this says *only if*. |
 
-The **Mute** row under the grid silences individual steps without disturbing their
-values, so you can take a step out and put it back unchanged.
+The **Mute** row under the grid silences individual steps **without disturbing their values**,
+so you can take a step out and put it back unchanged. It is its own lane as of 2026-08-14 - it
+used to overwrite the Note lane, which destroyed whatever the step held. A Note of `X` is still
+a *drawn* rest, which is a different thing and still there.
 
-**Voice** appears in its own row under Steps and Speed/Link, but only while the **Harmony**
-tab is the one selected - it is the panel's first control that depends on which lane you are
-looking at.
-Reads "Chord": the Harmony lane's second voice plays chord tones above the note the step
-plays, same as it always has. Click it and it reads "Sub": the second voice plays the
-subharmonic series below that same note instead, an undertone rather than an overtone. Off is
-"Chord" - a session that never touches Voice cannot tell it exists.
+### Select, Reset and Roll (the lane tools)
+
+Their own strip under the lane tabs, acting on the lane you are looking at.
+
+**Roll** rerolls that lane, straying from what is drawn by the amount beside it - a nudge at
+20%, a uniform scramble at 100. **Reset** puts the lane back to its default across its whole
+length, which is the way back from a roll you did not want; there is no undo anywhere in Keys.
+
+**Select** turns the drag into a span: with it lit, dragging on the grid marks steps instead of
+drawing on them, and Roll and Reset narrow to that span. Click it again to go back to drawing,
+which also drops the span. It is a mode rather than a modifier because the mouse-only contract
+has no Alt-drag to offer.
+
+**Voice** sits at the right end of the same strip, but only while the **Harmony** tab is
+selected - it is the panel's one control that depends on which lane you are looking at.
+It reads "Voice: Chord": the Harmony lane's second voice plays chord tones above the note the
+step plays. Click it for "Voice: Sub" and that voice plays the subharmonic series below the
+same note instead, an undertone rather than an overtone. Best heard with Scale Lock off, since
+it deliberately leaves the key.
+
+### Lane lengths, and Link
+
+**Steps** and **Speed** on the Play page set the length and clock divider of the lane you are
+editing. **Link** on (the default) means every lane shares one length - the simple case, where
+a pattern is just "sixteen steps". Off is polymeter: each lane keeps its own, and lanes of
+different lengths drift against each other.
+
+With Link on the lanes are kept in step continuously, not only when you nudge - a lane added by
+an update arrives at its own default and would otherwise draw a different number of cells than
+its neighbours with nothing to say why.
 
 ### Euclid and Clocks
 
-Two buttons on the action row, beside Randomize and Chain, each opening a strip of steppers
-above the row rather than a dialog. Opening a strip previews nothing on its own - only a
-stepper click writes - and the two strips are mutually exclusive, so the panel never grows by
-more than one of them at a time.
+Two buttons on the **Cards** page action row, beside Randomize and Chain, each opening a strip
+of steppers above the row rather than a dialog. Opening a strip previews nothing on its own -
+only a stepper click writes - and the two strips are mutually exclusive, so the panel never
+grows by more than one of them at a time.
 
-**Euclid** (Pattern shape only) spreads a Euclidean rhythm into the **Prob** lane: **Hits**
+**Euclid** (Pattern shape only) spreads a Euclidean rhythm into the **Chance** lane: **Hits**
 beats spread as evenly as possible across **Steps**, shifted by **Rotate**. Every click writes
-immediately and re-sizes the probability lane to match Steps, which is also why the strip
+immediately and re-sizes the Chance lane to match Steps, which is also why the strip
 closes itself if you leave Pattern shape - there is no lane on screen left to write into.
 
 **Clocks** (every shape, since the dividers act regardless of what Shape draws) holds four
 independent rhythm dividers layered under the pattern, **Div 1** through **Div 4**. Each runs
-0–16; 0 reads "Off" and is silent, same contract as Rhythm Div everywhere else in Keys. The
+0-16; 0 reads "Off" and is silent, same contract as Rhythm Div everywhere else in Keys. The
 button itself retitles to **Clocked** whenever any of the four is running, the same way Chain
 retitles to Chaining.
 

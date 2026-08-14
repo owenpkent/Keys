@@ -209,6 +209,69 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
   symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
   ruled box is drawn beside the band on every plain shape.
+- **Three lanes appended, and one of them is not stateless** (2026-08-14, the manual round).
+  `numLanes` went 10 -> 13: **Rand** (Cthulhu's "Rand Sel", how random *each step* is, bipolar
+  -8..+8), **Mute** (its own lane at last) and **Chain** (Stochas' condition: 0 always, 1 only
+  if the step before sounded, 2 only if it did not). **A lane's index is what a saved session
+  stores it under**, so appending is the only safe direction - the `genSource` rule again.
+  **Rand is the one randomness allowed to change which note plays**, because you drew it on that
+  step; Drift is a knob wandering over a part you did not aim at, so `laneDrifts` confines it to
+  the lanes that decide *how* a step plays. Rand acts only on a fixed 1-8: a Note of 0 means
+  "follow the shape", and randomising zero would quietly turn Up into a fixed entry.
+  **Chain is the only thing in the engine that is not stateless from the playhead.** Everything
+  else is computed from the step index so a transport jump lands right without walking there; a
+  condition has to remember one bit about the step before. It self-corrects within one step,
+  which is the cheapest possible break of that rule and is why this form was chosen over
+  Stochas' arbitrary cell-to-cell reference. If a future lane wants more state than that, it
+  needs a different design, not a bigger cache.
+  **Mute stopped eating the step.** It wrote -1 into the Note lane, destroying whatever was
+  there; Cthulhu's manual names preserving it as the entire reason mute buttons exist. Note = -1
+  is still a *drawn rest*, a different thing, and Cthulhu has both. Mute gets **no tab** - the
+  MUTE row is its editor and a tab as well would be two ways to draw one lane - and it is the
+  Note lane's **companion, not a polymetric lane**: it reads, writes and syncs at the Note
+  lane's length, because the engine wraps each lane by its own length and a disagreement would
+  silence the wrong step. `LaneRow::hasTab` exists because Mute's default-constructed button was
+  otherwise counted and laid out as a tab, which ate a cell and pushed Chain to zero width -
+  present in the tree, invisible on screen, absent from UIA with nothing to say why.
+  **The Note lane speaks Kirnu's ORDER vocabulary**: 9..12 are Prev, Highest, Lowest, Random,
+  appended **above** the fixed indices rather than below -1 so saved values are untouched *and*
+  a drag to the bottom of the grid still reaches the rest. Hi and Low **scan** the sequence
+  rather than taking its ends - `buildSequence` sorts by pitch only for the shapes that walk by
+  pitch and stacks octaves on top, so neither end is reliably the extreme.
+- **A lane appended after a session was saved arrives at the wrong length** (2026-08-14, Owen:
+  "Sometimes the steps do not match each other"). Rand, Mute and Chain all come in at
+  `ArpPattern`'s default 8 while the rest of the pattern may be at 16 or 32, and the grid draws
+  each lane at its **own** length - so three lanes drew a fraction of the cells their neighbours
+  did with nothing on screen to explain it. `nudgeLength` has always written every lane when
+  Link is on; the hole is that it cannot write a lane that did not exist when it last ran.
+  `ArpPanel::enforceLinkedLengths` pushes the Note lane's length and speed onto every lane
+  whenever the readouts refresh, so the repair lands on load rather than waiting for a nudge.
+  Link **off** is polymeter and is left alone entirely. **This is the shape of the problem for
+  every future lane**, not a one-off - append a lane and this is what you owe.
+- **Roll, Reset, Select and Drift are four different randomnesses, and the differences are the
+  design** (2026-08-14). **Roll** rerolls the lane you are looking at, once, visibly, by an
+  amount. **Reset** puts it back to its default across its length - Roll is destructive and Keys
+  has no undo anywhere, so the way back has to be one click. **Select** turns a drag into a span
+  and narrows both to it: Kirnu's Random tool acts on selected steps, and a selection is the
+  missing primitive behind Copy, Paste and Clear too. **Drift** strays from the lanes *while it
+  plays*, so the part never repeats and the lane on screen never changes. Drift sits beside
+  Humanize in FEEL because the two are the same question twice: Humanize is a **player**
+  wandering (late and quieter, never early, never louder) and Drift is a **machine** wandering
+  (either way, evenly around the drawn value).
+  **A value at the edge of its lane ignored Roll and Drift** until `ArpEngine::strayWithin`.
+  Both built `[value +/- reach/2]` and **clamped the result**, which is fine mid-lane and broken
+  at the ends: a value at the bottom had half of every draw fall outside and clamp back to
+  itself. Late, Harmony and Chord all default to 0 and Chance sits at its *top*, so "a lane of
+  zeroes barely moves" was the common case, not a corner one. **The window slides; the result is
+  never clamped.**
+- **A draw gesture edits the step it started on, and only that one** (2026-08-14, Owen: "I don't
+  want you to be able to jump from step to step. I just want it to be for that one when you're
+  moving up and down"). `LaneGrid` painted whatever step was under the pointer, so a hand
+  travelling up to set a height and drifting sideways rewrote every neighbour it crossed. The
+  step is captured on the press and held for the gesture; horizontal travel is ignored.
+  **`MuteRow` still paints across steps and should**: there the value is a toggle and a swipe
+  means "all of these", where in the grid it is a height the pointer must travel vertically to
+  set. Same gesture, opposite correct answer, because the value means a different thing.
 - **A line's deep view is three pages, and the arp panel is one fixed height** (2026-08-14,
   Owen: "when you click details it shouldn't resize the whole window, just the full arp
   section. and we need a way to get out the detail view", then "can we simplify the detail
@@ -1163,6 +1226,14 @@ Four things will bite otherwise:
   `Scale Lock`, so a script asks for the full phrase and a reader hears it. In Keys Host only,
   the same bar also carries `Instrument`, the chip whose menu holds Load/Show-Hide/Eject - it
   is invisible in plain Keys, so a script targeting it there will not find it, by design. The
+  Draw page's own controls, all 2026-08-14: the lane tabs answer to their visible word
+  (`Note`, `Octave`, `Velocity`, `Gate`, `Ratchet`, **`Chance`** - `Prob` until that day -
+  `Transpose`, `Late`, `Harmony`, `Chord`, **`Rand`**, **`Chain`**), and the tools beside them
+  are `Select steps`, `Reset lane`, `Roll lane`, `Less roll` / `More roll` and `Harmony voice`.
+  **`Chain` collides**: the progression button on the Cards page is also called Chain, and UIA
+  takes the first match - they are never on screen together, so pick the page first. Mute has a
+  lane but **no tab**, so there is nothing named for it; drive `laneMute` through MCP instead.
+  The
   view tabs on the arp bar are `Arp all tab` plus the three page tabs `Arp page Play` /
   `Arp page Cards` / `Arp page Draw` (2026-08-14; they answered to `Arp page Steps` / `Slots` /
   `Setup` for one build the same day - do not look for those). The page tabs exist only in a
