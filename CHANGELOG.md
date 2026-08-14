@@ -34,6 +34,20 @@ chord. A voice that would clamp onto the note it is harmonizing (running out of 
 the bottom) is dropped rather than folded back on top of it. Same storage and MCP shape as the
 rhythm dividers: a live atomic on `ArpEngine`, persisted per slot, no new parameter.
 
+### Added: mouse-only controls for the Euclidean generator, the rhythm dividers and the subharmonic voice
+
+The UI pass the three generative additions above were waiting on. **Euclid** and **Clocks**
+are two buttons on the arp panel's action row, each opening a strip of steppers above it -
+Hits/Steps/Rotate for Euclid, four dividers for Clocks - rather than a dialog; opening a strip
+previews nothing, only a stepper click writes, and the two are mutually exclusive so the panel
+never grows by more than one strip at once. Euclid stays scoped to Pattern shape, since it is
+writing into the probability lane; Clocks stays available in every shape, since the dividers
+act regardless of what Shape draws, and its own button retitles to "Clocked" while any divider
+is running, the same way Chain retitles to "Chaining". **Voice** switches the Harmony lane's
+second voice between chord tones and the subharmonic series, and is the panel's first control
+that depends on which lane is selected rather than which shape is - it shows up beside Steps,
+Speed and Link, but only with the Harmony tab itself picked.
+
 ### Changed: twelve pads a page, with Strum and Humanize in the columns that freed up
 
 Owen: "reduce the pads grid to 12 and move strum and humanize into that with the same style."
