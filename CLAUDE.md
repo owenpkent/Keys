@@ -1088,6 +1088,24 @@ nearly everything wearing them is 9 to 11 px letter-spaced uppercase (the micro-
 note list under every chord card) and small letterforms need far more contrast than large ones for
 the same effort. Both were lifted; `text` was never the problem.
 
+## Reference manuals
+
+Seven manuals sit in the repo root, and `docs/REFERENCES.md` records what each one contributed,
+what Keys took from it and what it deliberately did not. **Read the relevant one before
+designing a feature, not after.** This is not a formality: the Serum guide corrected a built
+`RangeKnob` satellite that looked right on screen, and the Cthulhu manual corrected a whole
+randomness feature that had shipped as a global knob when the reference does it per step
+(2026-08-14, Owen: "look at reference manuals"). Twice now a manual has been cheaper than the
+rebuild it would have prevented.
+
+The short version of which is which: **Cthulhu** is the arp's own architecture (per-parameter
+step lanes, Link Lengths, the Rand lane, mute-preserves-value); **Kirnu Cream** is the richest
+per-step vocabulary and the best source of unbuilt ideas; **Stochas** is probability and the
+chain/conditional trigger Keys does not have; **Serum 2** is UI, not sequencing; **Subharmonicon**
+is the polyrhythm dividers and the undertone series; **MatrixBrute** has ties and slides;
+**Numerology 4** draws the skip-versus-mute distinction. `docs/REFERENCES.md` ranks the three
+unbuilt ideas worth having.
+
 ## Screenshots for docs
 
 Use `scripts/capture-window.ps1`, which is the PrintWindow approach (never
