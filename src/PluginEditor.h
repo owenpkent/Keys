@@ -427,6 +427,20 @@ private:
     };
     std::array<std::unique_ptr<ArpBarTab>, KeysProcessor::uiArpLines> arpBarTabs;
     std::unique_ptr<ArpBarTab> arpBarAllTab;
+    // The three pages of a line's deep view (2026-08-14): Steps, Slots, Setup. Plain
+    // TextButtons, not ArpBarTabs - they select a page, there is no line behind them to hand a
+    // chord to, and that is the same reason the All tab refuses every drop.
+    //
+    // **On the bar rather than in the panel**, and that is the whole reason paging pays for
+    // itself: the bar is 34 px that already exists, so the page picker costs the panel no
+    // height at all. Putting it inside the panel would have taken 34 px off the very budget
+    // paging was buying back. Same rule that put Fill/Regen/Generator on the Pads bar.
+    //
+    // They sit immediately right of All, which makes All read as the fourth entry in one view
+    // picker - the overview - and therefore as the way back out of a page. That is the answer
+    // to "we need a way to get out the detail view": not a second control doing All's job, but
+    // All finally sitting with the things it is an alternative to.
+    std::array<std::unique_ptr<juce::TextButton>, 3> arpPageTabs;
     // Which tab is lit, derived from the processor's state so a drop, a session load and a
     // click all land in the same place.
     void refreshArpBarTabs();

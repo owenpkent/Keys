@@ -5,6 +5,48 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: a line's deep view is three pages, and the window stops resizing
+
+Owen, looking at the un-paged view: *"when you click details it shouldn't resize the whole
+window, just the full arp section. and we need a way to get out the detail view"*, then, asked
+where the height should go instead: *"can we simplify the detail view or organize into pages"*.
+
+The deep view used to be every block at once - the band's two rows, the ten lane tabs, the
+grid, the mute row, the twelve slots and the action row - which came to **612 px** against the
+macro view's 240. So clicking **Details** grew the *window* by 372 px and clicking **All**
+shrank it back, and on a screen that could not afford the 372 the keybed lost it off the
+bottom instead.
+
+Split by what you are doing rather than by what fits, the blocks come apart cleanly:
+
+| page | contents | height |
+|---|---|---|
+| **Steps** | the ten lane tabs, the selected lane's grid, the mute row | 258 |
+| **Slots** | the twelve cards, Copy / Clear / Stop / Randomize / Euclid / Clocks / Chain | 124 |
+| **Setup** | the band's two rows: Pattern, Playback, Steps, Spread, Feel | 208 |
+
+The tallest is 258 - eighteen more than the macro view, and **354 less** than the un-paged deep
+view - so the panel now takes one fixed height (`arpFixedH`) for every view and page it has and
+the window does not move between them at all. `contentHeight()` returns that constant and feeds
+the editor; a new `pageHeight()` feeds `cardBounds()`, so the drawn card is only as tall as the
+page showing and the leftover is panel background rather than an empty box.
+
+The page tabs ride the **ARP section bar**, right of All, which is what makes paging pay for
+itself: the bar is 34 px that already exists, so the picker costs the panel no height. They
+appear only in a line's deep view, so the bar reads `A B All` in the overview and
+`A B All Steps Slots Setup` in a page - which is the answer to *"we need a way to get out"*.
+All is not a third letter beside A and B any more, it is the first entry of the view group and
+visibly the way back. Steps greys outside Pattern shape rather than vanishing, and leaving
+Pattern with it up falls back to Setup. The page survives a fold and a session
+(`LayoutState::arpPage`, absent reads back as Steps).
+
+**Voice moved to the lane-tab row**, where it costs no height at all and sits beside the
+Harmony lane it is contextual on, instead of the 42 px row inside the STEPS group it had for
+one day. It reads `Voice: Chord` / `Voice: Sub` and carries its own word now: a 12 px caption
+over it left the button 22 px, under the mouse-only floor. Its cell is reserved out of the row
+before the tabs take their cut, and reserved whether or not it is showing, so the ten tabs do
+not resize under the mouse when you select Harmony.
+
 ### Added: a Euclidean rhythm generator, MCP-only for now
 
 `src/EuclidGen.h` is a pure, allocation-free `euclidHit(i, hits, steps, rotation)` (Bjorklund's

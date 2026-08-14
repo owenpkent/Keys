@@ -73,8 +73,27 @@ public:
     // click still has one unambiguous target while all three are on screen.
     bool isMacroView() const { return macroView; }
     void setMacroView(bool);
+
+    // A line's deep view is three pages (2026-08-14, Owen: "can we simplify the detail view or
+    // organize into pages"). Un-paged it was the band, the lane editor, the twelve slots and
+    // the action row all at once - 612 px against the macro view's 240, so Details grew the
+    // *window* by 372 px and All shrank it back again. Each page fits inside one fixed panel
+    // height (see arpFixedH), which is what stops the window moving between views at all.
+    //
+    // The split is by what you are doing, not by what fits: Steps is the lane editor, Slots is
+    // the twelve cards and everything that acts on them, Setup is the band's two rows.
+    enum class Page { steps = 0, slots = 1, setup = 2 };
+    Page currentPage() const;
+    void setPage(Page p);
+    // Steps has nothing to show outside Pattern shape - the lane editor is what Pattern *is* -
+    // so its tab greys there and the page falls back to Setup. The other two are always live.
+    bool pageAvailable(Page p) const;
     // Told when a tab is clicked, so the editor can move the Pads bar's letter chip with it.
     std::function<void()> onEditLineChanged;
+    // ...and when the page changes, so the bar's own page tabs can light the right one. The
+    // editor owns those (they must survive this panel being destroyed by a fold), so the two
+    // have to be told about each other in both directions.
+    std::function<void()> onPageChanged;
 
     // What a chord card dropped on this panel does, once JUCE has said where it landed. The
     // slot cards, line tabs and macro rows are each a `DragAndDropTarget` of their own and call
@@ -395,7 +414,18 @@ private:
     std::array<Group, 5> groups;
 
     bool patternMode() const; // Shape == "Pattern": the step editor is in play
-    int contentHeight() const; // one answer for the macro, shape and pattern views
+    int contentHeight() const; // the fixed height the panel reserves, whatever is showing
+    int pageHeight() const;    // what the current view or page actually needs; see cardBounds()
+
+    // Which controls belong to which page. Three explicit lists rather than a flag per
+    // component or three parent Components to reparent into: the lists are built once, in one
+    // readable block at the end of buildControls(), and adding a control means naming it in
+    // exactly one place. Nothing here ever turns a control *on* - refreshShape() is still the
+    // only thing that does, on its own Shape and lane gates - this only hides what is off the
+    // current page, and so must run last. See applyPageVisibility().
+    std::vector<juce::Component*> pageSteps, pageSlots, pageSetup;
+    void buildPageLists();
+    void applyPageVisibility();
     void applyShapeChoice();  // combo -> parameters
     void refreshShape();      // parameters -> combo, and show/hide the step editor
     // Retrigger spans two parameters the same way Shape does (a bool for "on a new chord"
@@ -530,7 +560,6 @@ private:
     // Voice: harmony mode (ArpEngine::harmonyMode - chord tones or the subharmonic voice),
     // the panel's first lane-contextual control. Visible only with the Harmony lane selected
     // and the STEPS group itself showing (Pattern shape); see refreshShape() and selectLane().
-    juce::Label voiceLabel;
     juce::TextButton voiceButton;
     void refreshVoiceButton();
 

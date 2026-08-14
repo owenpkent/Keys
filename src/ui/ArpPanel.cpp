@@ -363,8 +363,13 @@ void ArpPanel::setMacroView(bool on)
             row->setVisible(on);
     refreshShape();   // hides or restores the band, the lane tabs and the step editor
     refreshMacro();
-    if (onPreferredHeightChanged)
-        onPreferredHeightChanged();  // the panel is a different height in this view
+    // The bar's page tabs come and go with this view (they pick a page of a line's deep view,
+    // and the macro view has no page), so it has to hear about the change now rather than on
+    // the next tick. The panel is the *same* height in both views since 2026-08-14 - that is
+    // the whole point of arpFixedH - so there is no onPreferredHeightChanged here any more,
+    // and switching views no longer moves the window.
+    if (onPageChanged)
+        onPageChanged();
     resized();
     repaint();
 }
@@ -444,9 +449,9 @@ void ArpPanel::selectLane(int lane)
     // as well as in refreshShape(), which gates it on Pattern shape - the two conditions are
     // independent (a lane click cannot change Shape, a Shape change cannot change the lane).
     const bool voiceOn = patternMode() && selectedLane == (int) ArpEngine::laneHarmony;
-    voiceLabel.setVisible(voiceOn);
     voiceButton.setVisible(voiceOn);
     refreshVoiceButton();
+    applyPageVisibility(); // this only ever turns things on; the page has the last word
     resized();
 }
 
@@ -586,7 +591,6 @@ void ArpPanel::refreshShape()
     // Voice rides the STEPS group's own gate plus the Harmony lane; see selectLane() for the
     // other half of this condition.
     const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
-    voiceLabel.setVisible(voiceOn);
     voiceButton.setVisible(voiceOn);
 
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
@@ -613,15 +617,22 @@ void ArpPanel::refreshShape()
     if (! pattern && euclidStripOpen)
         openEuclidStrip(false); // Euclid only means anything with the probability lane on screen
 
-    // The card changes height with the mode, so relayout and repaint - but only on an
-    // actual change, since refreshShape() runs on the 10 Hz timer.
+    // Last, always: everything above decided visibility on Shape and lane grounds without
+    // knowing which page is showing, and this takes back what is off it (2026-08-14). It
+    // only ever hides, so the order is what makes it correct - see applyPageVisibility().
+    applyPageVisibility();
+
+    // Shape no longer changes the panel's height - every page fits inside arpFixedH - but it
+    // still changes what is *in* the Setup page and whether Steps is reachable at all, so the
+    // relayout stays. Only on an actual change, since refreshShape() runs on the 10 Hz timer.
     if (lastPatternMode != (int) pattern)
     {
         lastPatternMode = (int) pattern;
-        // Inline, the card does not size itself: the editor gives it preferredHeight(),
-        // so the editor has to re-lay-out first or resized() would carve up stale bounds.
-        if (onPreferredHeightChanged)
-            onPreferredHeightChanged();
+        // Leaving Pattern with the Steps page up strands you on a page with nothing on it.
+        // setPage sends it to Setup, and calls back into here - which is safe, because
+        // lastPatternMode is already written and the recursion stops on this branch.
+        if (! pattern && currentPage() == Page::steps)
+            setPage(Page::setup);
         resized();
         repaint();
     }
@@ -2121,8 +2132,6 @@ void ArpPanel::buildControls()
     // Voice: harmony mode, the panel's first lane-contextual control (visible only with the
     // Harmony lane selected). "Chord" plays the held chord's own tones in the second voice;
     // "Sub" plays the undertone series instead.
-    styleLabel(voiceLabel, "Voice");
-    addChildComponent(voiceLabel);
     voiceButton.setTitle("Harmony voice");
     voiceButton.setTooltip("The Harmony lane's second voice: chord tones, or the subharmonic "
                            "series below the root.");
@@ -2153,7 +2162,92 @@ void ArpPanel::buildControls()
         macroRows[(size_t) n] = std::move(row);
     }
 
+    // After every control this panel owns exists, and after the slot cards and lane grids in
+    // particular: the lists hold raw pointers into members built above, so this cannot move
+    // any earlier.
+    buildPageLists();
+
     buildAttachments();
+}
+
+// Which controls belong to which page (2026-08-14). One block, built once, naming every
+// control exactly once - the alternative was a flag per component or three parent Components
+// to reparent into, and this is the version you can read against the three page names.
+//
+// Not in it, on purpose: the macro rows (their own view, gated by macroView), the slot cards'
+// own children, and Cancel, whose visibility is the armed state's to decide and which
+// applyPageVisibility() therefore only ever hides.
+void ArpPanel::buildPageLists()
+{
+    pageSetup = {
+        &rateLabel, &rateKnob, &rateModeButton, &ratePrev, &rateNext,
+        &shapeLabel, &shapeBox, &shapePrev, &shapeNext,
+        &tupletLabel, &tupletBox, &dotButton,
+        &swingLabel, &swingSlider, &gateLabel, &gateSlider, &chanceLabel, &chanceSlider,
+        &retrigLabel, &retrigBox, &keysBandButton, &latchButton, &anchorButton,
+        &stepsLabel, &stepsMinus, &stepsReadout, &stepsPlus, &speedLabel, &speedButton, &linkButton,
+        &octavesLabel, &octavesSlider, &distanceLabel, &distanceBox, &offsetLabel, &offsetSlider,
+        &rampLabel, &rampSlider, &rampTimeLabel, &rampTimeSlider,
+        &humanLabel, &humanSlider, &humanVelLabel, &humanVelSlider,
+    };
+
+    pageSlots = {
+        &copyButton, &clearButton, &cancelButton, &stopButton, &chainButton,
+        &barsMinus, &barsReadout, &barsPlus, &randomizeButton,
+        &euclidButton, &euclidHitsLabel, &euclidStepsLabel, &euclidRotateLabel,
+        &euclidHitsReadout, &euclidStepsReadout, &euclidRotateReadout,
+        &euclidHitsMinus, &euclidHitsPlus, &euclidStepsMinus, &euclidStepsPlus,
+        &euclidRotateMinus, &euclidRotatePlus,
+        &clocksButton,
+    };
+    for (auto& c : slotCards)
+        if (c != nullptr)
+            pageSlots.push_back(c.get());
+    for (int i = 0; i < 4; ++i)
+    {
+        pageSlots.push_back(&clockDivLabels[(size_t) i]);
+        pageSlots.push_back(&clockDivReadouts[(size_t) i]);
+        pageSlots.push_back(&clockDivMinus[(size_t) i]);
+        pageSlots.push_back(&clockDivPlus[(size_t) i]);
+    }
+
+    pageSteps = { &muteRowLabel, &voiceButton };
+    if (muteRow != nullptr)
+        pageSteps.push_back(muteRow.get());
+    for (auto& lr : laneRows)
+    {
+        pageSteps.push_back(&lr.tab);
+        if (lr.grid != nullptr)
+            pageSteps.push_back(lr.grid.get());
+    }
+}
+
+// Hide everything that is not on the current page. **Never shows anything**: refreshShape()
+// is the one place a control is turned on, on its own Shape, lane and armed-state gates, and
+// this runs at the end of it to take away what those gates could not know about. Turning
+// things on here as well would mean two writers for one visibility and a control that comes
+// back wherever the two disagree - the mistake the macro card's second On toggle was.
+void ArpPanel::applyPageVisibility()
+{
+    const auto p = currentPage();
+    const auto hideList = [](const std::vector<juce::Component*>& list)
+    {
+        for (auto* c : list)
+            if (c != nullptr)
+                c->setVisible(false);
+    };
+
+    // The macro view is not a page and shows none of them.
+    if (macroView || p != Page::setup)
+    {
+        hideList(pageSetup);
+        for (auto& grp : groups)
+            grp.visible = false;
+    }
+    if (macroView || p != Page::slots)
+        hideList(pageSlots);
+    if (macroView || p != Page::steps)
+        hideList(pageSteps);
 }
 
 void ArpPanel::nudgeBars(int delta)
@@ -2264,8 +2358,11 @@ void ArpPanel::refreshClockDivReadouts()
 
 void ArpPanel::refreshVoiceButton()
 {
+    // The word travels with the state, because the caption above it is gone: the button had a
+    // 12 px "VOICE" label over it until 2026-08-14, and dropping that is what let the target
+    // have the tab row's whole 34 px. One control, saying what it is and what it is set to.
     const int mode = processor.arpLine(editLine()).harmonyMode.load(std::memory_order_relaxed);
-    voiceButton.setButtonText(mode == 1 ? "Sub" : "Chord");
+    voiceButton.setButtonText(mode == 1 ? "Voice: Sub" : "Voice: Chord");
 }
 
 void ArpPanel::timerCallback()
@@ -2344,17 +2441,36 @@ namespace
     // size with nothing to say so.
     constexpr int arpMacroBelow = 8;
     constexpr int arpMacroTotalH = 12 + (arpMacroH + arpMacroBelow) + 12;
-    // Voice's own row inside the STEPS group (2026-08-14): one more arpBandRow plus its 6 px
-    // gap, the same cost STEPS' own two rows already pay each. Pattern shape only - Voice
-    // needs the Harmony lane tab, which only exists once the step editor does - so this adds
-    // to arpPatternH and never to arpShapeH. Pattern and Playback simply carry the same extra
-    // height as blank frame below their own two rows; see resized().
-    constexpr int arpVoiceRowH = arpBandRow + 6;
-    constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10) + arpVoiceRowH;
     // Euclid and Clocks each open into one 34 px row plus its 8 px gap above the action row,
     // and the two are mutually exclusive (openEuclidStrip/openClocksStrip each close the
     // other), so at most one of them is ever open at once.
     constexpr int arpStripH = 34 + 8;
+
+    // --- The three pages of a line's deep view (2026-08-14) -------------------------------
+    //
+    // Owen, looking at the un-paged view: "when you click details it shouldn't resize the whole
+    // window, just the full arp section. and we need a way to get out the detail view". The
+    // deep view was every block at once - band 112, band2 64, lane tabs 34, grid 140, mute 46,
+    // slots 58, action row 34 - which came to 612 px against the macro view's 240. So Details
+    // grew the window by 372 px and All shrank it back, and on a screen that could not afford
+    // the 372 the keybed lost it off the bottom instead (the 2026-08-02 fail-safe entry).
+    //
+    // Split by what you are doing rather than by what fits, the blocks come apart cleanly and
+    // the tallest page is 258 - eighteen more than the macro view, and 354 *less* than the
+    // un-paged deep view. So the panel takes one fixed height for every view and page it has,
+    // and the window stops resizing between them at all.
+    constexpr int arpPageStepsH = 12 + (34 + 6) + (140 + 6) + (14 + 2) + 32 + 12;  // 258
+    constexpr int arpPageSlotsH = 12 + (arpSlotsH + 8) + 34 + 12;                  // 124
+    constexpr int arpPageSetupH = 12 + (arpBandH + 8) + arpBand2H + 12;            // 208
+    // The one height the panel is, ever. Written as a max rather than as the 258 it currently
+    // works out to: every one of these five is a sum of constants above, and the day one of
+    // them grows past the others this picks it up instead of silently clipping that view.
+    // The macro view is in the max for the same reason, not because it is the tallest.
+    constexpr int arpMax2(int a, int b) { return a > b ? a : b; }
+    constexpr int arpFixedH = arpMax2(arpMacroTotalH,
+                                      arpMax2(arpPageStepsH, arpMax2(arpPageSlotsH, arpPageSetupH)));
+    // A strip opens on the Slots page (124 + 42 = 166), which is well inside arpFixedH, so
+    // neither strip changes the panel's height any more and contentHeight() has no branch.
 
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
     // groups share whatever that is. Row one is Pattern / Playback / Steps, row two is
@@ -2379,23 +2495,79 @@ int ArpPanel::preferredHeight() const
     return contentHeight() + 16; // + the 8 px margin at both ends
 }
 
-// One answer for the three views: the macro rows, a plain shape, or the step editor. Neither
-// strip ever shows in the macro view (both are forced closed on the way in - see
-// refreshShape()), so that branch returns before the strip's height would apply.
+// One height for every view, page and shape the panel has (2026-08-14). It used to be three
+// different answers, and switching between them is what resized the whole window - see
+// arpFixedH for the arithmetic and for why paging removed the problem rather than shrinking
+// it. A page shorter than this simply leaves the space below it empty; the macro view, which
+// is 18 px under, gives its two cards the slack.
+//
+// This being a constant is load-bearing beyond the resize: preferredHeight() feeds the
+// editor's idealHeight(), so a constant here means a fold is the only thing that can move the
+// window, which is the one time it should.
 int ArpPanel::contentHeight() const
+{
+    return arpFixedH;
+}
+
+// What *this* view or page actually needs, as opposed to the fixed height the panel reserves.
+// The two are a pair and the split is the point: contentHeight() feeds the editor, so the
+// window never moves, while this feeds cardBounds(), so the drawn card is only as tall as
+// what is in it. Without it the Slots page - 154 px of content in a 258 px card - drew its
+// slots pinned to the bottom of a large empty box, since the block is laid out from the
+// bottom up. The leftover is panel background, not a card with nothing in it.
+int ArpPanel::pageHeight() const
 {
     if (macroView)
         return arpMacroTotalH;
-    const int stripExtra = (euclidStripOpen || clocksStripOpen) ? arpStripH : 0;
-    return (patternMode() ? arpPatternH : arpShapeH) + stripExtra;
+    switch (currentPage())
+    {
+        case Page::steps:
+            return patternMode() ? arpPageStepsH : arpPageSetupH; // Steps falls back to Setup
+        case Page::slots:
+            return arpPageSlotsH + ((euclidStripOpen || clocksStripOpen) ? arpStripH : 0);
+        case Page::setup:
+        default:
+            return arpPageSetupH;
+    }
+}
+
+ArpPanel::Page ArpPanel::currentPage() const
+{
+    return (Page) juce::jlimit(0, 2, processor.layout.arpPage);
+}
+
+// Steps is the lane editor, and outside Pattern shape there is no lane editor to show. The
+// other two hold controls that act on the line whatever it is playing, so they never gate.
+bool ArpPanel::pageAvailable(Page p) const
+{
+    return p != Page::steps || patternMode();
+}
+
+void ArpPanel::setPage(Page p)
+{
+    if (! pageAvailable(p))
+        p = Page::setup; // the Steps tab greys rather than vanishing; a click on it lands here
+    processor.layout.arpPage = (int) p;
+    // A page with no slots on screen must not leave an armed Copy or Clear waiting: the pick
+    // would fire, pages later, on a click the user armed and forgot. Same reasoning as
+    // entering the macro view, which disarms for the same reason.
+    if (p != Page::slots)
+        setArmed(armNone);
+    refreshShape();  // shape gates first, then applyPageVisibility() at its end
+    if (onPageChanged)
+        onPageChanged();
+    resized();
+    repaint();
 }
 
 juce::Rectangle<int> ArpPanel::cardBounds() const
 {
+    // pageHeight(), not contentHeight(): the editor hands the panel the fixed height so the
+    // window never resizes, and the card drawn inside it is sized to the page actually
+    // showing. Inline used to return `full` outright for the same reason it now does not -
+    // the height it is given stopped being the height its content needs.
     const auto full = getLocalBounds().reduced(8);
-    if (inlineMode)
-        return full; // the editor already gave us exactly preferredHeight()
-    return full.withHeight(juce::jmin(full.getHeight(), contentHeight()));
+    return full.withHeight(juce::jmin(full.getHeight(), pageHeight()));
 }
 
 void ArpPanel::paint(juce::Graphics& g)
@@ -2495,18 +2667,25 @@ void ArpPanel::resized()
         }
     }
 
-    // --- The control band: three captioned groups sharing the width ---------------
-    // Pattern shape only, band grows by arpVoiceRowH for Voice's own row inside STEPS -
-    // Pattern and Playback simply carry the same extra height as blank frame below their two
-    // rows (see contentHeight(), which has to agree with this exactly).
-    const int bandHNow = (! macroView && patternMode()) ? arpBandH + arpVoiceRowH : arpBandH;
-    auto band = macroView ? juce::Rectangle<int>() : area.removeFromTop(bandHNow);
-    if (! macroView)
+    // Which page's blocks claim space this pass (2026-08-14). Everything below already used
+    // the `macroView ? emptyRect : removeFromTop(...)` idiom, so paging it is a change of
+    // condition rather than a restructure: an off-page block lays itself out into an empty
+    // rectangle, which the comments below already call harmless because those controls are
+    // invisible. applyPageVisibility() is what makes that second half true.
+    const bool wantSetup = ! macroView && currentPage() == Page::setup;
+    const bool wantSlots = ! macroView && currentPage() == Page::slots;
+    const bool wantSteps = ! macroView && currentPage() == Page::steps && patternMode();
+
+    // --- SETUP page: the control band, three captioned groups sharing the width ----
+    // Voice left the STEPS group on 2026-08-14 for the lane-tab row, where it costs no height
+    // at all and sits beside the lane it belongs to, so the band is back to its two rows.
+    auto band = wantSetup ? area.removeFromTop(arpBandH) : juce::Rectangle<int>();
+    if (wantSetup)
         area.removeFromTop(8);
-    auto band2 = macroView ? juce::Rectangle<int>() : area.removeFromTop(arpBand2H);
-    if (! macroView)
+    auto band2 = wantSetup ? area.removeFromTop(arpBand2H) : juce::Rectangle<int>();
+    if (wantSetup)
         area.removeFromTop(12);
-    if (! macroView)
+    if (wantSetup)
     {
         const int gaps = 2 * 10;
         const int usable = band.getWidth() - gaps;
@@ -2679,22 +2858,12 @@ void ArpPanel::resized()
     }
 
     // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives
-    // rather than floating under the grid where it used to. A third row joins the usual two
-    // in Pattern shape, for VOICE (2026-08-14) - not groupInner(), whose height is fixed at
-    // arpBandInner for every group: this group alone needs the taller arpBandInner +
-    // arpVoiceRowH that bandHNow above already reserved in its bounds.
+    // rather than floating under the grid where it used to. Two rows again as of 2026-08-14:
+    // Voice had a third here for one day and moved to the lane-tab row on the Steps page,
+    // which costs no height and puts it beside the Harmony lane it is contextual on.
     {
-        auto stepsBounds = groups[2].bounds.reduced(10, 0).withTrimmedTop(arpBandTop)
-                                .withHeight(patternMode() ? arpBandInner + arpVoiceRowH : arpBandInner);
-        juce::Rectangle<int> rowA, rowB, rowC;
-        rowA = stepsBounds.removeFromTop(arpBandRow);
-        stepsBounds.removeFromTop(6);
-        rowB = stepsBounds.removeFromTop(arpBandRow);
-        if (patternMode())
-        {
-            stepsBounds.removeFromTop(6);
-            rowC = stepsBounds.removeFromTop(arpBandRow);
-        }
+        juce::Rectangle<int> rowA, rowB;
+        splitRows(groupInner(groups[2].bounds), rowA, rowB);
         auto stepsCell = rowA.removeFromLeft(juce::jlimit(120, 150, rowA.getWidth()));
         stepsLabel.setBounds(stepsCell.removeFromTop(14));
         stepsCell = stepsCell.withSizeKeepingCentre(stepsCell.getWidth(), juce::jmin(stepsCell.getHeight(), 28));
@@ -2707,21 +2876,15 @@ void ArpPanel::resized()
         speedButton.setBounds(speedCell.withSizeKeepingCentre(speedCell.getWidth(),
                                                               juce::jmin(speedCell.getHeight(), 28)));
         linkButton.setBounds(rowB.withTrimmedTop(14));
-
-        // VOICE: laid out regardless of the Harmony-lane gate (harmless while invisible),
-        // width-limited to 84 rather than jlimit'd like STEPS - it never needs to stretch.
-        auto voiceCell = rowC.removeFromLeft(juce::jmin(84, rowC.getWidth()));
-        voiceLabel.setBounds(voiceCell.removeFromTop(14));
-        voiceButton.setBounds(voiceCell.withSizeKeepingCentre(voiceCell.getWidth(),
-                                                              juce::jmin(voiceCell.getHeight(), 28)));
     }
 
-    // --- The slot row and its buttons, at the bottom of both per-line shapes -------
+    // --- SLOTS page: the twelve cards, the action row, and either strip ------------
     // Not the macro view, since 2026-08-02: the slots and the action row belong to the
     // per-line tabs, and the A/B/All tabs themselves were laid out in its header above -
     // running this block there would move them right back down to a row that no longer
-    // exists on screen.
-    if (! macroView)
+    // exists on screen. Its own page since 2026-08-14, which is what let the whole block
+    // keep its full-size targets while the deep view stopped being 612 px tall.
+    if (wantSlots)
     {
         auto actionRow = area.removeFromBottom(34);
         area.removeFromBottom(8);
@@ -2804,14 +2967,30 @@ void ArpPanel::resized()
                         clockDivReadouts[(size_t) i], clockDivPlus[(size_t) i]);
     }
 
-    // Everything left exists only in Pattern shape. Laying it out regardless is harmless
-    // (it is all invisible) and keeps this function free of a second branch.
+    // --- STEPS page: the lane tabs, the one lane they select, the mute row ---------
+    // Laying this out with an empty `area` on the other pages is harmless (it is all
+    // invisible by then - see applyPageVisibility) and keeps this function free of a
+    // second branch.
+    if (! wantSteps)
+        area = juce::Rectangle<int>();
 
-    // Lane tabs, then the one lane they select, then the mute row beneath it. Six
-    // stacked lanes needed ~750 px and the panel gets ~600, so the Probability lane and
-    // the whole pattern row used to be cut off the bottom of the window entirely.
     auto tabsRow = area.removeFromTop(34);
     area.removeFromTop(6);
+    // VOICE rides the right end of the tab row (2026-08-14), which is where it stopped costing
+    // the panel a 48 px band row of its own. **Reserved before the tabs take their cut, and
+    // reserved whether or not it is showing** - both halves matter. Reserve-first is the
+    // standing rule (2026-08-01 and -08-02, twice); reserving it unconditionally is what stops
+    // all ten tabs resizing under the mouse the moment you select Harmony.
+    //
+    // It takes the row's whole 34 px and carries its own word ("Voice: Chord" / "Voice: Sub")
+    // instead of sitting under a caption. A 12 px caption strip left the button 22 px, which is
+    // under the mouse-only floor - the same trap logged for the Reroll button and the
+    // note-count steppers, and the fix is the same one every time: give the target the cell
+    // rather than fitting the target into what is left of it.
+    auto voiceCell = tabsRow.removeFromRight(112);
+    tabsRow.removeFromRight(8);
+    voiceButton.setBounds(voiceCell);
+
     const int tabW = juce::jmax(70, (tabsRow.getWidth() - (ArpEngine::numLanes - 1) * 4) / ArpEngine::numLanes);
     for (auto& lr : laneRows)
     {
