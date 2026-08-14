@@ -2274,7 +2274,7 @@ void KeysProcessor::randomizeActiveArpPattern(int line)
     }
 }
 
-void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct)
+void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct, int fromStep, int toStep)
 {
     // Reroll **one** lane, by an amount (2026-08-14, Owen: "there should be, like, a more
     // random feature in the drawing, like cthulu"). randomizeActiveArpPattern above is the
@@ -2296,7 +2296,11 @@ void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct)
     // Its own length, not maxSteps: rerolling past the end would quietly rewrite steps the
     // pattern is not playing, and they would appear later if the length ever grew.
     const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) lane].load());
-    for (int s = 0; s < len; ++s)
+    // A span narrows it; -1 on either end means the whole lane. Clamped into the lane's own
+    // length, so a span marked before the length shrank cannot write past the end.
+    const int lo = fromStep < 0 ? 0 : juce::jlimit(0, len - 1, fromStep);
+    const int hi = toStep < 0 ? len - 1 : juce::jlimit(lo, len - 1, toStep);
+    for (int s = lo; s <= hi; ++s)
     {
         const int cur = lanes.value[(size_t) lane][(size_t) s].load();
         // The window slides rather than the result clamping - see ArpEngine::strayWithin for
@@ -2307,14 +2311,16 @@ void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct)
     }
 }
 
-void KeysProcessor::resetArpLane(int line, int laneIndex)
+void KeysProcessor::resetArpLane(int line, int laneIndex, int fromStep, int toStep)
 {
     // Its whole length, not maxSteps, for the reason rerollArpLane gives: the steps past the
     // end are not being played, and rewriting them would surface later if the length grew.
     const auto lane = juce::jlimit(0, ArpEngine::numLanes - 1, laneIndex);
     auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
     const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) lane].load());
-    for (int s = 0; s < len; ++s)
+    const int lo = fromStep < 0 ? 0 : juce::jlimit(0, len - 1, fromStep);
+    const int hi = toStep < 0 ? len - 1 : juce::jlimit(lo, len - 1, toStep);
+    for (int s = lo; s <= hi; ++s)
         lanes.value[(size_t) lane][(size_t) s].store(ArpEngine::laneDefaults[lane]);
 }
 

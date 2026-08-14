@@ -279,7 +279,9 @@ public:
         // `owner` is asked which line is being edited on every read and write, rather than
         // being handed an index: the tabs change it under these grids, and a copy taken at
         // construction would leave them drawing whichever line was up when the panel opened.
-        LaneGrid(KeysProcessor&, const ArpPanel& owner, ArpEngine::Lane, int loVal, int hiVal);
+        // Non-const owner, unlike MuteRow's: in Select mode this writes the span back into
+        // the panel, which owns it (Roll and Reset are the panel's, not the grid's).
+        LaneGrid(KeysProcessor&, ArpPanel& owner, ArpEngine::Lane, int loVal, int hiVal);
 
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
@@ -294,10 +296,11 @@ public:
         juce::String cellText(int value) const;
 
         KeysProcessor& processor;
-        const ArpPanel& owner;
+        ArpPanel& owner;
         ArpEngine::Lane lane;
         int loVal, hiVal;
         bool dragging = false;
+        int selAnchor = 0; // where a Select drag started
         juce::Point<float> cursorPos;
         int cursorValue = 0;
 
@@ -381,6 +384,11 @@ private:
     {
         juce::TextButton tab;
         std::unique_ptr<LaneGrid> grid;
+        // Not every lane gets a tab: Mute is drawn by the MUTE row under the grid, so it has a
+        // lane but nothing to click. Without this the loops below laid out and counted its
+        // default-constructed, empty button anyway, which ate a cell of the tab row and pushed
+        // the last real tab (Chain) off the end - visible as a missing tab and nothing else.
+        bool hasTab = false;
     };
 
     void timerCallback() override;
@@ -606,6 +614,19 @@ private:
     // state a lane that has never been touched is in - so "Reset then Roll" is repeatable, and
     // a roll you did not like costs one click rather than a redraw.
     juce::TextButton resetButton { "Reset" };
+    // Select: the missing primitive (2026-08-14, from Kirnu Cream's tool palette - its manual
+    // p8 has Draw / Select / Random / Copy / Paste / Clear, and its Random tool acts on
+    // "selected steps"). Roll and Reset acted on a whole lane because there was nothing smaller
+    // to act on. With this lit, a drag on the grid marks a span instead of painting it, and
+    // both buttons narrow to that span.
+    //
+    // A **mode**, not a modifier: the mouse-only contract has no Alt-drag to offer, and Kirnu
+    // itself models this as a tool you pick rather than a chord you hold. Lit is the whole
+    // affordance, the same way Copy and Clear already arm.
+    juce::TextButton selectButton { "Select" };
+    bool selectMode = false;
+    int selFrom = -1, selTo = -1; // inclusive step span; selFrom < 0 means the whole lane
+    void clearSelection();
     juce::TextButton rollMinus { "-" }, rollPlus { "+" };
     juce::Label rollReadout;
     int rollAmount = 35; // percent of the lane's range; 100 is a uniform scramble

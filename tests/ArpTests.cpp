@@ -1958,6 +1958,133 @@ public:
             }
         }
 
+        beginTest("note lane: Hi and Low ask the chord, not the index");
+        {
+            // The point of the modes over the fixed indices: they keep meaning the same thing
+            // when the chord under them changes. Hi must be the top note of whatever is held.
+            for (const bool wide : { false, true })
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto dp = p;
+                dp.usePattern = true;
+                for (int s = 0; s < 4; ++s)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) s].store(ArpEngine::noteHi);
+                e.lanes.length[ArpEngine::laneNote].store(4);
+
+                const int top = wide ? 79 : 67;
+                for (int g = 0; g < 6; ++g)
+                {
+                    juce::MidiBuffer in = (g != 0) ? juce::MidiBuffer {}
+                                        : (wide ? chordOn({ 60, 64, 79 }) : chordOn({ 60, 64, 67 }));
+                    juce::MidiBuffer out;
+                    clock.ppq = 0.25 * g;
+                    e.process(dp, clock, block, in, out);
+                    for (const auto& ev : collect(out))
+                        if (ev.on)
+                            expectEquals(ev.note, top, "Hi is the top of the chord actually held");
+                }
+            }
+        }
+
+        beginTest("note lane: Prev repeats what last sounded");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            // Step 0 fixed on entry 2, steps 1-3 Prev: all four must play the same note.
+            e.lanes.value[ArpEngine::laneNote][0].store(2);
+            for (int s = 1; s < 4; ++s)
+                e.lanes.value[ArpEngine::laneNote][(size_t) s].store(ArpEngine::notePrev);
+            e.lanes.length[ArpEngine::laneNote].store(4);
+
+            for (int g = 0; g < 8; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (const auto& ev : collect(out))
+                    if (ev.on)
+                        expectEquals(ev.note, 64, "entry 2, held by Prev");
+            }
+        }
+
+        beginTest("chain: 'only after a step that fired' is silent behind a rest");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            // Step 0 rests; step 1 asks to play only if the step before it sounded. It cannot.
+            e.lanes.value[ArpEngine::laneNote][0].store(ArpEngine::noteRest);
+            e.lanes.value[ArpEngine::laneChain][1].store(1);
+            e.lanes.length[ArpEngine::laneNote].store(2);
+            e.lanes.length[ArpEngine::laneChain].store(2);
+
+            int heard = 0;
+            for (int g = 0; g < 8; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (const auto& ev : collect(out))
+                    if (ev.on)
+                        ++heard;
+            }
+            expectEquals(heard, 0, "a rest, then a step conditional on it, is silence");
+        }
+
+        beginTest("chain: 'only after a step that did not fire' fills the gaps");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            e.lanes.value[ArpEngine::laneNote][0].store(ArpEngine::noteRest);
+            e.lanes.value[ArpEngine::laneChain][1].store(2); // only if the one before did NOT
+            e.lanes.length[ArpEngine::laneNote].store(2);
+            e.lanes.length[ArpEngine::laneChain].store(2);
+
+            int heard = 0;
+            for (int g = 0; g < 8; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (const auto& ev : collect(out))
+                    if (ev.on)
+                        ++heard;
+            }
+            expect(heard > 0, "the inverse condition sounds where the plain one does not");
+        }
+
+        beginTest("chain 0 everywhere is bit-identical to the feature never existing");
+        {
+            ArpEngine e1, e2;
+            e1.prepare(sr);
+            e2.prepare(sr);
+            auto dp = p;
+            dp.usePattern = true;
+            for (int s = 0; s < ArpEngine::maxSteps; ++s)
+                e2.lanes.value[ArpEngine::laneChain][(size_t) s].store(0); // explicit
+            for (int i = 0; i < 8; ++i)
+            {
+                juce::MidiBuffer in = (i == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer o1, o2;
+                clock.ppq = 0.25 * i;
+                e1.process(dp, clock, block, in, o1);
+                e2.process(dp, clock, block, in, o2);
+                auto a = collect(o1), b = collect(o2);
+                expectEquals((int) a.size(), (int) b.size(), "same count, block " + juce::String(i));
+                for (size_t k = 0; k < a.size() && k < b.size(); ++k)
+                    expectEquals(a[k].note, b[k].note, "same note");
+            }
+        }
+
         beginTest("laneRange covers every lane and none of them is empty");
         {
             for (int l = 0; l < ArpEngine::numLanes; ++l)

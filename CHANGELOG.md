@@ -5,6 +5,43 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a richer Note lane, a Chain lane, and a selection for the grid
+
+The three unbuilt ideas `docs/REFERENCES.md` ranked, built.
+
+**The Note lane speaks Kirnu's vocabulary** (its manual p9, the ORDER lane). Alongside `-1` rest,
+`0` follow-the-shape and `1..8` a fixed entry, it now has **P**rev (repeat what last sounded),
+**H**ighest, **L**owest and **R**andom. Those four *ask the chord a question* rather than
+counting into it, so they keep meaning the same thing when the chord under them changes - Hi is
+the top note of whatever is held, not entry 3. Appended **above 8**, not below -1, for two
+reasons: every saved session's values stay exactly what they were, and dragging a cell to the
+bottom of the grid still reaches the rest rather than landing on a mode.
+
+**The Chain lane** is Stochas' chain dependency (its manual p3) in the one form that needs no
+second coordinate: `0` always, `1` only if the step before it sounded, `2` only if it did not.
+Chance says "maybe"; this says "only if", and that is what turns a probabilistic pattern into
+one that answers itself. It is **the only thing in the engine that is not stateless from the
+playhead** - a condition has to remember one bit about the previous step - and it self-corrects
+within a single step, which is the cheapest possible break of that rule and is why this form was
+chosen over an arbitrary cell-to-cell reference.
+
+**Select** is the missing primitive (Kirnu's tool palette, p8, whose Random tool acts on
+*selected* steps). With it lit a drag on the grid marks a span instead of drawing on it, and
+Roll and Reset narrow to that span. A **mode**, not a modifier: the mouse-only contract has no
+Alt-drag to offer, and Kirnu itself models this as a tool you pick.
+
+**The lane tools moved to their own strip.** Twelve tabs at the 70 px floor need 884 px and the
+row had 784 left beside the buttons, so Rand was squeezed to 63 px and Chain was laid out at
+zero width - present in the tree, invisible on screen, absent from the accessibility tree with
+nothing to say why. *A crowded row grows a strip; it does not squeeze its targets* - the rule
+logged twice before and paid for a third time. All twelve tabs are uniform again, and the Draw
+page went 258 -> 298, so the window grew 40 px once and stopped.
+
+Five new test cases (195 total, 3,607 checks), pinning Hi against two different chords, Prev
+holding a note, both chain conditions, and chain-0 being bit-identical to the feature not
+existing.
+
+
 ### Added: a Rand lane, and mute stops eating your steps
 
 Owen: *"look at reference manuals"*. `Cthulhu_Manual_v1_1.pdf` is in the repo root and page 25

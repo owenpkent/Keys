@@ -13,7 +13,7 @@ namespace
     // {0, 0, 0} range that silently clamps the *note* lane to zero.
     const char* laneNames[ArpEngine::numLanes] = { "note", "octave", "velocity", "gate", "ratchet",
                                                    "probability", "transpose", "late", "harmony", "chord",
-                                                   "rand", "mute" };
+                                                   "rand", "mute", "chain" };
 
     // Legal per-lane range, straight from ArpEngine.h's Lanes comment: note is
     // -1 (mute) .. 8 (fixed chord-note index, 0 = follow direction mode); octave is

@@ -55,7 +55,7 @@ namespace
 // ---------------------------------------------------------------------------
 // LaneGrid
 
-ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, const ArpPanel& o, ArpEngine::Lane l, int lo, int hi)
+ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, ArpPanel& o, ArpEngine::Lane l, int lo, int hi)
     : processor(p), owner(o), lane(l), loVal(lo), hiVal(hi)
 {
     okstudio::ui::makeMouseOnly(*this);
@@ -95,12 +95,32 @@ void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e)
 
 void ArpPanel::LaneGrid::mouseDown(const juce::MouseEvent& e)
 {
+    // In Select mode a drag marks a span rather than painting one. The anchor is where the
+    // press landed and the far end follows the mouse, so a span can be drawn either way round;
+    // owner.selFrom/selTo are normalised on every update rather than at the end, since Roll can
+    // be clicked mid-gesture.
+    if (owner.selectMode)
+    {
+        dragging = true;
+        selAnchor = stepAtX(e.position.x);
+        owner.selFrom = owner.selTo = selAnchor;
+        owner.repaint();
+        return;
+    }
     dragging = true;
     paintStepFromMouse(e);
 }
 
 void ArpPanel::LaneGrid::mouseDrag(const juce::MouseEvent& e)
 {
+    if (owner.selectMode)
+    {
+        const int s = stepAtX(e.position.x);
+        owner.selFrom = juce::jmin(selAnchor, s);
+        owner.selTo = juce::jmax(selAnchor, s);
+        owner.repaint();
+        return;
+    }
     paintStepFromMouse(e); // continuous paint: every move updates the step under it
 }
 
@@ -114,10 +134,21 @@ juce::String ArpPanel::LaneGrid::cellText(int value) const
 {
     if (lane == ArpEngine::laneNote)
     {
-        if (value <= -1)
+        if (value <= ArpEngine::noteRest)
             return "X";
-        if (value == 0)
+        if (value == ArpEngine::noteFollow)
             return {}; // drawn as a dot instead, see paint()
+        // The four modes above the fixed indices (Kirnu's ORDER lane). One letter each: a cell
+        // is ~40 px at 32 steps, so "Prev" does not fit and an ellipsised word says less than
+        // an initial does. The tooltip on the tab carries the words.
+        switch (value)
+        {
+            case ArpEngine::notePrev: return "P";
+            case ArpEngine::noteHi:   return "H";
+            case ArpEngine::noteLow:  return "L";
+            case ArpEngine::noteRnd:  return "R";
+            default: break;
+        }
     }
     // Harmony and Chord are off at zero rather than centred on it, so a row of noughts would
     // read as data where it means "nothing here". The dot the note lane already uses says it
@@ -198,6 +229,25 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
         g.setColour(skin::text);
         g.setFont(f);
         g.drawText(txt, box, juce::Justification::centred);
+    }
+
+    // The Select span, drawn last so it sits over the bars. A tinted wash plus a bright edge at
+    // each end: the wash says "these steps", and the edges say where it starts and stops, which
+    // the wash alone does not once the span reaches the grid's own edge.
+    if (owner.selectMode && owner.selFrom >= 0)
+    {
+        const int len = currentLength();
+        const float cellW = len > 0 ? (float) getWidth() / (float) len : (float) getWidth();
+        const int lo = juce::jlimit(0, len - 1, owner.selFrom);
+        const int hi = juce::jlimit(lo, len - 1, owner.selTo);
+        const auto span = juce::Rectangle<float>(cellW * (float) lo, 0.0f,
+                                                 cellW * (float) (hi - lo + 1), (float) getHeight());
+        const auto a = skin::accentOf(*this);
+        g.setColour(a.base.withAlpha(0.16f));
+        g.fillRect(span);
+        g.setColour(a.base.withAlpha(0.75f));
+        g.fillRect(span.getX(), 0.0f, 1.5f, (float) getHeight());
+        g.fillRect(span.getRight() - 1.5f, 0.0f, 1.5f, (float) getHeight());
     }
 }
 
@@ -477,6 +527,7 @@ void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::Stri
 {
     row.tab.setButtonText(name);
     row.tab.onClick = [this, lane] { selectLane((int) lane); };
+    row.hasTab = true;
     addAndMakeVisible(row.tab);
 
     row.grid = std::make_unique<LaneGrid>(processor, *this, lane, loVal, hiVal);
@@ -614,7 +665,7 @@ void ArpPanel::refreshShape()
 
     for (int i = 0; i < ArpEngine::numLanes; ++i)
     {
-        laneRows[(size_t) i].tab.setVisible(pattern);
+        laneRows[(size_t) i].tab.setVisible(pattern && laneRows[(size_t) i].hasTab);
         if (laneRows[(size_t) i].grid != nullptr)
             laneRows[(size_t) i].grid->setVisible(pattern && i == selectedLane);
     }
@@ -644,7 +695,7 @@ void ArpPanel::refreshShape()
     const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
     voiceButton.setVisible(voiceOn);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &rollButton, &resetButton, &rollMinus, &rollReadout, &rollPlus })
+             &rollButton, &resetButton, &selectButton, &rollMinus, &rollReadout, &rollPlus })
         c->setVisible(pattern);
 
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
@@ -2012,7 +2063,8 @@ void ArpPanel::buildControls()
     addAndMakeVisible(retrigBox);
 
     // The ten lanes, in ArpEngine::Lane order. The original six first:
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note", -1, 8);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note",
+                 ArpEngine::noteRest, ArpEngine::noteRnd);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave", -3, 3);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate", 5, 200);
@@ -2031,6 +2083,14 @@ void ArpPanel::buildControls()
     // Rand gets a tab; Mute deliberately does not - the MUTE row under the grid has always been
     // its editor, and a tab as well would be two ways to draw one lane.
     buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand", -8, 8);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChain], ArpEngine::laneChain, "Chain", 0, 2);
+    laneRows[(size_t) ArpEngine::laneNote].tab.setTooltip(
+        "Which note of the held chord this step plays. X rests, a blank follows the Shape, "
+        "1-8 pick a fixed one, and P/H/L/R are Prev, Highest, Lowest and Random - those four "
+        "ask the chord a question, so they keep meaning the same thing when it changes.");
+    laneRows[(size_t) ArpEngine::laneChain].tab.setTooltip(
+        "Play this step only on a condition: 0 always, 1 only if the step before it sounded, "
+        "2 only if it did not. Chance says maybe; this says only if.");
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);
@@ -2225,6 +2285,19 @@ void ArpPanel::buildControls()
                            "did not want.");
     resetButton.onClick = [this] { resetSelectedLane(); };
     addChildComponent(resetButton);
+    selectButton.setClickingTogglesState(true);
+    selectButton.setTitle("Select steps");
+    selectButton.setTooltip("Drag on the grid to mark a span of steps instead of drawing on it. "
+                            "Roll and Reset then act on that span alone. Click again to go back "
+                            "to drawing, which also clears the span.");
+    selectButton.onClick = [this]
+    {
+        selectMode = selectButton.getToggleState();
+        if (! selectMode)
+            clearSelection(); // leaving the mode drops the span: it has nothing left to show it
+        repaint();
+    };
+    addChildComponent(selectButton);
     rollMinus.setTitle("Less roll");
     rollPlus.setTitle("More roll");
     rollMinus.onClick = [this] { nudgeRollAmount(-5); };
@@ -2304,7 +2377,8 @@ void ArpPanel::buildPageLists()
     }
 
     pageSteps = { &muteRowLabel, &voiceButton,
-                  &rollButton, &resetButton, &rollMinus, &rollReadout, &rollPlus };
+                  &rollButton, &resetButton, &selectButton,
+                  &rollMinus, &rollReadout, &rollPlus };
     if (muteRow != nullptr)
         pageSteps.push_back(muteRow.get());
     for (auto& lr : laneRows)
@@ -2460,15 +2534,21 @@ void ArpPanel::nudgeRollAmount(int delta)
 // Randomize has always offered.
 void ArpPanel::rollSelectedLane()
 {
-    processor.rerollArpLane(editLine(), selectedLane, rollAmount);
+    processor.rerollArpLane(editLine(), selectedLane, rollAmount, selFrom, selTo);
     refreshLaneReadouts();
     if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
         g->repaint();
 }
 
+void ArpPanel::clearSelection()
+{
+    selFrom = selTo = -1;
+    repaint();
+}
+
 void ArpPanel::resetSelectedLane()
 {
-    processor.resetArpLane(editLine(), selectedLane);
+    processor.resetArpLane(editLine(), selectedLane, selFrom, selTo);
     refreshLaneReadouts();
     if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
         g->repaint();
@@ -2577,7 +2657,9 @@ namespace
     // the tallest page is 258 - eighteen more than the macro view, and 354 *less* than the
     // un-paged deep view. So the panel takes one fixed height for every view and page it has,
     // and the window stops resizing between them at all.
-    constexpr int arpPageStepsH = 12 + (34 + 6) + (140 + 6) + (14 + 2) + 32 + 12;  // 258
+    // + the lane-tools strip (34 + 6), added 2026-08-14 when twelve tabs stopped fitting
+    // beside the buttons. arpFixedH is a max over these, so the window grew once and stopped.
+    constexpr int arpPageStepsH = 12 + (34 + 6) + (34 + 6) + (140 + 6) + (14 + 2) + 32 + 12; // 298
     constexpr int arpPageSlotsH = 12 + (arpSlotsH + 8) + 34 + 12;                  // 124
     constexpr int arpPageSetupH = 12 + (arpBandH + 8) + arpBand2H + 12;            // 208
     // The one height the panel is, ever. Written as a max rather than as the 258 it currently
@@ -3095,40 +3177,42 @@ void ArpPanel::resized()
 
     auto tabsRow = area.removeFromTop(34);
     area.removeFromTop(6);
-    // VOICE rides the right end of the tab row (2026-08-14), which is where it stopped costing
-    // the panel a 48 px band row of its own. **Reserved before the tabs take their cut, and
-    // reserved whether or not it is showing** - both halves matter. Reserve-first is the
-    // standing rule (2026-08-01 and -08-02, twice); reserving it unconditionally is what stops
-    // all ten tabs resizing under the mouse the moment you select Harmony.
+
+    // The lane tabs get the whole row, and the buttons that act on a lane get their own strip
+    // below it (2026-08-14). They shared this row until the Chain lane made twelve tabs: at the
+    // 70 px floor twelve need 884 px and the row had 784 left after the buttons, so Rand was
+    // squeezed to 63 and Chain was laid out at zero width - present in the tree, invisible on
+    // screen, and absent from the accessibility tree with nothing to say why.
     //
-    // It takes the row's whole 34 px and carries its own word ("Voice: Chord" / "Voice: Sub")
-    // instead of sitting under a caption. A 12 px caption strip left the button 22 px, which is
-    // under the mouse-only floor - the same trap logged for the Reroll button and the
-    // note-count steppers, and the fix is the same one every time: give the target the cell
-    // rather than fitting the target into what is left of it.
-    // Right to left: Voice, then Roll's stepper, then Roll. All three take the row's whole
-    // 34 px and all three are reserved unconditionally, so the ten tabs never resize under the
-    // mouse - 268 px out of ~1830 still leaves each tab around 145, well over its 70 floor.
-    auto voiceCell = tabsRow.removeFromRight(112);
-    tabsRow.removeFromRight(8);
-    voiceButton.setBounds(voiceCell);
-
-    auto rollAmtCell = tabsRow.removeFromRight(102);
-    tabsRow.removeFromRight(6);
-    rollMinus.setBounds(rollAmtCell.removeFromLeft(34));
-    rollPlus.setBounds(rollAmtCell.removeFromRight(34));
-    rollReadout.setBounds(rollAmtCell);
-    rollButton.setBounds(tabsRow.removeFromRight(62));
-    tabsRow.removeFromRight(4);
-    resetButton.setBounds(tabsRow.removeFromRight(66));
-    tabsRow.removeFromRight(8);
-
-    const int tabW = juce::jmax(70, (tabsRow.getWidth() - (ArpEngine::numLanes - 1) * 4) / ArpEngine::numLanes);
+    // **A crowded row grows a strip; it does not squeeze its targets** - the rule already
+    // logged twice (2026-08-01, 2026-08-02) and paid for a third time here. Height is the cheap
+    // axis on this page and 34 px buys every tab its full width back: twelve now get ~99 px
+    // each against a 70 px floor.
+    const int tabW = juce::jmax(70, (tabsRow.getWidth() - 11 * 4) / 12);
     for (auto& lr : laneRows)
     {
+        if (! lr.hasTab)
+            continue; // Mute has a lane but no tab - the MUTE row below is its editor
         lr.tab.setBounds(tabsRow.removeFromLeft(tabW));
         tabsRow.removeFromLeft(4);
     }
+
+    // The lane tools, left to right, in the order you reach for them: mark a span, then put it
+    // back or roll it. Voice sits at the right end, away from the three, because it is the one
+    // control here that edits the *sound* rather than the drawing - and it only appears at all
+    // with the Harmony lane up.
+    auto toolsRow = area.removeFromTop(34);
+    area.removeFromTop(6);
+    selectButton.setBounds(toolsRow.removeFromLeft(84));
+    toolsRow.removeFromLeft(6);
+    resetButton.setBounds(toolsRow.removeFromLeft(72));
+    toolsRow.removeFromLeft(6);
+    rollButton.setBounds(toolsRow.removeFromLeft(72));
+    toolsRow.removeFromLeft(6);
+    rollMinus.setBounds(toolsRow.removeFromLeft(34));
+    rollReadout.setBounds(toolsRow.removeFromLeft(52));
+    rollPlus.setBounds(toolsRow.removeFromLeft(34));
+    voiceButton.setBounds(toolsRow.removeFromRight(112));
 
     auto gridArea = area.removeFromTop(140);
     area.removeFromTop(6);
@@ -3144,4 +3228,5 @@ void ArpPanel::resized()
     area.removeFromTop(2);
     muteRow->setBounds(area.removeFromTop(32)); // same x and width as gridArea, both off `area`
 }
+
 } // namespace keys

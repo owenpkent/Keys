@@ -287,10 +287,13 @@ public:
     // Reroll one lane of the active pattern, straying `amountPct` (0..100) from what is drawn:
     // a nudge low down, a uniform scramble at 100. The per-lane twin of the whole-pattern
     // randomize above; see the definition for why both exist.
-    void rerollArpLane(int line, int laneIndex, int amountPct);
+    // `fromStep`/`toStep` are an inclusive span; pass -1 for either to mean the whole lane.
+    // The span is what Select on the Draw page marks (2026-08-14, from Kirnu Cream's Random
+    // tool, which acts on selected steps rather than everything).
+    void rerollArpLane(int line, int laneIndex, int amountPct, int fromStep = -1, int toStep = -1);
     // Put one lane back to its default across its whole length - the state a lane that has
     // never been touched is in. The way back from a reroll, since Keys has no undo anywhere.
-    void resetArpLane(int line, int laneIndex);
+    void resetArpLane(int line, int laneIndex, int fromStep = -1, int toStep = -1);
     // Writes a Euclidean rhythm (EuclidGen.h) into one lane of the active pattern: 100 on a
     // hit, 0 on a rest, and sets that lane's length to `steps`. Only the probability lane has
     // a meaningful hit/rest mapping today - anything else returns false and writes nothing.
