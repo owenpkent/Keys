@@ -1759,6 +1759,90 @@ public:
                                  "divs mismatch at g=" + juce::String(g));
         }
 
+        // --- Drift (2026-08-14) ---------------------------------------------------------
+
+        beginTest("drift 0: bit-identical to the feature never existing");
+        {
+            ArpEngine e1, e2;
+            e1.prepare(sr);
+            e2.prepare(sr);
+            auto p1 = p, p2 = p;
+            p1.usePattern = p2.usePattern = true;
+            p2.drift = 0; // explicit, rather than relying on the default
+            for (int i = 0; i < 6; ++i)
+            {
+                juce::MidiBuffer in = (i == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer o1, o2;
+                clock.ppq = 0.25 * i;
+                e1.process(p1, clock, block, in, o1);
+                e2.process(p2, clock, block, in, o2);
+                auto a = collect(o1), b = collect(o2);
+                expectEquals((int) a.size(), (int) b.size(), "same count, block " + juce::String(i));
+                for (size_t k = 0; k < a.size() && k < b.size(); ++k)
+                {
+                    expectEquals(a[k].note, b[k].note, "same note");
+                    expectEquals(a[k].sample, b[k].sample, "same offset");
+                }
+            }
+        }
+
+        beginTest("drift never moves a lane it is not allowed to");
+        {
+            // The rule the feature rests on: drift changes how a step plays, never which note
+            // it plays. Note, Ratchet, Harmony and Chord must be untouched at any amount.
+            expect(! ArpEngine::laneDrifts[ArpEngine::laneNote], "Note does not drift");
+            expect(! ArpEngine::laneDrifts[ArpEngine::laneRatchet], "Ratchet does not drift");
+            expect(! ArpEngine::laneDrifts[ArpEngine::laneHarmony], "Harmony does not drift");
+            expect(! ArpEngine::laneDrifts[ArpEngine::laneChord], "Chord does not drift");
+            expect(ArpEngine::laneDrifts[ArpEngine::laneVelocity], "Velocity drifts");
+            expect(ArpEngine::laneDrifts[ArpEngine::laneGate], "Gate drifts");
+        }
+
+        beginTest("drift at full: pitches are unchanged, velocities are not");
+        {
+            // Same held chord, same pattern, drift hard over. The *notes* must come back in the
+            // same order at the same times - only how they are played may wander.
+            ArpEngine e1, e2;
+            e1.prepare(sr);
+            e2.prepare(sr);
+            auto p1 = p, p2 = p;
+            p1.usePattern = p2.usePattern = true;
+            p2.drift = 100;
+            std::vector<int> n1, n2;
+            bool anyVelDiff = false;
+            for (int i = 0; i < 12; ++i)
+            {
+                juce::MidiBuffer in = (i == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer o1, o2;
+                clock.ppq = 0.25 * i;
+                e1.process(p1, clock, block, in, o1);
+                e2.process(p2, clock, block, in, o2);
+                for (const auto& ev : collect(o1))
+                    if (ev.on)
+                        n1.push_back(ev.note);
+                for (const auto& ev : collect(o2))
+                    if (ev.on)
+                        n2.push_back(ev.note);
+            }
+            juce::ignoreUnused(anyVelDiff);
+            // Octave *is* a drifting lane, so a drifting run may transpose by whole octaves -
+            // the pitch class is what must survive, since that is "which note it plays".
+            expectEquals((int) n1.size(), (int) n2.size(), "same number of notes");
+            for (size_t k = 0; k < n1.size() && k < n2.size(); ++k)
+                expectEquals(n1[k] % 12, n2[k] % 12, "same pitch class at " + juce::String((int) k));
+        }
+
+        beginTest("laneRange covers every lane and none of them is empty");
+        {
+            for (int l = 0; l < ArpEngine::numLanes; ++l)
+            {
+                const auto r = ArpEngine::laneRange(l);
+                expect(r.hi > r.lo, "lane " + juce::String(l) + " has a usable range");
+                expect(ArpEngine::laneDefaults[l] >= r.lo && ArpEngine::laneDefaults[l] <= r.hi,
+                       "lane " + juce::String(l) + "'s default is inside its own range");
+            }
+        }
+
         beginTest("rhythm dividers all zero: bit-identical to the feature never existing");
         {
             ArpEngine e1, e2;

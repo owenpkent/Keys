@@ -464,6 +464,17 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
                                                    nm + " Human Time Range", 0, 100, 100));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVelSpan"), 1 },
                                                    nm + " Human Velocity Range", 0, 100, 100));
+
+    // Drift (2026-08-14, Owen: "there should be, like, a more random feature in the drawing,
+    // like cthulu"). Roll rerolls a lane once and you can see what it did; this strays from
+    // whatever is drawn *while it plays*, so the part never repeats exactly and the lane on
+    // screen never changes. Appended, default 0, which is the engine exactly as it was.
+    //
+    // It only ever touches the lanes ArpEngine::laneDrifts allows - the ones that decide *how*
+    // a step plays, never *which* note it plays. See that table for why that split lets this be
+    // one knob instead of ten.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Drift"), 1 },
+                                                   nm + " Drift", 0, 100, 0));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -483,7 +494,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
-        "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan"
+        "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
+        "Drift"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1392,6 +1404,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.tuplet = tupletFor((int) arpParam(n, apTuplet));
         ap.humanizeSpan = (int) arpParam(n, apHumanizeSpan);
         ap.humanVelSpan = (int) arpParam(n, apHumanVelSpan);
+        ap.drift = (int) arpParam(n, apDrift);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;
@@ -2557,7 +2570,7 @@ void KeysProcessor::migrateHumanSpans(const juce::ValueTree& root)
         return;
 
     for (int line = 0; line < numArpLines; ++line)
-        for (const auto which : { apHumanizeSpan, apHumanVelSpan })
+        for (const auto which : { apHumanizeSpan, apHumanVelSpan, apDrift })
         {
             const auto wanted = arpParamId(line, which);
             bool saw = false;

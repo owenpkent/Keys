@@ -495,8 +495,13 @@ private:
     // growing by a whole band.
     // humanSlider is the timing half and humanVelSlider the velocity half of what was one
     // Humanize control until 2026-08-02; see the macro row's H.TIME / H.VEL pair.
-    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider, humanVelSlider;
-    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel, humanVelLabel;
+    // driftSlider joined FEEL on 2026-08-14. It belongs beside Humanize rather than on the
+    // Draw page where it was asked for: Humanize is a *player* wandering (late and quieter,
+    // never early and never louder) and Drift is a *machine* wandering (either way, on the
+    // lanes that decide how a step plays), so the two are the same question asked twice. It
+    // also works on a plain shape, where there is no Draw page at all.
+    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider, humanVelSlider, driftSlider;
+    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel, humanVelLabel, driftLabel;
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
     int selectedLane = (int) ArpEngine::laneNote;
@@ -595,7 +600,7 @@ private:
     // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
     std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
-    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt, humanVelAtt;
+    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt, humanVelAtt, driftAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)
 };

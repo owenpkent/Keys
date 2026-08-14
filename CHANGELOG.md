@@ -5,6 +5,43 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Roll, Drift, and per-step odds that say what they are
+
+Owen: *"there should be, like, a more random feature in the drawing, like cthulu"* - three
+answers, because the ask splits three ways and they are different things.
+
+**Roll** sits in the lane-tab row on the Draw page and rerolls the lane you are *looking at*,
+straying from what is drawn by its own amount (5..100%: a nudge low down, a uniform scramble at
+100). Randomize on the Cards page stays and is the other kind - six lanes at once, to a musical
+recipe, for a part you did not have. Roll is what you reach for on a lane you already like.
+
+It is also a regression fix: Randomize used to sit in the action row directly under the grid,
+and paging the deep view put it on another page, so the lane and the button that rerolls it
+were never on screen together.
+
+**Drift** (`arpDrift`, appended, default 0) is the opposite of Roll in every way: it strays
+from the lanes *while it plays*, so the part never repeats exactly and the lane on screen never
+changes. It rides the FEEL group on the Play page beside Humanize, because the two are the same
+question asked twice - Humanize is a **player** wandering (late and quieter, never early and
+never louder) and Drift is a **machine** wandering (either way, evenly around the drawn value).
+
+The rule it rests on is one line: **drift changes how a step plays, never which note it
+plays.** Octave, velocity, gate, lateness and chance wander; Note, Ratchet, Harmony, Chord and
+**Transpose** do not. Transpose was in the drifting set for one build, and the new
+"pitches are unchanged" test caught it on pitch class - transpose moves by scale degrees, so it
+picks a different note however you look at it. Octave stays in, because whole octaves keep the
+pitch class.
+
+`ArpEngine::laneRanges` is now the one copy of what each lane can hold, shared by the grid that
+draws a lane, the reroll that randomizes one and the drift that strays from one. A
+`static_assert` ties the Chord lane's high end to `ChordTable::numSlots`.
+
+**The Prob lane is called Chance**, matching the CHANCE knob on the Play page that it
+multiplies with. Two names in two places for one idea was most of why per-step odds were not
+findable.
+
+Four new test cases (186 total, 3,033 checks).
+
 ### Changed: a line's deep view is three pages, and the window stops resizing
 
 Owen, looking at the un-paged view: *"when you click details it shouldn't resize the whole
