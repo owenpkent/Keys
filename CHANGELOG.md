@@ -5,6 +5,45 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a Rand lane, and mute stops eating your steps
+
+Owen: *"look at reference manuals"*. `Cthulhu_Manual_v1_1.pdf` is in the repo root and page 25
+says two things Keys had wrong.
+
+**Cthulhu's randomness is a lane, not a knob.** Its "Rand Sel" tab is a graph where you draw
+*how random each step is* - default centred (no randomising), above centre the output step may
+come out higher than the one assigned, below centre lower, and the size is how far. So step 3
+can be locked and step 7 wide open. Roll and Drift are both global; this is per-step, which is
+the whole point.
+
+`laneRand` is that lane, appended as lane 10, bipolar -8..+8, default 0. It is **the one
+randomness in Keys allowed to change which note plays**, and the reason is that you drew it on
+that step: it is intent, where Drift is a knob wandering over a part you did not aim at. It
+applies only to a fixed Note index - a Note lane of 0 means "follow the shape", and randomising
+the number zero would silently turn Up into a fixed entry.
+
+**Mute is its own lane** (`laneMute`, lane 11). It used to toggle the Note lane between -1 and
+0, which destroyed whatever that step held - and the manual names preserving it as the reason
+mute buttons exist at all: *"you can experiment with mutes, without losing the set-value of the
+steps, in case you wish to undo this action."* Note keeps its value now and the mute lane says
+whether the step is heard. A Note of -1 is still a *drawn* rest, which is a different thing and
+stays; Cthulhu has both too.
+
+The mute lane is the Note lane's companion rather than a polymetric lane of its own: it reads,
+writes and syncs at the Note lane's length. The engine wraps every lane read by that lane's own
+length, so if the two disagreed a mute drawn at step 20 of a 32-step pattern would read back
+modulo 8 and silence the wrong step. It gets no tab - the MUTE row under the grid has always
+been its editor, and a tab as well would be two ways to draw one lane.
+
+**Both are append-only.** A lane's index is what a saved session stores it under, so an older
+session simply has no child for 10 or 11 and reads back as `ArpPattern`'s defaults - inert,
+both of them. Old sessions' mutes are `-1`s in the Note lane and still play as rests,
+identically; they are not migrated, because a drawn rest and a mute are now different things
+and guessing which one an old `-1` meant would be inventing intent.
+
+Three new test cases (190 total, 3,560 checks).
+
+
 ### Fixed: a value at the edge of its lane ignored Roll and Drift
 
 Owen: *"0 value seems to ignore roll"*. Both built a window of
