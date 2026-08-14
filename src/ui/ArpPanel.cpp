@@ -83,9 +83,19 @@ int ArpPanel::LaneGrid::valueAtY(float y) const
     return juce::jlimit(loVal, hiVal, loVal + juce::roundToInt(frac * (float) (hiVal - loVal)));
 }
 
-void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e)
+// `step` < 0 means "work it out from x" - which only the initial press does. Every drag after
+// that passes the step the press landed on, so a drag edits **one** step and its horizontal
+// travel is ignored (2026-08-14, Owen: "when you're drawing, I don't want you to be able to
+// jump from step to step. I just want it to be for that one when you're moving up and down").
+//
+// Painting across steps is the right gesture for a mute row, where the value is a toggle and a
+// swipe means "all of these" - and MuteRow still does exactly that. It is the wrong one here,
+// where the value is a height: the pointer has to travel vertically to set it, and any drift
+// sideways on the way rewrote a neighbour you had already placed.
+void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e, int step)
 {
-    const int step = stepAtX(e.position.x);
+    if (step < 0)
+        step = stepAtX(e.position.x);
     const int value = valueAtY(e.position.y);
     processor.arpLine(owner.editLine()).lanes.value[(size_t) lane][(size_t) step].store(value, std::memory_order_relaxed);
     cursorPos = e.position;
@@ -108,7 +118,8 @@ void ArpPanel::LaneGrid::mouseDown(const juce::MouseEvent& e)
         return;
     }
     dragging = true;
-    paintStepFromMouse(e);
+    paintStep = stepAtX(e.position.x); // locked for the rest of this gesture
+    paintStepFromMouse(e, paintStep);
 }
 
 void ArpPanel::LaneGrid::mouseDrag(const juce::MouseEvent& e)
@@ -121,7 +132,7 @@ void ArpPanel::LaneGrid::mouseDrag(const juce::MouseEvent& e)
         owner.repaint();
         return;
     }
-    paintStepFromMouse(e); // continuous paint: every move updates the step under it
+    paintStepFromMouse(e, paintStep); // the step the press landed on, whatever x does now
 }
 
 void ArpPanel::LaneGrid::mouseUp(const juce::MouseEvent&)
@@ -582,8 +593,41 @@ void ArpPanel::cycleClockDiv()
     refreshLaneReadouts();
 }
 
+// With Link on, every lane shares the Note lane's length and speed - and this **enforces** it
+// rather than trusting nudgeLength to have done so (2026-08-14, Owen: "Sometimes the steps do
+// not match each other").
+//
+// nudgeLength writes all twelve when Link is on, which is correct and was never the problem.
+// The problem is lanes that were not there when it last ran: Rand, Mute and Chain were appended
+// on 2026-08-14 and arrive at ArpPattern's default 8, so a session whose other lanes are at 32
+// had three lanes a quarter the length of the rest and no way to tell - the grid draws each
+// lane at its own length, so they simply showed a different number of steps. A session saved
+// before any of them has the same hole.
+//
+// The Note lane is the authority because it is the one that has always existed and the one the
+// MUTE row is pinned to. Link off is polymeter and is left alone entirely, which is the whole
+// point of the switch.
+void ArpPanel::enforceLinkedLengths()
+{
+    if (processor.apvts.getRawParameterValue(paramId(KeysProcessor::apLinkLanes))->load() <= 0.5f)
+        return;
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps,
+                                 lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    const int div = juce::jlimit(0, 2,
+                                 lanes.clockDiv[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        if (lanes.length[(size_t) l].load(std::memory_order_relaxed) != len)
+            lanes.length[(size_t) l].store(len, std::memory_order_relaxed);
+        if (lanes.clockDiv[(size_t) l].load(std::memory_order_relaxed) != div)
+            lanes.clockDiv[(size_t) l].store(div, std::memory_order_relaxed);
+    }
+}
+
 void ArpPanel::refreshLaneReadouts()
 {
+    enforceLinkedLengths(); // before the readout, so it reports what the lanes now agree on
     const auto li = (size_t) selectedLane;
     const int len = processor.arpLine(editedLine).lanes.length[li].load(std::memory_order_relaxed);
     stepsReadout.setText(juce::String(len), juce::dontSendNotification);

@@ -292,7 +292,8 @@ public:
         int currentLength() const;
         int stepAtX(float x) const;
         int valueAtY(float y) const;
-        void paintStepFromMouse(const juce::MouseEvent&);
+        // step < 0 = take it from x (the press); otherwise edit that step alone (the drag).
+        void paintStepFromMouse(const juce::MouseEvent&, int step);
         juce::String cellText(int value) const;
 
         KeysProcessor& processor;
@@ -301,6 +302,7 @@ public:
         int loVal, hiVal;
         bool dragging = false;
         int selAnchor = 0; // where a Select drag started
+        int paintStep = 0; // the step a draw gesture is locked to
         juce::Point<float> cursorPos;
         int cursorValue = 0;
 
@@ -406,6 +408,9 @@ private:
     void nudgeLength(int delta); // selected lane, or every lane while Link is on
     void cycleClockDiv();
     void refreshLaneReadouts();
+    // Link on: push the Note lane's length and speed onto every other lane. See the definition
+    // for why nudgeLength doing it too is not enough.
+    void enforceLinkedLengths();
     void refreshPatternButtons();
     void recallOrCopy(int index);
     void launchSlot(int index);   // left-click on a slot card

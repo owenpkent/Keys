@@ -5,6 +5,30 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: lanes of different lengths, and a draw that slid sideways
+
+Owen: *"Sometimes the steps do not match each other"* and *"when you're drawing, I don't want
+you to be able to jump from step to step. I just want it to be for that one when you're moving
+up and down."*
+
+**Every lane shares a length again with Link on.** `nudgeLength` has always written all of them,
+which was never the problem - the problem is lanes that were not there when it last ran. Rand,
+Mute and Chain were appended on 2026-08-14 and arrive at `ArpPattern`'s default 8, so a pattern
+whose other lanes were at 16 or 32 had three lanes a fraction of the length of the rest, drawn
+as a different number of cells with nothing to say why. A session saved before any of them has
+the same hole. `ArpPanel::enforceLinkedLengths` now pushes the Note lane's length and speed onto
+every lane whenever the readouts refresh, so the repair happens on load and on every lane
+change rather than waiting for the next nudge. Link **off** is polymeter and is left alone
+entirely - that is the whole point of the switch.
+
+**A draw gesture edits one step.** `LaneGrid`'s drag painted whatever step was under the
+pointer, so a hand moving up to set a height and drifting sideways on the way rewrote the
+neighbours it crossed. The step is captured on the press and held for the rest of the gesture;
+horizontal travel is ignored. The MUTE row still paints across steps, and should: there the
+value is a toggle and a swipe means "all of these", where here it is a height that the pointer
+has to travel vertically to set.
+
+
 ### Added: a richer Note lane, a Chain lane, and a selection for the grid
 
 The three unbuilt ideas `docs/REFERENCES.md` ranked, built.
