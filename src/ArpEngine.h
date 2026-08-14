@@ -45,6 +45,58 @@ public:
     // arpeggiator even after the step lanes have been edited.
     static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0 };
 
+    // What each lane can hold, low and high. **One copy** (2026-08-14): the grid that draws a
+    // lane, the reroll that randomizes one and the drift that strays from one all need these,
+    // and three tables that must agree is three tables that will not. The numbers are the ones
+    // ArpPanel's lane rows were built with; ChordTable::numSlots for the Chord lane, since that
+    // is what it indexes.
+    struct LaneRange { int lo, hi; };
+    static constexpr LaneRange laneRanges[numLanes] = {
+        { -1, 8 },   // Note: -1 is a rest, 0..8 pick a sequence entry
+        { -3, 3 },   // Octave
+        { 10, 200 }, // Velocity, as a percentage of what was played
+        { 5, 200 },  // Gate
+        { 1, 4 },    // Ratchet
+        { 0, 100 },  // Chance, per step - multiplied by the line's own Chance knob
+        { -7, 7 },   // Transpose, in scale degrees
+        { 0, 90 },   // Late, as a percentage of the step
+        { 0, 7 },    // Harmony
+        { 0, 12 },   // Chord: 0 is off, 1..12 call up that slot's chord
+    };
+    static LaneRange laneRange(int lane) noexcept
+    {
+        // ChordTable is declared below this point, so its count cannot appear in the
+        // initializer above - a static-member initializer is not delayed the way a member
+        // function body is. Asserting it here, where the body *is* delayed, is what keeps the
+        // literal 12 honest if the table ever grows.
+        static_assert(laneRanges[laneChord].hi == ChordTable::numSlots,
+                      "the Chord lane's range must be the number of slots it indexes");
+        return laneRanges[(size_t) juce::jlimit(0, numLanes - 1, lane)];
+    }
+
+    // Which lanes **Drift** is allowed to touch (2026-08-14, Owen: "there should be, like, a
+    // more random feature in the drawing, like cthulu"). The rule is one line and it is the
+    // whole design: **drift changes how a step plays, never which note it plays.** So the feel
+    // lanes wander - octave, velocity, gate, lateness, transpose, chance - and the four that
+    // choose *content* do not: Note picks the sequence entry, Ratchet subdivides it, Harmony
+    // adds a voice and Chord calls up a whole chord, and a knob that quietly rewrote any of
+    // those would be editing your part rather than performing it.
+    //
+    // Same split the chord generator already draws between Lean (which notes) and the voicing
+    // passes (where they sit), and it is why Drift can be one knob instead of ten.
+    static constexpr bool laneDrifts[numLanes] = {
+        false, // Note
+        true,  // Octave
+        true,  // Velocity
+        true,  // Gate
+        false, // Ratchet
+        true,  // Chance
+        true,  // Transpose
+        true,  // Late
+        false, // Harmony
+        false, // Chord
+    };
+
     // The Hz mode's range, which is not a round number by choice: it is exactly what the
     // eleven synced divisions span at 120 bpm. "1/64" is 32 steps a second and "16 bars" is
     // one step per 32 seconds, so a Hz mode narrower than this would reach less than the

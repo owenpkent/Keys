@@ -589,9 +589,13 @@ void ArpPanel::refreshShape()
     groups[2].visible = pattern;
 
     // Voice rides the STEPS group's own gate plus the Harmony lane; see selectLane() for the
-    // other half of this condition.
+    // other half of this condition. Roll is not lane-contextual - it acts on whichever lane is
+    // showing - so it follows the step editor alone.
     const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
     voiceButton.setVisible(voiceOn);
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &rollButton, &rollMinus, &rollReadout, &rollPlus })
+        c->setVisible(pattern);
 
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
     // a thing you do as launching one through an edited pattern, and hiding the row was what
@@ -1958,7 +1962,11 @@ void ArpPanel::buildControls()
     buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate", 5, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet", 1, 4);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Prob", 0, 100);
+    // "Chance", not "Prob" (2026-08-14). The knob on the Play page is called CHANCE and the two
+    // multiply together, so one word for one idea: a lane at 60 under a knob at 100 fires six
+    // times in ten. Owen asked for per-step odds to be findable, and two names for the same
+    // thing in two places is most of why they were not.
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance", 0, 100);
     // The 2026-07-30 four. "Prob" above shortened with them: ten tabs share the width six
     // used to, and "Probability" is the only old label that will not fit at that size.
     buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose", -7, 7);
@@ -2145,6 +2153,25 @@ void ArpPanel::buildControls()
     addChildComponent(voiceButton);
     refreshVoiceButton();
 
+    // Roll, and how far it may stray. Its own steppers rather than a slider, for the reason the
+    // rate's and the note count's have: a slider is a drag, and the mouse-only contract wants a
+    // click-only path to every value.
+    rollButton.setTitle("Roll lane");
+    rollButton.setTooltip("Reroll the lane you are looking at, straying from what is drawn by "
+                          "the amount beside this. 100 is a full scramble.");
+    rollButton.onClick = [this] { rollSelectedLane(); };
+    addChildComponent(rollButton);
+    rollMinus.setTitle("Less roll");
+    rollPlus.setTitle("More roll");
+    rollMinus.onClick = [this] { nudgeRollAmount(-5); };
+    rollPlus.onClick = [this] { nudgeRollAmount(5); };
+    addChildComponent(rollMinus);
+    addChildComponent(rollPlus);
+    rollReadout.setJustificationType(juce::Justification::centred);
+    rollReadout.setFont(juce::Font(juce::FontOptions(13.0f)));
+    addChildComponent(rollReadout);
+    rollReadout.setText(juce::String(rollAmount) + "%", juce::dontSendNotification);
+
     // One macro card per line, hidden until the All view asks for them. Built once and kept,
     // so their attachments never churn: each one is bound to its own line for good.
     //
@@ -2211,7 +2238,8 @@ void ArpPanel::buildPageLists()
         pageSlots.push_back(&clockDivPlus[(size_t) i]);
     }
 
-    pageSteps = { &muteRowLabel, &voiceButton };
+    pageSteps = { &muteRowLabel, &voiceButton,
+                  &rollButton, &rollMinus, &rollReadout, &rollPlus };
     if (muteRow != nullptr)
         pageSteps.push_back(muteRow.get());
     for (auto& lr : laneRows)
@@ -2354,6 +2382,23 @@ void ArpPanel::refreshClockDivReadouts()
         const int v = engine.rhythmDiv[(size_t) i].load(std::memory_order_relaxed);
         clockDivReadouts[(size_t) i].setText(v == 0 ? "Off" : juce::String(v), juce::dontSendNotification);
     }
+}
+
+void ArpPanel::nudgeRollAmount(int delta)
+{
+    rollAmount = juce::jlimit(5, 100, rollAmount + delta);
+    rollReadout.setText(juce::String(rollAmount) + "%", juce::dontSendNotification);
+}
+
+// Rerolls the lane on screen and repaints its grid. No audition and no undo - the grid shows
+// the result immediately, and clicking again is how you reject one, which is the same deal
+// Randomize has always offered.
+void ArpPanel::rollSelectedLane()
+{
+    processor.rerollArpLane(editLine(), selectedLane, rollAmount);
+    refreshLaneReadouts();
+    if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
+        g->repaint();
 }
 
 void ArpPanel::refreshVoiceButton()
@@ -2987,9 +3032,20 @@ void ArpPanel::resized()
     // under the mouse-only floor - the same trap logged for the Reroll button and the
     // note-count steppers, and the fix is the same one every time: give the target the cell
     // rather than fitting the target into what is left of it.
+    // Right to left: Voice, then Roll's stepper, then Roll. All three take the row's whole
+    // 34 px and all three are reserved unconditionally, so the ten tabs never resize under the
+    // mouse - 268 px out of ~1830 still leaves each tab around 145, well over its 70 floor.
     auto voiceCell = tabsRow.removeFromRight(112);
     tabsRow.removeFromRight(8);
     voiceButton.setBounds(voiceCell);
+
+    auto rollAmtCell = tabsRow.removeFromRight(102);
+    tabsRow.removeFromRight(6);
+    rollMinus.setBounds(rollAmtCell.removeFromLeft(34));
+    rollPlus.setBounds(rollAmtCell.removeFromRight(34));
+    rollReadout.setBounds(rollAmtCell);
+    rollButton.setBounds(tabsRow.removeFromRight(62));
+    tabsRow.removeFromRight(8);
 
     const int tabW = juce::jmax(70, (tabsRow.getWidth() - (ArpEngine::numLanes - 1) * 4) / ArpEngine::numLanes);
     for (auto& lr : laneRows)

@@ -2261,6 +2261,39 @@ void KeysProcessor::randomizeActiveArpPattern(int line)
     }
 }
 
+void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct)
+{
+    // Reroll **one** lane, by an amount (2026-08-14, Owen: "there should be, like, a more
+    // random feature in the drawing, like cthulu"). randomizeActiveArpPattern above is the
+    // other kind and stays: it writes six lanes at once to a musical recipe, which is a way to
+    // get a whole part you did not have. This is the one you reach for while looking at a lane
+    // you already like - so it is scoped to that lane, and `amountPct` is how far it may stray
+    // from what is drawn rather than an all-or-nothing reroll.
+    //
+    // At 100 the draw is uniform across the lane's whole range, which is the scramble; below
+    // that it is a nudge around each step's current value. Either way it only ever writes
+    // inside laneRange, so no reroll can put a value in a lane that the lane cannot hold.
+    const auto lane = juce::jlimit(0, ArpEngine::numLanes - 1, laneIndex);
+    const auto range = ArpEngine::laneRange(lane);
+    const int span = range.hi - range.lo;
+    if (span <= 0)
+        return;
+    const double amt = juce::jlimit(0, 100, amountPct) / 100.0;
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
+    // Its own length, not maxSteps: rerolling past the end would quietly rewrite steps the
+    // pattern is not playing, and they would appear later if the length ever grew.
+    const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) lane].load());
+    for (int s = 0; s < len; ++s)
+    {
+        const int cur = lanes.value[(size_t) lane][(size_t) s].load();
+        const double reach = span * amt;
+        const double lo = amt >= 1.0 ? range.lo : cur - reach * 0.5;
+        const double hi = amt >= 1.0 ? range.hi : cur + reach * 0.5;
+        const int v = (int) std::lround(lo + rng.nextDouble() * (hi - lo));
+        lanes.value[(size_t) lane][(size_t) s].store(juce::jlimit(range.lo, range.hi, v));
+    }
+}
+
 bool KeysProcessor::applyEuclidToActiveArpPattern(int line, int hits, int steps, int rotation, int laneIndex)
 {
     // Only the probability lane has a meaningful hit/rest mapping (100 fires the step as
