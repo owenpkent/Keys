@@ -1,4 +1,5 @@
 #include "../src/ArpEngine.h"
+#include "../src/EuclidGen.h"
 #include <juce_core/juce_core.h>
 
 namespace keys::tests
@@ -1682,6 +1683,266 @@ public:
             b.process(pat, clock, block, chordOn({ 60 }), ob);
             expect(collect(oa).empty(), "A's first step is muted");
             expect(! collect(ob).empty(), "B's is not");
+        }
+
+        // --- EuclidGen.h: pure, header-only, no engine involved -------------------------
+
+        beginTest("euclid: E(3,8) is the tresillo x..x..x.");
+        {
+            const bool expected[8] = { true, false, false, true, false, false, true, false };
+            for (int i = 0; i < 8; ++i)
+                expectEquals((int) keys::euclidHit(i, 3, 8, 0), (int) expected[i],
+                             "step " + juce::String(i));
+        }
+
+        beginTest("euclid: E(5,8)");
+        {
+            const bool expected[8] = { true, false, true, false, true, true, false, true };
+            for (int i = 0; i < 8; ++i)
+                expectEquals((int) keys::euclidHit(i, 5, 8, 0), (int) expected[i],
+                             "step " + juce::String(i));
+        }
+
+        beginTest("euclid: E(4,16) is evenly spaced every 4 steps");
+        {
+            for (int i = 0; i < 16; ++i)
+                expectEquals((int) keys::euclidHit(i, 4, 16, 0), (int) (i % 4 == 0 ? 1 : 0),
+                             "step " + juce::String(i));
+        }
+
+        beginTest("euclid: rotation wraps, including negative rotation");
+        {
+            // A rotated hit at i must equal the unrotated hit at (i + rotation) mod steps -
+            // checked against a plain modulo computed in the test, independent of the
+            // implementation's own wrap.
+            for (int rot = -20; rot <= 20; ++rot)
+                for (int i = 0; i < 8; ++i)
+                {
+                    const int j = ((i + rot) % 8 + 8) % 8;
+                    expectEquals((int) keys::euclidHit(i, 3, 8, rot), (int) keys::euclidHit(j, 3, 8, 0),
+                                 "rotation " + juce::String(rot) + " at step " + juce::String(i));
+                }
+        }
+
+        beginTest("euclid: degenerate hits=0 and hits=steps (and hits>steps clamps)");
+        {
+            for (int i = 0; i < 8; ++i)
+            {
+                expect(! keys::euclidHit(i, 0, 8, 0), "hits=0 is silence");
+                expect(keys::euclidHit(i, 8, 8, 0), "hits=steps is every step");
+                expect(keys::euclidHit(i, 99, 8, 0), "hits>steps clamps to steps");
+            }
+        }
+
+        // --- Rhythm dividers (ArpEngine::dividerFires / firedCountBefore, and process()) -
+
+        beginTest("firedCountBefore matches a brute-force count, for several divisor sets");
+        {
+            auto bruteForce = [](long long g, const std::array<int, 4>& divs) -> long long
+            {
+                long long count = 0;
+                for (long long k = 0; k < g; ++k)
+                    if (ArpEngine::dividerFires(k, divs))
+                        ++count;
+                return count;
+            };
+            const std::array<std::array<int, 4>, 5> sets { {
+                { 3, 0, 0, 0 },
+                { 3, 4, 0, 0 },
+                { 2, 3, 5, 0 },
+                { 4, 6, 0, 0 },
+                { 3, 5, 7, 11 },
+            } };
+            for (const auto& divs : sets)
+                for (const long long g : { 0LL, 1LL, 5LL, 16LL, 37LL, 100LL })
+                    expectEquals(ArpEngine::firedCountBefore(g, divs), bruteForce(g, divs),
+                                 "divs mismatch at g=" + juce::String(g));
+        }
+
+        beginTest("rhythm dividers all zero: bit-identical to the feature never existing");
+        {
+            ArpEngine e1, e2;
+            e1.prepare(sr);
+            e2.prepare(sr);
+            e2.rhythmDiv[0].store(0);
+            e2.rhythmDiv[1].store(0);
+            e2.rhythmDiv[2].store(0);
+            e2.rhythmDiv[3].store(0); // explicit zero, rather than relying on the default
+            for (int i = 0; i < 4; ++i)
+            {
+                juce::MidiBuffer in = (i == 0) ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer o1, o2;
+                clock.ppq = 0.25 * i;
+                e1.process(p, clock, block, in, o1);
+                e2.process(p, clock, block, in, o2);
+                auto ev1 = collect(o1);
+                auto ev2 = collect(o2);
+                expectEquals((int) ev1.size(), (int) ev2.size(), "same event count block " + juce::String(i));
+                for (size_t k = 0; k < ev1.size() && k < ev2.size(); ++k)
+                {
+                    expectEquals(ev1[k].note, ev2[k].note, "same note");
+                    expectEquals(ev1[k].sample, ev2[k].sample, "same sample offset");
+                    expect(ev1[k].on == ev2[k].on, "same on/off");
+                }
+            }
+        }
+
+        beginTest("rhythm dividers {3,4}: fires only on multiples, lanes advance one step per fire");
+        {
+            // Eight-note chord, note lane holding a distinct fixed index per step (1..8), so
+            // the *pitch* that comes out names which lane slot was read. If lane reads used
+            // the raw (uncompressed) step index, the sequence below would repeat and jump
+            // around instead of climbing 60..67 in order.
+            ArpEngine e;
+            e.prepare(sr);
+            e.rhythmDiv[0].store(3);
+            e.rhythmDiv[1].store(4);
+            auto dp = p;
+            dp.usePattern = true;
+            for (int s = 0; s < 8; ++s)
+                e.lanes.value[ArpEngine::laneNote][(size_t) s].store(s + 1); // fixed index 1..8
+            e.lanes.length[ArpEngine::laneNote].store(8);
+
+            std::vector<int> firedNotes;
+            for (int g = 0; g < 16; ++g)
+            {
+                juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 61, 62, 63, 64, 65, 66, 67 }) : juce::MidiBuffer {};
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * g;
+                e.process(dp, clock, block, in, out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        firedNotes.push_back(ev.note);
+            }
+            // Multiples of 3 or 4 in [0, 16): 0, 3, 4, 6, 8, 9, 12, 15 - eight boundaries.
+            expectEquals((int) firedNotes.size(), 8, "exactly the multiples of 3 or 4 fire");
+            for (size_t i = 0; i < firedNotes.size(); ++i)
+                expectEquals(firedNotes[i], 60 + (int) i,
+                             "fire " + juce::String((int) i) + " reads the lane at its compressed index");
+        }
+
+        beginTest("rhythm dividers: statelessness across a transport jump");
+        {
+            // A fresh engine started deep in the timeline must read the same relative pattern
+            // as one started at zero - firedCountBefore is a function of g alone, so a jump
+            // self-corrects instead of needing every step since 0 to have been walked.
+            auto runFromZero = [&](double startPpq) -> std::vector<int>
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                e.rhythmDiv[0].store(3);
+                e.rhythmDiv[1].store(4);
+                auto dp = p;
+                dp.usePattern = true;
+                for (int s = 0; s < 8; ++s)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) s].store(s + 1);
+                e.lanes.length[ArpEngine::laneNote].store(8);
+
+                std::vector<int> firedNotes;
+                for (int g = 0; g < 24 && (int) firedNotes.size() < 8; ++g)
+                {
+                    juce::MidiBuffer in = (g == 0) ? chordOn({ 60, 61, 62, 63, 64, 65, 66, 67 })
+                                                    : juce::MidiBuffer {};
+                    juce::MidiBuffer out;
+                    clock.ppq = startPpq + 0.25 * g;
+                    e.process(dp, clock, block, in, out);
+                    for (auto& ev : collect(out))
+                        if (ev.on)
+                            firedNotes.push_back(ev.note);
+                }
+                return firedNotes;
+            };
+
+            const auto fromZero = runFromZero(0.0);
+            const auto fromDeep = runFromZero(400.0); // beat 400 = raw step 1600
+            expectEquals((int) fromZero.size(), 8, "collected 8 fires from zero");
+            expectEquals((int) fromDeep.size(), 8, "collected 8 fires from deep in the timeline");
+            for (int i = 0; i < 8 && i < (int) fromZero.size() && i < (int) fromDeep.size(); ++i)
+                expectEquals(fromZero[(size_t) i], fromDeep[(size_t) i],
+                             "fire " + juce::String(i) + " matches regardless of start position");
+        }
+
+        // --- Subharmonic harmony mode -----------------------------------------------------
+
+        beginTest("harmonyMode 0 (default) is unchanged: a chord tone above");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto hp = p;
+            hp.usePattern = true;
+            e.lanes.value[ArpEngine::laneHarmony][0].store(1); // one chord tone above
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(hp, clock, block, chordOn({ 60, 64 }), out);
+            int sawMain = 0, sawHarmony = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                {
+                    if (ev.note == 60) ++sawMain;
+                    if (ev.note == 64) ++sawHarmony;
+                }
+            expectEquals(sawMain, 1, "the played note fires");
+            expectEquals(sawHarmony, 1, "a chord tone above it fires too");
+        }
+
+        beginTest("harmonyMode 1: h=0 emits nothing extra");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto hp = p;
+            hp.usePattern = true;
+            e.harmonyMode.store(1);
+            e.lanes.value[ArpEngine::laneHarmony][0].store(0); // off
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(hp, clock, block, chordOn({ 60 }), out);
+            int ons = 0;
+            for (auto& ev : collect(out))
+                if (ev.on) ++ons;
+            expectEquals(ons, 1, "only the main voice");
+        }
+
+        beginTest("harmonyMode 1: h=3 adds a voice at -24 semitones (the undertone f/4)");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto hp = p;
+            hp.usePattern = true;
+            e.harmonyMode.store(1);
+            e.lanes.value[ArpEngine::laneHarmony][0].store(3);
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(hp, clock, block, chordOn({ 72 }), out);
+            int sawMain = 0, sawSub = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                {
+                    if (ev.note == 72) ++sawMain;
+                    if (ev.note == 48) ++sawSub; // 72 - 24
+                }
+            expectEquals(sawMain, 1, "the played note fires");
+            expectEquals(sawSub, 1, "the subharmonic voice fires at -24");
+        }
+
+        beginTest("harmonyMode 1: a voice that clamps onto the played note is dropped, not wrapped");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto hp = p;
+            hp.usePattern = true;
+            e.harmonyMode.store(1);
+            e.lanes.value[ArpEngine::laneHarmony][0].store(7); // -36 semitones
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(hp, clock, block, chordOn({ 0 }), out); // already at the MIDI floor
+            int ons = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                {
+                    ++ons;
+                    expectEquals(ev.note, 0, "no note wraps to a high pitch");
+                }
+            expectEquals(ons, 1, "the collapsed voice is dropped, leaving only the main note");
         }
     }
 };

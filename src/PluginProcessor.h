@@ -284,6 +284,11 @@ public:
     void recallArpPattern(int index, int line = 0);    // snapshot slot -> lanes, becomes active
     void copyArpPattern(int from, int to, int line = 0); // whole-pattern copy (the no-modifier answer)
     void randomizeActiveArpPattern(int line = 0);
+    // Writes a Euclidean rhythm (EuclidGen.h) into one lane of the active pattern: 100 on a
+    // hit, 0 on a rest, and sets that lane's length to `steps`. Only the probability lane has
+    // a meaningful hit/rest mapping today - anything else returns false and writes nothing.
+    bool applyEuclidToActiveArpPattern(int line, int hits, int steps, int rotation,
+                                        int laneIndex = ArpEngine::laneProbability);
 
     // Launch a slot: recall its pattern, apply the shape and rate it remembers, and hold
     // its chord into the arp. That is the whole "pass a card into the arpeggiator" gesture
@@ -443,6 +448,11 @@ public:
         bool rateFree = false;
         float rateHz = 8.0f;
         int bars = 1;    // how long the chain holds this slot before moving on
+        // Subharmonicon-style rhythm dividers (2026-08-14), stored with the slot the same way
+        // the lanes are: 1..16, 0 = off, default all off so an old session reads back inert.
+        std::array<int, 4> rhythmDivs { 0, 0, 0, 0 };
+        // 0 = chord tones (default, today's Harmony lane), 1 = subharmonic.
+        int harmonyMode = 0;
     };
     const ArpPattern& arpPatternSlot(int index, int line = 0) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern, int line = 0); // refreshes live lanes too if index == active
