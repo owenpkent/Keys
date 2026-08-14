@@ -563,6 +563,24 @@ private:
     juce::TextButton voiceButton;
     void refreshVoiceButton();
 
+    // Reroll, on the Draw page (2026-08-14, Owen: "there should be, like, a more random feature
+    // in the drawing, like cthulu"). Acts on the lane you are *looking at*, which is the half
+    // that makes it different from Randomize on the Cards page - that one writes six lanes to a
+    // musical recipe, this one strays from the one lane in front of you by `rollAmount`.
+    //
+    // It is also the fix for a regression: Randomize used to sit in the action row directly
+    // under the lane grid, and paging the deep view put it on another page, so the lane and the
+    // button that rerolls it were never on screen together.
+    //
+    // `rollAmount` is panel state, not a parameter - the same call Euclid's three steppers make.
+    // Nothing it does is heard until you click Roll, so there is nothing for a host to automate.
+    juce::TextButton rollButton { "Roll" };
+    juce::TextButton rollMinus { "-" }, rollPlus { "+" };
+    juce::Label rollReadout;
+    int rollAmount = 35; // percent of the lane's range; 100 is a uniform scramble
+    void nudgeRollAmount(int delta);
+    void rollSelectedLane();
+
     // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
     // mouse-only contract wants a left-click path for everything). Both arm: click the
     // button, then click the slot. One state, not two flags, so arming one disarms the
