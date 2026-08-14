@@ -333,6 +333,40 @@ void ArpPanel::takeChordOnLine(int line, const chorddrag::Payload& p)
     setEditLine(line, /*leaveMacroView*/ false);
 }
 
+// The panel as a whole is a drop target for a chord card. It hands the chord to the line the
+// panel is *editing*, which is the only line it could mean: in the All view a macro card is
+// under the pointer and wins, and on the Cards page a slot card does.
+bool ArpPanel::isInterestedInDragSource(const SourceDetails& details)
+{
+    auto* p = chorddrag::chordBeingDragged(details);
+    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+}
+
+void ArpPanel::itemDragEnter(const SourceDetails&) { panelDropTarget = true; repaint(); }
+void ArpPanel::itemDragExit(const SourceDetails&) { panelDropTarget = false; repaint(); }
+
+void ArpPanel::itemDropped(const SourceDetails& details)
+{
+    panelDropTarget = false;
+    repaint();
+    if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
+    {
+        takeChordOnLine(editLine(), *p);
+        p->taken = true;
+    }
+}
+
+// The whole card outlined while a chord is over it, so "anywhere on here" is visible rather
+// than something you have to be told. Drawn over the children for the reason MacroRow's scrim
+// is: the controls sit on top of the card and would otherwise cover the edge of it.
+void ArpPanel::paintOverChildren(juce::Graphics& g)
+{
+    if (! panelDropTarget)
+        return;
+    g.setColour(skin::accentOf(*this).base);
+    g.drawRoundedRectangle(cardBounds().toFloat().reduced(1.0f), skin::panelRadius, 2.0f);
+}
+
 juce::String ArpPanel::paramId(KeysProcessor::ArpParam which) const
 {
     return KeysProcessor::arpParamId(editLine(), which);
@@ -595,7 +629,7 @@ void ArpPanel::refreshShape()
     const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
     voiceButton.setVisible(voiceOn);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &rollButton, &rollMinus, &rollReadout, &rollPlus })
+             &rollButton, &resetButton, &rollMinus, &rollReadout, &rollPlus })
         c->setVisible(pattern);
 
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
@@ -2167,6 +2201,12 @@ void ArpPanel::buildControls()
                           "the amount beside this. 100 is a full scramble.");
     rollButton.onClick = [this] { rollSelectedLane(); };
     addChildComponent(rollButton);
+    resetButton.setTitle("Reset lane");
+    resetButton.setTooltip("Put this lane back to its default across its whole length - the "
+                           "state it is in before you touch it. The way back from a Roll you "
+                           "did not want.");
+    resetButton.onClick = [this] { resetSelectedLane(); };
+    addChildComponent(resetButton);
     rollMinus.setTitle("Less roll");
     rollPlus.setTitle("More roll");
     rollMinus.onClick = [this] { nudgeRollAmount(-5); };
@@ -2246,7 +2286,7 @@ void ArpPanel::buildPageLists()
     }
 
     pageSteps = { &muteRowLabel, &voiceButton,
-                  &rollButton, &rollMinus, &rollReadout, &rollPlus };
+                  &rollButton, &resetButton, &rollMinus, &rollReadout, &rollPlus };
     if (muteRow != nullptr)
         pageSteps.push_back(muteRow.get());
     for (auto& lr : laneRows)
@@ -2403,6 +2443,14 @@ void ArpPanel::nudgeRollAmount(int delta)
 void ArpPanel::rollSelectedLane()
 {
     processor.rerollArpLane(editLine(), selectedLane, rollAmount);
+    refreshLaneReadouts();
+    if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
+        g->repaint();
+}
+
+void ArpPanel::resetSelectedLane()
+{
+    processor.resetArpLane(editLine(), selectedLane);
     refreshLaneReadouts();
     if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
         g->repaint();
@@ -3053,6 +3101,8 @@ void ArpPanel::resized()
     rollPlus.setBounds(rollAmtCell.removeFromRight(34));
     rollReadout.setBounds(rollAmtCell);
     rollButton.setBounds(tabsRow.removeFromRight(62));
+    tabsRow.removeFromRight(4);
+    resetButton.setBounds(tabsRow.removeFromRight(66));
     tabsRow.removeFromRight(8);
 
     const int tabW = juce::jmax(70, (tabsRow.getWidth() - (ArpEngine::numLanes - 1) * 4) / ArpEngine::numLanes);

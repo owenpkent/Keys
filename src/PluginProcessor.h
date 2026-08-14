@@ -288,6 +288,9 @@ public:
     // a nudge low down, a uniform scramble at 100. The per-lane twin of the whole-pattern
     // randomize above; see the definition for why both exist.
     void rerollArpLane(int line, int laneIndex, int amountPct);
+    // Put one lane back to its default across its whole length - the state a lane that has
+    // never been touched is in. The way back from a reroll, since Keys has no undo anywhere.
+    void resetArpLane(int line, int laneIndex);
     // Writes a Euclidean rhythm (EuclidGen.h) into one lane of the active pattern: 100 on a
     // hit, 0 on a rest, and sets that lane's length to `steps`. Only the probability lane has
     // a meaningful hit/rest mapping today - anything else returns false and writes nothing.

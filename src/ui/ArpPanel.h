@@ -37,6 +37,7 @@ namespace keys
 // on the message thread and read on the audio thread; no locking, so every edit is a
 // direct store(). Globals are ordinary APVTS-attached controls.
 class ArpPanel : public juce::Component,
+                 public juce::DragAndDropTarget,
                  private juce::Timer
 {
 public:
@@ -108,6 +109,22 @@ public:
     // JUCE's own `findTarget` does, so the behaviour survived the deletion.
     void takeChordOnSlot(int slot, const chorddrag::Payload&);
     void takeChordOnLine(int line, const chorddrag::Payload&);
+
+    // **The panel itself takes a chord, anywhere on it** (2026-08-14, Owen: "need to be able to
+    // drag chords to not just the main arp window"). Paging the deep view is what made this
+    // necessary: the slot cards moved to the Cards page and the macro cards only exist in the
+    // All view, so on Play or Draw the only target left was a 40 px letter on the bar.
+    //
+    // JUCE walks *up* from whatever is under the point, so this catches every pixel of the
+    // panel that a more specific target does not - a slot card still wins on the Cards page,
+    // and a macro card still wins in the All view, because they are deeper in the tree. That
+    // is the same forgiveness RangeKnob's margin gives its satellite: aim if you like, or drop
+    // on the panel and let it land on the line you are editing.
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDragEnter(const SourceDetails&) override;
+    void itemDragExit(const SourceDetails&) override;
+    void itemDropped(const SourceDetails&) override;
+    void paintOverChildren(juce::Graphics&) override;
 
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -439,6 +456,10 @@ private:
     // there are two rows to show and no reason to draw a full-height empty box.
     juce::Rectangle<int> cardBounds() const;
 
+    // Is a chord card hovering over the panel right now? Drawn as an outline round the
+    // whole card in paintOverChildren, so "drop anywhere" is visible.
+    bool panelDropTarget = false;
+
     bool inlineMode = false;
     // The line every control on this panel is bound to. Seeded from the processor, which is
     // where it lives (the panel is destroyed every time the section folds).
@@ -580,11 +601,17 @@ private:
     // `rollAmount` is panel state, not a parameter - the same call Euclid's three steppers make.
     // Nothing it does is heard until you click Roll, so there is nothing for a host to automate.
     juce::TextButton rollButton { "Roll" };
+    // Roll is destructive and Keys has no undo anywhere, so it needs a way back. Reset writes
+    // the lane's own default (ArpEngine::laneDefaults) across its whole length, which is the
+    // state a lane that has never been touched is in - so "Reset then Roll" is repeatable, and
+    // a roll you did not like costs one click rather than a redraw.
+    juce::TextButton resetButton { "Reset" };
     juce::TextButton rollMinus { "-" }, rollPlus { "+" };
     juce::Label rollReadout;
     int rollAmount = 35; // percent of the lane's range; 100 is a uniform scramble
     void nudgeRollAmount(int delta);
     void rollSelectedLane();
+    void resetSelectedLane();
 
     // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
     // mouse-only contract wants a left-click path for everything). Both arm: click the

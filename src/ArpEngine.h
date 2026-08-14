@@ -63,6 +63,27 @@ public:
         { 0, 7 },    // Harmony
         { 0, 12 },   // Chord: 0 is off, 1..12 call up that slot's chord
     };
+    // Stray from `value` by up to `reach`, staying inside `r`. `u01` is a draw in [0, 1).
+    //
+    // **The window slides; the result is never clamped** (2026-08-14, Owen: "0 value seems to
+    // ignore roll"). Both Roll and Drift used to build [value - reach/2, value + reach/2] and
+    // clamp whatever came out, which is fine in the middle of a lane and broken at its edges:
+    // a lane sitting at 0 (Late, Harmony and Chord all default there, and Chance sits at its
+    // *top*) had half of every draw fall outside the range and clamp straight back to the value
+    // it started from. So half the steps did not move and the rest only moved one way, which is
+    // exactly what "seems to ignore" looks like. Sliding the window keeps the full width of the
+    // draw wherever the value sits, and only narrows it if the reach is wider than the lane.
+    static int strayWithin(int value, double reach, LaneRange r, double u01) noexcept
+    {
+        double lo = (double) value - reach * 0.5;
+        double hi = (double) value + reach * 0.5;
+        if (lo < r.lo) { hi += (double) r.lo - lo; lo = (double) r.lo; }
+        if (hi > r.hi) { lo -= hi - (double) r.hi; hi = (double) r.hi; }
+        lo = juce::jmax(lo, (double) r.lo); // both, for a reach wider than the whole lane
+        hi = juce::jmin(hi, (double) r.hi);
+        return juce::jlimit(r.lo, r.hi, (int) std::llround(lo + u01 * (hi - lo)));
+    }
+
     static LaneRange laneRange(int lane) noexcept
     {
         // ChordTable is declared below this point, so its count cannot appear in the
@@ -820,9 +841,8 @@ private:
         // one-sided (late and quieter, never early and never louder) because it models a
         // player. Drift models a *machine* wandering, and a wander has no preferred direction.
         const auto r = laneRange(l);
-        const double reach = (double) (r.hi - r.lo) * (amt / 100.0) * 0.5;
-        const double u = (double) (rng() % 2001u) / 1000.0 - 1.0; // -1..+1
-        return juce::jlimit(r.lo, r.hi, (int) std::llround((double) v + u * reach));
+        const double reach = (double) (r.hi - r.lo) * (amt / 100.0);
+        return strayWithin(v, reach, r, (double) (rng() % 1000u) / 1000.0);
     }
 
     // Walk `degrees` scale steps from `note`, using the mask of in-scale pitch classes. A
