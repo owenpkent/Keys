@@ -722,7 +722,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 - **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip -
   now Tuplet - and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
   window width, so two more 34 px targets in it would have driven the eight knobs under the
-  mouse-only minimum - the row took a `arpMacroSubRow` strip at the bottom instead, removed
+  mouse-only minimum - the row took a sub-row strip (`arpMacroMods`, 34 px) at the bottom instead, removed
   *before* the main line is laid out so nothing above it moved. Height is the cheap axis in this
   view since line C went; width is the expensive one. Note **PLAY and Light keys are unrelated
   controls with similar names**: `arpKeys` routes the keybed *into* a line, `layout.arpLights`

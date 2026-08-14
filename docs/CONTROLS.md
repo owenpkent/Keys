@@ -779,11 +779,12 @@ follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
 The **Mute** row under the grid silences individual steps without disturbing their
 values, so you can take a step out and put it back unchanged.
 
-**Voice** appears beside Steps and Link, but only while the **Harmony** tab is the one
-selected - it is the panel's first control that depends on which lane you are looking at.
+**Voice** appears in its own row under Steps and Speed/Link, but only while the **Harmony**
+tab is the one selected - it is the panel's first control that depends on which lane you are
+looking at.
 Reads "Chord": the Harmony lane's second voice plays chord tones above the note the step
 plays, same as it always has. Click it and it reads "Sub": the second voice plays the
-subharmonic series below the root instead, an undertone rather than an overtone. Off is
+subharmonic series below that same note instead, an undertone rather than an overtone. Off is
 "Chord" - a session that never touches Voice cannot tell it exists.
 
 ### Euclid and Clocks

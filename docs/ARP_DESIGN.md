@@ -703,11 +703,11 @@ regardless of which is open (the closed one just gets a zero-width row, which is
 since its components are invisible too). Euclid is gated to Pattern shape, since it writes
 into a lane that only exists there, and closes its own strip if Shape leaves Pattern out from
 under it; Clocks stays open in every shape, since the dividers act regardless of what Shape
-draws. Voice, beside it in the shared Steps/Speed/Link row, is the panel's first
-**lane-contextual** control - visible only with the Harmony lane itself selected, which
+draws. Voice, in a third row of the STEPS group below Steps and Speed/Link, is the panel's
+first **lane-contextual** control - visible only with the Harmony lane itself selected, which
 needed a visibility rule of its own (`refreshShape()` and `selectLane()` both gate it,
 independently, since a lane click cannot change Shape and a Shape change cannot change the
-lane) rather than reusing an existing one. Fitting Voice into that row's already-tight width
+lane) rather than reusing an existing one. Fitting Voice into that group's already-tight width
 at the editor's 1280 px floor was the one real layout squeeze in this pass: the STEPS group
 grows a third row for it (Pattern shape only) rather than shrinking Link below its own
 working width, the same "grow height, not width" call the two strips make.
