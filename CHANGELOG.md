@@ -21,9 +21,9 @@ Split by what you are doing rather than by what fits, the blocks come apart clea
 
 | page | contents | height |
 |---|---|---|
-| **Steps** | the ten lane tabs, the selected lane's grid, the mute row | 258 |
-| **Slots** | the twelve cards, Copy / Clear / Stop / Randomize / Euclid / Clocks / Chain | 124 |
-| **Setup** | the band's two rows: Pattern, Playback, Steps, Spread, Feel | 208 |
+| **Draw** | the ten lane tabs, the selected lane's grid, the mute row | 258 |
+| **Cards** | the twelve slots, Copy / Clear / Stop / Randomize / Euclid / Clocks / Chain | 124 |
+| **Play** | the band's two rows: Pattern, Playback, Steps, Spread, Feel | 208 |
 
 The tallest is 258 - eighteen more than the macro view, and **354 less** than the un-paged deep
 view - so the panel now takes one fixed height (`arpFixedH`) for every view and page it has and
@@ -34,11 +34,14 @@ page showing and the leftover is panel background rather than an empty box.
 The page tabs ride the **ARP section bar**, right of All, which is what makes paging pay for
 itself: the bar is 34 px that already exists, so the picker costs the panel no height. They
 appear only in a line's deep view, so the bar reads `A B All` in the overview and
-`A B All Steps Slots Setup` in a page - which is the answer to *"we need a way to get out"*.
+`A B All Play Cards Draw` in a page - which is the answer to *"we need a way to get out"*.
 All is not a third letter beside A and B any more, it is the first entry of the view group and
-visibly the way back. Steps greys outside Pattern shape rather than vanishing, and leaving
-Pattern with it up falls back to Setup. The page survives a fold and a session
-(`LayoutState::arpPage`, absent reads back as Steps).
+visibly the way back. Draw greys outside Pattern shape rather than vanishing, and leaving
+Pattern with it up falls back to Play. The page survives a fold and a session
+(`LayoutState::arpPage`), and **defaults to Play**: Draw does nothing until you have drawn on
+it *and* set Shape to Pattern, so opening there is opening on a blank page with no way to tell
+why. The tabs were Steps / Slots / Setup for one build - five letters each, all starting with
+S, which is unreadable at a glance. These name what you do.
 
 **Voice moved to the lane-tab row**, where it costs no height at all and sits beside the
 Harmony lane it is contextual on, instead of the 42 px row inside the STEPS group it had for

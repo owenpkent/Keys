@@ -441,6 +441,18 @@ private:
     // to "we need a way to get out the detail view": not a second control doing All's job, but
     // All finally sitting with the things it is an alternative to.
     std::array<std::unique_ptr<juce::TextButton>, 3> arpPageTabs;
+    // Bar order is most-used first - **Play, Cards, Draw** - which is deliberately *not* the
+    // Page enum's own order. That stays steps = 0 / slots = 1 / setup = 2 because
+    // LayoutState::arpPage stores the plain value, and renumbering it would move the page
+    // every saved session opens on (the same reason genSource's choice list may only be
+    // appended to). One table, and both the click and the lit state read it.
+    //
+    // The names were Steps / Slots / Setup for one build (2026-08-14, same day). All three are
+    // five letters starting with S, which is unreadable at a glance - Owen: "I don't
+    // understand this layout". These name what you *do*: Play is where rate and shape are, so
+    // it is where you go for a sound; Draw says up front that the lane page needs drawing on
+    // before it does anything.
+    static ArpPanel::Page arpPageForTab(int tabIndex);
     // Which tab is lit, derived from the processor's state so a drop, a session load and a
     // click all land in the same place.
     void refreshArpBarTabs();

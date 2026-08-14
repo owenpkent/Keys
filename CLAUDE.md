@@ -215,8 +215,8 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   view or organize into pages"). The deep view was every block at once - band 112, band2 64,
   lane tabs 34, grid 140, mute 46, slots 58, action row 34 - **612 px** against the macro
   view's 240, so Details grew the *window* by 372 px and All shrank it back. Paged by what you
-  are doing rather than by what fits, the blocks come apart at **Steps 258 / Slots 124 /
-  Setup 208**, and the tallest is eighteen over the macro view rather than 372. So the panel
+  are doing rather than by what fits, the blocks come apart at **Draw 258 / Cards 124 /
+  Play 208**, and the tallest is eighteen over the macro view rather than 372. So the panel
   takes **one height for every view and page** and the window stops moving between them.
   **`contentHeight()` and `pageHeight()` are a pair and the split is the point**:
   `contentHeight()` returns the constant and feeds the editor's `idealHeight()`, so a fold is
@@ -228,7 +228,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   the bar is 34 px that already exists, so the picker costs the panel nothing - putting it
   inside would have taken 34 px off the very budget paging was buying back. Same rule that put
   Fill/Regen/Generator on the Pads bar. They show only in a deep view, so the bar reads
-  `A B All` in the overview and `A B All Steps Slots Setup` in a page. **That is the "way
+  `A B All` in the overview and `A B All Play Cards Draw` in a page. **That is the "way
   out"**: All stops reading as a third letter beside two power switches and becomes the first
   entry of one view group, which is the honest fix rather than a second control doing All's
   job. `refreshArpBarTabs()` owns their visibility as well as their lit state, so entering or
@@ -239,9 +239,16 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   writer that could also show things would be the macro card's deleted On toggle all over
   again. The three `pageSteps` / `pageSlots` / `pageSetup` lists are built once in
   `buildPageLists()`, after every control exists, and name each control exactly once.
-  Steps greys outside Pattern shape rather than vanishing (the group must not reflow under the
-  mouse), and leaving Pattern with it up falls back to Setup. `LayoutState::arpPage` keeps it
-  across a fold and a session, the `arpMacro` precedent; absent reads back as Steps.
+  **The tabs read Play / Cards / Draw, and the bar's order is not the enum's.** They were
+  Steps / Slots / Setup for one build the same day - five letters each, all starting with S,
+  which Owen could not read at a glance ("I don't understand this layout"). The names say what
+  you *do*; `KeysEditor::arpPageForTab` maps bar position to `ArpPanel::Page`, because the enum
+  stays steps=0/slots=1/setup=2 and renumbering it would move the page every saved session
+  opens on - the `genSource` append-only rule again. **`LayoutState::arpPage` defaults to Play,
+  not Draw**: Draw does nothing until you have drawn on it *and* set Shape to Pattern, so
+  opening there is opening on a blank page with no way to tell why, which is exactly where Owen
+  landed. Draw greys outside Pattern shape rather than vanishing (the group must not reflow
+  under the mouse), and leaving Pattern with it up falls back to Play.
   **Voice left the STEPS band group for the lane-tab row** the same day, one day after it
   arrived there. It costs no height at all now, sits beside the Harmony lane it is contextual
   on, and reads `Voice: Chord` / `Voice: Sub` - a 12 px caption over it left the button 22 px,
@@ -1138,8 +1145,15 @@ Four things will bite otherwise:
   `Scale Lock`, so a script asks for the full phrase and a reader hears it. In Keys Host only,
   the same bar also carries `Instrument`, the chip whose menu holds Load/Show-Hide/Eject - it
   is invisible in plain Keys, so a script targeting it there will not find it, by design. The
-  one tab left on the arp bar is `Arp all tab`, and the macro
-  view's own controls are prefixed `Macro` so they never collide with the bar chips or the tab:
+  view tabs on the arp bar are `Arp all tab` plus the three page tabs `Arp page Play` /
+  `Arp page Cards` / `Arp page Draw` (2026-08-14; they answered to `Arp page Steps` / `Slots` /
+  `Setup` for one build the same day - do not look for those). The page tabs exist only in a
+  line's deep view, so a script must leave the macro view before it can find one.
+  **`-InvokeButtons` cannot reach any of them in Keys Host**: it resolves against
+  `MainWindowHandle`, which there is the hosted synth's GUI, so enumerate the `Keys Host`
+  top-level `AutomationElement` yourself and `FindFirst` under it. That is the trap documented
+  further up, hit again on 2026-08-14 - a five-line UIA script is the way past it. The macro
+  view's own controls are prefixed `Macro` so they never collide with the bar chips or a tab:
   `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
   `Macro dot A` / `Macro tuplet A` / `Macro anchor A` (`Macro trip A` until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
