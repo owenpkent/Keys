@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "ChordSources.h" // the Progression picker's item list is that table's own
+#include "EuclidGen.h"
 #include "PluginEditor.h"
 #include "ScaleModes.h"
 #include "mcp/KeysMcp.h"
@@ -1642,6 +1643,9 @@ void KeysProcessor::storeActiveArpPattern(int line)
         pat.length[(size_t) l] = ln.engine.lanes.length[(size_t) l].load();
         pat.clockDiv[(size_t) l] = ln.engine.lanes.clockDiv[(size_t) l].load();
     }
+    for (int i = 0; i < 4; ++i)
+        pat.rhythmDivs[(size_t) i] = ln.engine.rhythmDiv[(size_t) i].load();
+    pat.harmonyMode = ln.engine.harmonyMode.load();
 }
 
 int KeysProcessor::arpActivePattern(int line) const
@@ -1664,6 +1668,9 @@ void KeysProcessor::recallArpPattern(int index, int line)
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
     }
+    for (int i = 0; i < 4; ++i)
+        ln.engine.rhythmDiv[(size_t) i].store(juce::jlimit(0, 16, pat.rhythmDivs[(size_t) i]));
+    ln.engine.harmonyMode.store(juce::jlimit(0, 1, pat.harmonyMode));
 }
 
 bool KeysProcessor::arpQuantizeOn() const
@@ -2233,6 +2240,9 @@ void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern, int 
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pattern.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pattern.clockDiv[(size_t) l]));
     }
+    for (int i = 0; i < 4; ++i)
+        ln.engine.rhythmDiv[(size_t) i].store(juce::jlimit(0, 16, pattern.rhythmDivs[(size_t) i]));
+    ln.engine.harmonyMode.store(juce::jlimit(0, 1, pattern.harmonyMode));
 }
 
 void KeysProcessor::randomizeActiveArpPattern(int line)
@@ -2249,6 +2259,21 @@ void KeysProcessor::randomizeActiveArpPattern(int line)
         lanes.value[ArpEngine::laneRatchet][(size_t) s].store(rng.nextInt(8) == 0 ? 2 : 1);
         lanes.value[ArpEngine::laneProbability][(size_t) s].store(rng.nextInt(6) == 0 ? 60 : 100);
     }
+}
+
+bool KeysProcessor::applyEuclidToActiveArpPattern(int line, int hits, int steps, int rotation, int laneIndex)
+{
+    // Only the probability lane has a meaningful hit/rest mapping (100 fires the step as
+    // written, 0 never does); any other lane's "on" value depends on what that lane means, so
+    // this stays scoped to probability rather than guessing at one.
+    if (laneIndex != ArpEngine::laneProbability)
+        return false;
+    steps = juce::jlimit(1, ArpEngine::maxSteps, steps);
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
+    for (int s = 0; s < steps; ++s)
+        lanes.value[ArpEngine::laneProbability][(size_t) s].store(keys::euclidHit(s, hits, steps, rotation) ? 100 : 0);
+    lanes.length[ArpEngine::laneProbability].store(steps);
+    return true;
 }
 
 void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
@@ -2621,6 +2646,14 @@ void KeysProcessor::arpLineToTree(juce::ValueTree& dest, int line) const
         pt.setProperty("rateFree", pat.rateFree, nullptr);
         pt.setProperty("rateHz", (double) pat.rateHz, nullptr);
         pt.setProperty("bars", pat.bars, nullptr); // how long the chain holds this slot
+        // Rhythm dividers and the Harmony lane's mode, appended 2026-08-14. Absent in every
+        // session saved before them, which reads back as "0,0,0,0" / 0 - inert, exactly what
+        // those sessions already played.
+        juce::StringArray rd;
+        for (int v : pat.rhythmDivs)
+            rd.add(juce::String(v));
+        pt.setProperty("rhythmDivs", rd.joinIntoString(","), nullptr);
+        pt.setProperty("harmonyMode", pat.harmonyMode, nullptr);
         for (int l = 0; l < ArpEngine::numLanes; ++l)
         {
             juce::StringArray vals;
@@ -2697,6 +2730,10 @@ void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int sa
         pat.rateHz = (float) juce::jlimit((double) ArpEngine::minRateHz, (double) ArpEngine::maxRateHz,
                                           (double) pt.getProperty("rateHz", 8.0));
         pat.bars = juce::jlimit(1, 16, (int) pt.getProperty("bars", 1)); // absent before the chain
+        const auto rd = juce::StringArray::fromTokens(pt.getProperty("rhythmDivs", "0,0,0,0").toString(), ",", "");
+        for (int i = 0; i < 4; ++i)
+            pat.rhythmDivs[(size_t) i] = i < rd.size() ? juce::jlimit(0, 16, rd[i].getIntValue()) : 0;
+        pat.harmonyMode = juce::jlimit(0, 1, (int) pt.getProperty("harmonyMode", 0));
         for (int lc = 0; lc < pt.getNumChildren(); ++lc)
         {
             const auto lt = pt.getChild(lc);
@@ -2722,6 +2759,9 @@ void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int sa
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
     }
+    for (int i = 0; i < 4; ++i)
+        ln.engine.rhythmDiv[(size_t) i].store(pat.rhythmDivs[(size_t) i]);
+    ln.engine.harmonyMode.store(pat.harmonyMode);
 }
 
 void KeysProcessor::arpFromTree(const juce::ValueTree& root)

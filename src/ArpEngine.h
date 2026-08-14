@@ -88,6 +88,55 @@ public:
         return a;
     }
 
+    // Rhythm dividers (2026-08-14, Subharmonicon-style): whether raw step g is a hit for ANY
+    // enabled divisor (value > 0) in `divs` - an OR of clocks, not a shared modulus, so {3, 4}
+    // fires on 0, 3, 4, 6, 8, 9, 12... not only their common multiple. Pure and stateless in g,
+    // so a transport jump lands on the right answer without having walked every step since 0.
+    static bool dividerFires(long long g, const std::array<int, 4>& divs) noexcept
+    {
+        for (const int d : divs)
+            if (d > 0 && g % d == 0)
+                return true;
+        return false;
+    }
+
+    // How many boundaries strictly before g are divider hits (dividerFires above), computed
+    // from g alone - the same "stateless from ppq" contract the rest of the engine's timing
+    // keeps (see the class comment). Inclusion-exclusion over the enabled divisors: for every
+    // non-empty subset, count multiples of its lcm in [0, g) and sign the count by the parity
+    // of the subset's size. At most 4 divisors means at most 15 subsets, walked with a bitmask
+    // rather than recursion - allocation-free, as everything the audio thread reaches must be.
+    static long long firedCountBefore(long long g, const std::array<int, 4>& divs) noexcept
+    {
+        if (g <= 0)
+            return 0;
+        long long total = 0;
+        for (unsigned mask = 1; mask < 16u; ++mask)
+        {
+            long long l = 1;
+            int bits = 0;
+            bool valid = true;
+            for (int i = 0; i < 4 && valid; ++i)
+            {
+                if ((mask & (1u << i)) == 0)
+                    continue;
+                if (divs[(size_t) i] <= 0)
+                {
+                    valid = false; // a subset touching a disabled slot is not a real subset
+                    break;
+                }
+                const int g2 = gcdOf((int) l, divs[(size_t) i]);
+                l = l / g2 * divs[(size_t) i];
+                ++bits;
+            }
+            if (! valid || bits == 0)
+                continue;
+            const long long count = (g - 1) / l + 1;
+            total += (bits & 1) ? count : -count;
+        }
+        return total;
+    }
+
     // How a tempo-synced rate is written under the dial: **the step length as an exact fraction
     // of a bar**, one copy of the rule for the band and for every macro card.
     //
@@ -296,6 +345,16 @@ public:
 
     Lanes lanes;
 
+    // Subharmonicon-style rhythm dividers (2026-08-14): up to four per line, 1..16, 0 = off.
+    // All zero (the default) is inert - process() takes the same path it always has, byte for
+    // byte - so a session that never touches this feature cannot tell it exists. Same contract
+    // as `lanes`: message thread writes, audio thread reads, plain atomics, no lock.
+    std::array<std::atomic<int>, 4> rhythmDiv {};
+
+    // The Harmony lane's voicing: 0 = chord tones (today's behaviour, default), 1 = subharmonic
+    // (the undertone series - see fireStep). Same contract as `rhythmDiv`.
+    std::atomic<int> harmonyMode { 0 };
+
     void prepare(double sampleRate)
     {
         sr = sampleRate > 0 ? sampleRate : 44100.0;
@@ -440,6 +499,16 @@ public:
             rampScale = (float) (1.0 + (double) p.velRamp / 100.0 * t);
         }
 
+        // Rhythm dividers, read once per block like every other atomic-backed control. Clamped
+        // here rather than trusted from whatever wrote them (an MCP client, a stale slot) - see
+        // stepLengthBeats's own clamp for why: this value bounds a loop below, on the audio
+        // thread, and an unclamped divisor would only bound that loop by luck.
+        const std::array<int, 4> divs = { juce::jlimit(0, 16, rhythmDiv[0].load(std::memory_order_relaxed)),
+                                          juce::jlimit(0, 16, rhythmDiv[1].load(std::memory_order_relaxed)),
+                                          juce::jlimit(0, 16, rhythmDiv[2].load(std::memory_order_relaxed)),
+                                          juce::jlimit(0, 16, rhythmDiv[3].load(std::memory_order_relaxed)) };
+        const bool dividersOn = divs[0] > 0 || divs[1] > 0 || divs[2] > 0 || divs[3] > 0;
+
         if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
             // Fire every step whose *fire time* lands inside [pos, pos + blockBeats). Not
@@ -461,6 +530,26 @@ public:
             {
                 const double boundaryBeats = nextIndexF * stepBeats;
                 const long long globalStep = (long long) llround(nextIndexF);
+
+                // With any divider enabled, a boundary fires only if it is a multiple of at
+                // least one of them (dividerFires); a suppressed boundary fires no note, no
+                // ratchet, and does not advance anything - skip it before it touches a single
+                // lane read or the direction walk. All zero (the default) never enters this
+                // branch, so behaviour is unchanged bit for bit.
+                if (dividersOn && ! dividerFires(globalStep, divs))
+                {
+                    nextIndexF += 1.0;
+                    continue;
+                }
+                // The index a firing boundary reads its lanes by and restarts its walk from.
+                // Raw with no dividers (today's behaviour, untouched); with dividers, the count
+                // of firing boundaries before this one (firedCountBefore), computed from
+                // globalStep alone - stateless the same way the rest of this clock is - so the
+                // pattern advances one lane step per *fired* boundary instead of leaving gaps
+                // where a divider skipped a raw step. Only the lane index compresses: the wall-
+                // clock position below still comes from the real step grid.
+                const long long stepIndex = dividersOn ? firedCountBefore(globalStep, divs) : globalStep;
+
                 double fireBeats = boundaryBeats;
                 if ((globalStep & 1) != 0)
                     fireBeats += stepBeats * p.swing; // swing shifts the offbeats
@@ -469,7 +558,7 @@ public:
                 // step order however the lane is drawn (step n at n+0.9 still precedes step
                 // n+1 at n+1.0). An early half would need the whole close-what-you-land-on
                 // rule in emitHit rewritten, for a shift Swing already offers.
-                fireBeats += stepBeats * juce::jlimit(0, 90, laneValue(p, laneLate, globalStep)) / 100.0;
+                fireBeats += stepBeats * juce::jlimit(0, 90, laneValue(p, laneLate, stepIndex)) / 100.0;
                 const double offsetBeats = fireBeats - pos;
                 const int offset = (int) std::floor(offsetBeats / beatsPerSample);
                 if (offset >= numSamples)
@@ -495,14 +584,14 @@ public:
                     if (pendingRetrig)
                     {
                         pendingRetrig = false;
-                        stepBase = globalStep;
+                        stepBase = stepIndex;
                         dirCursor = 0;
                     }
 
                     // Any ratchet sub-hit carried in from an earlier block that is due before
                     // this step goes first, so hits reach emitHit in time order.
                     firePendingBefore(offset, numSamples, out);
-                    fireStep(p, globalStep, offset, stepBeats / beatsPerSample, numSamples, out);
+                    fireStep(p, stepIndex, offset, stepBeats / beatsPerSample, numSamples, out);
                 }
                 nextIndexF += 1.0;
             }
@@ -889,11 +978,27 @@ private:
                 const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
                 addHit(place(src.note + entry.semitoneOffset), src.velocity * velScale, src.channel);
 
-                // Harmony: a second voice this many chord tones above the one just played,
+                // Harmony: a second voice, in one of two modes (harmonyMode, 2026-08-14).
+                // Mode 0, the original: this many chord tones above the one just played,
                 // Cthulhu's lane. Counting in sequence entries rather than semitones is what
                 // keeps it inside the chord; running off the top adds an octave instead of
                 // folding back onto a note already sounding.
-                if (harmony > 0)
+                if (harmony > 0 && harmonyMode.load(std::memory_order_relaxed) == 1)
+                {
+                    // Mode 1: subharmonic. One voice at the undertone series below the note
+                    // just played (f/2..f/8, quantized to 12-TET) instead of a chord tone
+                    // above it - meant to be heard with Scale Lock off, since it deliberately
+                    // leaves the chord. Clamped to the MIDI range and dropped, not wrapped, if
+                    // clamping collapses it onto the note it was meant to harmonize: a wrapped
+                    // low note would read as a new attack rather than a silence.
+                    static constexpr int kSubharmonicSemis[8] = { 0, -12, -19, -24, -28, -31, -34, -36 };
+                    const int playedRaw = place(src.note + entry.semitoneOffset);
+                    const int playedClamped = juce::jlimit(0, 127, playedRaw);
+                    const int subClamped = juce::jlimit(0, 127, playedRaw + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
+                    if (subClamped != playedClamped)
+                        addHit(subClamped, src.velocity * velScale, src.channel);
+                }
+                else if (harmony > 0)
                 {
                     const int h = idx + harmony;
                     const auto& hEntry = seq[(size_t) (h % seqCount)];

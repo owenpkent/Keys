@@ -104,6 +104,7 @@ KeysMcp::KeysMcp(KeysProcessor& p)
     server.addTool(toolSetArpPattern());
     server.addTool(toolRecallArpPattern());
     server.addTool(toolStoreArpPattern());
+    server.addTool(toolApplyEuclid());
     server.start();
     startTimer(5); // was 30: chord releases tolerate it, scheduled notes do not
 }
@@ -680,7 +681,8 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
     t.description = "Read an arp pattern's ten per-step lanes (note, octave, velocity, "
                      "gate, ratchet, probability, transpose, late, harmony, chord), each "
                      "trimmed to its own length, plus "
-                     "its per-lane clock dividers and which pattern is active. Without "
+                     "its per-lane clock dividers, its rhythm dividers, harmony mode and "
+                     "which pattern is active. Without "
                      "slot, reads the live lanes (what's currently playing/showing in the "
                      "editor); with slot, reads that stored pattern (0..11) without "
                      "disturbing what's live.";
@@ -701,6 +703,11 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
             }
             const auto& pat = processor.arpPatternSlot(slot, line);
             writeArpPatternInto(*obj, pat.value, pat.length, pat.clockDiv);
+            juce::Array<juce::var> rd;
+            for (int v : pat.rhythmDivs)
+                rd.add(v);
+            obj->setProperty("rhythmDivs", juce::var(rd));
+            obj->setProperty("harmonyMode", pat.harmonyMode);
         }
         else
         {
@@ -714,6 +721,11 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                 clockDivs[(size_t) l] = processor.arpLine(line).lanes.clockDiv[(size_t) l].load();
             }
             writeArpPatternInto(*obj, values, lengths, clockDivs);
+            juce::Array<juce::var> rd;
+            for (auto& a : processor.arpLine(line).rhythmDiv)
+                rd.add(a.load());
+            obj->setProperty("rhythmDivs", juce::var(rd));
+            obj->setProperty("harmonyMode", processor.arpLine(line).harmonyMode.load());
         }
         obj->setProperty("active", processor.arpActivePattern(line));
         obj->setProperty("line", line);
@@ -740,7 +752,13 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "also sets that lane's length to the array's size (clamped 1..32). Shorter "
         "arrays make a shorter pattern for that lane, for polymeter against the others. "
         "clockDivs is an optional map of lane name -> 0 (every step) / 1 (every 2nd) / 2 "
-        "(every 4th). Without slot, writes the live lanes directly (the same path the "
+        "(every 4th). rhythmDivs is an optional array of up to 4 rhythm dividers (1..16, "
+        "0 = off): with any enabled, a step boundary fires only if it is a multiple of at "
+        "least one of them (an OR of clocks, Subharmonicon-style), and the lanes advance "
+        "one step per boundary that actually fires. harmonyMode is optional: 0 (default) "
+        "is the Harmony lane's usual chord-tone voice, 1 switches it to a subharmonic voice "
+        "(the undertone series below the played note) - best heard with Scale Lock off. "
+        "Without slot, writes the live lanes directly (the same path the "
         "editor edits through); with slot, writes that stored pattern (0..11), and "
         "refreshes the live lanes too if that slot happens to be the active one.";
     t.params = {
@@ -757,6 +775,8 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         { "harmony", "array", "Per-step harmony lane, chord tones above (0..7).", false },
         { "chord", "array", "Per-step chord lane: 0 = off, 1..12 = that arp slot's chord.", false },
         { "clockDivs", "object", "Optional map of lane name -> clock divider 0/1/2.", false },
+        { "rhythmDivs", "array", "Up to 4 rhythm dividers (1..16, 0 = off).", false },
+        { "harmonyMode", "integer", "0 = chord tones (default), 1 = subharmonic.", false },
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
@@ -786,9 +806,25 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
                 if (clockDivsVar.hasProperty(laneNames[l]))
                     clockDivEdits.push_back({ l, juce::jlimit(0, 2, (int) clockDivsVar.getProperty(laneNames[l], 0)) });
 
-        if (edits.empty() && clockDivEdits.empty())
+        std::array<int, 4> rhythmDivsEdit {};
+        const bool hasRhythmDivs = args.hasProperty("rhythmDivs");
+        if (hasRhythmDivs)
         {
-            error = "nothing to set: supply at least one lane array or clockDivs";
+            std::vector<int> vals;
+            if (! readIntArray(args.getProperty("rhythmDivs", juce::var()), vals) || vals.size() > 4)
+            {
+                error = "rhythmDivs must be an array of up to 4 integers";
+                return {};
+            }
+            for (size_t i = 0; i < 4; ++i)
+                rhythmDivsEdit[i] = i < vals.size() ? juce::jlimit(0, 16, vals[i]) : 0;
+        }
+        const bool hasHarmonyMode = args.hasProperty("harmonyMode");
+        const int harmonyModeEdit = hasHarmonyMode ? juce::jlimit(0, 1, (int) args.getProperty("harmonyMode", 0)) : 0;
+
+        if (edits.empty() && clockDivEdits.empty() && ! hasRhythmDivs && ! hasHarmonyMode)
+        {
+            error = "nothing to set: supply at least one lane array, clockDivs, rhythmDivs or harmonyMode";
             return {};
         }
 
@@ -813,6 +849,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             }
             for (const auto& cd : clockDivEdits)
                 pattern.clockDiv[(size_t) cd.first] = cd.second;
+            if (hasRhythmDivs)
+                pattern.rhythmDivs = rhythmDivsEdit;
+            if (hasHarmonyMode)
+                pattern.harmonyMode = harmonyModeEdit;
             processor.setArpPatternSlot(slot, pattern, line);
         }
         else
@@ -825,6 +865,11 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             }
             for (const auto& cd : clockDivEdits)
                 processor.arpLine(line).lanes.clockDiv[(size_t) cd.first].store(cd.second);
+            if (hasRhythmDivs)
+                for (int i = 0; i < 4; ++i)
+                    processor.arpLine(line).rhythmDiv[(size_t) i].store(rhythmDivsEdit[(size_t) i]);
+            if (hasHarmonyMode)
+                processor.arpLine(line).harmonyMode.store(harmonyModeEdit);
         }
 
         auto* obj = new juce::DynamicObject();
@@ -875,6 +920,48 @@ okstudio::mcp::Tool KeysMcp::toolStoreArpPattern()
         processor.storeActiveArpPattern(juce::jlimit(0, KeysProcessor::numArpLines - 1,
                                                     (int) args.getProperty("line", 0)));
         return juce::var(true);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolApplyEuclid()
+{
+    okstudio::mcp::Tool t;
+    t.name = "apply_euclid";
+    t.description = "Write a Euclidean rhythm (hits spread as evenly as possible over steps, "
+                     "Bjorklund's algorithm) into the active pattern's probability lane: 100 "
+                     "on a hit, 0 on a rest, and sets that lane's length to steps. Only the "
+                     "probability lane has a meaningful hit/rest mapping today.";
+    t.params = {
+        { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has "
+                             "always had.", false },
+        { "hits", "integer", "Pulses to distribute, 0..steps.", true },
+        { "steps", "integer", "Pattern length, 1..32.", true },
+        { "rotation", "integer", "Rotate the pattern by this many steps. Default 0.", false },
+    };
+    t.run = [this](const juce::var& args, juce::String& error) -> juce::var
+    {
+        if (! args.hasProperty("hits") || ! args.hasProperty("steps"))
+        {
+            error = "hits and steps are required";
+            return {};
+        }
+        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1, (int) args.getProperty("line", 0));
+        const int hits = (int) args.getProperty("hits", 0);
+        const int steps = (int) args.getProperty("steps", 0);
+        const int rotation = (int) args.getProperty("rotation", 0);
+        if (steps < 1 || steps > ArpEngine::maxSteps)
+        {
+            error = "steps must be 1.." + juce::String(ArpEngine::maxSteps);
+            return {};
+        }
+        processor.applyEuclidToActiveArpPattern(line, hits, steps, rotation);
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("line", line);
+        obj->setProperty("hits", juce::jlimit(0, steps, hits));
+        obj->setProperty("steps", steps);
+        obj->setProperty("rotation", rotation);
+        return juce::var(obj);
     };
     return t;
 }

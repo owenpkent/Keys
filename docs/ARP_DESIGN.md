@@ -687,6 +687,46 @@ v2 and later (nice-to-have per the research ranking), with what became of each:
 | per-step CC lanes | not built |
 | arp-on-note-count | not built |
 
+## The generative round (2026-08-14)
+
+A third research round, sourced from hardware rather than the v2 ranking: the Moog
+Subharmonicon (its manual sits in the repo root), whose whole design is division - pitch
+from the undertone series, rhythm from OR-ed clock dividers. Three additions, engine and
+MCP only so far; the UI pass is still owed and is gated by the mouse-only contract like
+everything else.
+
+- **Euclidean generator** (`EuclidGen.h`, `apply_euclid` over MCP,
+  `applyEuclidToActiveArpPattern` on the processor). Writes hit/rest into the
+  **probability lane** - 100 on a hit, 0 on a rest - and sets the lane's length. Writing
+  probability rather than muting notes keeps the melodic content intact, and the global
+  `chance` still multiplies the result, so one continuous controller can thin a Euclidean
+  pattern the same way it thins anything else. Scoped to the probability lane on purpose:
+  no other lane has a meaning for "off" that a generator should guess at.
+
+- **Rhythm dividers** (`ArpEngine::rhythmDiv`, four per line, 1..16, 0 = off, stored with
+  the slot). The Subharmonicon's rhythm-generator behaviour: with any divider enabled, a
+  step boundary fires only when its index is a multiple of **at least one** of them, so
+  {3, 4} fires on 0, 3, 4, 6, 8, 9, 12 - an OR of clocks, not a shared modulus. A
+  suppressed boundary fires nothing and advances nothing. The position a firing boundary
+  reads its lanes by is `firedCountBefore(g)`, computed from the global step alone by
+  inclusion-exclusion over the enabled divisors - stateless the same way the rest of the
+  clock is, so transport jumps self-correct and two takes match. All zeros is bit-identical
+  to the engine before the feature existed, and a test holds that equality. Note the
+  difference from the per-lane `clockDiv`: that slows a lane's *read* while every step
+  still fires; this decides *whether a step fires at all*.
+
+- **Subharmonic harmony mode** (`ArpEngine::harmonyMode`, stored with the slot, default 0).
+  Mode 1 draws the Harmony lane's second voice from the undertone series **below** the
+  played note - f/2 to f/8 quantized to 12-TET, `{-12, -19, -24, -28, -31, -34, -36}` -
+  instead of chord tones above it. It deliberately leaves the chord, so it is meant to be
+  heard with Scale Lock off (Lock upstream will re-quantize it). A voice that clamps onto
+  the note it was meant to harmonize is dropped, not wrapped: a wrapped low note reads as a
+  new attack rather than a silence.
+
+All three serialize append-only on the `"pattern"` node (`rhythmDivs`, `harmonyMode`) with
+absence reading back as off, per the standing rule that old sessions must not be able to
+tell a new feature exists.
+
 ## Scale awareness
 
 Keys already owns Root/Scale. The arp editor flags out-of-key results visually

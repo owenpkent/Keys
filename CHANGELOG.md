@@ -5,6 +5,35 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a Euclidean rhythm generator, MCP-only for now
+
+`src/EuclidGen.h` is a pure, allocation-free `euclidHit(i, hits, steps, rotation)` (Bjorklund's
+algorithm, the Bresenham-line formulation), plus the new MCP tool `apply_euclid`, which writes
+the result into the active pattern's probability lane - 100 on a hit, 0 on a rest - and sets
+that lane's length to `steps`. Only the probability lane has a hit/rest mapping that means
+anything, so this is the one lane it touches; a mouse-only UI for it is a later pass.
+
+### Added: Subharmonicon-style rhythm dividers, up to four per line
+
+Up to four dividers (1..16, 0 = off) per arp line, live as plain atomics on `ArpEngine`
+(`rhythmDiv`) the same way the step lanes already are - no new APVTS parameter. With any
+enabled, a step boundary fires only if it is a multiple of at least one of them (an OR of
+clocks, not a shared modulus), and the lanes advance one step per boundary that actually fires
+rather than skipping ahead by whatever the divider passed over. The position is computed fresh
+from the raw step index every time (`ArpEngine::firedCountBefore`, by inclusion-exclusion over
+the enabled divisors), so a transport jump lands on the right step instead of drifting. All
+four off, the default, is bit-identical to the feature not existing. Persisted per slot as
+`rhythmDivs`; readable and writable through `get_arp_pattern` / `set_arp_pattern`.
+
+### Added: a subharmonic mode for the Harmony lane
+
+`harmonyMode` (0 = today's chord tone above the played note, 1 = subharmonic) switches the
+Harmony lane's second voice to the undertone series below it instead - f/2 down to f/8,
+quantized to 12-TET - meant to be heard with Scale Lock off, since it deliberately leaves the
+chord. A voice that would clamp onto the note it is harmonizing (running out of MIDI range at
+the bottom) is dropped rather than folded back on top of it. Same storage and MCP shape as the
+rhythm dividers: a live atomic on `ArpEngine`, persisted per slot, no new parameter.
+
 ### Changed: twelve pads a page, with Strum and Humanize in the columns that freed up
 
 Owen: "reduce the pads grid to 12 and move strum and humanize into that with the same style."
