@@ -1,6 +1,7 @@
 #include "../src/ArpEngine.h"
 #include "../src/EuclidGen.h"
 #include <juce_core/juce_core.h>
+#include <set>
 
 namespace keys::tests
 {
@@ -1825,11 +1826,49 @@ public:
                         n2.push_back(ev.note);
             }
             juce::ignoreUnused(anyVelDiff);
-            // Octave *is* a drifting lane, so a drifting run may transpose by whole octaves -
-            // the pitch class is what must survive, since that is "which note it plays".
-            expectEquals((int) n1.size(), (int) n2.size(), "same number of notes");
-            for (size_t k = 0; k < n1.size() && k < n2.size(); ++k)
-                expectEquals(n1[k] % 12, n2[k] % 12, "same pitch class at " + juce::String((int) k));
+            // **Set equality, not positional.** Chance and Late are drifting lanes, so a
+            // drifted run legitimately drops steps and slides others across the edge of the
+            // twelve blocks this samples - the counts are allowed to differ and did the moment
+            // strayWithin stopped half of Late's draw clamping back to zero. What may *not*
+            // happen is a pitch class the undrifted run never plays: that is "drift changes how
+            // a step plays, never which note it plays" stated exactly, and octave drift is
+            // invisible to it by design, since whole octaves keep the class.
+            expect(! n2.empty(), "the drifted run still plays");
+            std::set<int> classes;
+            for (const int n : n1)
+                classes.insert(n % 12);
+            for (const int n : n2)
+                expect(classes.count(n % 12) > 0,
+                       "drift invented pitch class " + juce::String(n % 12));
+        }
+
+        beginTest("strayWithin: a value at the edge of its lane still moves (Owen's 0 bug)");
+        {
+            // The bug: Roll and Drift built [v - reach/2, v + reach/2] and clamped the result,
+            // so a value sitting at the bottom of its lane had half of every draw fall outside
+            // and clamp straight back to itself. Late, Harmony and Chord all default to 0 and
+            // Chance sits at its top, so "a lane of zeroes barely moves" was the common case.
+            const ArpEngine::LaneRange late { 0, 90 };
+            int moved = 0;
+            for (int i = 0; i < 100; ++i)
+                if (ArpEngine::strayWithin(0, 90 * 0.35, late, i / 100.0) != 0)
+                    ++moved;
+            // The window is [0, 31.5], so only draws rounding to 0 stay - a handful, not half.
+            expect(moved > 90, "a value at the floor moves nearly always, not half the time");
+
+            int movedTop = 0;
+            for (int i = 0; i < 100; ++i)
+                if (ArpEngine::strayWithin(100, 100 * 0.35, { 0, 100 }, i / 100.0) != 100)
+                    ++movedTop;
+            expect(movedTop > 90, "a value at the ceiling moves too");
+
+            // ...and it never leaves the lane, wherever it starts and however wide the reach.
+            for (int v = -1; v <= 8; ++v)
+                for (int i = 0; i < 50; ++i)
+                {
+                    const int r = ArpEngine::strayWithin(v, 9 * 2.0, { -1, 8 }, i / 50.0);
+                    expect(r >= -1 && r <= 8, "stays inside the lane even past full reach");
+                }
         }
 
         beginTest("laneRange covers every lane and none of them is empty");

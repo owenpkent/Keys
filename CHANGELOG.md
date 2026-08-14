@@ -5,6 +5,35 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: a value at the edge of its lane ignored Roll and Drift
+
+Owen: *"0 value seems to ignore roll"*. Both built a window of
+`[value - reach/2, value + reach/2]` and **clamped the result**, which is fine in the middle of
+a lane and broken at its edges: a value sitting at the bottom had half of every draw fall
+outside the range and clamp straight back to where it started. Late, Harmony and Chord all
+default to 0 and Chance sits at its *top*, so "a lane of zeroes barely moves" was the common
+case, not a corner one.
+
+`ArpEngine::strayWithin` is the one copy of the rule now, and **the window slides instead of
+the result clamping**: the full width of the draw survives wherever the value sits, and it only
+narrows if the reach is wider than the lane itself. Pinned by a test at both the floor and the
+ceiling.
+
+### Added: Reset, and the whole arp panel takes a chord
+
+**Reset** sits beside Roll on the Draw page and writes the lane's own default across its whole
+length - the state a lane is in before you touch it. Roll is destructive and Keys has no undo
+anywhere, so a roll you did not want cost a redraw until now.
+
+**The panel itself is a drop target on every page** (Owen: *"need to be able to drag chords to
+not just the main arp window"*). This is a paging regression: the slot cards moved to the Cards
+page and the macro cards only exist in the All view, so on Play or Draw the only target left
+was a 40 px letter on the bar. A chord dropped anywhere on the panel goes to the line being
+edited; a slot card still wins on Cards and a macro card still wins in All, because JUCE walks
+up from whatever is under the pointer and those are deeper. The card outlines while a chord is
+over it, so "anywhere here" is visible rather than something you have to be told.
+
+
 ### Added: Roll, Drift, and per-step odds that say what they are
 
 Owen: *"there should be, like, a more random feature in the drawing, like cthulu"* - three

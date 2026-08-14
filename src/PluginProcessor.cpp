@@ -2299,12 +2299,23 @@ void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct)
     for (int s = 0; s < len; ++s)
     {
         const int cur = lanes.value[(size_t) lane][(size_t) s].load();
-        const double reach = span * amt;
-        const double lo = amt >= 1.0 ? range.lo : cur - reach * 0.5;
-        const double hi = amt >= 1.0 ? range.hi : cur + reach * 0.5;
-        const int v = (int) std::lround(lo + rng.nextDouble() * (hi - lo));
-        lanes.value[(size_t) lane][(size_t) s].store(juce::jlimit(range.lo, range.hi, v));
+        // The window slides rather than the result clamping - see ArpEngine::strayWithin for
+        // why, and for the bug that taught it. At 100% the reach is the whole lane, so the
+        // window covers it wherever the value sits and the draw is uniform across it.
+        lanes.value[(size_t) lane][(size_t) s].store(
+            ArpEngine::strayWithin(cur, span * amt, range, rng.nextDouble()));
     }
+}
+
+void KeysProcessor::resetArpLane(int line, int laneIndex)
+{
+    // Its whole length, not maxSteps, for the reason rerollArpLane gives: the steps past the
+    // end are not being played, and rewriting them would surface later if the length grew.
+    const auto lane = juce::jlimit(0, ArpEngine::numLanes - 1, laneIndex);
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) lane].load());
+    for (int s = 0; s < len; ++s)
+        lanes.value[(size_t) lane][(size_t) s].store(ArpEngine::laneDefaults[lane]);
 }
 
 bool KeysProcessor::applyEuclidToActiveArpPattern(int line, int hits, int steps, int rotation, int laneIndex)
