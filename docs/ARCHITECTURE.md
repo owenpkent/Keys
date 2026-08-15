@@ -899,6 +899,32 @@ coming back:
 Auditioning a chord reuses `pressChordPad` / `releaseChordPad`. It always did, and now there
 is one card doing it rather than two.
 
+## Undo
+
+Content only: chord pads, arp lanes, arp slots. **Not parameters** - a knob you can always turn
+back, and if every dial sweep filled the stack the pad you actually wanted would be pushed off
+the end of it. That is a design decision, not a limitation to be lifted later.
+
+An entry is a **snapshot of the affected subtree before the edit**, taken with the same
+`chordPadsToTree()` / `arpToTree()` the session file uses, and restored with their `...FromTree`
+twins wrapped back in a `KEYS` root. So no action has a hand-written inverse and none can have a
+*wrong* one; anything added later is undoable the moment its data lands in one of those two
+trees. `UndoScope` picks which tree an entry holds.
+
+**One entry per gesture.** `pushUndo` at the gesture site, and `KeysProcessor::UndoGesture` as
+an RAII guard that absorbs nested pushes - a drop that clears a pad and then sets it is one
+entry, and a lane drag pushes on the press and never again. Without that a single stroke across
+a lane buries everything under it. Depth 32, oldest dropped first; a new edit clears the redo
+branch.
+
+`undo()` and `redo()` call `stopAllChordPads()` before restoring, the same choke point an
+audition uses and for the same reason: restoring pads can rewrite the chord a sustained card is
+holding, and restoring the arp can rewrite the lanes under a running line.
+
+`undoGeneration()` is a counter the editor polls, the `soundingGeneration()` pattern - undo
+entries are created all over the UI, and one reader is far less to get wrong than every writer
+remembering to call back.
+
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,

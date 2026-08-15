@@ -1273,7 +1273,7 @@ Automation (`BoundingRectangle`, divided by the display scale), not with a ruler
 
 ## v1 implementation notes
 
-- `ArpEngine.h`: pure, allocation-free on the audio thread (fixed 32-step, ten-lane
+- `ArpEngine.h`: pure, allocation-free on the audio thread (fixed 32-step, twelve-lane
   arrays; fixed-capacity event output; mt19937 seeded once for probability). Lane
   data crosses UI -> audio as arrays of atomics; no locks anywhere. The processor holds
   three instances of it; the file itself is unaware of that and did not change.
