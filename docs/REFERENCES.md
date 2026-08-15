@@ -1,6 +1,6 @@
 # Reference manuals
 
-Seven manuals sit in the repo root. They are not decoration: three features in Keys were built
+Seven manuals sit in the repo root. They are not decoration: eight features in Keys were built
 from a specific page of one of them, and at least twice a manual **corrected a guess** that had
 already been coded and looked right on screen. This file records what each one contributes, what
 Keys took, and what it deliberately did not - so the next person does not re-derive a decision
@@ -15,7 +15,8 @@ global knob when the reference it was named after does it per step.
 ## Cthulhu (`Cthulhu_Manual_v1_1.pdf`, 34pp)
 
 The closest thing to Keys' arp there is: a chord module feeding a step-lane arpeggiator. Keys'
-whole "ten per-parameter lanes" architecture is Cthulhu's.
+whole per-parameter step-lane architecture is Cthulhu's - ten of them when it was copied,
+twelve now.
 
 **Taken:**
 
@@ -57,13 +58,19 @@ Four-track arpeggiator. The richest per-step vocabulary of any of these, and the
   button does exactly this - as a **button**, because right-click-only paths are a closed list
   here and a left-click path is the contract.
 
-**Not taken, and worth considering:**
+**Also taken, 2026-08-14:**
 
 - **A richer Note lane.** Kirnu's `ORDER` per-step values are `Off, Prev, 1st, Last, Hi, Low,
-  Rnd` - not just a fixed index. **Prev** (repeat what the last step played), **Hi** / **Low**
-  (the top or bottom note of the held chord whatever it is) and **Rnd** are all musical and none
-  of them exist in Keys, whose Note lane is `-1 rest / 0 follow the shape / 1..8 fixed index`.
-  These would be negative values below -1, or a widened range - either way append-only.
+  Rnd` - not just a fixed index. Keys' Note lane took **Prev, Hi, Low and Rnd** as values 9..12,
+  appended *above* the fixed indices rather than below -1 so that saved values are untouched and
+  a drag to the bottom of the grid still reaches the rest. The point of them is that they ask
+  the chord a question rather than counting into it, so they keep meaning the same thing when
+  the chord changes.
+- **A selection for the grid.** Kirnu's palette is Draw / Select / Random / Copy / Paste /
+  Clear, and its Random tool acts on *selected steps*. Keys built **Select**, and Roll and Reset
+  narrow to the span. Copy, Paste and Clear-within-a-lane are still unbuilt, and are now cheap.
+
+**Not taken, and worth considering:**
 - **An enable row per lane**, not just for notes: *"First row from bottom can be used to turn
   selected data section steps on or off. When step is off the value in step is ignored."* Keys'
   MUTE row is the Note lane's alone. A per-lane enable would let you disable one step's Octave
@@ -74,9 +81,6 @@ Four-track arpeggiator. The richest per-step vocabulary of any of these, and the
   understood and unpaid.
 - **ACCENT as its own lane** that raises one note and lowers the others around it. Keys has a
   Velocity lane, which is the absolute version of the same idea.
-- **A tool palette for the grid**: Draw / Select / Random / Copy / Paste / Clear, acting on a
-  **selection** rather than the whole lane. Keys' Roll and Reset act on the whole lane because
-  there is no selection model. A selection is the missing primitive behind three of these.
 - **Sync** (p7): a new chord is held for N *steps* before it takes. Keys' Launch Quantize is the
   same idea measured in beats.
 
@@ -92,12 +96,16 @@ A probability sequencer. Where Cthulhu randomises *which* note, Stochas randomis
   drawn value for exactly this reason, where Humanize is deliberately one-sided.
 - **Per-layer step counts for polyrhythm** - Keys' per-lane lengths with Link off.
 
-**Not taken, and the most interesting idea in any of these:**
+**Also taken, 2026-08-14 - and it was the most interesting idea in any of these:**
 
 - **Chain dependency**: a cell *"will play or not play depending on whether another cell has
-  played."* Conditional triggers - the "play this only if that fired" primitive that makes a
-  probabilistic pattern feel composed rather than sprayed. Keys has nothing like it, and it is
-  the single richest thing on this list.
+  played."* Keys built `laneChain` in the one form that needs no second coordinate: 0 always,
+  1 only if the step before sounded, 2 only if it did not. Chance says *maybe*; this says *only
+  if*, and that is what turns a probabilistic pattern into one that answers itself. It is also
+  the only thing in the engine that is not stateless from the playhead, which is exactly why
+  the arbitrary cell-to-cell form was not copied.
+
+**Not taken:**
 - **Max poly + Bias**: cap how many notes a step may play, and bias how close to the cap it
   lands. Keys has a global Voices cap, not a per-step one.
 - **Right-click a cell to zero it.** Keys cannot: right-click-only paths are closed.
@@ -165,12 +173,30 @@ distinction Keys does not:
 ## What this list is for
 
 Every "not taken" above is a decision, not a gap that nobody noticed. Three of them are ranked
-worth building, in order:
+worth building. **All three were ranked here on 2026-08-14 and all three were built the same
+day**, which is the argument for keeping this file: the ranking was the plan, and it survived
+contact with the code unchanged.
 
-1. **Chain / conditional triggers** (Stochas). The one idea that changes what the sequencer can
-   express rather than adding another axis to it.
-2. **A richer Note lane** (Kirnu's `Prev / Hi / Low / Rnd`). Cheap - it widens one lane's range -
-   and immediately musical.
-3. **A selection model for the grid** (Kirnu's tool palette). The missing primitive behind
-   Roll-on-a-selection, Copy, Paste and Clear, all of which currently act on a whole lane or not
-   at all.
+1. ~~**Chain / conditional triggers** (Stochas)~~ - built as `laneChain`. Still the one idea
+   here that changed what the sequencer can *express* rather than adding another axis to it.
+2. ~~**A richer Note lane** (Kirnu's `Prev / Hi / Low / Rnd`)~~ - built as Note values 9..12.
+3. ~~**A selection model for the grid** (Kirnu's tool palette)~~ - built as **Select**, which
+   Roll and Reset narrow to. **Copy, Paste and Clear-within-a-lane are still unbuilt** and are
+   now cheap: the primitive they were waiting for exists.
+
+### What is still on the table
+
+In rough order of what would change the instrument most:
+
+1. **Copy / Paste / Clear over a selection** (Kirnu). The three remaining tools of that palette,
+   now that Select exists to aim them.
+2. **Skip, as distinct from Mute** (Numerology). A muted step still occupies its slot; a skipped
+   one is passed over, so everything after it moves earlier. Keys' rhythm dividers are a global,
+   regular version of it. Copy Numerology's guard if it is built: the first and last steps of a
+   sequence cannot be skipped, since a pattern that can skip its own boundaries has no length.
+3. **Ties** (MatrixBrute). A step that extends the previous note rather than restriking it.
+   Keys' Gate lane can exceed 100% and overlap, which is close but not the same: a tie is *one*
+   note event, a long gate is two.
+4. **Negative Late** (Kirnu's SHIFT). Wanted, and the cost is understood and unpaid -
+   `ArpEngine`'s own comment explains that an early shift needs `emitHit`'s
+   close-what-you-land-on rule rewritten.
