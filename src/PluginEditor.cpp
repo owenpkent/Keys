@@ -742,6 +742,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // onBuildInstrumentMenu; plain Keys never does. refreshInstrumentChip() owns the visible
     // flag and the caption from there on, but the click handler and the accessible name are
     // fixed for the chip's whole life, so they are set once, here.
+    undoButton.setTitle("Undo");
+    undoButton.onClick = [this] { processor.undo(); refreshUndoButtons(); };
+    addAndMakeVisible(undoButton);
+    redoButton.setTitle("Redo");
+    redoButton.onClick = [this] { processor.redo(); refreshUndoButtons(); };
+    addAndMakeVisible(redoButton);
+    refreshUndoButtons();
+
     instrumentChip.setTitle("Instrument");
     instrumentChip.setTooltip("Load or eject the hosted instrument, or show its own window. "
                               "Only appears when Keys is hosting one, in Keys Host.");
@@ -1075,6 +1083,28 @@ ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)
                                              ArpPanel::Page::slots,   // "Cards"
                                              ArpPanel::Page::steps }; // "Draw"
     return order[(size_t) juce::jlimit(0, 2, tabIndex)];
+}
+
+// Enabled state and tooltip, derived from the processor's stacks. Polled rather than pushed:
+// undo entries are created all over the UI, and one place reading a generation counter is far
+// less to get wrong than every one of those sites remembering to call back here.
+void KeysEditor::refreshUndoButtons()
+{
+    const auto gen = processor.undoGeneration();
+    if (gen == lastUndoGen)
+        return;
+    lastUndoGen = gen;
+
+    undoButton.setEnabled(processor.canUndo());
+    redoButton.setEnabled(processor.canRedo());
+    // The tooltip names what would come back, which is the only way to know before clicking -
+    // and the reason every pushUndo call site passes a label rather than a bare marker.
+    const auto u = processor.undoLabel();
+    undoButton.setTooltip(u.isEmpty() ? juce::String("Nothing to undo")
+                                      : "Undo: " + u.toLowerCase());
+    const auto r = processor.redoLabel();
+    redoButton.setTooltip(r.isEmpty() ? juce::String("Nothing to redo")
+                                      : "Redo: " + r.toLowerCase());
 }
 
 void KeysEditor::refreshArpBarTabs()
@@ -1852,6 +1882,8 @@ void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
 
 void KeysEditor::timerCallback()
 {
+    refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
+
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());
     keyboard.setRange(sizeSpecs[sizeIdx].low, sizeSpecs[sizeIdx].count);
@@ -2177,6 +2209,14 @@ void KeysEditor::resized()
         // chipMin stays 60 (unchanged since the update-button corner it was built for) - see
         // minWidthForView() for why the floor, not this clamp, absorbs the growth above.
         // Everywhere but that one corner the clamp still lands on chipMax.
+        // Undo / Redo first, and reserved out of the bar before anything measures what is
+        // left - the reserve-fixed-size-first rule, which this bar has starved a control by
+        // ignoring before now.
+        undoButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        bar.removeFromLeft(4);
+        redoButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        bar.removeFromLeft(14);
+
         constexpr int chipMin = 60, chipMax = 150, bigGap = 14;
         const int chipCell = onBuildInstrumentMenu != nullptr ? chipMax + bigGap : 0;
         const int spareForChipAndCombos = bar.getWidth() - bpmGroupW - bigGap;

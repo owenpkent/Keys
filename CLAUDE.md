@@ -209,6 +209,29 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
   symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
   ruled box is drawn beside the band on every plain shape.
+- **Undo is content-only, and an entry is a subtree snapshot** (2026-08-14, Owen: "we should
+  have undo"). It covers chord pads, arp lanes and arp slots - what destroys music - and
+  **deliberately not parameters**: sweeping the rate dial would push forty entries and shove the
+  pad you wanted back off the end, which is an undo that cannot undo anything. A knob you can
+  turn back; a cleared pad you cannot.
+  **No action has a hand-written inverse**, so no action can have a wrong one: `pushUndo`
+  snapshots `chordPadsToTree()` or `arpToTree()` - the same trees the session file uses - and
+  undo restores one. Anything added later is undoable the moment its data lands in one of those
+  two trees, which is the whole reason this was affordable at all.
+  **One entry per gesture, not per change.** A lane drag pushes on the press and never again; a
+  single stroke would otherwise fill the stack. `KeysProcessor::UndoGesture` is the RAII guard
+  that absorbs nested pushes, so a drop that clears a pad and then sets it costs one entry.
+  **Undo/Redo ride the Controls bar** because it never hides with its fold - an undo you cannot
+  reach because a section is folded is one you cannot trust. They grey rather than vanish, so
+  the pair never reflows the bar; adding them pushed the bar into its `tight` cell set, which
+  drops ROOT's caption exactly as that mechanism is documented to.
+  **Undo releases every sounding chord first** (`stopAllChordPads`), the same choke point an
+  audition uses: restoring pads can rewrite the chord a sustained card holds, and restoring the
+  arp can rewrite the lanes under a running line.
+  **"There is no undo anywhere in Keys" was load-bearing in four places** - Reset beside Roll,
+  Clear page in a window, pad locks, and the `ChordPads::mouseUp` drag guard. All four stay:
+  they are still good behaviour, they just stop being the only thing standing between a click
+  and a lost chord. Do not remove one on the strength of undo existing.
 - **Three lanes appended, and one of them is not stateless** (2026-08-14, the manual round).
   `numLanes` went 10 -> 13: **Rand** (Cthulhu's "Rand Sel", how random *each step* is, bipolar
   -8..+8), **Mute** (its own lane at last) and **Chain** (Stochas' condition: 0 always, 1 only

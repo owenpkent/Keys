@@ -539,6 +539,19 @@ private:
     // there. It rides the left end, in the cell the Knobs chip vacated the same day, and it
     // is the one *elastic* control on this bar - see resized() for why the tempo group and
     // the keyboard-settings combos beyond it have to be measured first.
+    // Undo / Redo, on the **Controls bar** (2026-08-14, Owen: "we should have undo").
+    //
+    // That bar because it never hides with its fold - the same rule that keeps the tempo, Root
+    // and Scale on it. An undo you cannot reach because a section is collapsed is an undo you
+    // cannot trust, and the whole value of it is being reachable at the moment you realise.
+    //
+    // Left end, before everything else, because it is the one control here that is *about* the
+    // others: it reads as a header rather than as another setting. They grey when their stack
+    // is empty rather than vanishing, so the pair never reflows the bar under the mouse.
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
+    juce::uint32 lastUndoGen = 0xffffffffu; // forces the first refresh
+    void refreshUndoButtons();
+
     juce::TextButton instrumentChip;
     void applyAccent(int index);
 

@@ -119,6 +119,9 @@ void ArpPanel::LaneGrid::mouseDown(const juce::MouseEvent& e)
     }
     dragging = true;
     paintStep = stepAtX(e.position.x); // locked for the rest of this gesture
+    // The press is the whole gesture's undo entry - mouseDrag below deliberately does not push,
+    // or one stroke across a lane would be thirty entries and bury everything under it.
+    processor.pushUndo("Draw lane", KeysProcessor::UndoScope::arp);
     paintStepFromMouse(e, paintStep);
 }
 
@@ -312,6 +315,7 @@ void ArpPanel::MuteRow::mouseDown(const juce::MouseEvent& e)
     // and so threw away whatever that step held. 1 is muted, 0 is heard.
     const int current = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) step].load(std::memory_order_relaxed);
     paintValue = (current > 0) ? 0 : 1; // toggle, then paint every step the drag crosses to match
+    processor.pushUndo("Mute steps", KeysProcessor::UndoScope::arp); // once for the whole swipe
     dragging = true;
     applyAtX(e.position.x);
 }
@@ -974,6 +978,7 @@ void ArpPanel::recallOrCopy(int index)
     {
         case armCopy:
             if (index != copyFromIndex)
+                processor.pushUndo("Copy slot", KeysProcessor::UndoScope::arp);
                 processor.copyArpPattern(copyFromIndex, index, editLine());
             break;
         case armClear:
@@ -1036,6 +1041,7 @@ void ArpPanel::showSlotMenu(int index)
         else if (r == 4)
         {
             self->processor.recallArpPattern(index, self->editLine());
+            self->processor.pushUndo("Randomize pattern", KeysProcessor::UndoScope::arp);
             self->processor.randomizeActiveArpPattern(self->editLine());
         }
         self->refreshPatternButtons();
@@ -2207,7 +2213,11 @@ void ArpPanel::buildControls()
     addAndMakeVisible(cancelButton);
     cancelButton.setVisible(false);
 
-    randomizeButton.onClick = [this] { processor.randomizeActiveArpPattern(editLine()); };
+    randomizeButton.onClick = [this]
+    {
+        processor.pushUndo("Randomize pattern", KeysProcessor::UndoScope::arp);
+        processor.randomizeActiveArpPattern(editLine());
+    };
     addAndMakeVisible(randomizeButton);
 
     // Chain: one click plays the row as a progression. It starts at the lowest slot holding
@@ -2511,6 +2521,7 @@ void ArpPanel::nudgeEuclid(int which, int delta)
     euclidHits = juce::jlimit(0, euclidSteps, euclidHits);
     euclidRotate = juce::jlimit(0, euclidSteps - 1, euclidRotate);
 
+    processor.pushUndo("Euclid", KeysProcessor::UndoScope::arp);
     processor.applyEuclidToActiveArpPattern(editLine(), euclidHits, euclidSteps, euclidRotate,
                                             ArpEngine::laneProbability);
     refreshLaneReadouts();
@@ -2578,6 +2589,7 @@ void ArpPanel::nudgeRollAmount(int delta)
 // Randomize has always offered.
 void ArpPanel::rollSelectedLane()
 {
+    processor.pushUndo("Roll lane", KeysProcessor::UndoScope::arp);
     processor.rerollArpLane(editLine(), selectedLane, rollAmount, selFrom, selTo);
     refreshLaneReadouts();
     if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
@@ -2592,6 +2604,7 @@ void ArpPanel::clearSelection()
 
 void ArpPanel::resetSelectedLane()
 {
+    processor.pushUndo("Reset lane", KeysProcessor::UndoScope::arp);
     processor.resetArpLane(editLine(), selectedLane, selFrom, selTo);
     refreshLaneReadouts();
     if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
