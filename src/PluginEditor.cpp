@@ -655,6 +655,37 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addChildComponent(*arpBarAllTab);
 
+    // The page tabs, right of All, most-used first. See arpPageForTab for why the bar's order
+    // is not the enum's, and for where the names came from.
+    {
+        static const char* const names[3] = { "Play", "Cards", "Draw" };
+        static const char* const tips[3] = {
+            "How the line plays: rate, shape, swing, gate and feel. Most of what you want is here.",
+            "The twelve slot cards, plus Copy, Clear, Randomize, Euclid, Clocks and Chain.",
+            "Draw a rhythm by hand, one step at a time, on any of the ten lanes. Pattern shape only."
+        };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto b = std::make_unique<juce::TextButton>(names[i]);
+            b->setTitle(juce::String("Arp page ") + names[i]);
+            b->setTooltip(tips[i]);
+            b->onClick = [this, i]
+            {
+                if (arpPanel != nullptr)
+                {
+                    // A page click also leaves the macro view: you cannot be on a page of a
+                    // line's deep view and looking at both lines at once. setMacroView first,
+                    // so setPage's own relayout is the last one and sees the final state.
+                    arpPanel->setMacroView(false);
+                    arpPanel->setPage(arpPageForTab(i));
+                }
+                refreshArpBarTabs();
+            };
+            addChildComponent(*b); // navigates the panel, so it hides with the fold
+            arpPageTabs[(size_t) i] = std::move(b);
+        }
+    }
+
     bpmBarLabel.setText("BPM", juce::dontSendNotification);
     bpmBarLabel.setFont(skin::micro(9.0f));
     bpmBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
@@ -711,6 +742,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // onBuildInstrumentMenu; plain Keys never does. refreshInstrumentChip() owns the visible
     // flag and the caption from there on, but the click handler and the accessible name are
     // fixed for the chip's whole life, so they are set once, here.
+    undoButton.setTitle("Undo");
+    undoButton.onClick = [this] { processor.undo(); refreshUndoButtons(); };
+    addAndMakeVisible(undoButton);
+    redoButton.setTitle("Redo");
+    redoButton.onClick = [this] { processor.redo(); refreshUndoButtons(); };
+    addAndMakeVisible(redoButton);
+    refreshUndoButtons();
+
     instrumentChip.setTitle("Instrument");
     instrumentChip.setTooltip("Load or eject the hosted instrument, or show its own window. "
                               "Only appears when Keys is hosting one, in Keys Host.");
@@ -1038,6 +1077,36 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
     }
 }
 
+ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)
+{
+    static const ArpPanel::Page order[3] = { ArpPanel::Page::setup,   // "Play"
+                                             ArpPanel::Page::slots,   // "Cards"
+                                             ArpPanel::Page::steps }; // "Draw"
+    return order[(size_t) juce::jlimit(0, 2, tabIndex)];
+}
+
+// Enabled state and tooltip, derived from the processor's stacks. Polled rather than pushed:
+// undo entries are created all over the UI, and one place reading a generation counter is far
+// less to get wrong than every one of those sites remembering to call back here.
+void KeysEditor::refreshUndoButtons()
+{
+    const auto gen = processor.undoGeneration();
+    if (gen == lastUndoGen)
+        return;
+    lastUndoGen = gen;
+
+    undoButton.setEnabled(processor.canUndo());
+    redoButton.setEnabled(processor.canRedo());
+    // The tooltip names what would come back, which is the only way to know before clicking -
+    // and the reason every pushUndo call site passes a label rather than a bare marker.
+    const auto u = processor.undoLabel();
+    undoButton.setTooltip(u.isEmpty() ? juce::String("Nothing to undo")
+                                      : "Undo: " + u.toLowerCase());
+    const auto r = processor.redoLabel();
+    redoButton.setTooltip(r.isEmpty() ? juce::String("Nothing to redo")
+                                      : "Redo: " + r.toLowerCase());
+}
+
 void KeysEditor::refreshArpBarTabs()
 {
     // A and B answer to their own ButtonAttachment now (each bound to that line's On
@@ -1046,6 +1115,34 @@ void KeysEditor::refreshArpBarTabs()
     // click, a drop and a session load all agree.
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setToggleState(processor.layout.arpMacro, juce::dontSendNotification);
+
+    // The page tabs are ours to drive too, and their *visibility* is derived here rather than
+    // in syncSectionControls alone: entering or leaving the macro view has to show or hide
+    // them at once, not on the next 10 Hz tick, or the bar visibly catches up after the view
+    // has already changed. Steps greys outside Pattern shape - it is the lane editor and a
+    // plain shape has no lanes - rather than vanishing, so the group never reflows under the
+    // mouse and the tab is still there to say why.
+    const bool onPage = processor.layout.arp && ! processor.layout.arpMacro;
+    bool shownChanged = false;
+    for (int i = 0; i < 3; ++i)
+    {
+        auto* t = arpPageTabs[(size_t) i].get();
+        if (t == nullptr)
+            continue;
+        const auto page = arpPageForTab(i); // bar order is not enum order - see the header
+        if (t->isVisible() != onPage)
+        {
+            t->setVisible(onPage);
+            shownChanged = true;
+        }
+        t->setToggleState(onPage && processor.layout.arpPage == (int) page,
+                          juce::dontSendNotification);
+        t->setEnabled(arpPanel == nullptr || arpPanel->pageAvailable(page));
+    }
+    // Their cell collapses with them (see resized()), so BPM and Quantize slide back rather
+    // than orbiting a hole - the pageButtons lesson, one more time.
+    if (shownChanged)
+        resized();
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,6 +1227,7 @@ void KeysEditor::refreshArpPanel()
     // The bar tabs are a view of the processor's current line, so every path that moves it
     // has to say so. This is the panel's half - a chord dropped on a macro card lands here.
     arpPanel->onEditLineChanged = [this] { refreshArpBarTabs(); };
+    arpPanel->onPageChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -1248,6 +1346,11 @@ void KeysEditor::syncSectionControls()
     // All still only navigates the panel, so it keeps the pad-pages rule: hide with the fold.
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setVisible(lay.arp);
+    // The page tabs follow All's rule and add one of their own: a page picker is meaningless
+    // while the macro view is up, since no page is showing. So the bar reads "A B All" in the
+    // overview and "A B All Steps Slots Setup" in a line's deep view, which is what makes All
+    // visible as the way back rather than as a third letter. refreshArpBarTabs() owns that
+    // decision, here as everywhere else.
     refreshArpBarTabs();
 
     // The pads' page buttons stay on their bar in the main window even when the strip is
@@ -1779,6 +1882,8 @@ void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
 
 void KeysEditor::timerCallback()
 {
+    refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
+
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());
     keyboard.setRange(sizeSpecs[sizeIdx].low, sizeSpecs[sizeIdx].count);
@@ -2104,6 +2209,14 @@ void KeysEditor::resized()
         // chipMin stays 60 (unchanged since the update-button corner it was built for) - see
         // minWidthForView() for why the floor, not this clamp, absorbs the growth above.
         // Everywhere but that one corner the clamp still lands on chipMax.
+        // Undo / Redo first, and reserved out of the bar before anything measures what is
+        // left - the reserve-fixed-size-first rule, which this bar has starved a control by
+        // ignoring before now.
+        undoButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        bar.removeFromLeft(4);
+        redoButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        bar.removeFromLeft(14);
+
         constexpr int chipMin = 60, chipMax = 150, bigGap = 14;
         const int chipCell = onBuildInstrumentMenu != nullptr ? chipMax + bigGap : 0;
         const int spareForChipAndCombos = bar.getWidth() - bpmGroupW - bigGap;
@@ -2210,6 +2323,21 @@ void KeysEditor::resized()
         // rather than leaving Quantize orbiting a hole where it was (the pageButtons lesson).
         if (processor.layout.arp && arpBarAllTab != nullptr)
             arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
+        // The three page tabs, in the same collapsing cell as All and for the same reason:
+        // they navigate a panel, so with the section folded there is nothing behind them.
+        // A small gap first, so All reads as the head of this group rather than as one more
+        // letter beside A and B.
+        if (processor.layout.arp && ! processor.layout.arpMacro)
+        {
+            bar.removeFromLeft(6);
+            for (auto& t : arpPageTabs)
+            {
+                if (t == nullptr)
+                    continue;
+                t->setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+                bar.removeFromLeft(3);
+            }
+        }
         bar.removeFromLeft(14);
         quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
         quantizeBarBox.setBounds(bar.removeFromLeft(92).withSizeKeepingCentre(90, 24));

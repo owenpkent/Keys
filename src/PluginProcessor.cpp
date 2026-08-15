@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "ChordSources.h" // the Progression picker's item list is that table's own
+#include "EuclidGen.h"
 #include "PluginEditor.h"
 #include "ScaleModes.h"
 #include "mcp/KeysMcp.h"
@@ -463,6 +464,17 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
                                                    nm + " Human Time Range", 0, 100, 100));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVelSpan"), 1 },
                                                    nm + " Human Velocity Range", 0, 100, 100));
+
+    // Drift (2026-08-14, Owen: "there should be, like, a more random feature in the drawing,
+    // like cthulu"). Roll rerolls a lane once and you can see what it did; this strays from
+    // whatever is drawn *while it plays*, so the part never repeats exactly and the lane on
+    // screen never changes. Appended, default 0, which is the engine exactly as it was.
+    //
+    // It only ever touches the lanes ArpEngine::laneDrifts allows - the ones that decide *how*
+    // a step plays, never *which* note it plays. See that table for why that split lets this be
+    // one knob instead of ten.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Drift"), 1 },
+                                                   nm + " Drift", 0, 100, 0));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -482,7 +494,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
-        "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan"
+        "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
+        "Drift"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1391,6 +1404,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.tuplet = tupletFor((int) arpParam(n, apTuplet));
         ap.humanizeSpan = (int) arpParam(n, apHumanizeSpan);
         ap.humanVelSpan = (int) arpParam(n, apHumanVelSpan);
+        ap.drift = (int) arpParam(n, apDrift);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;
@@ -1554,6 +1568,99 @@ void KeysProcessor::advanceChainClock(int numSamples)
     }
 }
 
+// --- Undo -------------------------------------------------------------------------------
+//
+// See the header for why this is content-only and why an entry is a whole-subtree snapshot
+// rather than a hand-written inverse of each action.
+
+juce::ValueTree KeysProcessor::snapshotFor(UndoScope scope) const
+{
+    return scope == UndoScope::pads ? chordPadsToTree() : arpToTree();
+}
+
+void KeysProcessor::restore(const UndoEntry& e)
+{
+    // Both of these want the *root* the session file uses, and each snapshot is already that
+    // subtree - so wrap it back up in a root of the right shape before handing it over.
+    juce::ValueTree root { "KEYS" };
+    root.appendChild(e.before.createCopy(), nullptr);
+    if (e.scope == UndoScope::pads)
+        chordPadsFromTree(root);
+    else
+        arpFromTree(root);
+}
+
+void KeysProcessor::pushUndo(const juce::String& label, UndoScope scope)
+{
+    if (undoGestureDepth > 0)
+        return; // inside an open gesture: the outermost push already took the "before"
+
+    undoStack.push_back({ label, scope, snapshotFor(scope) });
+    if ((int) undoStack.size() > maxUndoDepth)
+        undoStack.erase(undoStack.begin());
+
+    // A new edit ends the redo branch, which is what every undo stack does and what people
+    // expect: once you change something after undoing, the future you undid is gone.
+    redoStack.clear();
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
+KeysProcessor::UndoGesture::UndoGesture(KeysProcessor& p, const juce::String& label, UndoScope scope)
+    : processor(p)
+{
+    p.pushUndo(label, scope);   // the outermost one; any nested push is absorbed
+    ++p.undoGestureDepth;
+}
+
+KeysProcessor::UndoGesture::~UndoGesture()
+{
+    --processor.undoGestureDepth;
+}
+
+void KeysProcessor::undo()
+{
+    if (undoStack.empty())
+        return;
+    auto entry = undoStack.back();
+    undoStack.pop_back();
+
+    // The current state becomes the redo entry, taken *before* the restore overwrites it.
+    redoStack.push_back({ entry.label, entry.scope, snapshotFor(entry.scope) });
+    if ((int) redoStack.size() > maxUndoDepth)
+        redoStack.erase(redoStack.begin());
+
+    // Undoing must never leave a note ringing that nothing owns any more. Restoring pads can
+    // rewrite the chord a sustained card is holding, and restoring the arp can rewrite the
+    // lanes under a running line, so let go of everything first - the same choke point an
+    // audition uses, and for the same reason.
+    stopAllChordPads();
+    restore(entry);
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
+void KeysProcessor::redo()
+{
+    if (redoStack.empty())
+        return;
+    auto entry = redoStack.back();
+    redoStack.pop_back();
+
+    undoStack.push_back({ entry.label, entry.scope, snapshotFor(entry.scope) });
+    if ((int) undoStack.size() > maxUndoDepth)
+        undoStack.erase(undoStack.begin());
+
+    stopAllChordPads();
+    restore(entry);
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
+void KeysProcessor::clearUndoHistory()
+{
+    undoStack.clear();
+    redoStack.clear();
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
 juce::ValueTree KeysProcessor::chordPadsToTree() const
 {
     juce::ValueTree pads { "chordPads" };
@@ -1642,6 +1749,9 @@ void KeysProcessor::storeActiveArpPattern(int line)
         pat.length[(size_t) l] = ln.engine.lanes.length[(size_t) l].load();
         pat.clockDiv[(size_t) l] = ln.engine.lanes.clockDiv[(size_t) l].load();
     }
+    for (int i = 0; i < 4; ++i)
+        pat.rhythmDivs[(size_t) i] = ln.engine.rhythmDiv[(size_t) i].load();
+    pat.harmonyMode = ln.engine.harmonyMode.load();
 }
 
 int KeysProcessor::arpActivePattern(int line) const
@@ -1664,6 +1774,9 @@ void KeysProcessor::recallArpPattern(int index, int line)
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
     }
+    for (int i = 0; i < 4; ++i)
+        ln.engine.rhythmDiv[(size_t) i].store(juce::jlimit(0, 16, pat.rhythmDivs[(size_t) i]));
+    ln.engine.harmonyMode.store(juce::jlimit(0, 1, pat.harmonyMode));
 }
 
 bool KeysProcessor::arpQuantizeOn() const
@@ -2233,6 +2346,9 @@ void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern, int 
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pattern.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pattern.clockDiv[(size_t) l]));
     }
+    for (int i = 0; i < 4; ++i)
+        ln.engine.rhythmDiv[(size_t) i].store(juce::jlimit(0, 16, pattern.rhythmDivs[(size_t) i]));
+    ln.engine.harmonyMode.store(juce::jlimit(0, 1, pattern.harmonyMode));
 }
 
 void KeysProcessor::randomizeActiveArpPattern(int line)
@@ -2249,6 +2365,71 @@ void KeysProcessor::randomizeActiveArpPattern(int line)
         lanes.value[ArpEngine::laneRatchet][(size_t) s].store(rng.nextInt(8) == 0 ? 2 : 1);
         lanes.value[ArpEngine::laneProbability][(size_t) s].store(rng.nextInt(6) == 0 ? 60 : 100);
     }
+}
+
+void KeysProcessor::rerollArpLane(int line, int laneIndex, int amountPct, int fromStep, int toStep)
+{
+    // Reroll **one** lane, by an amount (2026-08-14, Owen: "there should be, like, a more
+    // random feature in the drawing, like cthulu"). randomizeActiveArpPattern above is the
+    // other kind and stays: it writes six lanes at once to a musical recipe, which is a way to
+    // get a whole part you did not have. This is the one you reach for while looking at a lane
+    // you already like - so it is scoped to that lane, and `amountPct` is how far it may stray
+    // from what is drawn rather than an all-or-nothing reroll.
+    //
+    // At 100 the draw is uniform across the lane's whole range, which is the scramble; below
+    // that it is a nudge around each step's current value. Either way it only ever writes
+    // inside laneRange, so no reroll can put a value in a lane that the lane cannot hold.
+    const auto lane = juce::jlimit(0, ArpEngine::numLanes - 1, laneIndex);
+    const auto range = ArpEngine::laneRange(lane);
+    const int span = range.hi - range.lo;
+    if (span <= 0)
+        return;
+    const double amt = juce::jlimit(0, 100, amountPct) / 100.0;
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
+    // Its own length, not maxSteps: rerolling past the end would quietly rewrite steps the
+    // pattern is not playing, and they would appear later if the length ever grew.
+    const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) lane].load());
+    // A span narrows it; -1 on either end means the whole lane. Clamped into the lane's own
+    // length, so a span marked before the length shrank cannot write past the end.
+    const int lo = fromStep < 0 ? 0 : juce::jlimit(0, len - 1, fromStep);
+    const int hi = toStep < 0 ? len - 1 : juce::jlimit(lo, len - 1, toStep);
+    for (int s = lo; s <= hi; ++s)
+    {
+        const int cur = lanes.value[(size_t) lane][(size_t) s].load();
+        // The window slides rather than the result clamping - see ArpEngine::strayWithin for
+        // why, and for the bug that taught it. At 100% the reach is the whole lane, so the
+        // window covers it wherever the value sits and the draw is uniform across it.
+        lanes.value[(size_t) lane][(size_t) s].store(
+            ArpEngine::strayWithin(cur, span * amt, range, rng.nextDouble()));
+    }
+}
+
+void KeysProcessor::resetArpLane(int line, int laneIndex, int fromStep, int toStep)
+{
+    // Its whole length, not maxSteps, for the reason rerollArpLane gives: the steps past the
+    // end are not being played, and rewriting them would surface later if the length grew.
+    const auto lane = juce::jlimit(0, ArpEngine::numLanes - 1, laneIndex);
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) lane].load());
+    const int lo = fromStep < 0 ? 0 : juce::jlimit(0, len - 1, fromStep);
+    const int hi = toStep < 0 ? len - 1 : juce::jlimit(lo, len - 1, toStep);
+    for (int s = lo; s <= hi; ++s)
+        lanes.value[(size_t) lane][(size_t) s].store(ArpEngine::laneDefaults[lane]);
+}
+
+bool KeysProcessor::applyEuclidToActiveArpPattern(int line, int hits, int steps, int rotation, int laneIndex)
+{
+    // Only the probability lane has a meaningful hit/rest mapping (100 fires the step as
+    // written, 0 never does); any other lane's "on" value depends on what that lane means, so
+    // this stays scoped to probability rather than guessing at one.
+    if (laneIndex != ArpEngine::laneProbability)
+        return false;
+    steps = juce::jlimit(1, ArpEngine::maxSteps, steps);
+    auto& lanes = lines[(size_t) juce::jlimit(0, numArpLines - 1, line)].engine.lanes;
+    for (int s = 0; s < steps; ++s)
+        lanes.value[ArpEngine::laneProbability][(size_t) s].store(keys::euclidHit(s, hits, steps, rotation) ? 100 : 0);
+    lanes.length[ArpEngine::laneProbability].store(steps);
+    return true;
 }
 
 void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
@@ -2499,7 +2680,7 @@ void KeysProcessor::migrateHumanSpans(const juce::ValueTree& root)
         return;
 
     for (int line = 0; line < numArpLines; ++line)
-        for (const auto which : { apHumanizeSpan, apHumanVelSpan })
+        for (const auto which : { apHumanizeSpan, apHumanVelSpan, apDrift })
         {
             const auto wanted = arpParamId(line, which);
             bool saw = false;
@@ -2527,6 +2708,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("chordGen", layout.chordGen, nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
+    tree.setProperty("arpPage", layout.arpPage, nullptr);
     tree.setProperty("arpLights", layout.arpLights, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
@@ -2566,6 +2748,9 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
     layout.arpMacro = flag("arpMacro", true);
+    // Absent before the deep view was paged (2026-08-14). Play is the right answer for those,
+    // and for a fresh instance: see the LayoutState comment for why not Draw.
+    layout.arpPage = juce::jlimit(0, 2, (int) tree.getProperty("arpPage", 2));
     layout.arpLights = flag("arpLights", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
@@ -2621,6 +2806,14 @@ void KeysProcessor::arpLineToTree(juce::ValueTree& dest, int line) const
         pt.setProperty("rateFree", pat.rateFree, nullptr);
         pt.setProperty("rateHz", (double) pat.rateHz, nullptr);
         pt.setProperty("bars", pat.bars, nullptr); // how long the chain holds this slot
+        // Rhythm dividers and the Harmony lane's mode, appended 2026-08-14. Absent in every
+        // session saved before them, which reads back as "0,0,0,0" / 0 - inert, exactly what
+        // those sessions already played.
+        juce::StringArray rd;
+        for (int v : pat.rhythmDivs)
+            rd.add(juce::String(v));
+        pt.setProperty("rhythmDivs", rd.joinIntoString(","), nullptr);
+        pt.setProperty("harmonyMode", pat.harmonyMode, nullptr);
         for (int l = 0; l < ArpEngine::numLanes; ++l)
         {
             juce::StringArray vals;
@@ -2697,6 +2890,10 @@ void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int sa
         pat.rateHz = (float) juce::jlimit((double) ArpEngine::minRateHz, (double) ArpEngine::maxRateHz,
                                           (double) pt.getProperty("rateHz", 8.0));
         pat.bars = juce::jlimit(1, 16, (int) pt.getProperty("bars", 1)); // absent before the chain
+        const auto rd = juce::StringArray::fromTokens(pt.getProperty("rhythmDivs", "0,0,0,0").toString(), ",", "");
+        for (int i = 0; i < 4; ++i)
+            pat.rhythmDivs[(size_t) i] = i < rd.size() ? juce::jlimit(0, 16, rd[i].getIntValue()) : 0;
+        pat.harmonyMode = juce::jlimit(0, 1, (int) pt.getProperty("harmonyMode", 0));
         for (int lc = 0; lc < pt.getNumChildren(); ++lc)
         {
             const auto lt = pt.getChild(lc);
@@ -2722,6 +2919,9 @@ void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int sa
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
     }
+    for (int i = 0; i < 4; ++i)
+        ln.engine.rhythmDiv[(size_t) i].store(pat.rhythmDivs[(size_t) i]);
+    ln.engine.harmonyMode.store(pat.harmonyMode);
 }
 
 void KeysProcessor::arpFromTree(const juce::ValueTree& root)

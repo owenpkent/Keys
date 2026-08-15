@@ -32,18 +32,143 @@ public:
     // Sounding arp notes awaiting their note-off. Raised from 64 with the Chord shape and
     // the Harmony lane, which between them can put a spread chord's every note on one step.
     static constexpr int maxActive = 128;
-    static constexpr int numLanes = 10;
+    static constexpr int numLanes = 13;
 
     // The four after laneProbability arrived 2026-07-30. Appended, like everything else in
     // that round: a slot's lane data is serialized by index, so inserting would silently
     // reinterpret every pattern in every saved session.
+    // **Append only.** A lane's index is what a saved session stores it under (see
+    // arpLineToTree), so inserting one would silently move every older session's lane data.
+    // Lanes 10 and 11 arrived 2026-08-14 and an older session simply has no child for them,
+    // which reads back as ArpPattern's laneDefaults - inert, both of them.
     enum Lane { laneNote = 0, laneOctave, laneVelocity, laneGate, laneRatchet, laneProbability,
-                laneTranspose, laneLate, laneHarmony, laneChord };
+                laneTranspose, laneLate, laneHarmony, laneChord,
+                // Cthulhu's "Rand Sel" (its manual, p25): **how random each step is**, drawn
+                // per step rather than set by one knob for the whole line. Bipolar - above zero
+                // the played entry may come out higher than the one drawn in the Note lane,
+                // below zero lower, and the size is how far. Zero is exactly what is drawn.
+                //
+                // This is the one randomness in Keys that *is* allowed to change which note
+                // plays, and the reason is that you drew it on that step: it is intent, where
+                // Drift is a knob wandering over a part you did not aim at. See laneDrifts.
+                laneRand,
+                // The mute row's own lane. It used to write -1 straight into the Note lane,
+                // which destroyed whatever that step held - Cthulhu's manual names preserving
+                // it as the point of having mute buttons at all ("you can experiment with
+                // mutes, without losing the set-value of the steps"). Note keeps its value now
+                // and this says whether the step is heard. Note = -1 is still a *drawn* rest,
+                // which is a different thing and stays: Cthulhu has both too.
+                laneMute,
+                // Stochas' chain dependency (its manual p3: a cell "will play or not play
+                // depending on whether another cell has played"), reduced to the one form that
+                // needs no second coordinate: 0 always, 1 only if the step before it fired,
+                // 2 only if the step before it did not. Chance says "maybe"; this says "only
+                // if", which is what turns a probabilistic pattern into one that answers itself.
+                //
+                // **It is the one thing in the engine that is not stateless from the playhead.**
+                // Everything else here is computed from the step index alone so a transport jump
+                // lands right without having walked there; a condition has to remember one bit
+                // about the step before. It self-corrects within a single step, which is the
+                // cheapest possible break of that rule and is why this form was chosen over
+                // Stochas' arbitrary cell-to-cell reference.
+                laneChain };
 
     // The value each lane holds when it is doing nothing. Also what every lane reads as
     // while Params::usePattern is false, which is how "Shape: Up" behaves like a plain
     // arpeggiator even after the step lanes have been edited.
-    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0 };
+    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0, 0, 0, 0 };
+
+    // What each lane can hold, low and high. **One copy** (2026-08-14): the grid that draws a
+    // lane, the reroll that randomizes one and the drift that strays from one all need these,
+    // and three tables that must agree is three tables that will not. The numbers are the ones
+    // ArpPanel's lane rows were built with; ChordTable::numSlots for the Chord lane, since that
+    // is what it indexes.
+    // The Note lane's vocabulary (2026-08-14, from Kirnu Cream's ORDER lane - its manual p9:
+    // "Prev - Arp plays same note it played in previous step... Hi... Low... Rnd"). Keys' own
+    // -1 and 0 keep their meanings and the modes were **appended above 8**, not below -1, for
+    // two reasons: every saved session's values stay exactly what they were, and dragging a
+    // cell to the bottom of the grid still reaches the rest rather than landing on a mode.
+    static constexpr int noteRest = -1;      // a drawn rest; the step is silent
+    static constexpr int noteFollow = 0;     // whatever the Shape's walk says next
+    static constexpr int noteMaxFixed = 8;   // 1..8 are fixed sequence entries
+    static constexpr int notePrev = 9;       // play what the last step that sounded played
+    static constexpr int noteHi = 10;        // the highest note of the held chord, whatever it is
+    static constexpr int noteLow = 11;       // ...and the lowest
+    static constexpr int noteRnd = 12;       // any entry, drawn fresh each time
+
+    struct LaneRange { int lo, hi; };
+    static constexpr LaneRange laneRanges[numLanes] = {
+        { -1, 12 },  // Note: -1 rest, 0 follow the shape, 1..8 a fixed entry, 9..12 a mode
+        { -3, 3 },   // Octave
+        { 10, 200 }, // Velocity, as a percentage of what was played
+        { 5, 200 },  // Gate
+        { 1, 4 },    // Ratchet
+        { 0, 100 },  // Chance, per step - multiplied by the line's own Chance knob
+        { -7, 7 },   // Transpose, in scale degrees
+        { 0, 90 },   // Late, as a percentage of the step
+        { 0, 7 },    // Harmony
+        { 0, 12 },   // Chord: 0 is off, 1..12 call up that slot's chord
+        { -8, 8 },   // Rand: how far this step's note selection may stray, and which way
+        { 0, 1 },    // Mute: 1 silences the step without touching what it holds
+        { 0, 2 },    // Chain: 0 always, 1 only after a step that fired, 2 only after one that did not
+    };
+    // Stray from `value` by up to `reach`, staying inside `r`. `u01` is a draw in [0, 1).
+    //
+    // **The window slides; the result is never clamped** (2026-08-14, Owen: "0 value seems to
+    // ignore roll"). Both Roll and Drift used to build [value - reach/2, value + reach/2] and
+    // clamp whatever came out, which is fine in the middle of a lane and broken at its edges:
+    // a lane sitting at 0 (Late, Harmony and Chord all default there, and Chance sits at its
+    // *top*) had half of every draw fall outside the range and clamp straight back to the value
+    // it started from. So half the steps did not move and the rest only moved one way, which is
+    // exactly what "seems to ignore" looks like. Sliding the window keeps the full width of the
+    // draw wherever the value sits, and only narrows it if the reach is wider than the lane.
+    static int strayWithin(int value, double reach, LaneRange r, double u01) noexcept
+    {
+        double lo = (double) value - reach * 0.5;
+        double hi = (double) value + reach * 0.5;
+        if (lo < r.lo) { hi += (double) r.lo - lo; lo = (double) r.lo; }
+        if (hi > r.hi) { lo -= hi - (double) r.hi; hi = (double) r.hi; }
+        lo = juce::jmax(lo, (double) r.lo); // both, for a reach wider than the whole lane
+        hi = juce::jmin(hi, (double) r.hi);
+        return juce::jlimit(r.lo, r.hi, (int) std::llround(lo + u01 * (hi - lo)));
+    }
+
+    static LaneRange laneRange(int lane) noexcept
+    {
+        // ChordTable is declared below this point, so its count cannot appear in the
+        // initializer above - a static-member initializer is not delayed the way a member
+        // function body is. Asserting it here, where the body *is* delayed, is what keeps the
+        // literal 12 honest if the table ever grows.
+        static_assert(laneRanges[laneChord].hi == ChordTable::numSlots,
+                      "the Chord lane's range must be the number of slots it indexes");
+        return laneRanges[(size_t) juce::jlimit(0, numLanes - 1, lane)];
+    }
+
+    // Which lanes **Drift** is allowed to touch (2026-08-14, Owen: "there should be, like, a
+    // more random feature in the drawing, like cthulu"). The rule is one line and it is the
+    // whole design: **drift changes how a step plays, never which note it plays.** So the feel
+    // lanes wander - octave, velocity, gate, lateness, transpose, chance - and the four that
+    // choose *content* do not: Note picks the sequence entry, Ratchet subdivides it, Harmony
+    // adds a voice and Chord calls up a whole chord, and a knob that quietly rewrote any of
+    // those would be editing your part rather than performing it.
+    //
+    // Same split the chord generator already draws between Lean (which notes) and the voicing
+    // passes (where they sit), and it is why Drift can be one knob instead of ten.
+    static constexpr bool laneDrifts[numLanes] = {
+        false, // Note
+        true,  // Octave
+        true,  // Velocity
+        true,  // Gate
+        false, // Ratchet
+        true,  // Chance
+        false, // Transpose - scale degrees, so this picks a different note
+        true,  // Late
+        false, // Harmony
+        false, // Chord
+        false, // Rand - drift must not rewrite how random you drew a step
+        false, // Mute - nor silence a step you did not silence
+        false, // Chain - a condition is structure, not feel
+    };
 
     // The Hz mode's range, which is not a round number by choice: it is exactly what the
     // eleven synced divisions span at 120 bpm. "1/64" is 32 steps a second and "16 bars" is
@@ -86,6 +211,55 @@ public:
             b = t;
         }
         return a;
+    }
+
+    // Rhythm dividers (2026-08-14, Subharmonicon-style): whether raw step g is a hit for ANY
+    // enabled divisor (value > 0) in `divs` - an OR of clocks, not a shared modulus, so {3, 4}
+    // fires on 0, 3, 4, 6, 8, 9, 12... not only their common multiple. Pure and stateless in g,
+    // so a transport jump lands on the right answer without having walked every step since 0.
+    static bool dividerFires(long long g, const std::array<int, 4>& divs) noexcept
+    {
+        for (const int d : divs)
+            if (d > 0 && g % d == 0)
+                return true;
+        return false;
+    }
+
+    // How many boundaries strictly before g are divider hits (dividerFires above), computed
+    // from g alone - the same "stateless from ppq" contract the rest of the engine's timing
+    // keeps (see the class comment). Inclusion-exclusion over the enabled divisors: for every
+    // non-empty subset, count multiples of its lcm in [0, g) and sign the count by the parity
+    // of the subset's size. At most 4 divisors means at most 15 subsets, walked with a bitmask
+    // rather than recursion - allocation-free, as everything the audio thread reaches must be.
+    static long long firedCountBefore(long long g, const std::array<int, 4>& divs) noexcept
+    {
+        if (g <= 0)
+            return 0;
+        long long total = 0;
+        for (unsigned mask = 1; mask < 16u; ++mask)
+        {
+            long long l = 1;
+            int bits = 0;
+            bool valid = true;
+            for (int i = 0; i < 4 && valid; ++i)
+            {
+                if ((mask & (1u << i)) == 0)
+                    continue;
+                if (divs[(size_t) i] <= 0)
+                {
+                    valid = false; // a subset touching a disabled slot is not a real subset
+                    break;
+                }
+                const int g2 = gcdOf((int) l, divs[(size_t) i]);
+                l = l / g2 * divs[(size_t) i];
+                ++bits;
+            }
+            if (! valid || bits == 0)
+                continue;
+            const long long count = (g - 1) / l + 1;
+            total += (bits & 1) ? count : -count;
+        }
+        return total;
     }
 
     // How a tempo-synced rate is written under the dial: **the step length as an exact fraction
@@ -251,6 +425,16 @@ public:
         // floor at zero for any knob position, which is the behaviour these two had alone.
         int humanizeSpan = 100;   // 0..100
         int humanVelSpan = 100;   // 0..100
+        // Drift (2026-08-14, Owen: "there should be, like, a more random feature in the
+        // drawing, like cthulu"). Strays from what the lanes hold *while it plays*, by up to
+        // this percentage of each lane's own range - so the part never repeats exactly and the
+        // lane on screen never changes. Roll is the other half of the same ask and is its
+        // opposite in every way: one reroll, visible, permanent.
+        //
+        // Only the lanes `laneDrifts` allows, which is the whole design in one line: **drift
+        // changes how a step plays, never which note it plays.** 0 is the engine bit-identical
+        // to before, which is what makes it safe to append.
+        int drift = 0;            // 0..100
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
         // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
@@ -296,6 +480,16 @@ public:
 
     Lanes lanes;
 
+    // Subharmonicon-style rhythm dividers (2026-08-14): up to four per line, 1..16, 0 = off.
+    // All zero (the default) is inert - process() takes the same path it always has, byte for
+    // byte - so a session that never touches this feature cannot tell it exists. Same contract
+    // as `lanes`: message thread writes, audio thread reads, plain atomics, no lock.
+    std::array<std::atomic<int>, 4> rhythmDiv {};
+
+    // The Harmony lane's voicing: 0 = chord tones (today's behaviour, default), 1 = subharmonic
+    // (the undertone series - see fireStep). Same contract as `rhythmDiv`.
+    std::atomic<int> harmonyMode { 0 };
+
     void prepare(double sampleRate)
     {
         sr = sampleRate > 0 ? sampleRate : 44100.0;
@@ -325,6 +519,8 @@ public:
         stepCounter = 0;
         dirCursor = 0;
         stepBase = 0;
+        lastStepFired = false; // a restart has no step before it
+        lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
         heldBeats = 0.0;
@@ -344,6 +540,8 @@ public:
         stepCounter = 0;
         dirCursor = 0;
         stepBase = 0;
+        lastStepFired = false; // a restart has no step before it
+        lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
         heldBeats = 0.0;
@@ -440,6 +638,16 @@ public:
             rampScale = (float) (1.0 + (double) p.velRamp / 100.0 * t);
         }
 
+        // Rhythm dividers, read once per block like every other atomic-backed control. Clamped
+        // here rather than trusted from whatever wrote them (an MCP client, a stale slot) - see
+        // stepLengthBeats's own clamp for why: this value bounds a loop below, on the audio
+        // thread, and an unclamped divisor would only bound that loop by luck.
+        const std::array<int, 4> divs = { juce::jlimit(0, 16, rhythmDiv[0].load(std::memory_order_relaxed)),
+                                          juce::jlimit(0, 16, rhythmDiv[1].load(std::memory_order_relaxed)),
+                                          juce::jlimit(0, 16, rhythmDiv[2].load(std::memory_order_relaxed)),
+                                          juce::jlimit(0, 16, rhythmDiv[3].load(std::memory_order_relaxed)) };
+        const bool dividersOn = divs[0] > 0 || divs[1] > 0 || divs[2] > 0 || divs[3] > 0;
+
         if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
             // Fire every step whose *fire time* lands inside [pos, pos + blockBeats). Not
@@ -461,6 +669,26 @@ public:
             {
                 const double boundaryBeats = nextIndexF * stepBeats;
                 const long long globalStep = (long long) llround(nextIndexF);
+
+                // With any divider enabled, a boundary fires only if it is a multiple of at
+                // least one of them (dividerFires); a suppressed boundary fires no note, no
+                // ratchet, and does not advance anything - skip it before it touches a single
+                // lane read or the direction walk. All zero (the default) never enters this
+                // branch, so behaviour is unchanged bit for bit.
+                if (dividersOn && ! dividerFires(globalStep, divs))
+                {
+                    nextIndexF += 1.0;
+                    continue;
+                }
+                // The index a firing boundary reads its lanes by and restarts its walk from.
+                // Raw with no dividers (today's behaviour, untouched); with dividers, the count
+                // of firing boundaries before this one (firedCountBefore), computed from
+                // globalStep alone - stateless the same way the rest of this clock is - so the
+                // pattern advances one lane step per *fired* boundary instead of leaving gaps
+                // where a divider skipped a raw step. Only the lane index compresses: the wall-
+                // clock position below still comes from the real step grid.
+                const long long stepIndex = dividersOn ? firedCountBefore(globalStep, divs) : globalStep;
+
                 double fireBeats = boundaryBeats;
                 if ((globalStep & 1) != 0)
                     fireBeats += stepBeats * p.swing; // swing shifts the offbeats
@@ -469,7 +697,7 @@ public:
                 // step order however the lane is drawn (step n at n+0.9 still precedes step
                 // n+1 at n+1.0). An early half would need the whole close-what-you-land-on
                 // rule in emitHit rewritten, for a shift Swing already offers.
-                fireBeats += stepBeats * juce::jlimit(0, 90, laneValue(p, laneLate, globalStep)) / 100.0;
+                fireBeats += stepBeats * juce::jlimit(0, 90, driftedLane(p, laneLate, stepIndex)) / 100.0;
                 const double offsetBeats = fireBeats - pos;
                 const int offset = (int) std::floor(offsetBeats / beatsPerSample);
                 if (offset >= numSamples)
@@ -495,14 +723,14 @@ public:
                     if (pendingRetrig)
                     {
                         pendingRetrig = false;
-                        stepBase = globalStep;
+                        stepBase = stepIndex;
                         dirCursor = 0;
                     }
 
                     // Any ratchet sub-hit carried in from an earlier block that is due before
                     // this step goes first, so hits reach emitHit in time order.
                     firePendingBefore(offset, numSamples, out);
-                    fireStep(p, globalStep, offset, stepBeats / beatsPerSample, numSamples, out);
+                    fireStep(p, stepIndex, offset, stepBeats / beatsPerSample, numSamples, out);
                 }
                 nextIndexF += 1.0;
             }
@@ -650,6 +878,29 @@ private:
         return lanes.value[li][(size_t) idx].load(std::memory_order_relaxed);
     }
 
+    // laneValue plus Drift (2026-08-14). Every lane read that feeds *how a step plays* goes
+    // through here instead; the four that choose content still call laneValue directly, and
+    // `laneDrifts` is the table that says which is which.
+    //
+    // Non-const where laneValue is const, on purpose: this draws from `rng`, and a lane read
+    // that can return a different answer twice is not the same kind of thing as one that
+    // cannot. It is called exactly once per lane per fired step, so a step's drift is settled
+    // before any of it is heard.
+    int driftedLane(const Params& p, Lane l, long long globalStep)
+    {
+        const int v = laneValue(p, l, globalStep);
+        const int amt = juce::jlimit(0, 100, p.drift);
+        if (amt <= 0 || ! laneDrifts[l])
+            return v;
+        // Half the reach either side, so the drawn value stays the centre of what you hear
+        // rather than the floor of it - the opposite of Humanize, which is deliberately
+        // one-sided (late and quieter, never early and never louder) because it models a
+        // player. Drift models a *machine* wandering, and a wander has no preferred direction.
+        const auto r = laneRange(l);
+        const double reach = (double) (r.hi - r.lo) * (amt / 100.0);
+        return strayWithin(v, reach, r, (double) (rng() % 1000u) / 1000.0);
+    }
+
     // Walk `degrees` scale steps from `note`, using the mask of in-scale pitch classes. A
     // note that is not itself in the scale lands on the next one in the direction of travel,
     // which is the same rounding Scale Lock does upstream.
@@ -779,13 +1030,57 @@ private:
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
                   int numSamples, juce::MidiBuffer& out)
     {
-        const int noteVal = laneValue(p, laneNote, globalStep);
-        if (noteVal < 0)
-            return; // muted step
-        const int chance = laneValue(p, laneProbability, globalStep)
+        // The chain condition, first of all: a step whose condition fails did not happen, and
+        // must not spend a chance draw or advance anything. `lastStepFired` is the one bit of
+        // playhead-dependent state in this engine - see laneChain for why that is affordable.
+        if (const int chain = laneValue(p, laneChain, globalStep); chain != 0)
+            if ((chain == 1) != lastStepFired)
+            {
+                lastStepFired = false;
+                return;
+            }
+
+        // The mute lane first, and before anything else is resolved: a muted step costs
+        // nothing and must leave no trace. Separate from the Note lane's own -1 on purpose -
+        // that is a rest you *drew*, this is a switch you can flip back without having lost
+        // what the step held (Cthulhu's manual, p25, names that as the whole point of it).
+        if (laneValue(p, laneMute, globalStep) > 0)
+        {
+            lastStepFired = false;
+            return;
+        }
+
+        int noteVal = laneValue(p, laneNote, globalStep);
+        if (noteVal <= noteRest)
+        {
+            lastStepFired = false;
+            return; // a drawn rest
+        }
+
+        // Rand: how far this step's selection may stray from what is drawn, and which way
+        // (Cthulhu's "Rand Sel", its manual p25-26 - "if the Note Sel step is set to 2 and the
+        // random value is set to 2 above middle, the Arp will output 2, 3, or 4"). Drawn per
+        // step, so unlike Drift it is allowed to change which note plays: you aimed it there.
+        //
+        // Only meaningful on a fixed index. noteVal 0 means "follow the shape", and a shape is
+        // already a walk - randomising the *number zero* would silently turn Up into a fixed
+        // entry, which is not what drawing on this lane looks like it should do.
+        if (const int rand = laneValue(p, laneRand, globalStep);
+            rand != 0 && noteVal >= 1 && noteVal <= noteMaxFixed)
+        {
+            const int lo = juce::jmax(1, rand < 0 ? noteVal + rand : noteVal);
+            const int hi = juce::jmin(noteMaxFixed, rand > 0 ? noteVal + rand : noteVal);
+            if (hi > lo)
+                noteVal = lo + (int) (rng() % (unsigned) (hi - lo + 1));
+        }
+        const int chance = driftedLane(p, laneProbability, globalStep)
                          * juce::jlimit(0, 100, p.chance) / 100;
         if ((int) (rng() % 100u) >= chance)
+        {
+            lastStepFired = false;
             return; // 100 always fires, 0 never does
+        }
+        lastStepFired = true; // everything below this point sounds
 
         buildSequence(p);
         if (seqCount == 0)
@@ -804,14 +1099,51 @@ private:
         }
         else
         {
-            playIdx[playCount++] = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
+            // 1..8 name an entry; 9..12 are the modes borrowed from Kirnu's ORDER lane, which
+            // ask a question of the chord rather than counting into it - so they keep meaning
+            // the same thing when the chord under them changes.
+            int chosen;
+            switch (noteVal)
+            {
+                case notePrev:
+                    // The last entry that actually sounded, or the shape's next if nothing has
+                    // yet - a Prev on the first step of a fresh hold has nothing to repeat.
+                    chosen = lastPlayedIdx >= 0 ? juce::jlimit(0, seqCount - 1, lastPlayedIdx)
                                                 : nextDirectionIndex(p);
+                    break;
+                case noteHi:
+                case noteLow:
+                {
+                    // Scanned rather than assumed to be the ends of `seq`: buildSequence sorts
+                    // by pitch only for the shapes that walk by pitch, and stacks octaves on
+                    // top, so neither end is reliably the extreme.
+                    int best = 0;
+                    for (int i = 1; i < seqCount; ++i)
+                    {
+                        const int a = held[(size_t) seq[(size_t) i].heldIndex].note + seq[(size_t) i].semitoneOffset;
+                        const int b = held[(size_t) seq[(size_t) best].heldIndex].note + seq[(size_t) best].semitoneOffset;
+                        if (noteVal == noteHi ? a > b : a < b)
+                            best = i;
+                    }
+                    chosen = best;
+                    break;
+                }
+                case noteRnd:
+                    chosen = (int) (rng() % (unsigned) seqCount);
+                    break;
+                default:
+                    chosen = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
+                                          : nextDirectionIndex(p);
+                    break;
+            }
+            playIdx[playCount++] = chosen;
+            lastPlayedIdx = chosen; // what a later Prev repeats
         }
 
         // The Octave lane's per-step shift plus the line's own, both in octaves. Summed rather
         // than one overriding the other: the knob says where the run sits, the lane says how a
         // particular step departs from that, and they are different questions.
-        const int octaveShift = 12 * (juce::jlimit(-3, 3, laneValue(p, laneOctave, globalStep))
+        const int octaveShift = 12 * (juce::jlimit(-3, 3, driftedLane(p, laneOctave, globalStep))
                                       + juce::jlimit(-3, 3, p.octShift));
         const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
@@ -819,12 +1151,12 @@ private:
         // The line's own fader (velTrim) is deliberately NOT in velScale: velScale feeds the
         // 0.05 audibility floor below, which protects programmed dynamics, and the fader is
         // applied after that floor precisely so it is not protected by it.
-        const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale
+        const float velScale = (float) driftedLane(p, laneVelocity, globalStep) / 100.0f * rampScale
                              * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
         const float trimT = (100.0f + (float) juce::jlimit(-100, 100, p.velTrim)) / 100.0f;
         const float trimScale = trimT * trimT; // squared: see the Params comment
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
-        const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
+        const double gate = juce::jlimit(5, 200, driftedLane(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
 
         const double subLen = stepSamplesF / ratchets;
@@ -889,11 +1221,27 @@ private:
                 const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
                 addHit(place(src.note + entry.semitoneOffset), src.velocity * velScale, src.channel);
 
-                // Harmony: a second voice this many chord tones above the one just played,
+                // Harmony: a second voice, in one of two modes (harmonyMode, 2026-08-14).
+                // Mode 0, the original: this many chord tones above the one just played,
                 // Cthulhu's lane. Counting in sequence entries rather than semitones is what
                 // keeps it inside the chord; running off the top adds an octave instead of
                 // folding back onto a note already sounding.
-                if (harmony > 0)
+                if (harmony > 0 && harmonyMode.load(std::memory_order_relaxed) == 1)
+                {
+                    // Mode 1: subharmonic. One voice at the undertone series below the note
+                    // just played (f/2..f/8, quantized to 12-TET) instead of a chord tone
+                    // above it - meant to be heard with Scale Lock off, since it deliberately
+                    // leaves the chord. Clamped to the MIDI range and dropped, not wrapped, if
+                    // clamping collapses it onto the note it was meant to harmonize: a wrapped
+                    // low note would read as a new attack rather than a silence.
+                    static constexpr int kSubharmonicSemis[8] = { 0, -12, -19, -24, -28, -31, -34, -36 };
+                    const int playedRaw = place(src.note + entry.semitoneOffset);
+                    const int playedClamped = juce::jlimit(0, 127, playedRaw);
+                    const int subClamped = juce::jlimit(0, 127, playedRaw + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
+                    if (subClamped != playedClamped)
+                        addHit(subClamped, src.velocity * velScale, src.channel);
+                }
+                else if (harmony > 0)
                 {
                     const int h = idx + harmony;
                     const auto& hEntry = seq[(size_t) (h % seqCount)];
@@ -1118,6 +1466,13 @@ private:
     std::array<SeqEntry, maxHeld * 4> seq {};
     int seqCount = 0;
     long long stepCounter = 0;
+    // Did the step before this one sound? The chain lane's whole state (see laneChain), and
+    // the only thing in this engine that a transport jump cannot reconstruct from the step
+    // index. It self-corrects within one step, which is why it is affordable.
+    bool lastStepFired = false;
+    // Which sequence entry last sounded, for the Note lane's Prev. -1 until something has.
+    int lastPlayedIdx = -1;
+
     long long dirCursor = 0;
     // Where the lanes count from: the step index of the last restart, so Retrigger and the
     // beat-retrigger window both mean "step 1 next", and Offset counts from a known origin.

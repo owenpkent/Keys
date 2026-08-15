@@ -37,6 +37,7 @@ namespace keys
 // on the message thread and read on the audio thread; no locking, so every edit is a
 // direct store(). Globals are ordinary APVTS-attached controls.
 class ArpPanel : public juce::Component,
+                 public juce::DragAndDropTarget,
                  private juce::Timer
 {
 public:
@@ -73,8 +74,27 @@ public:
     // click still has one unambiguous target while all three are on screen.
     bool isMacroView() const { return macroView; }
     void setMacroView(bool);
+
+    // A line's deep view is three pages (2026-08-14, Owen: "can we simplify the detail view or
+    // organize into pages"). Un-paged it was the band, the lane editor, the twelve slots and
+    // the action row all at once - 612 px against the macro view's 240, so Details grew the
+    // *window* by 372 px and All shrank it back again. Each page fits inside one fixed panel
+    // height (see arpFixedH), which is what stops the window moving between views at all.
+    //
+    // The split is by what you are doing, not by what fits: Steps is the lane editor, Slots is
+    // the twelve cards and everything that acts on them, Setup is the band's two rows.
+    enum class Page { steps = 0, slots = 1, setup = 2 };
+    Page currentPage() const;
+    void setPage(Page p);
+    // Steps has nothing to show outside Pattern shape - the lane editor is what Pattern *is* -
+    // so its tab greys there and the page falls back to Setup. The other two are always live.
+    bool pageAvailable(Page p) const;
     // Told when a tab is clicked, so the editor can move the Pads bar's letter chip with it.
     std::function<void()> onEditLineChanged;
+    // ...and when the page changes, so the bar's own page tabs can light the right one. The
+    // editor owns those (they must survive this panel being destroyed by a fold), so the two
+    // have to be told about each other in both directions.
+    std::function<void()> onPageChanged;
 
     // What a chord card dropped on this panel does, once JUCE has said where it landed. The
     // slot cards, line tabs and macro rows are each a `DragAndDropTarget` of their own and call
@@ -89,6 +109,22 @@ public:
     // JUCE's own `findTarget` does, so the behaviour survived the deletion.
     void takeChordOnSlot(int slot, const chorddrag::Payload&);
     void takeChordOnLine(int line, const chorddrag::Payload&);
+
+    // **The panel itself takes a chord, anywhere on it** (2026-08-14, Owen: "need to be able to
+    // drag chords to not just the main arp window"). Paging the deep view is what made this
+    // necessary: the slot cards moved to the Cards page and the macro cards only exist in the
+    // All view, so on Play or Draw the only target left was a 40 px letter on the bar.
+    //
+    // JUCE walks *up* from whatever is under the point, so this catches every pixel of the
+    // panel that a more specific target does not - a slot card still wins on the Cards page,
+    // and a macro card still wins in the All view, because they are deeper in the tree. That
+    // is the same forgiveness RangeKnob's margin gives its satellite: aim if you like, or drop
+    // on the panel and let it land on the line you are editing.
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDragEnter(const SourceDetails&) override;
+    void itemDragExit(const SourceDetails&) override;
+    void itemDropped(const SourceDetails&) override;
+    void paintOverChildren(juce::Graphics&) override;
 
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -243,7 +279,9 @@ public:
         // `owner` is asked which line is being edited on every read and write, rather than
         // being handed an index: the tabs change it under these grids, and a copy taken at
         // construction would leave them drawing whichever line was up when the panel opened.
-        LaneGrid(KeysProcessor&, const ArpPanel& owner, ArpEngine::Lane, int loVal, int hiVal);
+        // Non-const owner, unlike MuteRow's: in Select mode this writes the span back into
+        // the panel, which owns it (Roll and Reset are the panel's, not the grid's).
+        LaneGrid(KeysProcessor&, ArpPanel& owner, ArpEngine::Lane, int loVal, int hiVal);
 
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
@@ -254,14 +292,17 @@ public:
         int currentLength() const;
         int stepAtX(float x) const;
         int valueAtY(float y) const;
-        void paintStepFromMouse(const juce::MouseEvent&);
+        // step < 0 = take it from x (the press); otherwise edit that step alone (the drag).
+        void paintStepFromMouse(const juce::MouseEvent&, int step);
         juce::String cellText(int value) const;
 
         KeysProcessor& processor;
-        const ArpPanel& owner;
+        ArpPanel& owner;
         ArpEngine::Lane lane;
         int loVal, hiVal;
         bool dragging = false;
+        int selAnchor = 0; // where a Select drag started
+        int paintStep = 0; // the step a draw gesture is locked to
         juce::Point<float> cursorPos;
         int cursorValue = 0;
 
@@ -345,6 +386,11 @@ private:
     {
         juce::TextButton tab;
         std::unique_ptr<LaneGrid> grid;
+        // Not every lane gets a tab: Mute is drawn by the MUTE row under the grid, so it has a
+        // lane but nothing to click. Without this the loops below laid out and counted its
+        // default-constructed, empty button anyway, which ate a cell of the tab row and pushed
+        // the last real tab (Chain) off the end - visible as a missing tab and nothing else.
+        bool hasTab = false;
     };
 
     void timerCallback() override;
@@ -362,6 +408,9 @@ private:
     void nudgeLength(int delta); // selected lane, or every lane while Link is on
     void cycleClockDiv();
     void refreshLaneReadouts();
+    // Link on: push the Note lane's length and speed onto every other lane. See the definition
+    // for why nudgeLength doing it too is not enough.
+    void enforceLinkedLengths();
     void refreshPatternButtons();
     void recallOrCopy(int index);
     void launchSlot(int index);   // left-click on a slot card
@@ -395,7 +444,18 @@ private:
     std::array<Group, 5> groups;
 
     bool patternMode() const; // Shape == "Pattern": the step editor is in play
-    int contentHeight() const; // one answer for the macro, shape and pattern views
+    int contentHeight() const; // the fixed height the panel reserves, whatever is showing
+    int pageHeight() const;    // what the current view or page actually needs; see cardBounds()
+
+    // Which controls belong to which page. Three explicit lists rather than a flag per
+    // component or three parent Components to reparent into: the lists are built once, in one
+    // readable block at the end of buildControls(), and adding a control means naming it in
+    // exactly one place. Nothing here ever turns a control *on* - refreshShape() is still the
+    // only thing that does, on its own Shape and lane gates - this only hides what is off the
+    // current page, and so must run last. See applyPageVisibility().
+    std::vector<juce::Component*> pageSteps, pageSlots, pageSetup;
+    void buildPageLists();
+    void applyPageVisibility();
     void applyShapeChoice();  // combo -> parameters
     void refreshShape();      // parameters -> combo, and show/hide the step editor
     // Retrigger spans two parameters the same way Shape does (a bool for "on a new chord"
@@ -408,6 +468,10 @@ private:
     // covers the editor (it dims what's behind and swallows clicks), but on a shape
     // there are two rows to show and no reason to draw a full-height empty box.
     juce::Rectangle<int> cardBounds() const;
+
+    // Is a chord card hovering over the panel right now? Drawn as an outline round the
+    // whole card in paintOverChildren, so "drop anywhere" is visible.
+    bool panelDropTarget = false;
 
     bool inlineMode = false;
     // The line every control on this panel is bound to. Seeded from the processor, which is
@@ -465,8 +529,13 @@ private:
     // growing by a whole band.
     // humanSlider is the timing half and humanVelSlider the velocity half of what was one
     // Humanize control until 2026-08-02; see the macro row's H.TIME / H.VEL pair.
-    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider, humanVelSlider;
-    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel, humanVelLabel;
+    // driftSlider joined FEEL on 2026-08-14. It belongs beside Humanize rather than on the
+    // Draw page where it was asked for: Humanize is a *player* wandering (late and quieter,
+    // never early and never louder) and Drift is a *machine* wandering (either way, on the
+    // lanes that decide how a step plays), so the two are the same question asked twice. It
+    // also works on a plain shape, where there is no Draw page at all.
+    juce::Slider offsetSlider, rampSlider, rampTimeSlider, humanSlider, humanVelSlider, driftSlider;
+    juce::Label offsetLabel, rampLabel, rampTimeLabel, humanLabel, humanVelLabel, driftLabel;
 
     std::array<LaneRow, ArpEngine::numLanes> laneRows;
     int selectedLane = (int) ArpEngine::laneNote;
@@ -499,6 +568,77 @@ private:
     juce::Label barsReadout;
     void nudgeBars(int delta);
 
+    // Euclid: a non-destructive preview strip (2026-08-14 generative round, see
+    // docs/ARP_DESIGN.md). Hits/steps/rotate are panel-level browse state, never persisted -
+    // opening the strip applies nothing; only a stepper click writes, straight into the
+    // probability lane via KeysProcessor::applyEuclidToActiveArpPattern. Visible only under
+    // the same condition as Randomize (slots view, Pattern shape); see refreshShape().
+    juce::TextButton euclidButton { "Euclid" };
+    bool euclidStripOpen = false;
+    int euclidHits = 3, euclidSteps = 8, euclidRotate = 0;
+    juce::Label euclidHitsLabel, euclidStepsLabel, euclidRotateLabel;
+    juce::Label euclidHitsReadout, euclidStepsReadout, euclidRotateReadout;
+    juce::TextButton euclidHitsMinus { "-" }, euclidHitsPlus { "+" };
+    juce::TextButton euclidStepsMinus { "-" }, euclidStepsPlus { "+" };
+    juce::TextButton euclidRotateMinus { "-" }, euclidRotatePlus { "+" };
+    void openEuclidStrip(bool open); // toggles the strip; closes Clocks, since only one strip is ever open
+    void nudgeEuclid(int which, int delta); // 0 = hits, 1 = steps, 2 = rotate
+    void refreshEuclidReadouts();
+
+    // Clocks: the four rhythm dividers (ArpEngine::rhythmDiv, 0 = off), same strip mechanism
+    // as Euclid and mutually exclusive with it. Visible whenever the slot row is (every
+    // shape, not just Pattern - the dividers act regardless of what Shape draws).
+    juce::TextButton clocksButton { "Clocks" };
+    bool clocksStripOpen = false;
+    std::array<juce::Label, 4> clockDivLabels, clockDivReadouts;
+    std::array<juce::TextButton, 4> clockDivMinus, clockDivPlus;
+    void openClocksStrip(bool open);
+    void nudgeClockDiv(int index, int delta);
+    void refreshClockDivReadouts();
+
+    // Voice: harmony mode (ArpEngine::harmonyMode - chord tones or the subharmonic voice),
+    // the panel's first lane-contextual control. Visible only with the Harmony lane selected
+    // and the STEPS group itself showing (Pattern shape); see refreshShape() and selectLane().
+    juce::TextButton voiceButton;
+    void refreshVoiceButton();
+
+    // Reroll, on the Draw page (2026-08-14, Owen: "there should be, like, a more random feature
+    // in the drawing, like cthulu"). Acts on the lane you are *looking at*, which is the half
+    // that makes it different from Randomize on the Cards page - that one writes six lanes to a
+    // musical recipe, this one strays from the one lane in front of you by `rollAmount`.
+    //
+    // It is also the fix for a regression: Randomize used to sit in the action row directly
+    // under the lane grid, and paging the deep view put it on another page, so the lane and the
+    // button that rerolls it were never on screen together.
+    //
+    // `rollAmount` is panel state, not a parameter - the same call Euclid's three steppers make.
+    // Nothing it does is heard until you click Roll, so there is nothing for a host to automate.
+    juce::TextButton rollButton { "Roll" };
+    // Roll is destructive and Keys has no undo anywhere, so it needs a way back. Reset writes
+    // the lane's own default (ArpEngine::laneDefaults) across its whole length, which is the
+    // state a lane that has never been touched is in - so "Reset then Roll" is repeatable, and
+    // a roll you did not like costs one click rather than a redraw.
+    juce::TextButton resetButton { "Reset" };
+    // Select: the missing primitive (2026-08-14, from Kirnu Cream's tool palette - its manual
+    // p8 has Draw / Select / Random / Copy / Paste / Clear, and its Random tool acts on
+    // "selected steps"). Roll and Reset acted on a whole lane because there was nothing smaller
+    // to act on. With this lit, a drag on the grid marks a span instead of painting it, and
+    // both buttons narrow to that span.
+    //
+    // A **mode**, not a modifier: the mouse-only contract has no Alt-drag to offer, and Kirnu
+    // itself models this as a tool you pick rather than a chord you hold. Lit is the whole
+    // affordance, the same way Copy and Clear already arm.
+    juce::TextButton selectButton { "Select" };
+    bool selectMode = false;
+    int selFrom = -1, selTo = -1; // inclusive step span; selFrom < 0 means the whole lane
+    void clearSelection();
+    juce::TextButton rollMinus { "-" }, rollPlus { "+" };
+    juce::Label rollReadout;
+    int rollAmount = 35; // percent of the lane's range; 100 is a uniform scramble
+    void nudgeRollAmount(int delta);
+    void rollSelectedLane();
+    void resetSelectedLane();
+
     // Copy and Clear both need a slot to act on, and neither may be right-click-only (the
     // mouse-only contract wants a left-click path for everything). Both arm: click the
     // button, then click the slot. One state, not two flags, so arming one disarms the
@@ -513,7 +653,7 @@ private:
     // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
     std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
     std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
-    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt, humanVelAtt;
+    std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt, humanVelAtt, driftAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)
 };

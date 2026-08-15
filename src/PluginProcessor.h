@@ -252,7 +252,7 @@ public:
                     // range: the existing two stay the ceiling, and these say how far under it
                     // the draw may fall. Default 100 - a span of the whole scale - leaves
                     // exactly what those two did alone.
-                    apHumanizeSpan, apHumanVelSpan, numArpParams };
+                    apHumanizeSpan, apHumanVelSpan, apDrift, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
@@ -284,6 +284,21 @@ public:
     void recallArpPattern(int index, int line = 0);    // snapshot slot -> lanes, becomes active
     void copyArpPattern(int from, int to, int line = 0); // whole-pattern copy (the no-modifier answer)
     void randomizeActiveArpPattern(int line = 0);
+    // Reroll one lane of the active pattern, straying `amountPct` (0..100) from what is drawn:
+    // a nudge low down, a uniform scramble at 100. The per-lane twin of the whole-pattern
+    // randomize above; see the definition for why both exist.
+    // `fromStep`/`toStep` are an inclusive span; pass -1 for either to mean the whole lane.
+    // The span is what Select on the Draw page marks (2026-08-14, from Kirnu Cream's Random
+    // tool, which acts on selected steps rather than everything).
+    void rerollArpLane(int line, int laneIndex, int amountPct, int fromStep = -1, int toStep = -1);
+    // Put one lane back to its default across its whole length - the state a lane that has
+    // never been touched is in. The way back from a reroll, since Keys has no undo anywhere.
+    void resetArpLane(int line, int laneIndex, int fromStep = -1, int toStep = -1);
+    // Writes a Euclidean rhythm (EuclidGen.h) into one lane of the active pattern: 100 on a
+    // hit, 0 on a rest, and sets that lane's length to `steps`. Only the probability lane has
+    // a meaningful hit/rest mapping today - anything else returns false and writes nothing.
+    bool applyEuclidToActiveArpPattern(int line, int hits, int steps, int rotation,
+                                        int laneIndex = ArpEngine::laneProbability);
 
     // Launch a slot: recall its pattern, apply the shape and rate it remembers, and hold
     // its chord into the arp. That is the whole "pass a card into the arpeggiator" gesture
@@ -443,6 +458,11 @@ public:
         bool rateFree = false;
         float rateHz = 8.0f;
         int bars = 1;    // how long the chain holds this slot before moving on
+        // Subharmonicon-style rhythm dividers (2026-08-14), stored with the slot the same way
+        // the lanes are: 1..16, 0 = off, default all off so an old session reads back inert.
+        std::array<int, 4> rhythmDivs { 0, 0, 0, 0 };
+        // 0 = chord tones (default, today's Harmony lane), 1 = subharmonic.
+        int harmonyMode = 0;
     };
     const ArpPattern& arpPatternSlot(int index, int line = 0) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern, int line = 0); // refreshes live lanes too if index == active
@@ -492,6 +512,23 @@ public:
         // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
         // slots, which are per-line and have nowhere to live in a row.
         bool arpMacro = true;
+        // Which page of a line's deep view is showing (2026-08-14, Owen: "can we simplify the
+        // detail view or organize into pages"). Values are ArpPanel::Page: 0 = Draw (the step
+        // lanes), 1 = Cards (the twelve slots), 2 = Play (rate, shape, feel).
+        //
+        // **Defaults to 2, Play**, and that is not arbitrary: Draw does nothing until you have
+        // drawn on it *and* set Shape to Pattern, so opening there is opening on a blank page
+        // with no way to tell why. Owen landed on exactly that - one step long, Shape on
+        // Pattern - and said "I don't understand this layout. how to get the sound I want".
+        // Play is where rate and shape are, which is the answer to that question.
+        //
+        // The deep view used to be all four blocks at once - band, lanes, slots, actions - at
+        // 612 px against the macro view's 240, so clicking Details grew the *window* by 372 px
+        // and clicking All shrank it back. Paged, every page fits inside one fixed panel
+        // height, and the window stops moving between views entirely. Same reason this lives
+        // here rather than in the panel as arpMacro does: the panel is destroyed every time
+        // the section folds, and Owen should get back the page he left.
+        int  arpPage = 2;
         // Whether the keybed lights up for the notes the arp is *playing*, as opposed to the
         // chord it was handed (which lights it either way, through noteRefs). Layout state and
         // not a parameter: it changes what is drawn and nothing that is heard, so there is
@@ -509,6 +546,73 @@ public:
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
         juce::Rectangle<int> chordGenBounds {};     // the generator's window
     };
+    enum class UndoScope { pads, arp };
+
+    // --- Undo (2026-08-14, Owen: "we should have undo") ---------------------------------
+    //
+    // **Content only, and that is the design, not a shortcut.** Undo covers what destroys
+    // music - chord pads, arp lanes, arp slots - and deliberately not parameters. Sweeping the
+    // rate dial would otherwise push forty entries onto the stack and shove the pad you
+    // actually wanted back off the end of it, which is an undo that cannot undo anything.
+    // A knob you can always turn back; a cleared pad you cannot.
+    //
+    // "no undo anywhere in Keys" was the stated reason for at least four design compromises -
+    // Reset beside Roll, Clear page living in a window rather than on a bar, locks on pads, and
+    // the drag guard in ChordPads::mouseUp. None of them should be removed on the strength of
+    // this: they are all still good behaviour, they just stop being *load-bearing*.
+    //
+    // An entry is a **snapshot of the affected subtree before the edit**, taken with the same
+    // chordPadsToTree/arpToTree the session file uses. That is why this is affordable at all:
+    // no action needs a hand-written inverse, so no action can have a *wrong* one, and a
+    // feature added later is undoable the moment its data is in one of those two trees.
+
+    // Snapshot before an edit. **One call per gesture, not per change** - a lane drag calls it
+    // on mouse-down and not again, or a single stroke would fill the stack by itself. Nested
+    // calls are ignored (see UndoGesture), so a high-level action that internally clears and
+    // then sets a pad still costs one entry.
+    void pushUndo(const juce::String& label, UndoScope scope);
+
+    // RAII around pushUndo, and the reason nesting is safe: a drop calls clearChordPad then
+    // setChordPad, and each of those may push on its own behalf. The outermost gesture wins and
+    // the inner ones are no-ops, so an entry is always the state before the *whole* action.
+    struct UndoGesture
+    {
+        UndoGesture(KeysProcessor& p, const juce::String& label, UndoScope scope);
+        ~UndoGesture();
+        KeysProcessor& processor;
+    };
+
+    bool canUndo() const { return ! undoStack.empty(); }
+    bool canRedo() const { return ! redoStack.empty(); }
+    // What the next undo/redo would put back, for the button's tooltip. Empty when there is none.
+    juce::String undoLabel() const { return undoStack.empty() ? juce::String() : undoStack.back().label; }
+    juce::String redoLabel() const { return redoStack.empty() ? juce::String() : redoStack.back().label; }
+    void undo();
+    void redo();
+    void clearUndoHistory();
+    // Bumped on every push, undo and redo, so the editor can poll cheaply and only repaint the
+    // buttons when something actually moved - the soundingGeneration() pattern.
+    juce::uint32 undoGeneration() const { return undoGen.load(); }
+
+    // The stacks the API above drives. Public alongside `layout` rather than tucked away,
+    // because that is how this processor already exposes its state to the editor.
+
+    // The undo stacks. Depth 32: deep enough that a run of edits stays recoverable, shallow
+    // enough that the arp snapshots (twelve slots x thirteen lanes x thirty-two steps, twice)
+    // do not add up to real memory. Oldest is dropped from the front when it overflows.
+    struct UndoEntry
+    {
+        juce::String label;
+        UndoScope scope;
+        juce::ValueTree before;
+    };
+    static constexpr int maxUndoDepth = 32;
+    std::vector<UndoEntry> undoStack, redoStack;
+    int undoGestureDepth = 0;      // >0 means a gesture is open and pushes are absorbed
+    std::atomic<juce::uint32> undoGen { 0 };
+    juce::ValueTree snapshotFor(UndoScope scope) const;
+    void restore(const UndoEntry& e);
+
     LayoutState layout;
 
 protected:

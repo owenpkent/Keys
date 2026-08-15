@@ -35,10 +35,11 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `clear_chord_pad` | Empty a pad slot. |
 | `press_chord_pad` | Fire a pad now, optionally auto-releasing after a duration. |
 | `release_chord_pad` | Stop a pad (unless Sustain is holding it). |
-| `get_arp_pattern` | Read a pattern's ten per-step lanes: the live lanes, or a stored slot (0..11). |
-| `set_arp_pattern` | Write one or more lanes of a pattern: the live lanes, or a stored slot. Lane names are `note`, `octave`, `velocity`, `gate`, `ratchet`, `probability`, and — since 2026-07-30 — `transpose` (scale degrees), `late` (percent of a step), `harmony` (chord tones above) and `chord` (0 = off, 1..12 = play that arp slot's stored chord on this step). |
+| `get_arp_pattern` | Read a pattern's ten per-step lanes, its rhythm dividers and harmony mode: the live lanes, or a stored slot (0..11). |
+| `set_arp_pattern` | Write one or more lanes of a pattern, and/or its rhythm dividers and harmony mode: the live lanes, or a stored slot. Lane names are `note`, `octave`, `velocity`, `gate`, `ratchet`, `probability`, and — since 2026-07-30 — `transpose` (scale degrees), `late` (percent of a step), `harmony` (chord tones above) and `chord` (0 = off, 1..12 = play that arp slot's stored chord on this step). Three more since 2026-08-14: `rand` (−8..+8, how far this step's note selection may stray and which way), `mute` (0/1, silences a step without touching what it holds) and `chain` (0 always, 1 only if the step before it sounded, 2 only if it did not). Note also takes 9..12 now — Prev, Highest, Lowest, Random — which ask the held chord a question instead of counting into it. |
 | `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
+| `apply_euclid` | Write a Euclidean rhythm (Bjorklund's algorithm) into the active pattern's probability lane: 100 on a hit, 0 on a rest, and set that lane's length to `steps`. |
 
 ### The two arpeggiator lines
 
@@ -88,6 +89,31 @@ set_params { "values": { "arpOn": true,  "arpRate": "1/8" } }
 set_params { "values": { "arp2On": true, "arp2Rate": "1/8", "arp2Tuplet": "Triplet" } }
 play_notes { "notes": [60, 64, 67], "durationMs": 4000 }
 ```
+
+### Euclidean rhythms, rhythm dividers and subharmonic harmony
+
+Three generative additions (2026-08-14), none of them a new parameter - they live in
+`rhythmDivs` / `harmonyMode` on `get_arp_pattern` / `set_arp_pattern`, and the `apply_euclid`
+tool. All are per line and per slot, same as the lanes.
+
+`apply_euclid { "hits": 3, "steps": 8 }` writes the tresillo (`x..x..x.`) into the probability
+lane and sets its length to 8. `rotation` (default 0) walks the pattern's start point around
+the circle. Only the probability lane has a hit/rest mapping that means anything, so this is
+the one lane it writes.
+
+`rhythmDivs` is up to four integers, 1..16, 0 = off (all four default off - the pattern behaves
+exactly as it always has). With any enabled, a step boundary fires only if it is a multiple of
+*at least one* of them - a Subharmonicon-style OR of clocks, not a shared modulus, so
+`{ "rhythmDivs": [3, 4] }` fires on steps 0, 3, 4, 6, 8, 9, 12... A suppressed boundary plays
+nothing and does not advance the lanes; a firing one advances them by one step regardless of
+how many raw steps it skipped, so a pattern under a divider still reads step to step in order
+rather than leaving silent gaps in the middle of it.
+
+`harmonyMode` switches what the Harmony lane's second voice is: `0` (default) is today's chord
+tone above the played note; `1` is subharmonic, one voice at the undertone series below it
+(f/2 down to f/8, quantized to 12-TET) - a deliberately non-diatonic voicing, best heard with
+Scale Lock off. A voice that would clamp onto the note it is harmonizing (very low notes running
+out of MIDI range below 0) is dropped rather than folded back on top of it.
 
 ## How scheduled notes are timed
 

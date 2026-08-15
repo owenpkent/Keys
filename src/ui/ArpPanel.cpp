@@ -55,7 +55,7 @@ namespace
 // ---------------------------------------------------------------------------
 // LaneGrid
 
-ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, const ArpPanel& o, ArpEngine::Lane l, int lo, int hi)
+ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, ArpPanel& o, ArpEngine::Lane l, int lo, int hi)
     : processor(p), owner(o), lane(l), loVal(lo), hiVal(hi)
 {
     okstudio::ui::makeMouseOnly(*this);
@@ -83,9 +83,19 @@ int ArpPanel::LaneGrid::valueAtY(float y) const
     return juce::jlimit(loVal, hiVal, loVal + juce::roundToInt(frac * (float) (hiVal - loVal)));
 }
 
-void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e)
+// `step` < 0 means "work it out from x" - which only the initial press does. Every drag after
+// that passes the step the press landed on, so a drag edits **one** step and its horizontal
+// travel is ignored (2026-08-14, Owen: "when you're drawing, I don't want you to be able to
+// jump from step to step. I just want it to be for that one when you're moving up and down").
+//
+// Painting across steps is the right gesture for a mute row, where the value is a toggle and a
+// swipe means "all of these" - and MuteRow still does exactly that. It is the wrong one here,
+// where the value is a height: the pointer has to travel vertically to set it, and any drift
+// sideways on the way rewrote a neighbour you had already placed.
+void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e, int step)
 {
-    const int step = stepAtX(e.position.x);
+    if (step < 0)
+        step = stepAtX(e.position.x);
     const int value = valueAtY(e.position.y);
     processor.arpLine(owner.editLine()).lanes.value[(size_t) lane][(size_t) step].store(value, std::memory_order_relaxed);
     cursorPos = e.position;
@@ -95,13 +105,37 @@ void ArpPanel::LaneGrid::paintStepFromMouse(const juce::MouseEvent& e)
 
 void ArpPanel::LaneGrid::mouseDown(const juce::MouseEvent& e)
 {
+    // In Select mode a drag marks a span rather than painting one. The anchor is where the
+    // press landed and the far end follows the mouse, so a span can be drawn either way round;
+    // owner.selFrom/selTo are normalised on every update rather than at the end, since Roll can
+    // be clicked mid-gesture.
+    if (owner.selectMode)
+    {
+        dragging = true;
+        selAnchor = stepAtX(e.position.x);
+        owner.selFrom = owner.selTo = selAnchor;
+        owner.repaint();
+        return;
+    }
     dragging = true;
-    paintStepFromMouse(e);
+    paintStep = stepAtX(e.position.x); // locked for the rest of this gesture
+    // The press is the whole gesture's undo entry - mouseDrag below deliberately does not push,
+    // or one stroke across a lane would be thirty entries and bury everything under it.
+    processor.pushUndo("Draw lane", KeysProcessor::UndoScope::arp);
+    paintStepFromMouse(e, paintStep);
 }
 
 void ArpPanel::LaneGrid::mouseDrag(const juce::MouseEvent& e)
 {
-    paintStepFromMouse(e); // continuous paint: every move updates the step under it
+    if (owner.selectMode)
+    {
+        const int s = stepAtX(e.position.x);
+        owner.selFrom = juce::jmin(selAnchor, s);
+        owner.selTo = juce::jmax(selAnchor, s);
+        owner.repaint();
+        return;
+    }
+    paintStepFromMouse(e, paintStep); // the step the press landed on, whatever x does now
 }
 
 void ArpPanel::LaneGrid::mouseUp(const juce::MouseEvent&)
@@ -114,10 +148,21 @@ juce::String ArpPanel::LaneGrid::cellText(int value) const
 {
     if (lane == ArpEngine::laneNote)
     {
-        if (value <= -1)
+        if (value <= ArpEngine::noteRest)
             return "X";
-        if (value == 0)
+        if (value == ArpEngine::noteFollow)
             return {}; // drawn as a dot instead, see paint()
+        // The four modes above the fixed indices (Kirnu's ORDER lane). One letter each: a cell
+        // is ~40 px at 32 steps, so "Prev" does not fit and an ellipsised word says less than
+        // an initial does. The tooltip on the tab carries the words.
+        switch (value)
+        {
+            case ArpEngine::notePrev: return "P";
+            case ArpEngine::noteHi:   return "H";
+            case ArpEngine::noteLow:  return "L";
+            case ArpEngine::noteRnd:  return "R";
+            default: break;
+        }
     }
     // Harmony and Chord are off at zero rather than centred on it, so a row of noughts would
     // read as data where it means "nothing here". The dot the note lane already uses says it
@@ -199,6 +244,25 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
         g.setFont(f);
         g.drawText(txt, box, juce::Justification::centred);
     }
+
+    // The Select span, drawn last so it sits over the bars. A tinted wash plus a bright edge at
+    // each end: the wash says "these steps", and the edges say where it starts and stops, which
+    // the wash alone does not once the span reaches the grid's own edge.
+    if (owner.selectMode && owner.selFrom >= 0)
+    {
+        const int len = currentLength();
+        const float cellW = len > 0 ? (float) getWidth() / (float) len : (float) getWidth();
+        const int lo = juce::jlimit(0, len - 1, owner.selFrom);
+        const int hi = juce::jlimit(lo, len - 1, owner.selTo);
+        const auto span = juce::Rectangle<float>(cellW * (float) lo, 0.0f,
+                                                 cellW * (float) (hi - lo + 1), (float) getHeight());
+        const auto a = skin::accentOf(*this);
+        g.setColour(a.base.withAlpha(0.16f));
+        g.fillRect(span);
+        g.setColour(a.base.withAlpha(0.75f));
+        g.fillRect(span.getX(), 0.0f, 1.5f, (float) getHeight());
+        g.fillRect(span.getRight() - 1.5f, 0.0f, 1.5f, (float) getHeight());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -209,10 +273,23 @@ ArpPanel::MuteRow::MuteRow(KeysProcessor& p, const ArpPanel& o) : processor(p), 
     okstudio::ui::makeMouseOnly(*this);
 }
 
+// **The mute lane is the Note lane's companion, not a polymetric lane of its own.** It reads
+// and writes at the Note lane's length, and syncs its own to match (2026-08-14) - the engine
+// wraps every lane read by that lane's own length, so if the two ever disagreed a mute drawn
+// at step 20 of a 32-step pattern would be read back modulo 8 and silence the wrong step. It
+// has no tab and no STEPS control, so there is nowhere for a user to set it and nothing to
+// gain from letting it differ.
 int ArpPanel::MuteRow::currentLength() const
 {
-    return juce::jlimit(1, ArpEngine::maxSteps,
-                        processor.arpLine(owner.editLine()).lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    auto& lanes = processor.arpLine(owner.editLine()).lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps,
+                                 lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    // Cheap and idempotent, and this is the one place that knows both numbers. It also repairs
+    // a session saved before the lane existed, which comes back at the default 8 while the
+    // Note lane may be anything.
+    if (lanes.length[(size_t) ArpEngine::laneMute].load(std::memory_order_relaxed) != len)
+        lanes.length[(size_t) ArpEngine::laneMute].store(len, std::memory_order_relaxed);
+    return len;
 }
 
 int ArpPanel::MuteRow::stepAtX(float x) const
@@ -227,15 +304,18 @@ int ArpPanel::MuteRow::stepAtX(float x) const
 void ArpPanel::MuteRow::applyAtX(float x)
 {
     const int step = stepAtX(x);
-    processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].store(paintValue, std::memory_order_relaxed);
+    processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) step].store(paintValue, std::memory_order_relaxed);
     repaint();
 }
 
 void ArpPanel::MuteRow::mouseDown(const juce::MouseEvent& e)
 {
     const int step = stepAtX(e.position.x);
-    const int current = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) step].load(std::memory_order_relaxed);
-    paintValue = (current == -1) ? 0 : -1; // toggle, then paint every step the drag crosses to match
+    // Its own lane since 2026-08-14, where it used to toggle the Note lane between -1 and 0
+    // and so threw away whatever that step held. 1 is muted, 0 is heard.
+    const int current = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) step].load(std::memory_order_relaxed);
+    paintValue = (current > 0) ? 0 : 1; // toggle, then paint every step the drag crosses to match
+    processor.pushUndo("Mute steps", KeysProcessor::UndoScope::arp); // once for the whole swipe
     dragging = true;
     applyAtX(e.position.x);
 }
@@ -255,8 +335,8 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
 
     for (int i = 0; i < length; ++i)
     {
-        const int value = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneNote][(size_t) i].load(std::memory_order_relaxed);
-        const bool muted = value == -1;
+        const int value = processor.arpLine(owner.editLine()).lanes.value[(size_t) ArpEngine::laneMute][(size_t) i].load(std::memory_order_relaxed);
+        const bool muted = value > 0;
         auto cell = juce::Rectangle<float>(b.getX() + cellW * (float) i, b.getY(), cellW, b.getHeight()).reduced(2.0f);
 
         if (muted)
@@ -333,6 +413,40 @@ void ArpPanel::takeChordOnLine(int line, const chorddrag::Payload& p)
     setEditLine(line, /*leaveMacroView*/ false);
 }
 
+// The panel as a whole is a drop target for a chord card. It hands the chord to the line the
+// panel is *editing*, which is the only line it could mean: in the All view a macro card is
+// under the pointer and wins, and on the Cards page a slot card does.
+bool ArpPanel::isInterestedInDragSource(const SourceDetails& details)
+{
+    auto* p = chorddrag::chordBeingDragged(details);
+    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+}
+
+void ArpPanel::itemDragEnter(const SourceDetails&) { panelDropTarget = true; repaint(); }
+void ArpPanel::itemDragExit(const SourceDetails&) { panelDropTarget = false; repaint(); }
+
+void ArpPanel::itemDropped(const SourceDetails& details)
+{
+    panelDropTarget = false;
+    repaint();
+    if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
+    {
+        takeChordOnLine(editLine(), *p);
+        p->taken = true;
+    }
+}
+
+// The whole card outlined while a chord is over it, so "anywhere on here" is visible rather
+// than something you have to be told. Drawn over the children for the reason MacroRow's scrim
+// is: the controls sit on top of the card and would otherwise cover the edge of it.
+void ArpPanel::paintOverChildren(juce::Graphics& g)
+{
+    if (! panelDropTarget)
+        return;
+    g.setColour(skin::accentOf(*this).base);
+    g.drawRoundedRectangle(cardBounds().toFloat().reduced(1.0f), skin::panelRadius, 2.0f);
+}
+
 juce::String ArpPanel::paramId(KeysProcessor::ArpParam which) const
 {
     return KeysProcessor::arpParamId(editLine(), which);
@@ -363,8 +477,13 @@ void ArpPanel::setMacroView(bool on)
             row->setVisible(on);
     refreshShape();   // hides or restores the band, the lane tabs and the step editor
     refreshMacro();
-    if (onPreferredHeightChanged)
-        onPreferredHeightChanged();  // the panel is a different height in this view
+    // The bar's page tabs come and go with this view (they pick a page of a line's deep view,
+    // and the macro view has no page), so it has to hear about the change now rather than on
+    // the next tick. The panel is the *same* height in both views since 2026-08-14 - that is
+    // the whole point of arpFixedH - so there is no onPreferredHeightChanged here any more,
+    // and switching views no longer moves the window.
+    if (onPageChanged)
+        onPageChanged();
     resized();
     repaint();
 }
@@ -409,6 +528,10 @@ void ArpPanel::setEditLine(int line, bool leaveMacroView)
     refreshRetrig();
     refreshLaneReadouts();
     refreshPatternButtons();
+    refreshVoiceButton();       // reads the new line's harmonyMode
+    refreshClockDivReadouts();  // reads the new line's rhythmDiv - the documented rate-dial
+                                // bug (a control that kept showing the old line) is exactly
+                                // what skipping this would repeat
     if (onEditLineChanged)
         onEditLineChanged();
     resized();  // Shape may have changed the panel's height with the line
@@ -419,6 +542,7 @@ void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::Stri
 {
     row.tab.setButtonText(name);
     row.tab.onClick = [this, lane] { selectLane((int) lane); };
+    row.hasTab = true;
     addAndMakeVisible(row.tab);
 
     row.grid = std::make_unique<LaneGrid>(processor, *this, lane, loVal, hiVal);
@@ -436,6 +560,13 @@ void ArpPanel::selectLane(int lane)
             row.grid->setVisible(patternMode() && i == selectedLane);
     }
     refreshLaneReadouts();
+    // Voice is lane-contextual: only the Harmony lane means anything to harmonyMode. Set here
+    // as well as in refreshShape(), which gates it on Pattern shape - the two conditions are
+    // independent (a lane click cannot change Shape, a Shape change cannot change the lane).
+    const bool voiceOn = patternMode() && selectedLane == (int) ArpEngine::laneHarmony;
+    voiceButton.setVisible(voiceOn);
+    refreshVoiceButton();
+    applyPageVisibility(); // this only ever turns things on; the page has the last word
     resized();
 }
 
@@ -466,8 +597,41 @@ void ArpPanel::cycleClockDiv()
     refreshLaneReadouts();
 }
 
+// With Link on, every lane shares the Note lane's length and speed - and this **enforces** it
+// rather than trusting nudgeLength to have done so (2026-08-14, Owen: "Sometimes the steps do
+// not match each other").
+//
+// nudgeLength writes all twelve when Link is on, which is correct and was never the problem.
+// The problem is lanes that were not there when it last ran: Rand, Mute and Chain were appended
+// on 2026-08-14 and arrive at ArpPattern's default 8, so a session whose other lanes are at 32
+// had three lanes a quarter the length of the rest and no way to tell - the grid draws each
+// lane at its own length, so they simply showed a different number of steps. A session saved
+// before any of them has the same hole.
+//
+// The Note lane is the authority because it is the one that has always existed and the one the
+// MUTE row is pinned to. Link off is polymeter and is left alone entirely, which is the whole
+// point of the switch.
+void ArpPanel::enforceLinkedLengths()
+{
+    if (processor.apvts.getRawParameterValue(paramId(KeysProcessor::apLinkLanes))->load() <= 0.5f)
+        return;
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps,
+                                 lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    const int div = juce::jlimit(0, 2,
+                                 lanes.clockDiv[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        if (lanes.length[(size_t) l].load(std::memory_order_relaxed) != len)
+            lanes.length[(size_t) l].store(len, std::memory_order_relaxed);
+        if (lanes.clockDiv[(size_t) l].load(std::memory_order_relaxed) != div)
+            lanes.clockDiv[(size_t) l].store(div, std::memory_order_relaxed);
+    }
+}
+
 void ArpPanel::refreshLaneReadouts()
 {
+    enforceLinkedLengths(); // before the readout, so it reports what the lanes now agree on
     const auto li = (size_t) selectedLane;
     const int len = processor.arpLine(editedLine).lanes.length[li].load(std::memory_order_relaxed);
     stepsReadout.setText(juce::String(len), juce::dontSendNotification);
@@ -549,7 +713,7 @@ void ArpPanel::refreshShape()
 
     for (int i = 0; i < ArpEngine::numLanes; ++i)
     {
-        laneRows[(size_t) i].tab.setVisible(pattern);
+        laneRows[(size_t) i].tab.setVisible(pattern && laneRows[(size_t) i].hasTab);
         if (laneRows[(size_t) i].grid != nullptr)
             laneRows[(size_t) i].grid->setVisible(pattern && i == selectedLane);
     }
@@ -564,13 +728,23 @@ void ArpPanel::refreshShape()
                     &swingSlider, &gateSlider, &chanceSlider, &octavesLabel, &swingLabel,
                     &gateLabel, &chanceLabel, &latchButton, &keysBandButton, &offsetSlider,
                     &rampSlider, &rampTimeSlider, &humanSlider, &humanVelSlider, &offsetLabel,
-                    &rampLabel, &rampTimeLabel, &humanLabel, &humanVelLabel }, ! macroView);
+                    &rampLabel, &rampTimeLabel, &humanLabel, &humanVelLabel,
+                    &driftSlider, &driftLabel }, ! macroView);
     // The STEPS group is the only part of the band that belongs to the step editor, so it
     // is the only part that goes with it.
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &stepsLabel, &speedLabel, &stepsReadout, &stepsMinus, &stepsPlus, &speedButton, &linkButton })
         c->setVisible(pattern);
     groups[2].visible = pattern;
+
+    // Voice rides the STEPS group's own gate plus the Harmony lane; see selectLane() for the
+    // other half of this condition. Roll is not lane-contextual - it acts on whichever lane is
+    // showing - so it follows the step editor alone.
+    const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
+    voiceButton.setVisible(voiceOn);
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &rollButton, &resetButton, &selectButton, &rollMinus, &rollReadout, &rollPlus })
+        c->setVisible(pattern);
 
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
     // a thing you do as launching one through an edited pattern, and hiding the row was what
@@ -586,19 +760,32 @@ void ArpPanel::refreshShape()
             c->setVisible(slotsOn);
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &copyButton, &clearButton, &stopButton, &chainButton,
-             &barsMinus, &barsPlus, &barsReadout })
+             &barsMinus, &barsPlus, &barsReadout, &clocksButton })
         c->setVisible(slotsOn);
-    randomizeButton.setVisible(pattern);
+    if (! slotsOn && clocksStripOpen)
+        openClocksStrip(false); // dividers act in every shape, but not in the macro view
 
-    // The card changes height with the mode, so relayout and repaint - but only on an
-    // actual change, since refreshShape() runs on the 10 Hz timer.
+    randomizeButton.setVisible(pattern);
+    euclidButton.setVisible(pattern);
+    if (! pattern && euclidStripOpen)
+        openEuclidStrip(false); // Euclid only means anything with the probability lane on screen
+
+    // Last, always: everything above decided visibility on Shape and lane grounds without
+    // knowing which page is showing, and this takes back what is off it (2026-08-14). It
+    // only ever hides, so the order is what makes it correct - see applyPageVisibility().
+    applyPageVisibility();
+
+    // Shape no longer changes the panel's height - every page fits inside arpFixedH - but it
+    // still changes what is *in* the Setup page and whether Steps is reachable at all, so the
+    // relayout stays. Only on an actual change, since refreshShape() runs on the 10 Hz timer.
     if (lastPatternMode != (int) pattern)
     {
         lastPatternMode = (int) pattern;
-        // Inline, the card does not size itself: the editor gives it preferredHeight(),
-        // so the editor has to re-lay-out first or resized() would carve up stale bounds.
-        if (onPreferredHeightChanged)
-            onPreferredHeightChanged();
+        // Leaving Pattern with the Steps page up strands you on a page with nothing on it.
+        // setPage sends it to Setup, and calls back into here - which is safe, because
+        // lastPatternMode is already written and the recursion stops on this branch.
+        if (! pattern && currentPage() == Page::steps)
+            setPage(Page::setup);
         resized();
         repaint();
     }
@@ -791,6 +978,7 @@ void ArpPanel::recallOrCopy(int index)
     {
         case armCopy:
             if (index != copyFromIndex)
+                processor.pushUndo("Copy slot", KeysProcessor::UndoScope::arp);
                 processor.copyArpPattern(copyFromIndex, index, editLine());
             break;
         case armClear:
@@ -853,6 +1041,7 @@ void ArpPanel::showSlotMenu(int index)
         else if (r == 4)
         {
             self->processor.recallArpPattern(index, self->editLine());
+            self->processor.pushUndo("Randomize pattern", KeysProcessor::UndoScope::arp);
             self->processor.randomizeActiveArpPattern(self->editLine());
         }
         self->refreshPatternButtons();
@@ -894,6 +1083,15 @@ void ArpPanel::refreshPatternButtons()
     const int activeBars = processor.arpSlotBars(processor.arpActivePattern(editLine()), editLine());
     barsReadout.setText(juce::String(activeBars) + (activeBars == 1 ? " bar" : " bars"),
                         juce::dontSendNotification);
+
+    // Clocks retitles the same way Chain does, but on whether any divider is running rather
+    // than on the strip being open - the toggle glow already says that (openClocksStrip). Not
+    // setToggleState here: that would fight the strip-open state the same button also shows.
+    const auto& engine = processor.arpLine(editLine());
+    bool anyDividerOn = false;
+    for (int i = 0; i < 4; ++i)
+        anyDividerOn |= engine.rhythmDiv[(size_t) i].load(std::memory_order_relaxed) != 0;
+    clocksButton.setButtonText(anyDividerOn ? "Clocked" : "Clocks");
 }
 
 // ---------------------------------------------------------------------------
@@ -1687,6 +1885,7 @@ void ArpPanel::buildAttachments()
     rampTimeAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apRampBeats), rampTimeSlider);
     humanAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apHumanize), humanSlider);
     humanVelAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apHumanVel), humanVelSlider);
+    driftAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apDrift), driftSlider);
     keysBandAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apKeys), keysBandButton);
     swingAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apSwing), swingSlider);
     gateAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apGate), gateSlider);
@@ -1853,6 +2052,10 @@ void ArpPanel::buildControls()
     bar(humanVelSlider, humanVelLabel, "Human Vel", 0.0, 100.0, "%",
         "Takes a little off each hit's velocity, by a different amount every time. Every hit "
         "lands at full strength at 0.");
+    bar(driftSlider, driftLabel, "Drift", 0.0, 100.0, "%",
+        "Strays from what the lanes hold while it plays, so the part never repeats exactly. "
+        "Octave, velocity, gate, lateness and chance wander; the notes never do. "
+        "The lanes on screen are not changed - use Roll on the Draw page for that.");
 
     // Swing, Gate and Chance as knobs with the value in the middle: three continuous
     // controls side by side, where three labelled horizontal sliders would have eaten the
@@ -1910,18 +2113,34 @@ void ArpPanel::buildControls()
     addAndMakeVisible(retrigBox);
 
     // The ten lanes, in ArpEngine::Lane order. The original six first:
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note", -1, 8);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note",
+                 ArpEngine::noteRest, ArpEngine::noteRnd);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave", -3, 3);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate", 5, 200);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet", 1, 4);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Prob", 0, 100);
+    // "Chance", not "Prob" (2026-08-14). The knob on the Play page is called CHANCE and the two
+    // multiply together, so one word for one idea: a lane at 60 under a knob at 100 fires six
+    // times in ten. Owen asked for per-step odds to be findable, and two names for the same
+    // thing in two places is most of why they were not.
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance", 0, 100);
     // The 2026-07-30 four. "Prob" above shortened with them: ten tabs share the width six
     // used to, and "Probability" is the only old label that will not fit at that size.
     buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose", -7, 7);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late", 0, 90);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony", 0, 7);
     buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord", 0, 12);
+    // Rand gets a tab; Mute deliberately does not - the MUTE row under the grid has always been
+    // its editor, and a tab as well would be two ways to draw one lane.
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand", -8, 8);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChain], ArpEngine::laneChain, "Chain", 0, 2);
+    laneRows[(size_t) ArpEngine::laneNote].tab.setTooltip(
+        "Which note of the held chord this step plays. X rests, a blank follows the Shape, "
+        "1-8 pick a fixed one, and P/H/L/R are Prev, Highest, Lowest and Random - those four "
+        "ask the chord a question, so they keep meaning the same thing when it changes.");
+    laneRows[(size_t) ArpEngine::laneChain].tab.setTooltip(
+        "Play this step only on a condition: 0 always, 1 only if the step before it sounded, "
+        "2 only if it did not. Chance says maybe; this says only if.");
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);
@@ -1994,7 +2213,11 @@ void ArpPanel::buildControls()
     addAndMakeVisible(cancelButton);
     cancelButton.setVisible(false);
 
-    randomizeButton.onClick = [this] { processor.randomizeActiveArpPattern(editLine()); };
+    randomizeButton.onClick = [this]
+    {
+        processor.pushUndo("Randomize pattern", KeysProcessor::UndoScope::arp);
+        processor.randomizeActiveArpPattern(editLine());
+    };
     addAndMakeVisible(randomizeButton);
 
     // Chain: one click plays the row as a progression. It starts at the lowest slot holding
@@ -2026,6 +2249,120 @@ void ArpPanel::buildControls()
         addAndMakeVisible(*b);
     }
 
+    // Euclid: opens a non-destructive preview strip of three steppers (HITS/STEPS/ROTATE).
+    // A click on any stepper writes straight into the probability lane; opening the strip on
+    // its own writes nothing. setClickingTogglesState mirrors rateModeButton's own toggle
+    // chip above: the button flips its own state on click, and the handler reads it back
+    // rather than tracking a second boolean.
+    euclidButton.setClickingTogglesState(true);
+    euclidButton.setTitle("Euclid pattern");
+    euclidButton.setTooltip("A Euclidean rhythm, spread into the probability lane: HITS beats "
+                            "spaced as evenly as possible across STEPS, shifted by ROTATE.");
+    euclidButton.onClick = [this] { openEuclidStrip(euclidButton.getToggleState()); };
+    addAndMakeVisible(euclidButton);
+
+    const auto buildStepper = [this](juce::Label& cap, const juce::String& capText,
+                                     juce::TextButton& minus, const juce::String& minusName,
+                                     juce::TextButton& plus, const juce::String& plusName,
+                                     juce::Label& readout)
+    {
+        styleLabel(cap, capText);
+        addChildComponent(cap); // strips lay out regardless; visibility follows the strip
+        minus.setButtonText("-");
+        plus.setButtonText("+");
+        minus.setTitle(minusName);
+        plus.setTitle(plusName);
+        addChildComponent(minus);
+        addChildComponent(plus);
+        readout.setJustificationType(juce::Justification::centred);
+        readout.setFont(juce::Font(juce::FontOptions(13.0f)));
+        addChildComponent(readout);
+    };
+    buildStepper(euclidHitsLabel, "Hits", euclidHitsMinus, "Fewer hits", euclidHitsPlus, "More hits", euclidHitsReadout);
+    buildStepper(euclidStepsLabel, "Steps", euclidStepsMinus, "Fewer steps", euclidStepsPlus, "More steps", euclidStepsReadout);
+    buildStepper(euclidRotateLabel, "Rotate", euclidRotateMinus, "Rotate left", euclidRotatePlus, "Rotate right", euclidRotateReadout);
+    euclidHitsMinus.onClick = [this] { nudgeEuclid(0, -1); };
+    euclidHitsPlus.onClick = [this] { nudgeEuclid(0, 1); };
+    euclidStepsMinus.onClick = [this] { nudgeEuclid(1, -1); };
+    euclidStepsPlus.onClick = [this] { nudgeEuclid(1, 1); };
+    euclidRotateMinus.onClick = [this] { nudgeEuclid(2, -1); };
+    euclidRotatePlus.onClick = [this] { nudgeEuclid(2, 1); };
+    refreshEuclidReadouts();
+
+    // Clocks: the four rhythm dividers, same strip mechanism, mutually exclusive with Euclid.
+    clocksButton.setClickingTogglesState(true);
+    clocksButton.setTitle("Rhythm dividers");
+    clocksButton.setTooltip("Four independent clock dividers layered under the pattern - "
+                            "0 is off, higher numbers slow that voice down further.");
+    clocksButton.onClick = [this] { openClocksStrip(clocksButton.getToggleState()); };
+    addAndMakeVisible(clocksButton);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        buildStepper(clockDivLabels[(size_t) i], "Div " + juce::String(i + 1),
+                    clockDivMinus[(size_t) i], "Divider " + juce::String(i + 1) + " slower",
+                    clockDivPlus[(size_t) i], "Divider " + juce::String(i + 1) + " faster",
+                    clockDivReadouts[(size_t) i]);
+        const int idx = i;
+        clockDivMinus[(size_t) i].onClick = [this, idx] { nudgeClockDiv(idx, -1); };
+        clockDivPlus[(size_t) i].onClick = [this, idx] { nudgeClockDiv(idx, 1); };
+    }
+    refreshClockDivReadouts();
+
+    // Voice: harmony mode, the panel's first lane-contextual control (visible only with the
+    // Harmony lane selected). "Chord" plays the held chord's own tones in the second voice;
+    // "Sub" plays the undertone series instead.
+    voiceButton.setTitle("Harmony voice");
+    voiceButton.setTooltip("The Harmony lane's second voice: chord tones, or the subharmonic "
+                           "series below the root.");
+    voiceButton.onClick = [this]
+    {
+        auto& engine = processor.arpLine(editLine());
+        const int next = engine.harmonyMode.load(std::memory_order_relaxed) == 0 ? 1 : 0;
+        engine.harmonyMode.store(next, std::memory_order_relaxed);
+        refreshVoiceButton();
+    };
+    addChildComponent(voiceButton);
+    refreshVoiceButton();
+
+    // Roll, and how far it may stray. Its own steppers rather than a slider, for the reason the
+    // rate's and the note count's have: a slider is a drag, and the mouse-only contract wants a
+    // click-only path to every value.
+    rollButton.setTitle("Roll lane");
+    rollButton.setTooltip("Reroll the lane you are looking at, straying from what is drawn by "
+                          "the amount beside this. 100 is a full scramble.");
+    rollButton.onClick = [this] { rollSelectedLane(); };
+    addChildComponent(rollButton);
+    resetButton.setTitle("Reset lane");
+    resetButton.setTooltip("Put this lane back to its default across its whole length - the "
+                           "state it is in before you touch it. The way back from a Roll you "
+                           "did not want.");
+    resetButton.onClick = [this] { resetSelectedLane(); };
+    addChildComponent(resetButton);
+    selectButton.setClickingTogglesState(true);
+    selectButton.setTitle("Select steps");
+    selectButton.setTooltip("Drag on the grid to mark a span of steps instead of drawing on it. "
+                            "Roll and Reset then act on that span alone. Click again to go back "
+                            "to drawing, which also clears the span.");
+    selectButton.onClick = [this]
+    {
+        selectMode = selectButton.getToggleState();
+        if (! selectMode)
+            clearSelection(); // leaving the mode drops the span: it has nothing left to show it
+        repaint();
+    };
+    addChildComponent(selectButton);
+    rollMinus.setTitle("Less roll");
+    rollPlus.setTitle("More roll");
+    rollMinus.onClick = [this] { nudgeRollAmount(-5); };
+    rollPlus.onClick = [this] { nudgeRollAmount(5); };
+    addChildComponent(rollMinus);
+    addChildComponent(rollPlus);
+    rollReadout.setJustificationType(juce::Justification::centred);
+    rollReadout.setFont(juce::Font(juce::FontOptions(13.0f)));
+    addChildComponent(rollReadout);
+    rollReadout.setText(juce::String(rollAmount) + "%", juce::dontSendNotification);
+
     // One macro card per line, hidden until the All view asks for them. Built once and kept,
     // so their attachments never churn: each one is bound to its own line for good.
     //
@@ -2043,7 +2380,95 @@ void ArpPanel::buildControls()
         macroRows[(size_t) n] = std::move(row);
     }
 
+    // After every control this panel owns exists, and after the slot cards and lane grids in
+    // particular: the lists hold raw pointers into members built above, so this cannot move
+    // any earlier.
+    buildPageLists();
+
     buildAttachments();
+}
+
+// Which controls belong to which page (2026-08-14). One block, built once, naming every
+// control exactly once - the alternative was a flag per component or three parent Components
+// to reparent into, and this is the version you can read against the three page names.
+//
+// Not in it, on purpose: the macro rows (their own view, gated by macroView), the slot cards'
+// own children, and Cancel, whose visibility is the armed state's to decide and which
+// applyPageVisibility() therefore only ever hides.
+void ArpPanel::buildPageLists()
+{
+    pageSetup = {
+        &rateLabel, &rateKnob, &rateModeButton, &ratePrev, &rateNext,
+        &shapeLabel, &shapeBox, &shapePrev, &shapeNext,
+        &tupletLabel, &tupletBox, &dotButton,
+        &swingLabel, &swingSlider, &gateLabel, &gateSlider, &chanceLabel, &chanceSlider,
+        &retrigLabel, &retrigBox, &keysBandButton, &latchButton, &anchorButton,
+        &stepsLabel, &stepsMinus, &stepsReadout, &stepsPlus, &speedLabel, &speedButton, &linkButton,
+        &octavesLabel, &octavesSlider, &distanceLabel, &distanceBox, &offsetLabel, &offsetSlider,
+        &rampLabel, &rampSlider, &rampTimeLabel, &rampTimeSlider,
+        &humanLabel, &humanSlider, &humanVelLabel, &humanVelSlider,
+        &driftLabel, &driftSlider,
+    };
+
+    pageSlots = {
+        &copyButton, &clearButton, &cancelButton, &stopButton, &chainButton,
+        &barsMinus, &barsReadout, &barsPlus, &randomizeButton,
+        &euclidButton, &euclidHitsLabel, &euclidStepsLabel, &euclidRotateLabel,
+        &euclidHitsReadout, &euclidStepsReadout, &euclidRotateReadout,
+        &euclidHitsMinus, &euclidHitsPlus, &euclidStepsMinus, &euclidStepsPlus,
+        &euclidRotateMinus, &euclidRotatePlus,
+        &clocksButton,
+    };
+    for (auto& c : slotCards)
+        if (c != nullptr)
+            pageSlots.push_back(c.get());
+    for (int i = 0; i < 4; ++i)
+    {
+        pageSlots.push_back(&clockDivLabels[(size_t) i]);
+        pageSlots.push_back(&clockDivReadouts[(size_t) i]);
+        pageSlots.push_back(&clockDivMinus[(size_t) i]);
+        pageSlots.push_back(&clockDivPlus[(size_t) i]);
+    }
+
+    pageSteps = { &muteRowLabel, &voiceButton,
+                  &rollButton, &resetButton, &selectButton,
+                  &rollMinus, &rollReadout, &rollPlus };
+    if (muteRow != nullptr)
+        pageSteps.push_back(muteRow.get());
+    for (auto& lr : laneRows)
+    {
+        pageSteps.push_back(&lr.tab);
+        if (lr.grid != nullptr)
+            pageSteps.push_back(lr.grid.get());
+    }
+}
+
+// Hide everything that is not on the current page. **Never shows anything**: refreshShape()
+// is the one place a control is turned on, on its own Shape, lane and armed-state gates, and
+// this runs at the end of it to take away what those gates could not know about. Turning
+// things on here as well would mean two writers for one visibility and a control that comes
+// back wherever the two disagree - the mistake the macro card's second On toggle was.
+void ArpPanel::applyPageVisibility()
+{
+    const auto p = currentPage();
+    const auto hideList = [](const std::vector<juce::Component*>& list)
+    {
+        for (auto* c : list)
+            if (c != nullptr)
+                c->setVisible(false);
+    };
+
+    // The macro view is not a page and shows none of them.
+    if (macroView || p != Page::setup)
+    {
+        hideList(pageSetup);
+        for (auto& grp : groups)
+            grp.visible = false;
+    }
+    if (macroView || p != Page::slots)
+        hideList(pageSlots);
+    if (macroView || p != Page::steps)
+        hideList(pageSteps);
 }
 
 void ArpPanel::nudgeBars(int delta)
@@ -2054,6 +2479,145 @@ void ArpPanel::nudgeBars(int delta)
     for (auto& c : slotCards)
         if (c != nullptr)
             c->repaint();
+}
+
+// Euclid and Clocks are mutually exclusive: the panel never grows by more than one strip's
+// height at a time. Opening one closes the other; each strip's own components are the only
+// place their visibility is set, since resized() lays them out regardless (they read a
+// possibly-empty rectangle when closed, which is harmless because nothing sees it).
+void ArpPanel::openEuclidStrip(bool open)
+{
+    euclidStripOpen = open;
+    euclidButton.setToggleState(open, juce::dontSendNotification);
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &euclidHitsLabel, &euclidStepsLabel, &euclidRotateLabel,
+             &euclidHitsReadout, &euclidStepsReadout, &euclidRotateReadout,
+             &euclidHitsMinus, &euclidHitsPlus, &euclidStepsMinus, &euclidStepsPlus,
+             &euclidRotateMinus, &euclidRotatePlus })
+        c->setVisible(open);
+    if (open)
+        openClocksStrip(false);
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
+    resized();
+    repaint();
+}
+
+// which: 0 = hits, 1 = steps, 2 = rotate. Every click is immediately audible - that is the
+// point of a preview strip, not a bug - so this both writes through the processor and
+// refreshes the probability lane's own readout (applyEuclidToActiveArpPattern changes that
+// lane's length).
+void ArpPanel::nudgeEuclid(int which, int delta)
+{
+    switch (which)
+    {
+        case 0: euclidHits += delta; break;
+        case 1: euclidSteps += delta; break;
+        default: euclidRotate += delta; break;
+    }
+    // Re-clamp hits and rotate against the possibly-changed steps value, whichever stepper
+    // moved: a STEPS click can leave either of the other two out of range.
+    euclidSteps = juce::jlimit(1, ArpEngine::maxSteps, euclidSteps);
+    euclidHits = juce::jlimit(0, euclidSteps, euclidHits);
+    euclidRotate = juce::jlimit(0, euclidSteps - 1, euclidRotate);
+
+    processor.pushUndo("Euclid", KeysProcessor::UndoScope::arp);
+    processor.applyEuclidToActiveArpPattern(editLine(), euclidHits, euclidSteps, euclidRotate,
+                                            ArpEngine::laneProbability);
+    refreshLaneReadouts();
+    refreshEuclidReadouts();
+}
+
+void ArpPanel::refreshEuclidReadouts()
+{
+    euclidHitsReadout.setText(juce::String(euclidHits), juce::dontSendNotification);
+    euclidStepsReadout.setText(juce::String(euclidSteps), juce::dontSendNotification);
+    euclidRotateReadout.setText(juce::String(euclidRotate), juce::dontSendNotification);
+}
+
+void ArpPanel::openClocksStrip(bool open)
+{
+    clocksStripOpen = open;
+    clocksButton.setToggleState(open, juce::dontSendNotification);
+    for (int i = 0; i < 4; ++i)
+    {
+        clockDivLabels[(size_t) i].setVisible(open);
+        clockDivReadouts[(size_t) i].setVisible(open);
+        clockDivMinus[(size_t) i].setVisible(open);
+        clockDivPlus[(size_t) i].setVisible(open);
+    }
+    if (open)
+    {
+        openEuclidStrip(false);
+        refreshClockDivReadouts();
+    }
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
+    resized();
+    repaint();
+}
+
+// Writes straight to the atomic - no snapshot, no dirty flag, same contract as Randomize.
+void ArpPanel::nudgeClockDiv(int index, int delta)
+{
+    auto& engine = processor.arpLine(editLine());
+    const int next = juce::jlimit(0, 16,
+                                  engine.rhythmDiv[(size_t) index].load(std::memory_order_relaxed) + delta);
+    engine.rhythmDiv[(size_t) index].store(next, std::memory_order_relaxed);
+    refreshClockDivReadouts();
+    refreshPatternButtons(); // the Clocks/Clocked retitle depends on all four
+}
+
+void ArpPanel::refreshClockDivReadouts()
+{
+    auto& engine = processor.arpLine(editLine());
+    for (int i = 0; i < 4; ++i)
+    {
+        const int v = engine.rhythmDiv[(size_t) i].load(std::memory_order_relaxed);
+        clockDivReadouts[(size_t) i].setText(v == 0 ? "Off" : juce::String(v), juce::dontSendNotification);
+    }
+}
+
+void ArpPanel::nudgeRollAmount(int delta)
+{
+    rollAmount = juce::jlimit(5, 100, rollAmount + delta);
+    rollReadout.setText(juce::String(rollAmount) + "%", juce::dontSendNotification);
+}
+
+// Rerolls the lane on screen and repaints its grid. No audition and no undo - the grid shows
+// the result immediately, and clicking again is how you reject one, which is the same deal
+// Randomize has always offered.
+void ArpPanel::rollSelectedLane()
+{
+    processor.pushUndo("Roll lane", KeysProcessor::UndoScope::arp);
+    processor.rerollArpLane(editLine(), selectedLane, rollAmount, selFrom, selTo);
+    refreshLaneReadouts();
+    if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
+        g->repaint();
+}
+
+void ArpPanel::clearSelection()
+{
+    selFrom = selTo = -1;
+    repaint();
+}
+
+void ArpPanel::resetSelectedLane()
+{
+    processor.pushUndo("Reset lane", KeysProcessor::UndoScope::arp);
+    processor.resetArpLane(editLine(), selectedLane, selFrom, selTo);
+    refreshLaneReadouts();
+    if (auto& g = laneRows[(size_t) juce::jlimit(0, ArpEngine::numLanes - 1, selectedLane)].grid)
+        g->repaint();
+}
+
+void ArpPanel::refreshVoiceButton()
+{
+    // The word travels with the state, because the caption above it is gone: the button had a
+    // 12 px "VOICE" label over it until 2026-08-14, and dropping that is what let the target
+    // have the tab row's whole 34 px. One control, saying what it is and what it is set to.
+    const int mode = processor.arpLine(editLine()).harmonyMode.load(std::memory_order_relaxed);
+    voiceButton.setButtonText(mode == 1 ? "Voice: Sub" : "Voice: Chord");
 }
 
 void ArpPanel::timerCallback()
@@ -2132,7 +2696,38 @@ namespace
     // size with nothing to say so.
     constexpr int arpMacroBelow = 8;
     constexpr int arpMacroTotalH = 12 + (arpMacroH + arpMacroBelow) + 12;
-    constexpr int arpPatternH = arpShapeH + (34 + 6) + (140 + 6) + (14 + 2) + (32 + 10);
+    // Euclid and Clocks each open into one 34 px row plus its 8 px gap above the action row,
+    // and the two are mutually exclusive (openEuclidStrip/openClocksStrip each close the
+    // other), so at most one of them is ever open at once.
+    constexpr int arpStripH = 34 + 8;
+
+    // --- The three pages of a line's deep view (2026-08-14) -------------------------------
+    //
+    // Owen, looking at the un-paged view: "when you click details it shouldn't resize the whole
+    // window, just the full arp section. and we need a way to get out the detail view". The
+    // deep view was every block at once - band 112, band2 64, lane tabs 34, grid 140, mute 46,
+    // slots 58, action row 34 - which came to 612 px against the macro view's 240. So Details
+    // grew the window by 372 px and All shrank it back, and on a screen that could not afford
+    // the 372 the keybed lost it off the bottom instead (the 2026-08-02 fail-safe entry).
+    //
+    // Split by what you are doing rather than by what fits, the blocks come apart cleanly and
+    // the tallest page is 258 - eighteen more than the macro view, and 354 *less* than the
+    // un-paged deep view. So the panel takes one fixed height for every view and page it has,
+    // and the window stops resizing between them at all.
+    // + the lane-tools strip (34 + 6), added 2026-08-14 when twelve tabs stopped fitting
+    // beside the buttons. arpFixedH is a max over these, so the window grew once and stopped.
+    constexpr int arpPageStepsH = 12 + (34 + 6) + (34 + 6) + (140 + 6) + (14 + 2) + 32 + 12; // 298
+    constexpr int arpPageSlotsH = 12 + (arpSlotsH + 8) + 34 + 12;                  // 124
+    constexpr int arpPageSetupH = 12 + (arpBandH + 8) + arpBand2H + 12;            // 208
+    // The one height the panel is, ever. Written as a max rather than as the 258 it currently
+    // works out to: every one of these five is a sum of constants above, and the day one of
+    // them grows past the others this picks it up instead of silently clipping that view.
+    // The macro view is in the max for the same reason, not because it is the tallest.
+    constexpr int arpMax2(int a, int b) { return a > b ? a : b; }
+    constexpr int arpFixedH = arpMax2(arpMacroTotalH,
+                                      arpMax2(arpPageStepsH, arpMax2(arpPageSlotsH, arpPageSetupH)));
+    // A strip opens on the Slots page (124 + 42 = 166), which is well inside arpFixedH, so
+    // neither strip changes the panel's height any more and contentHeight() has no branch.
 
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
     // groups share whatever that is. Row one is Pattern / Playback / Steps, row two is
@@ -2157,20 +2752,79 @@ int ArpPanel::preferredHeight() const
     return contentHeight() + 16; // + the 8 px margin at both ends
 }
 
-// One answer for the three views: the macro rows, a plain shape, or the step editor.
+// One height for every view, page and shape the panel has (2026-08-14). It used to be three
+// different answers, and switching between them is what resized the whole window - see
+// arpFixedH for the arithmetic and for why paging removed the problem rather than shrinking
+// it. A page shorter than this simply leaves the space below it empty; the macro view, which
+// is 18 px under, gives its two cards the slack.
+//
+// This being a constant is load-bearing beyond the resize: preferredHeight() feeds the
+// editor's idealHeight(), so a constant here means a fold is the only thing that can move the
+// window, which is the one time it should.
 int ArpPanel::contentHeight() const
+{
+    return arpFixedH;
+}
+
+// What *this* view or page actually needs, as opposed to the fixed height the panel reserves.
+// The two are a pair and the split is the point: contentHeight() feeds the editor, so the
+// window never moves, while this feeds cardBounds(), so the drawn card is only as tall as
+// what is in it. Without it the Slots page - 154 px of content in a 258 px card - drew its
+// slots pinned to the bottom of a large empty box, since the block is laid out from the
+// bottom up. The leftover is panel background, not a card with nothing in it.
+int ArpPanel::pageHeight() const
 {
     if (macroView)
         return arpMacroTotalH;
-    return patternMode() ? arpPatternH : arpShapeH;
+    switch (currentPage())
+    {
+        case Page::steps:
+            return patternMode() ? arpPageStepsH : arpPageSetupH; // Steps falls back to Setup
+        case Page::slots:
+            return arpPageSlotsH + ((euclidStripOpen || clocksStripOpen) ? arpStripH : 0);
+        case Page::setup:
+        default:
+            return arpPageSetupH;
+    }
+}
+
+ArpPanel::Page ArpPanel::currentPage() const
+{
+    return (Page) juce::jlimit(0, 2, processor.layout.arpPage);
+}
+
+// Steps is the lane editor, and outside Pattern shape there is no lane editor to show. The
+// other two hold controls that act on the line whatever it is playing, so they never gate.
+bool ArpPanel::pageAvailable(Page p) const
+{
+    return p != Page::steps || patternMode();
+}
+
+void ArpPanel::setPage(Page p)
+{
+    if (! pageAvailable(p))
+        p = Page::setup; // the Steps tab greys rather than vanishing; a click on it lands here
+    processor.layout.arpPage = (int) p;
+    // A page with no slots on screen must not leave an armed Copy or Clear waiting: the pick
+    // would fire, pages later, on a click the user armed and forgot. Same reasoning as
+    // entering the macro view, which disarms for the same reason.
+    if (p != Page::slots)
+        setArmed(armNone);
+    refreshShape();  // shape gates first, then applyPageVisibility() at its end
+    if (onPageChanged)
+        onPageChanged();
+    resized();
+    repaint();
 }
 
 juce::Rectangle<int> ArpPanel::cardBounds() const
 {
+    // pageHeight(), not contentHeight(): the editor hands the panel the fixed height so the
+    // window never resizes, and the card drawn inside it is sized to the page actually
+    // showing. Inline used to return `full` outright for the same reason it now does not -
+    // the height it is given stopped being the height its content needs.
     const auto full = getLocalBounds().reduced(8);
-    if (inlineMode)
-        return full; // the editor already gave us exactly preferredHeight()
-    return full.withHeight(juce::jmin(full.getHeight(), contentHeight()));
+    return full.withHeight(juce::jmin(full.getHeight(), pageHeight()));
 }
 
 void ArpPanel::paint(juce::Graphics& g)
@@ -2270,14 +2924,25 @@ void ArpPanel::resized()
         }
     }
 
-    // --- The control band: three captioned groups sharing the width ---------------
-    auto band = macroView ? juce::Rectangle<int>() : area.removeFromTop(arpBandH);
-    if (! macroView)
+    // Which page's blocks claim space this pass (2026-08-14). Everything below already used
+    // the `macroView ? emptyRect : removeFromTop(...)` idiom, so paging it is a change of
+    // condition rather than a restructure: an off-page block lays itself out into an empty
+    // rectangle, which the comments below already call harmless because those controls are
+    // invisible. applyPageVisibility() is what makes that second half true.
+    const bool wantSetup = ! macroView && currentPage() == Page::setup;
+    const bool wantSlots = ! macroView && currentPage() == Page::slots;
+    const bool wantSteps = ! macroView && currentPage() == Page::steps && patternMode();
+
+    // --- SETUP page: the control band, three captioned groups sharing the width ----
+    // Voice left the STEPS group on 2026-08-14 for the lane-tab row, where it costs no height
+    // at all and sits beside the lane it belongs to, so the band is back to its two rows.
+    auto band = wantSetup ? area.removeFromTop(arpBandH) : juce::Rectangle<int>();
+    if (wantSetup)
         area.removeFromTop(8);
-    auto band2 = macroView ? juce::Rectangle<int>() : area.removeFromTop(arpBand2H);
-    if (! macroView)
+    auto band2 = wantSetup ? area.removeFromTop(arpBand2H) : juce::Rectangle<int>();
+    if (wantSetup)
         area.removeFromTop(12);
-    if (! macroView)
+    if (wantSetup)
     {
         const int gaps = 2 * 10;
         const int usable = band.getWidth() - gaps;
@@ -2442,15 +3107,18 @@ void ArpPanel::resized()
     {
         auto inner = groupInner(groups[4].bounds).withHeight(arpBandRow);
         auto row = inner;
-        const int each = juce::jmax(120, (row.getWidth() - 24) / 4);
+        const int each = juce::jmax(120, (row.getWidth() - 32) / 5); // five since Drift joined
         cell(row, each, rampLabel, rampSlider);
         cell(row, each, rampTimeLabel, rampTimeSlider);
         cell(row, each, humanLabel, humanSlider);
-        cell(row, juce::jmax(120, row.getWidth()), humanVelLabel, humanVelSlider);
+        cell(row, each, humanVelLabel, humanVelSlider);
+        cell(row, juce::jmax(120, row.getWidth()), driftLabel, driftSlider);
     }
 
     // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives
-    // rather than floating under the grid where it used to.
+    // rather than floating under the grid where it used to. Two rows again as of 2026-08-14:
+    // Voice had a third here for one day and moved to the lane-tab row on the Steps page,
+    // which costs no height and puts it beside the Harmony lane it is contextual on.
     {
         juce::Rectangle<int> rowA, rowB;
         splitRows(groupInner(groups[2].bounds), rowA, rowB);
@@ -2468,15 +3136,31 @@ void ArpPanel::resized()
         linkButton.setBounds(rowB.withTrimmedTop(14));
     }
 
-    // --- The slot row and its buttons, at the bottom of both per-line shapes -------
+    // --- SLOTS page: the twelve cards, the action row, and either strip ------------
     // Not the macro view, since 2026-08-02: the slots and the action row belong to the
     // per-line tabs, and the A/B/All tabs themselves were laid out in its header above -
     // running this block there would move them right back down to a row that no longer
-    // exists on screen.
-    if (! macroView)
+    // exists on screen. Its own page since 2026-08-14, which is what let the whole block
+    // keep its full-size targets while the deep view stopped being 612 px tall.
+    if (wantSlots)
     {
         auto actionRow = area.removeFromBottom(34);
         area.removeFromBottom(8);
+        // Euclid and Clocks open a strip directly above the action row, which stays put at
+        // the bottom edge - the row that grows is the one above it, not the one the toggle
+        // buttons live in. At most one of these is ever non-empty; the other is a zero-height
+        // rect, which is harmless since its strip's components are invisible too.
+        juce::Rectangle<int> euclidRow, clocksRow;
+        if (euclidStripOpen)
+        {
+            euclidRow = area.removeFromBottom(34);
+            area.removeFromBottom(8);
+        }
+        if (clocksStripOpen)
+        {
+            clocksRow = area.removeFromBottom(34);
+            area.removeFromBottom(8);
+        }
         auto slotRow = area.removeFromBottom(arpSlotsH);
         area.removeFromBottom(12);
 
@@ -2505,31 +3189,87 @@ void ArpPanel::resized()
         stopButton.setBounds(actionRow.removeFromLeft(84));
         actionRow.removeFromLeft(12);
         randomizeButton.setBounds(actionRow.removeFromLeft(110));
+        actionRow.removeFromLeft(8);
+        euclidButton.setBounds(actionRow.removeFromLeft(110));
 
         // Chain and its Bars stepper sit at the far end, away from the four that act on one
-        // slot: these two are about the row as a whole.
+        // slot: these two are about the row as a whole. Clocks joins them, for the same
+        // reason - it acts on the line, not on one slot.
         auto barsCell = actionRow.removeFromRight(126);
         barsPlus.setBounds(barsCell.removeFromRight(34));
         barsMinus.setBounds(barsCell.removeFromLeft(34));
         barsReadout.setBounds(barsCell); // says "2 bars", so it needs no caption beside it
         actionRow.removeFromRight(8);
         chainButton.setBounds(actionRow.removeFromRight(96));
+        actionRow.removeFromRight(8);
+        clocksButton.setBounds(actionRow.removeFromRight(96));
+
+        // Each strip: three or four [caption][-][readout][+] groups left to right, laid out
+        // regardless of which one is actually open this frame (the closed one's row is
+        // zero-width, so its removeFromLeft calls are simple no-ops).
+        const auto stepperGroup = [](juce::Rectangle<int>& row, int w, juce::Label& cap,
+                                     juce::TextButton& minus, juce::Label& readout, juce::TextButton& plus)
+        {
+            auto cell = row.removeFromLeft(w);
+            row.removeFromLeft(8);
+            cap.setBounds(cell.removeFromLeft(40));
+            minus.setBounds(cell.removeFromLeft(34));
+            plus.setBounds(cell.removeFromRight(34));
+            readout.setBounds(cell);
+        };
+        stepperGroup(euclidRow, 156, euclidHitsLabel, euclidHitsMinus, euclidHitsReadout, euclidHitsPlus);
+        stepperGroup(euclidRow, 156, euclidStepsLabel, euclidStepsMinus, euclidStepsReadout, euclidStepsPlus);
+        stepperGroup(euclidRow, 156, euclidRotateLabel, euclidRotateMinus, euclidRotateReadout, euclidRotatePlus);
+        for (int i = 0; i < 4; ++i)
+            stepperGroup(clocksRow, 140, clockDivLabels[(size_t) i], clockDivMinus[(size_t) i],
+                        clockDivReadouts[(size_t) i], clockDivPlus[(size_t) i]);
     }
 
-    // Everything left exists only in Pattern shape. Laying it out regardless is harmless
-    // (it is all invisible) and keeps this function free of a second branch.
+    // --- STEPS page: the lane tabs, the one lane they select, the mute row ---------
+    // Laying this out with an empty `area` on the other pages is harmless (it is all
+    // invisible by then - see applyPageVisibility) and keeps this function free of a
+    // second branch.
+    if (! wantSteps)
+        area = juce::Rectangle<int>();
 
-    // Lane tabs, then the one lane they select, then the mute row beneath it. Six
-    // stacked lanes needed ~750 px and the panel gets ~600, so the Probability lane and
-    // the whole pattern row used to be cut off the bottom of the window entirely.
     auto tabsRow = area.removeFromTop(34);
     area.removeFromTop(6);
-    const int tabW = juce::jmax(70, (tabsRow.getWidth() - (ArpEngine::numLanes - 1) * 4) / ArpEngine::numLanes);
+
+    // The lane tabs get the whole row, and the buttons that act on a lane get their own strip
+    // below it (2026-08-14). They shared this row until the Chain lane made twelve tabs: at the
+    // 70 px floor twelve need 884 px and the row had 784 left after the buttons, so Rand was
+    // squeezed to 63 and Chain was laid out at zero width - present in the tree, invisible on
+    // screen, and absent from the accessibility tree with nothing to say why.
+    //
+    // **A crowded row grows a strip; it does not squeeze its targets** - the rule already
+    // logged twice (2026-08-01, 2026-08-02) and paid for a third time here. Height is the cheap
+    // axis on this page and 34 px buys every tab its full width back: twelve now get ~99 px
+    // each against a 70 px floor.
+    const int tabW = juce::jmax(70, (tabsRow.getWidth() - 11 * 4) / 12);
     for (auto& lr : laneRows)
     {
+        if (! lr.hasTab)
+            continue; // Mute has a lane but no tab - the MUTE row below is its editor
         lr.tab.setBounds(tabsRow.removeFromLeft(tabW));
         tabsRow.removeFromLeft(4);
     }
+
+    // The lane tools, left to right, in the order you reach for them: mark a span, then put it
+    // back or roll it. Voice sits at the right end, away from the three, because it is the one
+    // control here that edits the *sound* rather than the drawing - and it only appears at all
+    // with the Harmony lane up.
+    auto toolsRow = area.removeFromTop(34);
+    area.removeFromTop(6);
+    selectButton.setBounds(toolsRow.removeFromLeft(84));
+    toolsRow.removeFromLeft(6);
+    resetButton.setBounds(toolsRow.removeFromLeft(72));
+    toolsRow.removeFromLeft(6);
+    rollButton.setBounds(toolsRow.removeFromLeft(72));
+    toolsRow.removeFromLeft(6);
+    rollMinus.setBounds(toolsRow.removeFromLeft(34));
+    rollReadout.setBounds(toolsRow.removeFromLeft(52));
+    rollPlus.setBounds(toolsRow.removeFromLeft(34));
+    voiceButton.setBounds(toolsRow.removeFromRight(112));
 
     auto gridArea = area.removeFromTop(140);
     area.removeFromTop(6);
@@ -2545,4 +3285,5 @@ void ArpPanel::resized()
     area.removeFromTop(2);
     muteRow->setBounds(area.removeFromTop(32)); // same x and width as gridArea, both off `area`
 }
+
 } // namespace keys

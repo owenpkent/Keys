@@ -5,6 +5,342 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Undo and Redo
+
+Owen: *"we should have undo"*. **"There is no undo anywhere in Keys" was the stated reason for
+at least four design compromises** - Reset beside Roll, Clear page living in a window rather
+than on a bar, locks on pads, and the drag guard in `ChordPads::mouseUp`. All four stay, because
+all four are still good behaviour; they simply stop being load-bearing.
+
+**Content only, and that is the design rather than a shortcut.** Undo covers what destroys
+music - chord pads, arp lanes, arp slots - and deliberately not parameters. Sweeping the rate
+dial would otherwise push forty entries onto the stack and shove the pad you actually wanted
+back off the end of it, which is an undo that cannot undo anything. A knob you can always turn
+back; a cleared pad you cannot.
+
+An entry is a **snapshot of the affected subtree before the edit**, taken with the same
+`chordPadsToTree` / `arpToTree` the session file already uses. That is what makes it affordable:
+no action needs a hand-written inverse, so no action can have a *wrong* one, and anything added
+later is undoable the moment its data lands in one of those two trees.
+
+**One entry per gesture, not per change.** A lane drag pushes on the press and not again, or a
+single stroke would fill the stack by itself; `KeysProcessor::UndoGesture` is the RAII guard
+that lets a high-level action (a drop clears a pad and then sets it) cost one entry rather than
+two. Depth is 32, oldest dropped first.
+
+Covered: clear / overwrite / move a pad, capture the live chord, drop a tray candidate, Fill,
+Regen, Clear page, drag a card off the strip, Roll, Reset, Randomize, Euclid, copy a slot, draw
+a lane, mute steps.
+
+**Undo and Redo ride the Controls bar**, at the left end, because that bar never hides with its
+fold - the same rule that keeps the tempo and Root on it. An undo you cannot reach because a
+section is collapsed is an undo you cannot trust. They grey rather than vanish when their stack
+is empty, so the pair never reflows the bar under the mouse, and each carries a tooltip naming
+what would come back - which is why every push site passes a label rather than a bare marker.
+
+Undoing releases every sounding chord first (`stopAllChordPads`), for the same reason an
+audition does: restoring pads can rewrite the chord a sustained card is holding, and restoring
+the arp can rewrite the lanes under a running line.
+
+Six new test cases (211 total, 3,801 checks), including the one that matters most - an open
+gesture costs one entry however many edits are inside it.
+
+
+### Added: tests that could have caught this week's bugs
+
+Two new test files, and the link that makes them possible: `Keys_tests` now links the plugin
+itself, so a test can hold a real `KeysProcessor` and a real `ArpPanel`.
+
+**`StateTests.cpp` pins the migrations.** That mechanism was silently dead for months - the
+kit's `state::load` handed `replaceState` a shared node, so `onExtra` saw a tree in which every
+parameter existed whether the session saved it or not (fixed 2026-08-14, kit PR #6). Nothing in
+Keys exercised a migration, so a dead one and a working one looked identical from outside. Each
+test now loads a session with a parameter *removed* and asserts the migration noticed:
+`migrateVelTrim` folding Volume 25 into VelTrim -50 through the same curve, `migrateTuplet`
+folding a set Trip into Triplet and retiring it, the spans and Drift resetting to their defaults
+rather than inheriting the live value, and `bpmSync` backfilling while a *saved* off survives
+untouched. Every one of these would have failed before the kit fix.
+
+**`LayoutTests.cpp` pins the layout rules.** Every bug of 2026-08-14 was a layout bug and the
+engine suite caught none of them - the Chain tab at zero width, Mute's phantom tab eating a
+cell, the Voice button at 22 px, three lanes at the wrong length. Screenshots and UI Automation
+found all four, which needs a running app. The rules those bugs broke are now tests: no visible
+control is starved in any view or page, all twelve lane tabs are laid out at the same width and
+above their floor, the panel is one height in every view and page, and opening the panel repairs
+lanes that disagree about length while leaving a deliberate polymeter alone.
+
+They are **rules, not pixel snapshots**: a snapshot of a layout still being designed fails every
+time the design moves, which trains people to delete tests.
+
+201 -> 206 cases, 3,787 checks.
+
+### Fixed: a chord card let go mid-drag destroyed the chord
+
+Dragging a card off the strip clears it, which is the documented gesture. The test for it was
+"nobody claimed the drop" - so letting a card go anywhere that merely *happens* not to be a drop
+target destroyed the chord: the gap between two sections, a bar, the keybed. Changing your mind
+mid-drag and putting the card back down on the strip is the commonest way to do that, and it is
+the one gesture that most obviously should not delete anything. There is no undo anywhere in
+Keys.
+
+The release now has to have actually left the strip as well. A locked card was already immune,
+and still is.
+
+
+### Fixed: lanes of different lengths, and a draw that slid sideways
+
+Owen: *"Sometimes the steps do not match each other"* and *"when you're drawing, I don't want
+you to be able to jump from step to step. I just want it to be for that one when you're moving
+up and down."*
+
+**Every lane shares a length again with Link on.** `nudgeLength` has always written all of them,
+which was never the problem - the problem is lanes that were not there when it last ran. Rand,
+Mute and Chain were appended on 2026-08-14 and arrive at `ArpPattern`'s default 8, so a pattern
+whose other lanes were at 16 or 32 had three lanes a fraction of the length of the rest, drawn
+as a different number of cells with nothing to say why. A session saved before any of them has
+the same hole. `ArpPanel::enforceLinkedLengths` now pushes the Note lane's length and speed onto
+every lane whenever the readouts refresh, so the repair happens on load and on every lane
+change rather than waiting for the next nudge. Link **off** is polymeter and is left alone
+entirely - that is the whole point of the switch.
+
+**A draw gesture edits one step.** `LaneGrid`'s drag painted whatever step was under the
+pointer, so a hand moving up to set a height and drifting sideways on the way rewrote the
+neighbours it crossed. The step is captured on the press and held for the rest of the gesture;
+horizontal travel is ignored. The MUTE row still paints across steps, and should: there the
+value is a toggle and a swipe means "all of these", where here it is a height that the pointer
+has to travel vertically to set.
+
+
+### Added: a richer Note lane, a Chain lane, and a selection for the grid
+
+The three unbuilt ideas `docs/REFERENCES.md` ranked, built.
+
+**The Note lane speaks Kirnu's vocabulary** (its manual p9, the ORDER lane). Alongside `-1` rest,
+`0` follow-the-shape and `1..8` a fixed entry, it now has **P**rev (repeat what last sounded),
+**H**ighest, **L**owest and **R**andom. Those four *ask the chord a question* rather than
+counting into it, so they keep meaning the same thing when the chord under them changes - Hi is
+the top note of whatever is held, not entry 3. Appended **above 8**, not below -1, for two
+reasons: every saved session's values stay exactly what they were, and dragging a cell to the
+bottom of the grid still reaches the rest rather than landing on a mode.
+
+**The Chain lane** is Stochas' chain dependency (its manual p3) in the one form that needs no
+second coordinate: `0` always, `1` only if the step before it sounded, `2` only if it did not.
+Chance says "maybe"; this says "only if", and that is what turns a probabilistic pattern into
+one that answers itself. It is **the only thing in the engine that is not stateless from the
+playhead** - a condition has to remember one bit about the previous step - and it self-corrects
+within a single step, which is the cheapest possible break of that rule and is why this form was
+chosen over an arbitrary cell-to-cell reference.
+
+**Select** is the missing primitive (Kirnu's tool palette, p8, whose Random tool acts on
+*selected* steps). With it lit a drag on the grid marks a span instead of drawing on it, and
+Roll and Reset narrow to that span. A **mode**, not a modifier: the mouse-only contract has no
+Alt-drag to offer, and Kirnu itself models this as a tool you pick.
+
+**The lane tools moved to their own strip.** Twelve tabs at the 70 px floor need 884 px and the
+row had 784 left beside the buttons, so Rand was squeezed to 63 px and Chain was laid out at
+zero width - present in the tree, invisible on screen, absent from the accessibility tree with
+nothing to say why. *A crowded row grows a strip; it does not squeeze its targets* - the rule
+logged twice before and paid for a third time. All twelve tabs are uniform again, and the Draw
+page went 258 -> 298, so the window grew 40 px once and stopped.
+
+Five new test cases (195 total, 3,607 checks), pinning Hi against two different chords, Prev
+holding a note, both chain conditions, and chain-0 being bit-identical to the feature not
+existing.
+
+
+### Added: a Rand lane, and mute stops eating your steps
+
+Owen: *"look at reference manuals"*. `Cthulhu_Manual_v1_1.pdf` is in the repo root and page 25
+says two things Keys had wrong.
+
+**Cthulhu's randomness is a lane, not a knob.** Its "Rand Sel" tab is a graph where you draw
+*how random each step is* - default centred (no randomising), above centre the output step may
+come out higher than the one assigned, below centre lower, and the size is how far. So step 3
+can be locked and step 7 wide open. Roll and Drift are both global; this is per-step, which is
+the whole point.
+
+`laneRand` is that lane, appended as lane 10, bipolar -8..+8, default 0. It is **the one
+randomness in Keys allowed to change which note plays**, and the reason is that you drew it on
+that step: it is intent, where Drift is a knob wandering over a part you did not aim at. It
+applies only to a fixed Note index - a Note lane of 0 means "follow the shape", and randomising
+the number zero would silently turn Up into a fixed entry.
+
+**Mute is its own lane** (`laneMute`, lane 11). It used to toggle the Note lane between -1 and
+0, which destroyed whatever that step held - and the manual names preserving it as the reason
+mute buttons exist at all: *"you can experiment with mutes, without losing the set-value of the
+steps, in case you wish to undo this action."* Note keeps its value now and the mute lane says
+whether the step is heard. A Note of -1 is still a *drawn* rest, which is a different thing and
+stays; Cthulhu has both too.
+
+The mute lane is the Note lane's companion rather than a polymetric lane of its own: it reads,
+writes and syncs at the Note lane's length. The engine wraps every lane read by that lane's own
+length, so if the two disagreed a mute drawn at step 20 of a 32-step pattern would read back
+modulo 8 and silence the wrong step. It gets no tab - the MUTE row under the grid has always
+been its editor, and a tab as well would be two ways to draw one lane.
+
+**Both are append-only.** A lane's index is what a saved session stores it under, so an older
+session simply has no child for 10 or 11 and reads back as `ArpPattern`'s defaults - inert,
+both of them. Old sessions' mutes are `-1`s in the Note lane and still play as rests,
+identically; they are not migrated, because a drawn rest and a mute are now different things
+and guessing which one an old `-1` meant would be inventing intent.
+
+Three new test cases (190 total, 3,560 checks).
+
+
+### Fixed: a value at the edge of its lane ignored Roll and Drift
+
+Owen: *"0 value seems to ignore roll"*. Both built a window of
+`[value - reach/2, value + reach/2]` and **clamped the result**, which is fine in the middle of
+a lane and broken at its edges: a value sitting at the bottom had half of every draw fall
+outside the range and clamp straight back to where it started. Late, Harmony and Chord all
+default to 0 and Chance sits at its *top*, so "a lane of zeroes barely moves" was the common
+case, not a corner one.
+
+`ArpEngine::strayWithin` is the one copy of the rule now, and **the window slides instead of
+the result clamping**: the full width of the draw survives wherever the value sits, and it only
+narrows if the reach is wider than the lane itself. Pinned by a test at both the floor and the
+ceiling.
+
+### Added: Reset, and the whole arp panel takes a chord
+
+**Reset** sits beside Roll on the Draw page and writes the lane's own default across its whole
+length - the state a lane is in before you touch it. Roll is destructive and Keys has no undo
+anywhere, so a roll you did not want cost a redraw until now.
+
+**The panel itself is a drop target on every page** (Owen: *"need to be able to drag chords to
+not just the main arp window"*). This is a paging regression: the slot cards moved to the Cards
+page and the macro cards only exist in the All view, so on Play or Draw the only target left
+was a 40 px letter on the bar. A chord dropped anywhere on the panel goes to the line being
+edited; a slot card still wins on Cards and a macro card still wins in All, because JUCE walks
+up from whatever is under the pointer and those are deeper. The card outlines while a chord is
+over it, so "anywhere here" is visible rather than something you have to be told.
+
+
+### Added: Roll, Drift, and per-step odds that say what they are
+
+Owen: *"there should be, like, a more random feature in the drawing, like cthulu"* - three
+answers, because the ask splits three ways and they are different things.
+
+**Roll** sits in the lane-tab row on the Draw page and rerolls the lane you are *looking at*,
+straying from what is drawn by its own amount (5..100%: a nudge low down, a uniform scramble at
+100). Randomize on the Cards page stays and is the other kind - six lanes at once, to a musical
+recipe, for a part you did not have. Roll is what you reach for on a lane you already like.
+
+It is also a regression fix: Randomize used to sit in the action row directly under the grid,
+and paging the deep view put it on another page, so the lane and the button that rerolls it
+were never on screen together.
+
+**Drift** (`arpDrift`, appended, default 0) is the opposite of Roll in every way: it strays
+from the lanes *while it plays*, so the part never repeats exactly and the lane on screen never
+changes. It rides the FEEL group on the Play page beside Humanize, because the two are the same
+question asked twice - Humanize is a **player** wandering (late and quieter, never early and
+never louder) and Drift is a **machine** wandering (either way, evenly around the drawn value).
+
+The rule it rests on is one line: **drift changes how a step plays, never which note it
+plays.** Octave, velocity, gate, lateness and chance wander; Note, Ratchet, Harmony, Chord and
+**Transpose** do not. Transpose was in the drifting set for one build, and the new
+"pitches are unchanged" test caught it on pitch class - transpose moves by scale degrees, so it
+picks a different note however you look at it. Octave stays in, because whole octaves keep the
+pitch class.
+
+`ArpEngine::laneRanges` is now the one copy of what each lane can hold, shared by the grid that
+draws a lane, the reroll that randomizes one and the drift that strays from one. A
+`static_assert` ties the Chord lane's high end to `ChordTable::numSlots`.
+
+**The Prob lane is called Chance**, matching the CHANCE knob on the Play page that it
+multiplies with. Two names in two places for one idea was most of why per-step odds were not
+findable.
+
+Four new test cases (186 total, 3,033 checks).
+
+### Changed: a line's deep view is three pages, and the window stops resizing
+
+Owen, looking at the un-paged view: *"when you click details it shouldn't resize the whole
+window, just the full arp section. and we need a way to get out the detail view"*, then, asked
+where the height should go instead: *"can we simplify the detail view or organize into pages"*.
+
+The deep view used to be every block at once - the band's two rows, the ten lane tabs, the
+grid, the mute row, the twelve slots and the action row - which came to **612 px** against the
+macro view's 240. So clicking **Details** grew the *window* by 372 px and clicking **All**
+shrank it back, and on a screen that could not afford the 372 the keybed lost it off the
+bottom instead.
+
+Split by what you are doing rather than by what fits, the blocks come apart cleanly:
+
+| page | contents | height |
+|---|---|---|
+| **Draw** | the ten lane tabs, the selected lane's grid, the mute row | 258 |
+| **Cards** | the twelve slots, Copy / Clear / Stop / Randomize / Euclid / Clocks / Chain | 124 |
+| **Play** | the band's two rows: Pattern, Playback, Steps, Spread, Feel | 208 |
+
+The tallest is 258 - eighteen more than the macro view, and **354 less** than the un-paged deep
+view - so the panel now takes one fixed height (`arpFixedH`) for every view and page it has and
+the window does not move between them at all. `contentHeight()` returns that constant and feeds
+the editor; a new `pageHeight()` feeds `cardBounds()`, so the drawn card is only as tall as the
+page showing and the leftover is panel background rather than an empty box.
+
+The page tabs ride the **ARP section bar**, right of All, which is what makes paging pay for
+itself: the bar is 34 px that already exists, so the picker costs the panel no height. They
+appear only in a line's deep view, so the bar reads `A B All` in the overview and
+`A B All Play Cards Draw` in a page - which is the answer to *"we need a way to get out"*.
+All is not a third letter beside A and B any more, it is the first entry of the view group and
+visibly the way back. Draw greys outside Pattern shape rather than vanishing, and leaving
+Pattern with it up falls back to Play. The page survives a fold and a session
+(`LayoutState::arpPage`), and **defaults to Play**: Draw does nothing until you have drawn on
+it *and* set Shape to Pattern, so opening there is opening on a blank page with no way to tell
+why. The tabs were Steps / Slots / Setup for one build - five letters each, all starting with
+S, which is unreadable at a glance. These name what you do.
+
+**Voice moved to the lane-tab row**, where it costs no height at all and sits beside the
+Harmony lane it is contextual on, instead of the 42 px row inside the STEPS group it had for
+one day. It reads `Voice: Chord` / `Voice: Sub` and carries its own word now: a 12 px caption
+over it left the button 22 px, under the mouse-only floor. Its cell is reserved out of the row
+before the tabs take their cut, and reserved whether or not it is showing, so the ten tabs do
+not resize under the mouse when you select Harmony.
+
+### Added: a Euclidean rhythm generator, MCP-only for now
+
+`src/EuclidGen.h` is a pure, allocation-free `euclidHit(i, hits, steps, rotation)` (Bjorklund's
+algorithm, the Bresenham-line formulation), plus the new MCP tool `apply_euclid`, which writes
+the result into the active pattern's probability lane - 100 on a hit, 0 on a rest - and sets
+that lane's length to `steps`. Only the probability lane has a hit/rest mapping that means
+anything, so this is the one lane it touches; a mouse-only UI for it is a later pass.
+
+### Added: Subharmonicon-style rhythm dividers, up to four per line
+
+Up to four dividers (1..16, 0 = off) per arp line, live as plain atomics on `ArpEngine`
+(`rhythmDiv`) the same way the step lanes already are - no new APVTS parameter. With any
+enabled, a step boundary fires only if it is a multiple of at least one of them (an OR of
+clocks, not a shared modulus), and the lanes advance one step per boundary that actually fires
+rather than skipping ahead by whatever the divider passed over. The position is computed fresh
+from the raw step index every time (`ArpEngine::firedCountBefore`, by inclusion-exclusion over
+the enabled divisors), so a transport jump lands on the right step instead of drifting. All
+four off, the default, is bit-identical to the feature not existing. Persisted per slot as
+`rhythmDivs`; readable and writable through `get_arp_pattern` / `set_arp_pattern`.
+
+### Added: a subharmonic mode for the Harmony lane
+
+`harmonyMode` (0 = today's chord tone above the played note, 1 = subharmonic) switches the
+Harmony lane's second voice to the undertone series below it instead - f/2 down to f/8,
+quantized to 12-TET - meant to be heard with Scale Lock off, since it deliberately leaves the
+chord. A voice that would clamp onto the note it is harmonizing (running out of MIDI range at
+the bottom) is dropped rather than folded back on top of it. Same storage and MCP shape as the
+rhythm dividers: a live atomic on `ArpEngine`, persisted per slot, no new parameter.
+
+### Added: mouse-only controls for the Euclidean generator, the rhythm dividers and the subharmonic voice
+
+The UI pass the three generative additions above were waiting on. **Euclid** and **Clocks**
+are two buttons on the arp panel's action row, each opening a strip of steppers above it -
+Hits/Steps/Rotate for Euclid, four dividers for Clocks - rather than a dialog; opening a strip
+previews nothing, only a stepper click writes, and the two are mutually exclusive so the panel
+never grows by more than one strip at once. Euclid stays scoped to Pattern shape, since it is
+writing into the probability lane; Clocks stays available in every shape, since the dividers
+act regardless of what Shape draws, and its own button retitles to "Clocked" while any divider
+is running, the same way Chain retitles to "Chaining". **Voice** switches the Harmony lane's
+second voice between chord tones and the subharmonic series, and is the panel's first control
+that depends on which lane is selected rather than which shape is - it shows up in its own row
+under Steps and Speed/Link, but only with the Harmony tab itself picked.
+
 ### Changed: twelve pads a page, with Strum and Humanize in the columns that freed up
 
 Owen: "reduce the pads grid to 12 and move strum and humanize into that with the same style."

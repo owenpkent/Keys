@@ -427,6 +427,32 @@ private:
     };
     std::array<std::unique_ptr<ArpBarTab>, KeysProcessor::uiArpLines> arpBarTabs;
     std::unique_ptr<ArpBarTab> arpBarAllTab;
+    // The three pages of a line's deep view (2026-08-14): Steps, Slots, Setup. Plain
+    // TextButtons, not ArpBarTabs - they select a page, there is no line behind them to hand a
+    // chord to, and that is the same reason the All tab refuses every drop.
+    //
+    // **On the bar rather than in the panel**, and that is the whole reason paging pays for
+    // itself: the bar is 34 px that already exists, so the page picker costs the panel no
+    // height at all. Putting it inside the panel would have taken 34 px off the very budget
+    // paging was buying back. Same rule that put Fill/Regen/Generator on the Pads bar.
+    //
+    // They sit immediately right of All, which makes All read as the fourth entry in one view
+    // picker - the overview - and therefore as the way back out of a page. That is the answer
+    // to "we need a way to get out the detail view": not a second control doing All's job, but
+    // All finally sitting with the things it is an alternative to.
+    std::array<std::unique_ptr<juce::TextButton>, 3> arpPageTabs;
+    // Bar order is most-used first - **Play, Cards, Draw** - which is deliberately *not* the
+    // Page enum's own order. That stays steps = 0 / slots = 1 / setup = 2 because
+    // LayoutState::arpPage stores the plain value, and renumbering it would move the page
+    // every saved session opens on (the same reason genSource's choice list may only be
+    // appended to). One table, and both the click and the lit state read it.
+    //
+    // The names were Steps / Slots / Setup for one build (2026-08-14, same day). All three are
+    // five letters starting with S, which is unreadable at a glance - Owen: "I don't
+    // understand this layout". These name what you *do*: Play is where rate and shape are, so
+    // it is where you go for a sound; Draw says up front that the lane page needs drawing on
+    // before it does anything.
+    static ArpPanel::Page arpPageForTab(int tabIndex);
     // Which tab is lit, derived from the processor's state so a drop, a session load and a
     // click all land in the same place.
     void refreshArpBarTabs();
@@ -513,6 +539,19 @@ private:
     // there. It rides the left end, in the cell the Knobs chip vacated the same day, and it
     // is the one *elastic* control on this bar - see resized() for why the tempo group and
     // the keyboard-settings combos beyond it have to be measured first.
+    // Undo / Redo, on the **Controls bar** (2026-08-14, Owen: "we should have undo").
+    //
+    // That bar because it never hides with its fold - the same rule that keeps the tempo, Root
+    // and Scale on it. An undo you cannot reach because a section is collapsed is an undo you
+    // cannot trust, and the whole value of it is being reachable at the moment you realise.
+    //
+    // Left end, before everything else, because it is the one control here that is *about* the
+    // others: it reads as a header rather than as another setting. They grey when their stack
+    // is empty rather than vanishing, so the pair never reflows the bar under the mouse.
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
+    juce::uint32 lastUndoGen = 0xffffffffu; // forces the first refresh
+    void refreshUndoButtons();
+
     juce::TextButton instrumentChip;
     void applyAccent(int index);
 

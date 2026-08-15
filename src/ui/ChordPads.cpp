@@ -197,10 +197,14 @@ void ChordPads::itemDropped(const SourceDetails& details)
     }
     else if (p->from == From::padSlot)
     {
+        const KeysProcessor::UndoGesture undoable { processor, "Move chord",
+                                                   KeysProcessor::UndoScope::pads };
         processor.moveChordPad(p->index, cell); // rearrange, locked or not
     }
     else if (p->from == From::liveCard)
     {
+        const KeysProcessor::UndoGesture undoable { processor, "Capture chord",
+                                                   KeysProcessor::UndoScope::pads };
         processor.setChordPad(cell, p->chord.notes, p->chord.name); // capture the live chord
     }
     else
@@ -212,6 +216,8 @@ void ChordPads::itemDropped(const SourceDetails& details)
         // would have had its old notes stranded on with nothing left owning them. clearChordPad
         // is the one public call that stops the pad *and* releases the arp hold if this card is
         // the one holding it, so the old chord is properly given up before the new one lands.
+        const KeysProcessor::UndoGesture undoable { processor, "Drop chord",
+                                                   KeysProcessor::UndoScope::pads };
         processor.clearChordPad(cell);
         processor.setChordPad(cell, p->chord);
         // Committed, so the tray's cell goes empty. `taken` alone would not say this: the
@@ -580,6 +586,7 @@ void ChordPads::showPadMenu(int slot)
         {
             if (slot == safe->editingSlot && safe->onEditToggle)
                 safe->onEditToggle(slot); // end the edit before wiping its target
+            safe->processor.pushUndo("Clear pad", KeysProcessor::UndoScope::pads);
             safe->processor.clearChordPad(slot);
         }
         else if (choice == 3)
@@ -809,10 +816,12 @@ void ChordPads::beginChordDrag(const juce::MouseEvent& e)
                              /*allowDraggingToExternalWindows*/ true, &grab, &e.source);
 }
 
-void ChordPads::mouseUp(const juce::MouseEvent&)
+void ChordPads::mouseUp(const juce::MouseEvent& e)
 {
     if (dragging)
     {
+        // Where the card was let go, in screen coordinates - the strip may be in its own window.
+        const auto releasedAt = e.getScreenPosition();
         // Where this drag landed is not known yet. Every drop - onto a pad of this strip, onto
         // the live card, onto the generator's reference box, onto an arp slot or line - is
         // delivered by JUCE *after* this method, later in the same event, so the one question
@@ -820,12 +829,20 @@ void ChordPads::mouseUp(const juce::MouseEvent&)
         // for why that is the right length of wait and dragOperationEnded is not.
         chorddrag::whenDragSettles(
             *this, inFlight,
-            [](ChordPads& pads, const chorddrag::Payload& p)
+            [releasedAt](ChordPads& pads, const chorddrag::Payload& p)
             {
                 // Nobody took it, so the card was let go off the row, and off the row means
                 // clear. The veto is what keeps this from being the way to *lose* a chord:
                 // reaching for the reference box means dragging a card off the strip, and that
                 // box - like every arp target - says so by setting `taken`.
+                //
+                // **"Nobody took it" is not the same question as "off the strip"** (2026-08-14).
+                // It used to be the only test, so letting a card go anywhere that happens not to
+                // be a drop target - the gap between two sections, a bar, the keybed - destroyed
+                // the chord, with no undo anywhere in Keys. Changing your mind mid-drag and
+                // putting the card back down on the strip is the commonest way to do that, and
+                // it is the one gesture that most obviously should not delete anything. So the
+                // release has to have actually left the strip as well.
                 //
                 // A locked card dropped off the strip does nothing at all. The lock is the thing
                 // that stops a chord being destroyed (Owen, 2026-07-30), and "Clear pad" on the
@@ -834,8 +851,12 @@ void ChordPads::mouseUp(const juce::MouseEvent&)
                 // itself stays allowed, because moveChordPad only swaps two slots and a locked
                 // card still has to be arrangeable.
                 if (! p.taken && p.from == chorddrag::Payload::From::padSlot
+                    && ! pads.getScreenBounds().contains(releasedAt)
                     && ! pads.processor.chordPad(p.index).locked)
+                {
+                    pads.processor.pushUndo("Clear pad", KeysProcessor::UndoScope::pads);
                     pads.processor.clearChordPad(p.index);
+                }
 
                 pads.inFlight = nullptr;
                 pads.repaint();

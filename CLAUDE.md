@@ -209,6 +209,139 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   starved it to nothing the moment the row got tight and eight knobs drew as seven with no other
   symptom; and **coming back from the macro view must leave STEPS following Shape**, or an empty
   ruled box is drawn beside the band on every plain shape.
+- **Undo is content-only, and an entry is a subtree snapshot** (2026-08-14, Owen: "we should
+  have undo"). It covers chord pads, arp lanes and arp slots - what destroys music - and
+  **deliberately not parameters**: sweeping the rate dial would push forty entries and shove the
+  pad you wanted back off the end, which is an undo that cannot undo anything. A knob you can
+  turn back; a cleared pad you cannot.
+  **No action has a hand-written inverse**, so no action can have a wrong one: `pushUndo`
+  snapshots `chordPadsToTree()` or `arpToTree()` - the same trees the session file uses - and
+  undo restores one. Anything added later is undoable the moment its data lands in one of those
+  two trees, which is the whole reason this was affordable at all.
+  **One entry per gesture, not per change.** A lane drag pushes on the press and never again; a
+  single stroke would otherwise fill the stack. `KeysProcessor::UndoGesture` is the RAII guard
+  that absorbs nested pushes, so a drop that clears a pad and then sets it costs one entry.
+  **Undo/Redo ride the Controls bar** because it never hides with its fold - an undo you cannot
+  reach because a section is folded is one you cannot trust. They grey rather than vanish, so
+  the pair never reflows the bar; adding them pushed the bar into its `tight` cell set, which
+  drops ROOT's caption exactly as that mechanism is documented to.
+  **Undo releases every sounding chord first** (`stopAllChordPads`), the same choke point an
+  audition uses: restoring pads can rewrite the chord a sustained card holds, and restoring the
+  arp can rewrite the lanes under a running line.
+  **"There is no undo anywhere in Keys" was load-bearing in four places** - Reset beside Roll,
+  Clear page in a window, pad locks, and the `ChordPads::mouseUp` drag guard. All four stay:
+  they are still good behaviour, they just stop being the only thing standing between a click
+  and a lost chord. Do not remove one on the strength of undo existing.
+- **Three lanes appended, and one of them is not stateless** (2026-08-14, the manual round).
+  `numLanes` went 10 -> 13: **Rand** (Cthulhu's "Rand Sel", how random *each step* is, bipolar
+  -8..+8), **Mute** (its own lane at last) and **Chain** (Stochas' condition: 0 always, 1 only
+  if the step before sounded, 2 only if it did not). **A lane's index is what a saved session
+  stores it under**, so appending is the only safe direction - the `genSource` rule again.
+  **Rand is the one randomness allowed to change which note plays**, because you drew it on that
+  step; Drift is a knob wandering over a part you did not aim at, so `laneDrifts` confines it to
+  the lanes that decide *how* a step plays. Rand acts only on a fixed 1-8: a Note of 0 means
+  "follow the shape", and randomising zero would quietly turn Up into a fixed entry.
+  **Chain is the only thing in the engine that is not stateless from the playhead.** Everything
+  else is computed from the step index so a transport jump lands right without walking there; a
+  condition has to remember one bit about the step before. It self-corrects within one step,
+  which is the cheapest possible break of that rule and is why this form was chosen over
+  Stochas' arbitrary cell-to-cell reference. If a future lane wants more state than that, it
+  needs a different design, not a bigger cache.
+  **Mute stopped eating the step.** It wrote -1 into the Note lane, destroying whatever was
+  there; Cthulhu's manual names preserving it as the entire reason mute buttons exist. Note = -1
+  is still a *drawn rest*, a different thing, and Cthulhu has both. Mute gets **no tab** - the
+  MUTE row is its editor and a tab as well would be two ways to draw one lane - and it is the
+  Note lane's **companion, not a polymetric lane**: it reads, writes and syncs at the Note
+  lane's length, because the engine wraps each lane by its own length and a disagreement would
+  silence the wrong step. `LaneRow::hasTab` exists because Mute's default-constructed button was
+  otherwise counted and laid out as a tab, which ate a cell and pushed Chain to zero width -
+  present in the tree, invisible on screen, absent from UIA with nothing to say why.
+  **The Note lane speaks Kirnu's ORDER vocabulary**: 9..12 are Prev, Highest, Lowest, Random,
+  appended **above** the fixed indices rather than below -1 so saved values are untouched *and*
+  a drag to the bottom of the grid still reaches the rest. Hi and Low **scan** the sequence
+  rather than taking its ends - `buildSequence` sorts by pitch only for the shapes that walk by
+  pitch and stacks octaves on top, so neither end is reliably the extreme.
+- **A lane appended after a session was saved arrives at the wrong length** (2026-08-14, Owen:
+  "Sometimes the steps do not match each other"). Rand, Mute and Chain all come in at
+  `ArpPattern`'s default 8 while the rest of the pattern may be at 16 or 32, and the grid draws
+  each lane at its **own** length - so three lanes drew a fraction of the cells their neighbours
+  did with nothing on screen to explain it. `nudgeLength` has always written every lane when
+  Link is on; the hole is that it cannot write a lane that did not exist when it last ran.
+  `ArpPanel::enforceLinkedLengths` pushes the Note lane's length and speed onto every lane
+  whenever the readouts refresh, so the repair lands on load rather than waiting for a nudge.
+  Link **off** is polymeter and is left alone entirely. **This is the shape of the problem for
+  every future lane**, not a one-off - append a lane and this is what you owe.
+- **Roll, Reset, Select and Drift are four different randomnesses, and the differences are the
+  design** (2026-08-14). **Roll** rerolls the lane you are looking at, once, visibly, by an
+  amount. **Reset** puts it back to its default across its length - Roll is destructive and Keys
+  has no undo anywhere, so the way back has to be one click. **Select** turns a drag into a span
+  and narrows both to it: Kirnu's Random tool acts on selected steps, and a selection is the
+  missing primitive behind Copy, Paste and Clear too. **Drift** strays from the lanes *while it
+  plays*, so the part never repeats and the lane on screen never changes. Drift sits beside
+  Humanize in FEEL because the two are the same question twice: Humanize is a **player**
+  wandering (late and quieter, never early, never louder) and Drift is a **machine** wandering
+  (either way, evenly around the drawn value).
+  **A value at the edge of its lane ignored Roll and Drift** until `ArpEngine::strayWithin`.
+  Both built `[value +/- reach/2]` and **clamped the result**, which is fine mid-lane and broken
+  at the ends: a value at the bottom had half of every draw fall outside and clamp back to
+  itself. Late, Harmony and Chord all default to 0 and Chance sits at its *top*, so "a lane of
+  zeroes barely moves" was the common case, not a corner one. **The window slides; the result is
+  never clamped.**
+- **A draw gesture edits the step it started on, and only that one** (2026-08-14, Owen: "I don't
+  want you to be able to jump from step to step. I just want it to be for that one when you're
+  moving up and down"). `LaneGrid` painted whatever step was under the pointer, so a hand
+  travelling up to set a height and drifting sideways rewrote every neighbour it crossed. The
+  step is captured on the press and held for the gesture; horizontal travel is ignored.
+  **`MuteRow` still paints across steps and should**: there the value is a toggle and a swipe
+  means "all of these", where in the grid it is a height the pointer must travel vertically to
+  set. Same gesture, opposite correct answer, because the value means a different thing.
+- **A line's deep view is three pages, and the arp panel is one fixed height** (2026-08-14,
+  Owen: "when you click details it shouldn't resize the whole window, just the full arp
+  section. and we need a way to get out the detail view", then "can we simplify the detail
+  view or organize into pages"). The deep view was every block at once - band 112, band2 64,
+  lane tabs 34, grid 140, mute 46, slots 58, action row 34 - **612 px** against the macro
+  view's 240, so Details grew the *window* by 372 px and All shrank it back. Paged by what you
+  are doing rather than by what fits, the blocks come apart at **Draw 258 / Cards 124 /
+  Play 208**, and the tallest is eighteen over the macro view rather than 372. So the panel
+  takes **one height for every view and page** and the window stops moving between them.
+  **`contentHeight()` and `pageHeight()` are a pair and the split is the point**:
+  `contentHeight()` returns the constant and feeds the editor's `idealHeight()`, so a fold is
+  the only thing that can move the window; `pageHeight()` returns what the current page needs
+  and feeds `cardBounds()`, so the drawn card is only as tall as its content. Without the
+  second one the Slots page drew its 154 px of content pinned to the bottom of a 258 px box,
+  because that block lays out from the bottom up.
+  **The page tabs ride the ARP section bar**, right of All, and that is what makes paging pay:
+  the bar is 34 px that already exists, so the picker costs the panel nothing - putting it
+  inside would have taken 34 px off the very budget paging was buying back. Same rule that put
+  Fill/Regen/Generator on the Pads bar. They show only in a deep view, so the bar reads
+  `A B All` in the overview and `A B All Play Cards Draw` in a page. **That is the "way
+  out"**: All stops reading as a third letter beside two power switches and becomes the first
+  entry of one view group, which is the honest fix rather than a second control doing All's
+  job. `refreshArpBarTabs()` owns their visibility as well as their lit state, so entering or
+  leaving the macro view shows or hides them at once instead of on the next 10 Hz tick.
+  **`applyPageVisibility()` only ever hides.** `refreshShape()` is still the one place a
+  control is turned *on*, on its own Shape and lane gates, and this runs at the end of it to
+  take back what is off the current page - so the order is what makes it correct, and a second
+  writer that could also show things would be the macro card's deleted On toggle all over
+  again. The three `pageSteps` / `pageSlots` / `pageSetup` lists are built once in
+  `buildPageLists()`, after every control exists, and name each control exactly once.
+  **The tabs read Play / Cards / Draw, and the bar's order is not the enum's.** They were
+  Steps / Slots / Setup for one build the same day - five letters each, all starting with S,
+  which Owen could not read at a glance ("I don't understand this layout"). The names say what
+  you *do*; `KeysEditor::arpPageForTab` maps bar position to `ArpPanel::Page`, because the enum
+  stays steps=0/slots=1/setup=2 and renumbering it would move the page every saved session
+  opens on - the `genSource` append-only rule again. **`LayoutState::arpPage` defaults to Play,
+  not Draw**: Draw does nothing until you have drawn on it *and* set Shape to Pattern, so
+  opening there is opening on a blank page with no way to tell why, which is exactly where Owen
+  landed. Draw greys outside Pattern shape rather than vanishing (the group must not reflow
+  under the mouse), and leaving Pattern with it up falls back to Play.
+  **Voice left the STEPS band group for the lane-tab row** the same day, one day after it
+  arrived there. It costs no height at all now, sits beside the Harmony lane it is contextual
+  on, and reads `Voice: Chord` / `Voice: Sub` - a 12 px caption over it left the button 22 px,
+  under the 34 px floor, and dropping the caption is what gave the target the whole row. Its
+  cell is reserved **before** the tabs take their cut and **whether or not it is showing**:
+  reserve-first is the standing rule, and reserving unconditionally is what stops all ten tabs
+  resizing under the mouse the moment you select Harmony.
 - **The All view is the header and the two rows, nothing else** (2026-08-02, second pass -
   and by the fourth pass, below, the header itself left for the section bar and the rows
   became boxed cards, so the view is now literally the two cards) (Owen:
@@ -722,7 +855,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 - **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip -
   now Tuplet - and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
   window width, so two more 34 px targets in it would have driven the eight knobs under the
-  mouse-only minimum - the row took a `arpMacroSubRow` strip at the bottom instead, removed
+  mouse-only minimum - the row took a sub-row strip (`arpMacroMods`, 34 px) at the bottom instead, removed
   *before* the main line is laid out so nothing above it moved. Height is the cheap axis in this
   view since line C went; width is the expensive one. Note **PLAY and Light keys are unrelated
   controls with similar names**: `arpKeys` routes the keybed *into* a line, `layout.arpLights`
@@ -1041,6 +1174,24 @@ nearly everything wearing them is 9 to 11 px letter-spaced uppercase (the micro-
 note list under every chord card) and small letterforms need far more contrast than large ones for
 the same effort. Both were lifted; `text` was never the problem.
 
+## Reference manuals
+
+Seven manuals sit in the repo root, and `docs/REFERENCES.md` records what each one contributed,
+what Keys took from it and what it deliberately did not. **Read the relevant one before
+designing a feature, not after.** This is not a formality: the Serum guide corrected a built
+`RangeKnob` satellite that looked right on screen, and the Cthulhu manual corrected a whole
+randomness feature that had shipped as a global knob when the reference does it per step
+(2026-08-14, Owen: "look at reference manuals"). Twice now a manual has been cheaper than the
+rebuild it would have prevented.
+
+The short version of which is which: **Cthulhu** is the arp's own architecture (per-parameter
+step lanes, Link Lengths, the Rand lane, mute-preserves-value); **Kirnu Cream** is the richest
+per-step vocabulary and the best source of unbuilt ideas; **Stochas** is probability and the
+chain/conditional trigger Keys does not have; **Serum 2** is UI, not sequencing; **Subharmonicon**
+is the polyrhythm dividers and the undertone series; **MatrixBrute** has ties and slides;
+**Numerology 4** draws the skip-versus-mute distinction. `docs/REFERENCES.md` ranks the three
+unbuilt ideas worth having.
+
 ## Screenshots for docs
 
 Use `scripts/capture-window.ps1`, which is the PrintWindow approach (never
@@ -1098,8 +1249,23 @@ Four things will bite otherwise:
   `Scale Lock`, so a script asks for the full phrase and a reader hears it. In Keys Host only,
   the same bar also carries `Instrument`, the chip whose menu holds Load/Show-Hide/Eject - it
   is invisible in plain Keys, so a script targeting it there will not find it, by design. The
-  one tab left on the arp bar is `Arp all tab`, and the macro
-  view's own controls are prefixed `Macro` so they never collide with the bar chips or the tab:
+  Draw page's own controls, all 2026-08-14: the lane tabs answer to their visible word
+  (`Note`, `Octave`, `Velocity`, `Gate`, `Ratchet`, **`Chance`** - `Prob` until that day -
+  `Transpose`, `Late`, `Harmony`, `Chord`, **`Rand`**, **`Chain`**), and the tools beside them
+  are `Select steps`, `Reset lane`, `Roll lane`, `Less roll` / `More roll` and `Harmony voice`.
+  **`Chain` collides**: the progression button on the Cards page is also called Chain, and UIA
+  takes the first match - they are never on screen together, so pick the page first. Mute has a
+  lane but **no tab**, so there is nothing named for it; drive `laneMute` through MCP instead.
+  The
+  view tabs on the arp bar are `Arp all tab` plus the three page tabs `Arp page Play` /
+  `Arp page Cards` / `Arp page Draw` (2026-08-14; they answered to `Arp page Steps` / `Slots` /
+  `Setup` for one build the same day - do not look for those). The page tabs exist only in a
+  line's deep view, so a script must leave the macro view before it can find one.
+  **`-InvokeButtons` cannot reach any of them in Keys Host**: it resolves against
+  `MainWindowHandle`, which there is the hosted synth's GUI, so enumerate the `Keys Host`
+  top-level `AutomationElement` yourself and `FindFirst` under it. That is the trap documented
+  further up, hit again on 2026-08-14 - a five-line UIA script is the way past it. The macro
+  view's own controls are prefixed `Macro` so they never collide with the bar chips or a tab:
   `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
   `Macro dot A` / `Macro tuplet A` / `Macro anchor A` (`Macro trip A` until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo

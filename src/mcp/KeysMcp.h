@@ -56,6 +56,7 @@ private:
     okstudio::mcp::Tool toolSetArpPattern();
     okstudio::mcp::Tool toolRecallArpPattern();
     okstudio::mcp::Tool toolStoreArpPattern();
+    okstudio::mcp::Tool toolApplyEuclid();
 
     KeysProcessor& processor;
     okstudio::mcp::Server server;

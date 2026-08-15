@@ -528,6 +528,11 @@ void ChordGenMenu::timerCallback()
 
 void ChordGenMenu::regeneratePageMarkov()
 {
+    // One entry for the whole page, not one per pad: generation is a single
+    // gesture and the pads it writes are what you would want back together.
+    const KeysProcessor::UndoGesture undoable { processor, "Regenerate page",
+                                               KeysProcessor::UndoScope::pads };
+
     rollFreeChoices();
     // Octavium regenerates unlocked cards left to right, each stepping the chain
     // from its (possibly just-updated) left neighbour, so changes cascade.
@@ -543,6 +548,11 @@ void ChordGenMenu::regeneratePageMarkov()
 
 void ChordGenMenu::fillPageMarkov()
 {
+    // One entry for the whole page, not one per pad: generation is a single
+    // gesture and the pads it writes are what you would want back together.
+    const KeysProcessor::UndoGesture undoable { processor, "Fill page",
+                                               KeysProcessor::UndoScope::pads };
+
     rollFreeChoices();
     const auto targets = emptyPadsOnPage();
     if (targets.empty())
@@ -733,6 +743,11 @@ std::vector<int> ChordGenMenu::regeneratablePadsOnPage() const
 // so this asks for none: locked or not is beside the point when the slot is empty.
 void ChordGenMenu::fillPage()
 {
+    // One entry for the whole page, not one per pad: generation is a single
+    // gesture and the pads it writes are what you would want back together.
+    const KeysProcessor::UndoGesture undoable { processor, "Fill page",
+                                               KeysProcessor::UndoScope::pads };
+
     if (markovActive())
     {
         fillPageMarkov();
@@ -754,6 +769,11 @@ void ChordGenMenu::fillPage()
 // Fill is what blanks are for.
 void ChordGenMenu::regeneratePage()
 {
+    // One entry for the whole page, not one per pad: generation is a single
+    // gesture and the pads it writes are what you would want back together.
+    const KeysProcessor::UndoGesture undoable { processor, "Regenerate page",
+                                               KeysProcessor::UndoScope::pads };
+
     if (markovActive())
     {
         regeneratePageMarkov();
