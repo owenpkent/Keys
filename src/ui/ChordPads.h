@@ -167,11 +167,9 @@ private:
     int padRootPc(int slot) const; // the root a pad's chord is built on, generated or analysed
 
     KeysProcessor& processor;
-    // Whether a click on a chord card feeds the arpeggiator instead of playing the chord
-    // for as long as the button is down. It is the arp's own On state (see
-    // KeysProcessor::cardsFeedArp), asked rather than cached so the pads can never be in a
-    // different mode than the arp itself.
-    bool toArp() const;
+    // There is no toArp() here any more (2026-08-02, Owen: "I don't want it to send it to
+    // the arpeggiator unless you drag it"): a click plays the pad whatever the lines are
+    // doing, and feeding a line is the drag's job alone.
     int editingSlot = -1;
     std::vector<int> currentNotes;
     juce::String currentName;

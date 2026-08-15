@@ -87,11 +87,13 @@ Live](http://audioswiftapp.com/midi-effects-wrapper-for-vst-au-plugins-using-max
 
 ## Keys Host: one window for VST3 instruments
 
-Drop **Keys Host** on a MIDI track and click **Load Instrument…**: an in-window list
-of every installed VST3 (the same folders Live's browser scans), filed into a
-collapsible folder per publisher, one click to open a folder and one to load. The synth's UI opens in its **own floating window**
-above the keyboard — two windows, not one stack; the top bar's **Show/Hide
-Instrument** controls it (the window's close button just hides it). Audio comes out
+Drop **Keys Host** on a MIDI track and open the **Instrument** chip on its Controls bar,
+then **Load instrument...**: an in-window list of every installed VST3 (the same folders
+Live's browser scans), filed into a collapsible folder per publisher, one click to open a
+folder and one to load. (Keys Host used to carry a bar of its own for this, above the
+keyboard; it folded into that chip 2026-08-02.) The synth's UI opens in its **own floating
+window** above the keyboard — two windows, not one stack; the same chip's **Show/Hide
+instrument GUI** controls it (the window's close button just hides it). Audio comes out
 of the Keys Host track. The
 instrument's complete state — including its own MIDI Learn mappings for the Keys
 knobs — is saved inside the Live set. Dragging a `.vst3` file from Windows
@@ -121,7 +123,7 @@ Ch** on Keys and filter by channel on the receiving tracks. Otherwise leave it a
 
 Arm the instrument track and record; the notes you click land as a normal MIDI clip.
 Scale Lock, octave, and velocity all apply to what's recorded, because Keys sends the
-already-resolved notes. With any of the Arp section's line switches (**A**, **B**, **C**) lit,
+already-resolved notes. With either of the Arp section's line switches (**A**, **B**) lit,
 what lands is the arpeggiated stream rather than the chord you clicked: the arp rewrites the
 note stream on its way out of the plugin, so the clip holds what you heard — both lines
 at once, if both are running.

@@ -151,7 +151,11 @@ public:
         juce::String numeral;   // Markov roman numeral ("" = not from the Markov source);
                                 // regeneration walks the chain from the previous pad's numeral
     };
-    static constexpr int padsPerPage = 16; // Octavium's 4x4 grid per page
+    // Twelve since 2026-08-03 (Owen: "reduce the pads grid to 12"), as two rows of six - the
+    // two columns that freed up carry Strum and Humanize as range knobs. It was 16 (Octavium's
+    // 4x4 page) and 8 before that; `chordPadsFromTree` re-bases a saved session's slots into
+    // whatever this is, and is the one place that has to know the count ever moved.
+    static constexpr int padsPerPage = 12;
     static constexpr int numPadPages = 4;
     static constexpr int numChordPads = padsPerPage * numPadPages;
 
@@ -180,7 +184,7 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     // The arpeggiator (docs/ARP_DESIGN.md). The editor writes lane atomics directly;
-    // globals live in the APVTS ("arpOn", "arpRate", "arpDot", "arpTrip",
+    // globals live in the APVTS ("arpOn", "arpRate", "arpDot", "arpTuplet",
     // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
     // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
     //
@@ -228,8 +232,43 @@ public:
                     // Appended 2026-08-02, both defaulting to what the arp did without them.
                     // OctShift transposes the whole run and is centred at 0; Octaves beside it
                     // still *stacks* and still only widens - two questions, two controls.
-                    apOctShift, apVolume, numArpParams };
+                    apOctShift, apVolume,
+                    // Appended later the same day (Owen's macro-view pass). HumanVel is the
+                    // velocity half of Humanize, split out so timing and dynamics randomize
+                    // independently; Humanize itself is timing-only from here on. VelTrim is
+                    // the bipolar velocity control that replaced VOL on the macro row: centred
+                    // at 0 (as played), up boosts, down cuts. Volume stays registered - old
+                    // sessions carry it - but migrateVelTrim folds it into VelTrim on load and
+                    // nothing in the UI writes it any more.
+                    apHumanVel, apVelTrim,
+                    // Appended 2026-08-03 (Owen: "what if I want 1/5 or other division?").
+                    // Trip could only ever mean 3-in-the-space-of-2; Tuplet is a choice over
+                    // five and is what the combo on the sub-row writes now. Trip
+                    // stays registered above - old sessions carry it, and migrateTuplet folds
+                    // it into this on load - but nothing reads it after that, exactly as
+                    // Volume was retired into VelTrim.
+                    apTuplet,
+                    // Appended 2026-08-03 with the range knobs. Each Humanize control became a
+                    // range: the existing two stay the ceiling, and these say how far under it
+                    // the draw may fall. Default 100 - a span of the whole scale - leaves
+                    // exactly what those two did alone.
+                    apHumanizeSpan, apHumanVelSpan, numArpParams };
     static const char* arpParamSuffix(int which);
+    // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
+    // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
+    // Appending here is safe and is how a 11 or a 13 would arrive; inserting renumbers what
+    // every saved session and automation lane already holds.
+    //
+    // "Straight" and "Triplet" are the words Reaper's own straight/triplet/dotted selector
+    // uses, so the two everyone already knows read as they do everywhere else; the rest carry
+    // the number, since there is no household word for a 7. The combo names the *family* and
+    // the dial's readout names the resulting length ("1/10"), which is the division of labour
+    // the fraction notation makes possible - see ArpEngine::rateSyncText.
+    static juce::StringArray tupletChoices()
+    {
+        return { "Straight", "Triplet", "5-tuplet", "7-tuplet", "9-tuplet" };
+    }
+    static int tupletFor(int choiceIndex);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
     float arpParam(int line, ArpParam which) const;
@@ -291,6 +330,20 @@ public:
     // What is waiting, for the UI to show as pending. -1 = nothing waiting on that line.
     int arpPendingSlot(int line) const;
     bool arpLaunchPending(int line) const;
+
+    // --- Tempo Sync -------------------------------------------------------------------------
+    // True the block a rolling host actually overrode the "bpm" parameter (bpmSync on, a
+    // transport playing, a valid tempo reported). Published so the Controls bar can show the
+    // host's tempo in the field and greys its own stepper and drag: neither can change
+    // anything while this is true. Written once a block in advanceChainClock, read on the
+    // message thread in KeysEditor::timerCallback - not a sample-accurate answer and does not
+    // need to be, the same contract as arpBeats beside it.
+    bool hostTempoLive() const { return arpHostBpmLive.load(std::memory_order_relaxed); }
+    // The tempo the arp's beat clock is actually running at this block: the host's own while
+    // hostTempoLive() is true, otherwise the "bpm" parameter's value (see arpBeatsBpm, which
+    // this reads). The Controls bar's tempo field reads this to show the host's number when
+    // Tempo Sync has actually taken over, rather than the "bpm" parameter it is not using.
+    double currentTempo() const { return arpBeatsBpm.load(std::memory_order_relaxed); }
 
     // What "let go of the held chord" means to a *user*, and the only thing the UI should
     // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
@@ -402,7 +455,11 @@ public:
     struct LayoutState
     {
         bool controls = true;   // the header rows and the knob bank under them
-        bool knobs = true;      // the CC knob bank, the bottom row of the controls band
+        // Vestigial since 2026-08-02: the Knobs chip that folded the CC knob bank off the
+        // bottom of the Controls band is gone, and the bank is unconditional whenever the
+        // section itself is open. Kept, always true, so layoutToTree()/layoutFromTree() keep
+        // round-tripping a session's tree without a special case for one dropped field.
+        bool knobs = true;
         bool pads = true;       // the chord-pad strip
         bool arp = false;       // the arpeggiator section (off by default: it is tall)
         bool wheels = true;     // mod + pitch, left of the keybed
@@ -463,6 +520,22 @@ protected:
     // Same shape: puts the arp rate back in Sync when a session predates the Hz mode, since an
     // absent parameter keeps the live instance's current value rather than resetting.
     void migrateRateMode(const juce::ValueTree& root);
+    // Same shape again: a session saved before VelTrim existed carries its line levels in
+    // Volume. Fold each line's Volume into VelTrim (volume% == 1 + (volume-100)/100 exactly,
+    // so the session sounds identical) and put Volume back to 100, and write HumanVel's
+    // default explicitly so it does not inherit the live instance's value.
+    void migrateVelTrim(const juce::ValueTree& root);
+    // Same shape a third time: a session saved before Tempo Sync existed has no "bpmSync" at
+    // all, and its absence is not "off" - it is a live instance's *current* value, which the
+    // repair overwrites with the parameter's own default (true), reproducing exactly what
+    // Keys always did before this parameter existed.
+    void migrateBpmSync(const juce::ValueTree& root);
+    // Trip became Tuplet on 2026-08-03. Same absence tell, same repair, plus the one fold that
+    // makes an old session sound identical: a set Trip is a Tuplet of 3.
+    void migrateTuplet(const juce::ValueTree& root);
+    // The Humanize spans, appended 2026-08-03. Absence is the tell and the default is the
+    // repair; there is no older parameter to fold, unlike the two above.
+    void migrateHumanSpans(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);
@@ -562,6 +635,7 @@ private:
     // wall-clock deadline that a 1 ms timer then waits out.
     std::atomic<double> arpBeats { 0.0 };
     std::atomic<double> arpBeatsBpm { 120.0 }; // the tempo those beats are running at
+    std::atomic<bool> arpHostBpmLive { false }; // see hostTempoLive()
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
     juce::Random rng; // humanize jitter; touched only on the message thread

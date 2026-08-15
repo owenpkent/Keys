@@ -475,11 +475,6 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
-bool ChordPads::toArp() const
-{
-    return processor.cardsFeedArp();
-}
-
 // A pad's card menu. Nine rows and two separators, which at the 34 px mouse-only item height
 // (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) is 9 * 34 + 2 * 17 =
 // 340 px. That budget is the reason this list is short: the menu hangs off a pad near the
@@ -852,43 +847,23 @@ void ChordPads::mouseUp(const juce::MouseEvent&)
         // where everything the press used to do now happens, in the same order it used to be
         // tested in, so only the *timing* changed and not which branch a given card takes.
 
-        // Arp On: a filled pad hands its chord to the arpeggiator and it stays there. Not an
-        // audition, so `playing` stays -1 and no timer is started - held means held. A second
-        // click on the pad already feeding the arp re-plays it. Checked before the audition
-        // branch because in this mode the click means something else entirely.
-        //
-        // The `arpLineHoldingPad()` half of the test is not redundant with the notes test: a
-        // card can be cleared while it is still the one feeding the arp, and then it wears the
-        // ring with no notes behind it. Without that clause the click falls past every branch
-        // below and does nothing at all, which is a dead click on a lit target.
-        if (toArp() && dragSource >= 0
-            && (! processor.chordPad(dragSource).notes.empty()
-                || processor.arpLineHoldingPad(dragSource) >= 0))
+        // A click never hands a chord to the arpeggiator any more (2026-08-02, Owen: "when
+        // an arpeggiator's running and you click on a pad, I don't want it to send it to the
+        // arpeggiator unless you drag it"). Feeding a line is the *drag* - onto a line's card,
+        // its letter tab on the arp bar, or a slot - and a click just plays the pad, whatever
+        // the lines are doing. The per-card menu's Send to arp slot is still the aimed
+        // accelerator. One arp behaviour survives on the left button, and it is a stop, not a
+        // send: a *cleared* card still feeding a line wears the ring with no notes behind it,
+        // so a click on it has nothing to play and keeps meaning the only other thing it can -
+        // let go. Without that branch the click would fall through every test below and do
+        // nothing at all, a dead click on a lit target.
+        if (const int holder = dragSource >= 0 ? processor.arpLineHoldingPad(dragSource) : -1;
+            holder >= 0 && dragSource >= 0 && processor.chordPad(dragSource).notes.empty())
         {
-            if (processor.chordPad(dragSource).notes.empty())
-            {
-                // Ringed but empty: there is nothing to re-play, so the click means the only
-                // other thing it can mean. This is the ring's own way out, and the reason it is
-                // drawn on a cleared card at all.
-                processor.releaseArpChord();
-            }
-            else
-            {
-                // Re-playing the holder is a retrigger, never a second owner on the same
-                // pitches: holdArpChordFromPad goes through holdArpChord, which releases the
-                // previous hold (releaseNotes on arpChordTag, so the refs and the arp's held set
-                // both unwind) before it fires, and applies Exclusive to the new one. Stopping a
-                // filled card's hold outright is the Hold off button on the arp bar.
-                processor.holdArpChordFromPad(dragSource, processor.arpCurrentLine());
-            }
+            processor.releaseArpChord(holder);
         }
-        // The live "current chord" card is a chord card too, and the mode's tooltip says so.
-        else if (toArp() && dragSource == -2 && isChord(currentNotes))
-        {
-            processor.holdArpChord(currentNotes, currentName);
-        }
-        // No line listening: the click auditions the chord. It sounds now and the timer lets it
-        // go, because the button is already up and nothing else is coming to end it.
+        // The click auditions the chord. It sounds now and the timer lets it go, because the
+        // button is already up and nothing else is coming to end it.
         else if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
         {
             processor.pressChordPad(dragSource);

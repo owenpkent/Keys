@@ -66,6 +66,72 @@ public:
         return juce::String(hz, hz < 1.0 ? 3 : (hz < 10.0 ? 2 : 1));
     }
 
+    // A tuplet is "N steps in the space of M", and M is the largest power of two at or below N:
+    // 3 in the space of 2 - the plain triplet this generalised on 2026-08-03 - then 5 in 4, 7 in
+    // 4, 9 in 8. That is the notation convention, and it is why a quintuplet is measured against
+    // four and not six: five steps fill exactly the time four straight ones would. Which also
+    // makes the number alone enough to name one, and what lets rateSyncText below print the
+    // result as a plain fraction instead of the division plus a marker.
+    // Anything under 2 is straight, which is how the choice list's "Off" arrives here.
+    static int tupletSpace(int n) { return n >= 8 ? 8 : (n >= 4 ? 4 : 2); }
+    static double tupletFactor(int n) { return n < 2 ? 1.0 : (double) tupletSpace(n) / (double) n; }
+    // Written out rather than pulled from <numeric>: one loop, and the header stays as light
+    // as it is. Only rateSyncText uses it, to put a fraction in lowest terms.
+    static int gcdOf(int a, int b)
+    {
+        while (b != 0)
+        {
+            const int t = a % b;
+            a = b;
+            b = t;
+        }
+        return a;
+    }
+
+    // How a tempo-synced rate is written under the dial: **the step length as an exact fraction
+    // of a bar**, one copy of the rule for the band and for every macro card.
+    //
+    // This is the one notation that survives tuplets (2026-08-03, Owen: "shouldn't it just be
+    // 1/5 not 1/4:5?", and he is right - `1/4:5` was invented here, which is the tell). The
+    // convention every DAW uses, `1/16T` and `1/16D`, has a letter for triplets and dotted and
+    // *no form at all* for a quintuplet; the fraction needs no letters, because a quarter-note
+    // quintuplet is five in the space of four quarters, which is four fifths of a beat, which
+    // is one fifth of a bar. So it is simply "1/5". FL Studio's grid ("1/3 beat", "1/6 beat")
+    // is the same system.
+    //
+    // 4/4 is assumed exactly as much as it already was: "1/4" has always meant a quarter of a
+    // bar here. Straight, this reproduces the division names byte for byte, which is why the
+    // dial reads the same as it ever did until a modifier is set.
+    //
+    // Dot stays a dot rather than folding in. It *could* - a dotted 1/8 is 3/16 of a bar - but
+    // "1/8." is universal and instantly read, where "3/16" has to be worked out. The tuplet is
+    // folded because it has no such symbol.
+    static juce::String rateSyncText(int rateIndex, bool dotted, int tuplet)
+    {
+        static constexpr int barsNum[11] = { 16, 8, 4, 2, 1, 1, 1, 1, 1, 1, 1 };
+        static constexpr int barsDen[11] = {  1, 1, 1, 1, 1, 2, 4, 8, 16, 32, 64 };
+        const int i = juce::jlimit(0, 10, rateIndex);
+        int num = barsNum[i], den = barsDen[i];
+        if (tuplet >= 2)
+        {
+            num *= tupletSpace(tuplet);
+            den *= tuplet;
+        }
+        // Reduce, or an 1/8 in threes prints as "2/24" instead of "1/12". Most combinations
+        // come back to a unit fraction; a few honestly do not (a 1/2 in fives is two fifths of
+        // a bar) and print as "2/5", which is exact and still reads as a length.
+        if (const int g = gcdOf(num, den); g > 1)
+        {
+            num /= g;
+            den /= g;
+        }
+        juce::String s = den == 1 ? juce::String(num) + (num == 1 ? " bar" : " bars")
+                                  : juce::String(num) + "/" + juce::String(den);
+        if (dotted)
+            s << ".";
+        return s;
+    }
+
     // The chords the twelve slots hold, mirrored into atomics so a step can call one up on
     // the audio thread. The processor owns it and refreshes it on the message thread
     // whenever a slot's chord changes; the engine only ever reads.
@@ -120,12 +186,16 @@ public:
         int rateIndex = 8;        // index into rateInBeats(), default 1/16
         // The rate as a frequency instead of a division. True and the engine free-runs at
         // `rateHz` always - transport rolling or stopped, anchored or not - and neither the
-        // playhead, `rateIndex`, `dotted` nor `triplet` is read for step timing. There is
+        // playhead, `rateIndex`, `dotted` nor `tuplet` is read for step timing. There is
         // still only one scheduler: the mode picks which clock drives it (see process()).
         bool rateFree = false;
         double rateHz = 8.0;      // 8 Hz is 1/16 at 120 bpm, so the default is the same speed
         bool dotted = false;
-        bool triplet = false;
+        // 0 (or 1) straight, otherwise N-in-the-space-of-tupletSpace(N): 3 is the old triplet
+        // toggle, 5 and 7 are what it could never reach. Dotted is a separate axis on purpose -
+        // it lengthens a step by half, where a tuplet divides a span into an odd number of them,
+        // and the two compose (a dotted 1/8 quintuplet is a legitimate, if unhinged, ask).
+        int tuplet = 0;
         bool anchored = true;     // affixed to the host bar grid vs free-running
         Direction direction = Direction::up;
         bool usePattern = false;  // false: plain arpeggiator, the step lanes are not read
@@ -163,11 +233,24 @@ public:
         // it. 0 is off, and costs nothing.
         int velRamp = 0;          // -100..+100
         double rampBeats = 8.0;
-        // One knob's worth of "played, not programmed": nudges each hit late by up to
-        // 25 ms and takes up to 30% off its velocity, both scaled by this. The arp has never
-        // been humanized at all (Humanize lives in KeysProcessor::noteOn, which the arp path
-        // does not go through), so 0 leaves the engine bit-identical to before.
-        int humanize = 0;         // 0..100
+        // "Played, not programmed", split into its two halves on 2026-08-02 (Owen: "maybe we
+        // could split it up into two knobs"). `humanize` nudges each hit late by up to 25 ms;
+        // `humanVel` takes up to 30% off its velocity - each scaled by its own knob, each a
+        // different random draw per hit. Before the split one value drove both, so a session
+        // saved then keeps its amount as the timing half and gets 0 for the velocity half.
+        int humanize = 0;         // 0..100, timing only - the *ceiling* of the random draw
+        int humanVel = 0;         // 0..100, velocity only - likewise
+        // The spans, appended 2026-08-03 with the range knobs (Owen: "a serum style knob where
+        // you can set a range in the knob"). Each hit draws uniformly between `humanize - span`
+        // and `humanize` instead of between zero and `humanize`, so the knob keeps meaning "the
+        // most this ever does" and the span says how far under it the draw may fall. **The
+        // range travels with the knob**, which is the behaviour Serum's mod ring has and the
+        // half Owen asked for by name: turn the dial and both ends move together.
+        //
+        // Default 100 is what makes them safe to append - a span of the whole scale puts the
+        // floor at zero for any knob position, which is the behaviour these two had alone.
+        int humanizeSpan = 100;   // 0..100
+        int humanVelSpan = 100;   // 0..100
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
         // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
@@ -177,8 +260,27 @@ public:
         // Output level for the whole line, as a percentage of the velocity it would have
         // played. The plain volume control an arpeggiator wants and Keys never had: with two
         // lines running, balancing them was previously only possible by playing one softer.
+        // Kept for sessions saved before velTrim below; nothing in the UI writes it any more
+        // and KeysProcessor::migrateVelTrim folds it into velTrim on load.
         int volume = 100;         // 0..100
+        // The control that replaced it on screen (2026-08-02, Owen: "it should start in the
+        // middle so you can turn it up or down. But really, the volume is controlling
+        // velocity"). Bipolar so the middle means "as played", and the multiplier is
+        // *squared* - ((100+velTrim)/100)^2 - because hearing is logarithmic and the linear
+        // version spent nearly all of its audible change in the last few degrees (same day,
+        // Owen: "I was at negative 96, and it was still pretty loud"). Halfway down plays a
+        // quarter of the velocity, which sounds about half as loud; -100 mutes exactly as
+        // volume 0 does. Applied after the 0.05 audibility floor, not before it - see the
+        // emit loop - so a deep cut reaches MIDI velocity 1 instead of pinning at 6.
+        int velTrim = 0;          // -100..+100
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
+        // Tempo Sync (`bpmSync`, KeysProcessor::advanceChainClock/buildArpParams). True
+        // reproduces exactly what Keys always did before this parameter existed: a rolling
+        // host with a valid bpm wins over fallbackBpm below. False pins the engine to
+        // fallbackBpm even while the host is rolling, the escape hatch for someone who wants
+        // Keys' own clock regardless of what the DAW's transport says. Read only in Sync -
+        // Hz already ignores the host clock outright, so this changes nothing there.
+        bool followHost = true;
         // The slot chords, for the Chord lane. Null means the lane does nothing, which is
         // what every caller that has no slots (the tests) wants.
         const ChordTable* chords = nullptr;
@@ -295,7 +397,9 @@ public:
         // Ramp Time, therefore read as seconds while Hz is on. That is the honest reading:
         // there is no bar to restart on when nothing is following a transport.
         const double bpm = p.rateFree ? 60.0
-                                      : ((clock.playing && clock.bpm > 0) ? clock.bpm : p.fallbackBpm);
+                                      : ((p.followHost && clock.playing && clock.bpm > 0)
+                                             ? clock.bpm
+                                             : p.fallbackBpm);
         const double beatsPerSample = bpm / 60.0 / sr;
         const double stepBeats = stepLengthBeats(p);
         const double blockBeats = beatsPerSample * numSamples;
@@ -446,7 +550,7 @@ private:
     double stepLengthBeats(const Params& p) const
     {
         // Hz mode: process() has pinned the clock to 60 bpm, so a "beat" is a second and the
-        // step length is simply the period. Dot and Trip are deliberately not applied - they
+        // step length is simply the period. Dot and Tuplet are deliberately not applied - they
         // are subdivisions of a beat, and there is no beat here; all a dotted 8 Hz would do
         // is make the number on the dial a lie.
         //
@@ -465,8 +569,8 @@ private:
         static constexpr double base[11] = { 64.0, 32.0, 16.0, 8.0, 4.0,   // 16,8,4,2,1 bars
                                              2.0, 1.0, 0.5, 0.25, 0.125, 0.0625 }; // 1/2..1/64
         double b = base[juce::jlimit(0, 10, p.rateIndex)];
-        if (p.dotted)  b *= 1.5;
-        if (p.triplet) b *= 2.0 / 3.0;
+        if (p.dotted) b *= 1.5;
+        b *= tupletFactor(p.tuplet); // 1.0 when straight, so the multiply is unconditional
         return b;
     }
 
@@ -712,8 +816,13 @@ private:
         const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
         const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
+        // The line's own fader (velTrim) is deliberately NOT in velScale: velScale feeds the
+        // 0.05 audibility floor below, which protects programmed dynamics, and the fader is
+        // applied after that floor precisely so it is not protected by it.
         const float velScale = (float) laneValue(p, laneVelocity, globalStep) / 100.0f * rampScale
                              * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
+        const float trimT = (100.0f + (float) juce::jlimit(-100, 100, p.velTrim)) / 100.0f;
+        const float trimScale = trimT * trimT; // squared: see the Params comment
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, laneValue(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
@@ -727,6 +836,13 @@ private:
                           ? (int) juce::jmin(0.025 * sr * (juce::jlimit(0, 100, p.humanize) / 100.0),
                                              subLen * 0.4)
                           : 0;
+        // The floor is the knob less the span, so it travels with the knob. It rides the same
+        // 25 ms scale and the same 40% guard by being clamped to what the ceiling already
+        // survived: it can never push a hit further than maxLate, so the ordering rule above
+        // holds whatever the two parameters say - either can be automated past the other.
+        const int humanFloor = juce::jmax(0, juce::jlimit(0, 100, p.humanize)
+                                                 - juce::jlimit(0, 100, p.humanizeSpan));
+        const int minLate = juce::jlimit(0, maxLate, (int) (0.025 * sr * (humanFloor / 100.0)));
 
         // Resolve the step into pitches once, before the ratchet loop repeats them. Three
         // lanes fold in here, and all three want the note *after* the sequence walk has
@@ -797,7 +913,7 @@ private:
         // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
         // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
         // the run up where it would have been rather than restarting it.
-        if (p.volume <= 0)
+        if (p.volume <= 0 || p.velTrim <= -100)
             hitCount = 0;
 
         for (int r = 0; r < ratchets; ++r)
@@ -812,17 +928,33 @@ private:
 
                 int on = at;
                 float vel = hit.vel;
-                if (p.humanize > 0)
+                // Late and quieter, never early and never louder: a nudge that can also
+                // rush is what Swing is for, and a velocity that can also rise makes an
+                // edited Velocity lane mean less than it says. Two knobs since 2026-08-02
+                // (humanize is the timing, humanVel the velocity), so each half only runs
+                // when its own knob is up.
+                if (maxLate > 0)
+                    on += minLate + (int) (rng() % (unsigned) (maxLate - minLate + 1));
+                if (p.humanVel > 0)
                 {
-                    // Late and quieter, never early and never louder: a nudge that can also
-                    // rush is what Swing is for, and a velocity that can also rise makes an
-                    // edited Velocity lane mean less than it says.
-                    if (maxLate > 0)
-                        on += (int) (rng() % (unsigned) (maxLate + 1));
-                    const double amt = juce::jlimit(0, 100, p.humanize) / 100.0;
-                    vel *= (float) (1.0 - (double) (rng() % 1000u) / 1000.0 * 0.30 * amt);
+                    // Uniform between the floor and the ceiling. With the floor at 0 this is
+                    // the expression it replaced, term for term.
+                    const double amt = juce::jlimit(0, 100, p.humanVel) / 100.0;
+                    const double amtMin = juce::jmax(0, juce::jlimit(0, 100, p.humanVel)
+                                                            - juce::jlimit(0, 100, p.humanVelSpan))
+                                          / 100.0;
+                    const double u = (double) (rng() % 1000u) / 1000.0;
+                    vel *= (float) (1.0 - (amtMin + u * (amt - amtMin)) * 0.30);
                 }
-                vel = juce::jlimit(0.05f, 1.0f, vel);
+                // The 0.05 floor protects programmed dynamics: a Velocity lane at 0 or a
+                // hard H.VEL draw must stay audible rather than turn into a note-off. The
+                // line's fader multiplies *after* it, because turning a line down is
+                // supposed to approach silence - inside the floor it pinned at velocity 6
+                // from about -90 downward, which on a patch with a shallow velocity
+                // response was still plainly audible (2026-08-02). The final clamp bottoms
+                // at one MIDI step; zero would be a note-off in disguise.
+                vel = juce::jlimit(0.05f, 1.0f, vel) * trimScale;
+                vel = juce::jlimit(1.0f / 127.0f, 1.0f, vel);
 
                 // A ratchet subdivides one step, and a step is routinely longer than a buffer -
                 // at 1/16 and 120 bpm a step is 6000 samples against a 512-sample block - so every

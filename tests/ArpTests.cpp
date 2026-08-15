@@ -983,6 +983,69 @@ public:
             expect(sawLate, "something actually moved");
         }
 
+        beginTest("Humanize velocity is its own knob, and VEL trim is bipolar");
+        {
+            // One Humanize drove both halves until 2026-08-02; now `humanize` is the timing
+            // nudge alone and `humanVel` the velocity shave alone, and `velTrim` is the level
+            // control centred on "as played". Each question below fails if the split leaks.
+            const auto velsWith = [&](int human, int humanVel, int trim)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto sp = p;
+                sp.humanize = human;
+                sp.humanVel = humanVel;
+                sp.velTrim = trim;
+                std::vector<float> vels;
+                for (int i = 0; i < 8; ++i)
+                {
+                    juce::MidiBuffer out;
+                    clock.ppq = 0.25 * i;
+                    e.process(sp, clock, block, i == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                    for (const auto meta : out)
+                        if (meta.getMessage().isNoteOn())
+                            vels.push_back(meta.getMessage().getFloatVelocity());
+                }
+                return vels;
+            };
+
+            const auto base = velsWith(0, 0, 0);
+            expect(! base.empty(), "the reference run plays");
+
+            const auto timingOnly = velsWith(100, 0, 0);
+            for (size_t i = 0; i < timingOnly.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(timingOnly[i], base[i], 0.005f,
+                                          "full H.TIME leaves every velocity alone");
+
+            const auto velOnly = velsWith(0, 100, 0);
+            bool sawQuieter = false;
+            for (size_t i = 0; i < velOnly.size() && i < base.size(); ++i)
+            {
+                expect(velOnly[i] <= base[i] + 0.005f, "H.VEL only ever shaves, never louder");
+                sawQuieter = sawQuieter || velOnly[i] < base[i] - 0.005f;
+            }
+            expect(sawQuieter, "full H.VEL actually moved something");
+
+            // The trim's curve is squared - hearing is logarithmic, and the linear version
+            // spent nearly all its audible change at the very end of the travel - and it
+            // multiplies *after* the 0.05 audibility floor, so a deep cut reaches MIDI
+            // velocity 1 instead of pinning at 6 from -90 down.
+            const auto half = velsWith(0, 0, -50);
+            for (size_t i = 0; i < half.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(half[i], base[i] * 0.25f, 0.02f,
+                                          "trim at -50 plays at quarter velocity (half as loud)");
+            const auto boosted = velsWith(0, 0, 100);
+            for (size_t i = 0; i < boosted.size() && i < base.size(); ++i)
+                expectWithinAbsoluteError(boosted[i], juce::jmin(1.0f, base[i] * 4.0f), 0.02f,
+                                          "trim at +100 quadruples, into the 1.0 ceiling");
+            const auto deep = velsWith(0, 0, -96);
+            expect(! deep.empty(), "a deep cut still plays");
+            for (const float v : deep)
+                expectWithinAbsoluteError(v, 1.0f / 127.0f, 0.012f,
+                                          "-96 reaches the bottom MIDI step, not the old velocity-6 pin");
+            expect(velsWith(0, 0, -100).empty(), "full-left trim is a mute, exactly as VOL 0 was");
+        }
+
         // ---------------------------------------------------------------------------------
         // Hz mode: the second timebase. `rateFree` swaps the beat grid for a free-running
         // frequency - process() pins the tempo to 60 so that one "beat" is one second and the
@@ -1055,9 +1118,9 @@ public:
                    "a synced arp goes where the transport goes");
         }
 
-        beginTest("the Hz step is one over the rate, and Dot and Trip do not touch it");
+        beginTest("the Hz step is one over the rate, and Dot and Tuplet do not touch it");
         {
-            // Sync divides a beat, so Dot and Trip are subdivisions of one. Hz has no beat to
+            // Sync divides a beat, so Dot and Tuplet are subdivisions of one. Hz has no beat to
             // subdivide, and all a dotted 8 Hz could do is make the number on the dial a lie.
             const auto period = [&](const ArpEngine::Params& sp, int blocks)
             {
@@ -1075,20 +1138,157 @@ public:
             auto dot = hzp;
             dot.dotted = true;
             auto trip = hzp;
-            trip.triplet = true;
+            trip.tuplet = 3;
             auto both = hzp;
-            both.dotted = both.triplet = true;
+            both.dotted = true;
+            both.tuplet = 3;
             expectWithinAbsoluteError(period(dot, 4), 6000, 2, "Dot is not applied in Hz");
-            expectWithinAbsoluteError(period(trip, 4), 6000, 2, "and neither is Trip");
+            expectWithinAbsoluteError(period(trip, 4), 6000, 2, "and neither is Tuplet");
             expectWithinAbsoluteError(period(both, 4), 6000, 2, "nor the two together");
 
             // ...and both still mean exactly what they always did on the synced side.
             auto syncDot = p;
             syncDot.dotted = true;
             auto syncTrip = p;
-            syncTrip.triplet = true;
+            syncTrip.tuplet = 3;
             expectWithinAbsoluteError(period(syncDot, 4), 9000, 2, "a dotted 1/16 is a step and a half");
             expectWithinAbsoluteError(period(syncTrip, 4), 4000, 2, "a triplet 1/16 is two thirds of one");
+        }
+
+        beginTest("a Humanize range reaches back from the knob by its span");
+        {
+            // 2026-08-03, the range knobs (Owen: "a serum style knob where you can set a range
+            // in the knob ... when the outer ring is enabled, moving the dial moves the outer
+            // ring with it"). Humanize was always "uniform between nothing and the knob"; the
+            // span says how far under the knob the draw may fall, so the knob stays the
+            // ceiling and the *range travels with it* - which is the half of this that has to
+            // be pinned, because it is the half that is easy to build the other way round.
+            const auto onsets = [&](int amount, int spanPct)
+            {
+                auto sp = p;
+                sp.humanize = amount;
+                sp.humanizeSpan = spanPct;
+                sp.anchored = false;
+                return onsetsOf(sp, clock, block, 12, steady);
+            };
+
+            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - but
+            // the engine also caps a nudge at 40% of the gap to the next sub-hit, so the
+            // ceiling in force is min(1200, 2400) = 1200.
+            const auto closed = onsets(100, 0);
+            expect(closed.size() >= 4, "the run has to fire before this proves anything");
+            // A span of zero collapses the range onto the knob: no randomness left, every hit
+            // exactly 1200 late, so the gaps are all one step.
+            for (size_t i = 1; i < closed.size(); ++i)
+                expectWithinAbsoluteError((double) (closed[i] - closed[i - 1]), 6000.0, 2.0,
+                                          "a closed range is a fixed offset, not a draw");
+            // ... and it is pinned to the *knob*, not to zero.
+            expectWithinAbsoluteError((double) closed[0], 1200.0, 2.0,
+                                      "every hit is a full 25 ms late");
+
+            // Wide open is the old behaviour: somewhere in 0..1200, and different draws.
+            const auto open = onsets(100, 100);
+            expect(open.size() >= 4);
+            expect(open != closed, "a full span still randomizes");
+            for (const auto o : open)
+                expect(o % 6000 <= 1201, "and never past the ceiling it always had");
+
+            // **The range travels with the knob.** Halve the knob with the span closed and
+            // every hit lands at half the offset - the proof that the span is measured back
+            // from the knob rather than up from zero.
+            const auto halfClosed = onsets(50, 0);
+            expect(halfClosed.size() >= 4);
+            expectWithinAbsoluteError((double) halfClosed[0], 600.0, 2.0,
+                                      "the closed range moved with the dial");
+
+            // A span narrower than the knob is a floor under a draw: at least 30% of 25 ms.
+            const auto narrow = onsets(100, 70);
+            expect(narrow.size() >= 4);
+            for (const auto o : narrow)
+            {
+                expect(o % 6000 >= 359, "every hit is at least as late as the range's bottom");
+                expect(o % 6000 <= 1201, "and no later than the knob");
+            }
+
+            // Humanize itself off means the span does nothing: there is no draw to put a
+            // bottom under, and a range that nudged on its own would make a knob at zero audible.
+            const auto off = onsets(0, 0);
+            expect(off.size() >= 4);
+            expectWithinAbsoluteError((double) off[0], 0.0, 2.0,
+                                      "a closed range under a Humanize of zero is still zero");
+        }
+
+        beginTest("the rate readout is the step length as a fraction of a bar");
+        {
+            // 2026-08-03, Owen: "shouldn't it just be 1/5 not 1/4:5?" - it should, and this is
+            // what makes it so. The invariant worth pinning is that the *straight* readings are
+            // byte-identical to the division names the parameter carries, since that is what
+            // stops this from being a second, drifting copy of the rate list.
+            const auto text = [](int i, bool dot, int tup) { return ArpEngine::rateSyncText(i, dot, tup); };
+            expectEquals(text(0, false, 0), juce::String("16 bars"));
+            expectEquals(text(4, false, 0), juce::String("1 bar"), "singular at one");
+            expectEquals(text(5, false, 0), juce::String("1/2"));
+            expectEquals(text(7, false, 0), juce::String("1/8"));
+            expectEquals(text(10, false, 0), juce::String("1/64"));
+
+            // Owen's own example, and the reason the notation works: five steps in the space of
+            // four quarters is four fifths of a beat, which is one fifth of a bar.
+            expectEquals(text(6, false, 5), juce::String("1/5"), "a quarter in fives is 1/5");
+            expectEquals(text(7, false, 3), juce::String("1/12"), "an 1/8 in threes is 1/12");
+            expectEquals(text(7, false, 5), juce::String("1/10"), "an 1/8 in fives is 1/10");
+            expectEquals(text(8, false, 5), juce::String("1/20"), "a 1/16 in fives is 1/20");
+            expectEquals(text(6, false, 7), juce::String("1/7"), "a quarter in sevens is 1/7");
+            expectEquals(text(7, false, 9), juce::String("1/9"), "an 1/8 in nines is 1/9");
+
+            // Not every combination reduces to a unit fraction, and the honest answer is the
+            // one printed rather than a rounded note value.
+            expectEquals(text(5, false, 5), juce::String("2/5"), "a 1/2 in fives is two fifths");
+
+            // Dot stays a dot: universal, and instantly read where "3/16" would have to be
+            // worked out. It applies to whatever the tuplet already produced.
+            expectEquals(text(7, true, 0), juce::String("1/8."));
+            expectEquals(text(7, true, 5), juce::String("1/10."));
+        }
+
+        beginTest("a tuplet is N steps in the space of the power of two below N");
+        {
+            // 2026-08-03, the day Trip became Tuplet (Owen: "what if I want 1/5 or other
+            // division?"). The whole feature is one multiplier, so this pins the multiplier:
+            // a 1/16 is 6000 samples at this tempo, and N of them have to fill exactly the
+            // span that tupletSpace(N) straight ones would.
+            const auto period = [&](const ArpEngine::Params& sp, int blocks)
+            {
+                const auto on = onsetsOf(sp, clock, block, blocks, steady);
+                return on.size() >= 2 ? on[1] - on[0] : -1;
+            };
+            const auto withTuplet = [&p](int n) { auto q = p; q.tuplet = n; return q; };
+            // Doubles throughout: 7 in the space of 4 does not land on a whole sample, and
+            // expectWithinAbsoluteError takes all three of its arguments as one type.
+            const auto gap = [&](int n) { return (double) period(withTuplet(n), 4); };
+
+            // Off and 1 are both straight - the choice list's "Off" arrives here as 0, and 1
+            // is "one in the space of one", which is the same statement.
+            expectWithinAbsoluteError(gap(0), 6000.0, 2.0, "0 is straight");
+            expectWithinAbsoluteError(gap(1), 6000.0, 2.0, "and so is 1");
+            expectWithinAbsoluteError(gap(3), 4000.0, 2.0, "3 in the space of 2");
+            expectWithinAbsoluteError(gap(5), 4800.0, 2.0, "5 in the space of 4");
+            expectWithinAbsoluteError(gap(7), 3428.57, 2.0, "7 in the space of 4");
+            expectWithinAbsoluteError(gap(9), 5333.33, 2.0, "9 in the space of 8");
+
+            // The two axes compose rather than colliding: Dot lengthens a step by half, a
+            // tuplet divides a span into N. A dotted 1/16 quintuplet is 9000 * 4/5.
+            auto dotFive = p;
+            dotFive.dotted = true;
+            dotFive.tuplet = 5;
+            expectWithinAbsoluteError((double) period(dotFive, 4), 7200.0, 2.0,
+                                      "dotted and in fives at once");
+
+            // And the span is the point: five 1/16 quintuplet steps take exactly as long as
+            // four straight 1/16s, which is what makes it playable against another line.
+            expectWithinAbsoluteError(gap(5) * 5.0, 6000.0 * 4.0, 16.0,
+                                      "five quintuplet steps fill four straight ones");
+            expectWithinAbsoluteError(gap(7) * 7.0, 6000.0 * 4.0, 16.0,
+                                      "and seven septuplet steps do too");
         }
 
         beginTest("a rate-mode flip mid-note closes everything it owed, at offset 0");
@@ -1313,6 +1513,88 @@ public:
             expect(onsetsOf(odd, slowHost, block, 8, steady) == still, "and neither is the host's bpm");
         }
 
+        // ---------------------------------------------------------------------------------
+        // Tempo Sync (bpmSync, Job 1): `followHost` is the escape hatch from a rolling host's
+        // tempo, not the thing that adds following - Sync already read the host whenever it
+        // was playing with a valid bpm, and followHost defaults true to reproduce exactly
+        // that. Off pins every line to fallbackBpm even while the host rolls.
+        //
+        // `anchored` is forced off in every case below. Anchored+playing+hasPpq reads
+        // `clock.ppq` straight off the playhead for step *position* - "Sync mode does follow
+        // the playhead" above already pins that - and `steady`'s ppq is bpm-independent, so
+        // testing followHost through the anchored branch would prove nothing about which bpm
+        // fed it. Free-running (anchored off) is the branch that actually turns bpm into a
+        // step period (`blockBeats = bpm/60/sr*numSamples`), which is the resolution this
+        // parameter changes.
+        // ---------------------------------------------------------------------------------
+        beginTest("followHost on: a rolling host with a valid bpm overrides fallbackBpm");
+        {
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = true;
+            sp.fallbackBpm = 90.0;
+            auto hostRolling = clock;
+            hostRolling.bpm = 150.0;
+            const auto on = onsetsOf(sp, hostRolling, block, 4, steady);
+            // 1/16 at 150 bpm: 0.25 beat * 60/150 s = 0.1 s = 4800 samples at 48 kHz, so five
+            // onsets land inside 4 * 6000 = 24000 samples (0, 4800, ..., 19200).
+            expectEquals((int) on.size(), 5);
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 4800, 2,
+                                          "sync on steps at the host's bpm, not fallbackBpm");
+        }
+
+        beginTest("followHost off: a rolling host is ignored in favour of fallbackBpm");
+        {
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = false;
+            sp.fallbackBpm = 90.0;
+            auto hostRolling = clock;
+            hostRolling.bpm = 150.0;
+            const auto on = onsetsOf(sp, hostRolling, block, 4, steady);
+            // 1/16 at 90 bpm: 0.25 beat * 60/90 s = 1/6 s = 8000 samples, so three onsets land
+            // inside 4 * 6000 = 24000 samples (0, 8000, 16000).
+            expectEquals((int) on.size(), 3);
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 8000, 2,
+                                          "sync off steps at fallbackBpm even though the host is rolling");
+        }
+
+        beginTest("followHost on, transport stopped: fallbackBpm runs the clock");
+        {
+            // The "on" in followHost only ever means "let the host in when it is actually
+            // there to ask" - a stopped transport has nothing to override with, on or off.
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = true;
+            sp.fallbackBpm = 100.0;
+            ArpEngine::HostClock stoppedHost;
+            stoppedHost.playing = false;
+            stoppedHost.hasPpq = false;
+            stoppedHost.bpm = 150.0; // stale; must not leak in while stopped
+            const auto on = onsetsOf(sp, stoppedHost, block, 4, steady);
+            expectEquals((int) on.size(), 4);
+            // 1/16 at 100 bpm: 0.25 beat * 60/100 s = 0.15 s = 7200 samples.
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 7200, 2,
+                                          "a stopped transport reads fallbackBpm whatever followHost says");
+        }
+
+        beginTest("Hz mode is deaf to followHost, exactly as it is to fallbackBpm and the host bpm");
+        {
+            auto hostRolling = clock;
+            hostRolling.bpm = 45.0;
+            auto spOn = hzp;
+            spOn.followHost = true;
+            auto spOff = hzp;
+            spOff.followHost = false;
+            const auto onA = onsetsOf(spOn, hostRolling, block, 8, steady);
+            const auto onB = onsetsOf(spOff, hostRolling, block, 8, steady);
+            expect(onA == onB, "followHost changes nothing while the rate is in Hz");
+            expectEquals((int) onA.size(), 8, "still one step per 6000-sample block at 8 Hz");
+        }
+
         // --- Three lines ------------------------------------------------------------------
         // The engine has never known how many of it there are, which is why three of them cost
         // nothing to build. What these check is that being three of them changes none of it:
@@ -1332,7 +1614,7 @@ public:
             pb.rateIndex = 7; // 1/8
             auto pc = p;
             pc.rateIndex = 7;
-            pc.triplet = true; // 1/8 triplet
+            pc.tuplet = 3; // 1/8 triplet
 
             int onsA = 0, onsB = 0, onsC = 0;
             auto held = chordOn({ 60, 64, 67 });

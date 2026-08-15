@@ -86,8 +86,21 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
 
 ## Editor: `KeysHostEditor : AudioProcessorEditor`
 
-- Top bar (44 px): **Load Instrument…** button, instrument-name label,
-  **Show/Hide Instrument** toggle, **Eject**. All ≥34 px targets, single left-click.
+- **No top bar of its own** (removed 2026-08-02, Owen: "the load instrument section with all
+  that should go in the controls submenu"). `KeysHostEditor::resized()` is just
+  `keysEditor.setBounds(getLocalBounds())` - the embedded `KeysEditor` fills the whole window
+  edge to edge, and `paint()` is a plain background fill behind it. **Load Instrument…**,
+  **Show/Hide Instrument** and **Eject** live behind an **Instrument** chip on
+  `KeysEditor`'s own Controls bar instead, opened as a `juce::PopupMenu`: a section header with
+  the instrument's name if one is loaded, "Load instrument...", "Show/Hide instrument GUI"
+  (enabled only if something is loaded), a separator, then "Eject" (enabled only if loaded).
+  The mechanism is a new public hook on `KeysEditor` - `onBuildInstrumentMenu` (fills the
+  menu), `instrumentName` (supplies the chip's caption), `refreshInstrumentChip()` (call after
+  a load or an eject so the caption catches up) - the first extension point `KeysEditor` has
+  ever exposed to something embedding it. Plain Keys never sets these, so the chip stays
+  invisible there and its Controls bar is unchanged; only Keys Host wires them up, in its
+  constructor. `KeysHostEditor::updateBar()` is renamed `refreshInstrumentUi()` to match: there
+  is no bar left to update, only the chip.
 - The hosted instrument's editor (`createEditorIfNeeded()`, fall back to
   `GenericAudioProcessorEditor` when the plugin has no GUI) lives in
   `InstrumentWindow`, a **floating native-titlebar `DocumentWindow`** placed above
@@ -98,20 +111,23 @@ is the answer to the "reassign CCs every session" pain: assign once, saved forev
   **before** the instance can be destroyed — the processor exposes an "instrument
   about to change" callback so the editor closes the old GUI first, then the
   processor swaps, then broadcasts.
-- Below the bar: an embedded `KeysEditor` (it is just a Component) fills the plugin
-  window. After constructing it, call `keysEditor.setResizable(false, false)` to kill its
-  own corner-resizer and `keysEditor.setEmbedded(true)` so it never calls `setSize` on
-  itself: here the host owns geometry. Its height is no longer a floor, because every
-  section folds. It reports what the current folds add up to through
-  `keysEditor.onIdealHeightChanged`, and the host follows it in both directions, resizing
-  to `barHeight + wanted` (`KeysHostEditor.cpp:403-408`) inside
-  `setResizeLimits(keysEditor.minWidthForView(), barHeight + absMinKeysHeight, 2600, 1700)`,
-  and opens at that same width. **Ask, do not copy**: it was a literal 1010 until 2026-07-30,
-  when a Generator chip joined Fill and Regen on the Pads bar and moved the editor's own floor
-  to 1070 - a host window narrower than the editor it embeds carves controls off the
-  right-hand end of that bar with nothing on screen to say so. Detaching any
-  section drops its height out of that number, since a detached section lives in its own
-  window.
+- The embedded `KeysEditor` (it is just a Component) fills the whole plugin window. After
+  constructing it, call `keysEditor.setResizable(false, false)` to kill its own
+  corner-resizer and `keysEditor.setEmbedded(true)` so it never calls `setSize` on itself: here
+  the host owns geometry. Its height is no longer a floor, because every section folds. It
+  reports what the current folds add up to through `keysEditor.onIdealHeightChanged`, and the
+  host follows it in both directions, resizing to exactly `wanted` inside
+  `setResizeLimits(keysEditor.minWidthForView(), absMinKeysHeight, 2600, maxWindowHeight())`,
+  and opens at that same width. There is no `barHeight` added to any of this any more (deleted
+  2026-08-02 along with the bar itself) - the window's height is purely
+  `KeysEditor::idealHeight()`, clamped to that floor and ceiling. **Ask, do not copy**: the
+  width floor was a literal 1010 until 2026-07-30, when a Generator chip joined Fill and Regen
+  on the Pads bar and moved the editor's own floor to 1070, then 1280 on 2026-08-02, when the
+  Controls bar overtook the Pads bar as the binding constraint (BPM's caption, Voices' and CH's
+  captions, and a Tempo Sync chip all joining that bar the same day) - a host window narrower
+  than the editor it embeds carves controls off the right-hand end of that bar with nothing on
+  screen to say so. Detaching any section drops its height out of that number, since a detached
+  section lives in its own window.
 - `InstrumentPicker` files instruments into one **collapsible folder per publisher**:
   bundle `moduleinfo.json` "Factory Info"/"Vendor", else the DLL version-resource
   CompanyName (Windows, `version.lib` via `#pragma comment`), else the vendor
@@ -181,7 +197,8 @@ nothing in the kit assumes one plugin per repo.
 - **One surface, folding sections** (see CHANGELOG): Keys dropped the five tabbed
   surfaces and the `uiLayout`-selected Classic/Performer arrangement. The surface is
   picked at compile time now, and the rest of the editor is a stack of **four** foldable
-  sections: Controls (the two header rows plus the knob bank), Arp, Pads, Keyboard. There
+  sections: Controls (one header row plus the knob bank, unconditional now that the Knobs
+  chip that used to fold it is gone), Arp, Pads, Keyboard. There
   are no tabs anywhere: the centre view went on 2026-07-30 with the chord generator's panel,
   and the Transcribe section was removed the same day, which also took Keys off the static
   MSVC runtime that its ONNX Runtime forced on the whole binary. Every section detaches into

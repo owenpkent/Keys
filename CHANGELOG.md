@@ -5,6 +5,442 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: twelve pads a page, with Strum and Humanize in the columns that freed up
+
+Owen: "reduce the pads grid to 12 and move strum and humanize into that with the same style."
+
+The chord strip is **two rows of six**, and the two columns it gave up carry **Strum** and
+**Humanize** as `RangeKnob`s - the knob is the top of each range and the lamp beside it opens
+and closes the range. Both were already ranges (a two-handle `RangeSlider` each), and both shape
+what a chord *pad* does, so the strip is where they belong; the bar and the band were only where
+they fitted.
+
+**The lamp is also the switch**: a click turns the feature on or off, a drag still sets the
+range, and unlit means off (Owen: "clicking the blue satellite button should turn on or off the
+feature. And then I don't think we need the humanized check mark anymore"). So Humanize's tick
+box is gone - same parameter, same meaning, one fewer control. Strum needs no on/off parameter,
+since a strum of zero *is* off; its lamp parks the range at zero and puts back what it was.
+Four pixels of slop separate a click from a drag, because a click on a mouse-only surface is
+allowed to be untidy. **Switched off, the knob stops looking like a range** - the arc goes back
+to an ordinary one and the readout drops to a single number, since an unlit lamp over a range
+arc is the control saying two things at once.
+
+Strum's **Dir** combo became a `<` `>` pair beside the caption, and the caption reads the live
+direction (`STRUM UP` / `STRUM DOWN` / `STRUM RAND`) so nothing else has to. They **wrap**,
+unlike the arp's steppers: three values with no scale to them are a ring, not a ladder. With
+both the tick box and the combo gone, the row under each knob went too and that height is the
+face's - it lands near 60 px, comfortably past the arp's 40.
+
+One oddity this surfaced rather than caused: **with Humanize off, Keys plays the band's
+midpoint**, not the knob's value. The readout says that midpoint, so the number under the knob
+is what you hear; the knob itself still points at the top of the band.
+
+**This drops pads, and it is not reversible.** 12 x 4 pages is 48 slots where it was 64.
+`chordPadsFromTree` re-bases a saved session's slots into the current page width, and that code
+was written for 8 -> 16, where every old position still had a home. Narrowing does not: the old
+formula wrapped positions 12-15 onto the *front of the next page*, where they silently
+overwrote that page's own pads as the loop went on. A pad past the end of its page is now
+dropped instead, so each page keeps its first twelve and loses its last four. Owen's call, asked
+before it was built.
+
+With Strum gone the **Controls band has no rows left** - it was down to Strum and its direction
+after the 2026-08-02 passes - so that section is now its CC knob row alone. The Pads bar gets
+back the 232 px Humanize held, which goes to the section caption.
+
+### Added: `RangeKnob`, and Humanize Time and Velocity became ranges
+
+Owen: "for the humanized time and velocity knobs, I want to build a serum style knob where you
+can set a range in the knob. In serum they have like a little light next to it that sets the
+range ... I think this is gonna be a reusable component."
+
+**`src/ui/RangeKnob.h`** is a rotary that holds two values: the knob face sets one end and the
+span reaches back from it. **The knob's own arc is the range** - the lit stretch runs from the
+range's bottom to its top, and **travels with the face**, so turning the knob moves the whole
+range at its width. There is no second ring: a concentric one outside the face was tried and
+was one ring too many.
+
+Drawing it is one new line in the skin. `KeysLookAndFeel::drawRotarySlider` already computes
+where a lit arc *starts* - normally zero, or a bipolar knob's centre - so a slider can now
+override that proportion through the `skin::arcFromProperty` component property, and
+`RangeKnob` sets it to the range's bottom. Nothing is subclassed and no copy of the knob's look
+has to be kept in step.
+
+Painting over the arc afterwards was tried first and does not work: Keys draws a value arc as
+**three strokes** - a halo at 2.1x the line width, a body at 1.15, a hot core at 0.55 - so a
+mask sized to the line leaves the halo's edges showing all the way round. Owen's word for it
+was "a shadow of blue on the inner ring that isn't just the range".
+
+It is built from Serum's manual rather than from a guess at its screenshot, and the manual
+corrected the guess. Page 195: *"A smaller blue halo appears to the top left of the knob...
+Click and drag the arrow control to change the modulation depth amount. As you drag the arrow,
+notice how the halo shrinks or expands to show the range of modulation."* So the grab is a
+**satellite at the top left**, dragged vertically - not a dot sitting on the ring. That detail
+is what makes it buildable here: a satellite is a component of its own, so it can be sized to a
+real target instead of Serum's few pixels, and it goes in the corner a round knob leaves empty
+in a rectangular cell. It is a child *above* the face in z-order, because a Slider eats every
+press inside its rectangle, corners included.
+
+Two departures from Serum, both forced by the mouse-only contract. Serum's fallback for the
+fiddly satellite is Option/Alt-click-drag on the knob body; a modifier is not a gesture Keys may
+require, so the fallback here is that **the whole margin around the face drags the span too** -
+every pixel the face does not cover, corners included. The satellite is the affordance; the
+margin is the forgiveness. And there is no negative span: Serum flips the halo's hue for an
+inverted depth, but a range has nothing to invert into, so a `Direction` picks which side of the
+value it reaches instead. The satellite itself is a **plain LED** - solid, lit, unchanging. It
+carried a miniature arc filling with the span for one build (the span drawn twice), then an
+outline and a pip (which read as a tiny knob); the knob's own ring is the one that reads.
+
+The span is not a parameter the component owns - it comes in through `setSpan()` and goes out
+through three callbacks - so a consumer keeps the parameter, the gesture brackets and the undo
+story in one place. Written kit-ready but kept in Keys for now; promoting it means moving the
+file beside `okstudio/RotaryKnob.h` and swapping `skin::` for the theme's tokens.
+
+**`arpHumanizeSpan` and `arpHumanVelSpan`** (and their B and C twins) are the spans, appended,
+default 100. Humanize always drew uniformly between nothing and the knob; now it draws between
+`knob - span` and `knob`, so the knob keeps meaning "the most this ever does" and the range
+travels with it. A line can then be *always* a little late and a little softer with the
+variation on top, instead of everything anchored to dead-on. Span closed is a fixed offset with
+no randomness left; span at 100 puts the floor at zero wherever the knob sits, which is exactly
+what these did alone and is what makes them safe to append. The engine clamps the floor to its
+own ceiling, since either can be automated past the other and it is the only place that sees
+both at once. `migrateHumanSpans` backfills the defaults for an older session, the
+`migrateRateMode` shape - and matters more than most, since the default is the *top* of this
+range, so an absent parameter would inherit something narrower rather than wider.
+
+The macro card's knob row is 16 px taller to hold the rings, and the two range knobs reserve
+their ring width out of the row rather than taking it off a neighbour - so the face inside a
+range knob is exactly as wide as every plain one and the row still reads as eight knobs of one
+size. `ArpTests.cpp` pins the behaviour (169 cases, all passing), including the half that is
+easy to build the other way round: halving the knob with the span closed halves the offset, so
+the range provably travels with the dial rather than growing up from zero.
+
+Not done: the band's own **Human Time** and **Human Vel** sliders, on a line's Details view,
+still set the ceiling alone - they are linear sliders in a four-cell group, not knobs, so the
+floor is reachable from the macro card only for now.
+
+### Changed: Trip became a Tuplet combo, and the rate readout is a plain fraction
+
+Owen: "I think when triplet mode is enabled the division text should reflect. what if I want
+1/5 or other division?", then, on the first cut: "confusing UI. it's a check box but it changes.
+fraction confusing too. shouldn't it just be 1/5 not 1/4:5?"
+
+Two problems, one of them the other's cause. The dial's readout came straight from the
+`arpRate` choice parameter, which knows nothing about Dot or Trip, so a line playing dotted
+triplet 1/8s said "1/8" - and once the readout cannot describe a modified rate, there is not
+much point adding more modifiers.
+
+**The readout is now the step length as an exact fraction of a bar**, `ArpEngine::rateSyncText`:
+`1/8` straight, `1/12` in threes, `1/10` in fives, `1/5` for a quarter in fives, `1/8.` dotted,
+`1/10.` for both. This is the one notation that survives tuplets. The convention every DAW uses,
+`1/16T` and `1/16D`, has a letter for triplets and dotted and *no form at all* for a quintuplet,
+which is exactly why the first cut invented `1/4:5`; the fraction needs no letters, because a
+quarter-note quintuplet is five in the space of four quarters, which is four fifths of a beat,
+which is one fifth of a bar. FL Studio's grid ("1/3 beat", "1/6 beat") is the same system. Dot
+stays a dot rather than folding in - a dotted 1/8 is 3/16 of a bar, but `1/8.` is universal and
+`3/16` has to be worked out. Straight, every reading is byte-identical to the division names the
+parameter already carried. Hz is untouched: the engine ignores both modifiers there, so
+"4.00 Hz" was already the whole truth. Installed onto the dial after every attachment swap,
+since `SliderParameterAttachment` writes `textFromValueFunction` in its own constructor.
+
+**Trip is now Tuplet, an ordinary combo box** - Straight / Triplet / 5-tuplet / 7-tuplet /
+9-tuplet - on the band and on each macro card. It was briefly a check box that cycled its own
+text, which was a control lying about its own shape; a combo is what Keys already means by
+"pick from a list", the same idiom as Shape, Distance and Retrigger, and it takes an ordinary
+`ComboBoxAttachment` where a button could not bind a choice at all. A tuplet is N steps in the
+space of the largest power of two at or below N, so Triplet is exactly what the old toggle did.
+Dot stays a separate control: it lengthens a step by half where a tuplet divides a span, and the
+two compose. Both grey out in Hz as before.
+
+`arpTuplet` (and `arp2Tuplet`, `arp3Tuplet`) is **appended** to the parameter layout, so a
+saved session still loads. `arpTrip` stays registered but is read by nothing: `migrateTuplet`
+folds a set Trip into a Triplet - exact, not approximate, since `tupletFactor(3)` is the
+same 2/3 the old branch multiplied by - and returns Trip to its default, the same retirement
+`migrateVelTrim` gave Volume. `ArpTests.cpp` pins the notation and the multiplier for every
+value, the two axes composing, and the span identity (168 cases, all passing).
+
+Fixed on the way past: switching the panel from one line to another **left the rate dial
+attached to the line you had just left** whenever both were in the same rate mode.
+`refreshRateMode()` early-outs when the mode has not changed, and the dial's attachment lives
+there rather than in `buildAttachments()`, so it was the one control that never rebound.
+
+Not built, and deliberately: folding the tuplets into the rate list itself, so the dial walks
+1/4, 1/5, 1/6, 1/8, 1/10 and the second control disappears. It is the cleanest reading of "it
+should just say 1/5", but the list goes to about two dozen entries, which turns 1/4 to 1/64
+from four stepper clicks into fifteen - and the rate's click-only path is not something to make
+four times longer. Keeping the division and the tuplet as two short controls is also what Reaper,
+Cubase and Studio One do. See `docs/ARP_DESIGN.md`.
+
+### Added: a Tempo Sync toggle, and labels for BPM, Voices and MIDI Ch on the Controls bar
+
+Owen: "BPM and Off and one in the controls header needs labels. and we need BPM sync toggle to
+sync with DAW."
+
+Keys already followed the host's tempo whenever the transport rolled and reported one - the new
+`bpmSync` parameter (default on, appended last, `migrateBpmSync` backfills it for an older
+session the same way `migrateVelTrim` does) is not what adds that, it is the escape hatch from
+it. Off pins every arp line and the chain clock to the "bpm" control even while the host rolls;
+on reproduces exactly what Keys always did. `ArpEngine::Params::followHost` carries it into the
+engine, `KeysProcessor::advanceChainClock` carries it into the chain, and neither touches the
+Hz rate path, which was never listening to the host's tempo to begin with.
+
+A **Sync** chip beside the tempo field is the on-screen switch, and while it is on and the host
+is actually the one setting the tempo this block (`KeysProcessor::hostTempoLive()`, published
+next to the existing `arpBeatsBpm`), the field shows the host's own number and its drag and its
+`<` `>` steppers grey out - none of the three can change anything while the host owns the tempo.
+`BpmField::paint` dims itself for this rather than relying on the LookAndFeel, which it never
+consults.
+
+**BPM**, **VOICES** and **CH** are now honest captions rather than bare controls: BPM gets its
+own label beside the tempo field, and Voices and CH are captioned in *both* of the bar's
+existing width tiers now, not only the roomy one Keys Host never reaches. Root's caption -
+which Owen did not ask for - stays roomy-only and is the one that drops first under width
+pressure, exactly the priority order asked for.
+
+Fitting BPM's label, the Sync chip and two more captions onto a bar that already had 87 px of
+slack at the old 1070 px floor and no more took 186 px, not 87, so **the floor is 1280 now**.
+The arithmetic is written out in full in `KeysEditor::minWidthForView()`: at 1280 the ordinary
+day clears every caption including Root's with the Instrument chip at its full width, and the
+one day the update button also claims its 170 px, Root's caption is what gives way and the chip
+shrinks to a still-comfortable 85 px rather than being starved to an ellipsis.
+
+### Changed: the arp bar's A/B tabs are now the line On switches
+
+Owen: "the A and B on the left side of the header, I want those to be on and off buttons to
+turn on or off the ARP ... we can remove the a and b check mark on the right side of the
+header."
+
+The lettered On chip that used to sit beside Hold off is gone; the A/B tabs at the left end of
+the arp bar are the switch now, each bound to that line's `arpOn` / `arp2On` parameter through
+an ordinary attachment. They no longer navigate the panel - that job moved to each macro card's
+own Details button, added the same day (see the next entry) - and because they are the arp's
+own power switch they never hide with the section, the same "reach for it while playing" case
+BPM and Quantize have always had on this bar. The All tab is unaffected: it still only chooses
+the macro view, so it still hides and collapses its cell when the section folds. Every
+chord-drop behaviour on A and B is unchanged, including dropping onto a line that is switched
+off.
+
+### Changed: the arp macro card drops its own On toggle; an off line is scrimmed, and gains a Details button
+
+Owen, the same ask, continued: "and if it's turned off, gray it out below ... maybe we can add
+another button on the bottom by anchor, like details, and that can open up the detailed
+arpeggiator view."
+
+`MacroRow::onButton` - the small on/off toggle each macro card carried, bound to the same `On`
+parameter the bar's A/B tabs now answer to - is deleted outright: two switches for one
+parameter, one of them buried in a card, was a control to get wrong twice. In its place,
+`MacroRow::paintOverChildren` scrims the card body (not the `LINE A` / `LINE B` caption strip,
+which stays legible) with a translucent fill whenever that line is off, skipped while the card
+is a drag-and-drop target so a drop highlight is never muddied by it. Nothing on the card is
+ever `setEnabled(false)`: every knob, the rate dial and the card itself as a drop target stay
+fully live while greyed, both so a rate can be dialled in before switching the line on and
+because a chord dropped onto an off line has to land (a line that is off still takes chords in).
+
+Each card also gains a **Details** button beside Anchor in its bottom sub-row - the only way
+left from a macro card to that line's full detailed view (the band, and the step editor on
+Pattern shape) now that A and B navigate nothing. It calls the same `setEditLine` a tab click
+used to call. The per-line panel itself gained a small `LINE A` / `LINE B` caption in its own
+top margin, drawn only outside the macro view, so something on screen still says which line you
+are editing.
+
+### Changed: Size, Octave and Humanize move off the Controls band; the Knobs chip is gone
+
+Owen: "I think we can remove the octave setting and the size can go down to the header of the
+keyboard button", and later the same day, "remove the knobs button and make the knobs visible
+when you open controls."
+
+**Size and Octave** left the Controls band for the **Keyboard** bar, which never hides with
+the section - Octave is the keybed's only pitch-range control, and folding the band away is
+exactly when you still want it. Octave is a `<` value `>` stepper rather than a slider (a bar
+control is 24 px tall, under what IncDecButtons needs), reading "+2" / "0" / "-3". **Humanize**
+and its velocity range left for the **Pads** bar instead, at Owen's pick, reworded to fit a
+much narrower cell. With both rows emptied, the Controls band drops to a single row (Strum and
+its direction), shrinking the section by 60 px. **The Knobs chip** that folded the CC knob row
+is deleted outright; the row is unconditional now whenever Controls itself is open. A session
+saved with the knobs hidden opens with them visible again - there is no control left that could
+turn them back off, so the persisted flag is ignored on load rather than honoured.
+
+### Added: an Instrument chip on the Controls bar; Keys Host's own top bar is gone
+
+Owen: "the load instrument section with all that should go in the controls submenu."
+
+`KeysEditor` grows `onBuildInstrumentMenu`, `instrumentName` and `refreshInstrumentChip()` -
+a host that embeds Keys (Keys Host) can set the first two to get an Instrument chip on the
+Controls bar; plain Keys never does, so the bar is unchanged there. The chip takes the cell
+the Knobs chip vacated and is the one elastic control on the bar: the tempo group and the
+keyboard-settings combos beside it are measured first, and the chip gets whatever is left,
+clamped to a readable range. This is the first extension point `KeysEditor` has ever exposed
+to something embedding it.
+
+Keys Host's own 44 px top bar - **Load Instrument...**, the instrument name/error label,
+**Show/Hide Instrument**, **Eject** - is deleted along with it. `KeysHostEditor::resized()` is
+now just `keysEditor.setBounds(getLocalBounds())`, the embedded editor fills the whole window,
+and Load/Show-Hide/Eject move into a popup menu off the new chip instead. `barHeight` is gone
+from every height calculation in `KeysHostEditor.cpp` - `maxWindowHeight()`, `fitToKeysHeight()`
+and the constructor's initial `setResizeLimits` no longer add it to `KeysEditor::idealHeight()`,
+since there is no bar left to account for. `KeysHostEditor::updateBar()` is renamed
+`refreshInstrumentUi()` to match: there is no bar left to update, only the chip's caption.
+
+### Changed: the keyboard's own settings ride the Controls bar, and the Pads bar sheds three
+
+Owen: "let's also add the scale, root and scale lock, voices and MIDI channel into the controls
+header. remove the scale and percentage and letter b from pads header."
+
+**Onto the Controls bar**, right of the tempo: **Root**, **Scale**, **Scale Lock** (shown as
+"Lock", accessible name unchanged), **Voices** and the **MIDI channel**. All five left the
+Controls band, whose first row is now just Size and Octave. Like the tempo beside them they
+never hide when the section folds, which is the point: these are what you set while playing,
+and the band they used to live in went away with the fold.
+
+They did not fit at the editor's minimum width, and Owen's call was "I think we can resize the
+elements down" rather than a wider window, so the group has **two sizes and measures which one
+it can afford**. The roomy set captions Root, Voices and CH, since "C", "Off" and "1" say
+nothing alone; Scale and Lock never get a caption because "Major" and "Lock" are their own. The
+tight set drops every caption and is what fits on the day an update notification claims 170 px
+of the same bar. Deciding by measurement rather than assumption is what keeps that day from
+starving the last control to zero width, which is the trap this layout has now paid for twice.
+
+**Off the Pads bar**: the generator's **Mode** and **Scale Compliance** combos, and the
+**arp target-line letter**. Both combos are still in the Generator window, which holds every
+setting the generator has, so nothing became unreachable; the **Key** stays on the bar as the
+one you change between fills. The letter had already lost its job earlier the same day, when a
+card click stopped feeding an arp line at all, and what remained (naming the target of the card
+menu's *Send to arp slot*) is what the A/B tabs on the arp bar say. `genModeBox`,
+`genComplianceBox`, `arpTargetButton`, `cycleArpTargetLine()` and `refreshArpTargetButton()`
+are deleted rather than hidden, along with the `StepComboBox` two-way wiring that only a
+Compliance box on a bar ever needed.
+
+### Changed: the tempo is a plain number in the Controls header
+
+Owen: "I think the bpm should live in the controls header. I want it to be like the bpm in
+ableton, just a number."
+
+It was a labelled drag slider in row B of the Controls *band*, spent one build on the arp bar,
+and now sits on the Controls *bar* as a recessed field showing nothing but the number, dragged
+vertically the way Ableton's tempo is. That is the right home on the merits and not only by
+taste: **the tempo is the plugin's clock, not the arpeggiator's**, and the arp is merely its
+loudest consumer - Launch Quantize stayed behind on the arp bar, which is the same distinction
+read the other way. Riding a bar means it survives folding Controls away, which the band copy
+never did.
+
+`KeysEditor::BpmField` is a `juce::Slider` subclass that overrides `paint`: a Slider so the
+APVTS attachment still drives it, `paint` overridden rather than a style chosen because every
+built-in style draws a track, a bar or a knob. The `<` `>` pair beside it stays - a drag is a
+drag, and the mouse-only contract wants a click-only path to every value, which is the one
+part of "just a number" Keys cannot copy from a DAW that expects a keyboard for that field.
+
+### Changed: each line is its own boxed card, the bar carries what they share, and a pad click never feeds a line
+
+Owen, on the side-by-side first cut: "we need a bit more clear delineation between the two
+arpeggiators. They kinda look like one right now" - and two more calls in the same breath.
+
+- **LINE A and LINE B are boxes now.** Each card draws its own captioned, ruled frame with a
+  fill behind it - the band's group-frame look, one per line - and the outer LINES frame and
+  its caption are gone: a box drawn around both cards was the single strongest cue that they
+  were one thing.
+- **The A/B/All tabs, BPM and Launch Quantize moved up onto the ARP section bar**, left of
+  the line switches, so the All view is nothing but the two cards (~30 px shorter again; the
+  window has gone 1450 to 1192 across the day). The tabs are editor-owned now - the bar
+  outlives the panel - still named `Arp line A tab` / `Arp all tab` for the capture script,
+  still chord drop targets, and they hide when the section folds, the pad-pages rule. BPM
+  (a value bar with `<` `>` steppers) and Quantize stay when it folds: they are what you
+  reach for while playing.
+- **RATE and SHAPE are written over their arrows.** Two flanked `< >` pairs sitting side by
+  side read as one puzzle ("the arrows to adjust certain parameters are not clear as to what
+  they're adjusting"); the top line has the same micro-caps heading strip the knobs always
+  had.
+- **A click on a chord card never feeds a line any more** ("when an arpeggiator's running and
+  you click on a pad, I don't want it to send it to the arpeggiator unless you drag it").
+  Feeding a line is the drag - onto a line's card, its letter tab, or a slot - and the
+  per-card menu's *Send to arp slot* stays as the aimed accelerator. A click just plays the
+  pad, whatever the lines are doing. One stop survives on the left button: clicking a
+  *cleared* card that is still feeding a line (the ring with no notes behind it) still lets
+  that hold go. The Pads bar's letter chip now only names the line *Send to arp slot*
+  targets, cycles without yanking the panel out of the All view, and says so in its tooltip.
+
+### Changed: the two lines sit side by side, and VEL actually gets quiet
+
+The follow-up to the entry below, both Owen's calls on the same day ("I was at negative 96,
+and it was still pretty loud", "I'd like to consider having the arpeggiators parallel to each
+other instead of one on top of the other").
+
+**Side by side.** Each line is now a card - rate and shape on top, the eight knobs under
+their own headings, Dot / Trip / Anchor with the held chord along the bottom - and the two
+cards share the panel's width. Two parallel instruments that read as such, each a drop target
+half the panel wide, and the view is another ~30 px shorter. Every card carries its own knob
+headings now; "written once on the top row" only worked while the rows stacked.
+
+**Three fixes under the VEL knob, one complaint.** -96 was still plainly audible because
+three things compounded:
+
+- **The curve was linear and hearing is not.** The multiplier is now squared
+  (`((100+VEL)/100)^2`), so halfway down plays a quarter of the velocity, which *sounds*
+  about half as loud, and the travel spends its change evenly instead of cramming it into
+  the last few degrees.
+- **The floor pinned the bottom.** The engine's 0.05 audibility floor (there to keep a
+  Velocity lane at 0 or a hard H.VEL draw from turning into silence) used to sit *after*
+  the level control, so everything from about -90 down emitted identical velocity-6 notes.
+  The fader now multiplies after the floor and bottoms out at MIDI velocity 1.
+- **The input was being re-randomized.** A chord handed to a line went through the
+  keyboard's own Humanize velocity range on the way in, so VEL's "as played" reference
+  wandered per note. A note bound for a line's queue now skips that replacement - the line
+  has H.VEL for randomness and VEL for level; what you play on the keybed keeps Humanize,
+  because that is playing.
+
+`migrateVelTrim` now folds an old session's Volume through the curve
+(`trim = 100*(sqrt(volume%) - 1)`), still level-exact to within the 1/127 velocity quantum.
+One cohort moves: VEL values set under the few-hours-old linear build (dev machines only)
+now play quieter than they did, since the same number means less under the squared curve.
+And past all of it: how loud MIDI velocity 1 *sounds* is the synth patch's decision - a
+preset with no velocity sensitivity flattens every velocity control Keys has, and only the
+-100 mute cuts through that.
+
+### Changed: the All view is the two lines and their header, and the level/humanize knobs reworked
+
+Owen, on the macro view: "Your arpeggiator needs some work ... we need to make the window
+shorter." Four calls, all his:
+
+**Humanize is two knobs.** One HUMAN knob randomized timing and velocity together; it is now
+**H.TIME** (the late-nudge, up to 25 ms) and **H.VEL** (the velocity shave, up to 30%), each its
+own random draw per hit. The per-line tab's FEEL group grew the same split: **Human Time** and
+**Human Vel** sliders where Human sat.
+
+**VOL became VEL, bipolar, centred on "as played".** VOL was 0-100 defaulting to 100, so it
+could only cut - and what it cut was velocity, which the old name never said. VEL runs -100 to
++100 around a neutral centre: right pushes the notes louder, left quieter, full left is a mute
+exactly as VOL 0 was.
+
+**Each line row slimmed to what you reach for while both lines run.** LTCH, PLAY and Chain left
+the rows; all three still live with the line - Latch on the per-line band as before, **Play**
+newly beside Retrigger in PLAYBACK (same `arpKeys` parameter the row's PLAY wrote), Chain on the
+action row under the slots.
+
+**The All view lost its bottom half.** The twelve slot cards and the Copy / Clear / Stop /
+Chain row belong to the per-line tabs now; the A/B/All tabs moved up into the LINES header
+alongside the BPM cell and Launch Quantize, whose shared row is gone with them. The view is a
+34 px header and the two line rows, which takes ~110 px off the window Keys opens in.
+
+**Parameter layout changed - loudly.** Two per-line parameters are appended: `arpHumanVel` /
+`arp2HumanVel` / `arp3HumanVel` (0-100, default 0) and `arpVelTrim` / `arp2VelTrim` /
+`arp3VelTrim` (-100..+100, default 0). Appended, so nothing existing moves. A session saved
+before this opens sounding identical: its Humanize value carries on as the timing half, and
+`migrateVelTrim` folds each line's old Volume into VelTrim exactly (volume% and
+1 + (trim)/100 are the same multiplier) before putting Volume back to 100. `arpVolume` stays
+registered and the engine still honours it, but nothing in the UI writes it any more.
+`ArpTests.cpp` pins all of it: H.TIME leaves velocities alone, H.VEL only shaves, -50 halves,
++100 doubles into the 1.0 ceiling, -100 emits nothing.
+
+**Writing that migration found every absence-detecting migration silently dead.** The kit's
+`okstudio::state::load` handed `apvts.replaceState()` the parameter child of the parsed root
+itself; ValueTrees share nodes, and replaceState synchronously backfills a child for every
+registered parameter the session did not carry - into that same shared tree - so by the time
+the `onExtra` callback (where `restoreSharedState` and all three migrations run) looked, every
+parameter existed and "absent" was unobservable. `migrateStrumRange` and `migrateRateMode`
+have been no-ops on every load since they moved into that callback; they worked when written
+because they then ran before `replaceState`. Fixed in the kit (`StateHelpers.h`): replaceState
+now gets `params.createCopy()`, so the root the callback receives stays exactly what the
+session saved. Found because `migrateVelTrim` no-opped on the exact session shape it was
+written for, with the tell being a VEL knob reading 0 over a line still playing at 38%.
+
 ### Changed: the chord drag is stock JUCE, and the ghost now follows your cursor between windows
 
 Every chord drag in Keys - a tray candidate onto a pad, a pad onto the reference box, a card onto

@@ -247,12 +247,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // does insert mid-list, so this branch moves that order regardless.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "bpm", 1 }, "BPM", 40, 240, 120));
 
+    // Tempo Sync (2026-08-02, Owen: "we need a BPM sync toggle to sync with DAW"). Keys
+    // already followed the host's tempo whenever the transport rolled and reported one - the
+    // "host that is playing always wins" comment above this parameter is describing that -
+    // so this does not add following, it adds an *escape hatch* from it. True reproduces
+    // today's behaviour exactly: the host wins while it plays a valid tempo, "bpm" above
+    // otherwise. False pins the engine to "bpm" even with the host rolling.
+    //
+    // Appended last, same reasoning as "bpm" itself just above: keep the shuffling of this
+    // layout to a minimum, since a VST3 id is a hash of the string id and does not move, but
+    // a host's generic parameter list order does.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "bpmSync", 1 }, "Tempo Sync", true));
+
     return layout;
 }
 
-// One arpeggiator line's parameters. Dot/Trip are separate toggles rather than entries in the
-// rate list so automating the rate stays on even divisions (Serum's documented rationale);
-// Anchor picks bar-affixed vs free-running.
+// One arpeggiator line's parameters. Dot and Tuplet are separate controls rather than entries
+// in the rate list so automating the rate stays on even divisions (Serum's documented
+// rationale); Anchor picks bar-affixed vs free-running.
 //
 // Called three times (2026-08-01, the polyrhythm lines). Line 0 registers under exactly the
 // ids and names it always has - "arpRate", "Arp Rate" - so every saved session, every
@@ -414,6 +426,51 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // Volume: the plain output level an arpeggiator wants and this one never had. With two
     // lines running, balancing them used to mean playing one of them softer.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Volume"), 1 }, nm + " Volume", 0, 100, 100));
+    // The velocity half of Humanize, split out (Owen, 2026-08-02: "I don't know if we wanted
+    // to randomize velocity and timing. Maybe we could split it up into two knobs"). Humanize
+    // above is timing-only from the same day; a session saved before the split keeps its
+    // Humanize amount as the timing half and this defaults to none.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 100, 0));
+    // The bipolar velocity control that replaced VOL on the macro row (Owen, same day: "it
+    // should start in the middle so you can turn it up or down"). 0 plays velocities as they
+    // came, +100 doubles them, -100 mutes. Volume above stays registered for old sessions,
+    // which migrateVelTrim folds into this on load; nothing in the UI writes Volume now.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelTrim"), 1 }, nm + " Velocity", -100, 100, 0));
+    // Tuplet, the general form of the Trip toggle above (Owen, 2026-08-03: "what if I want 1/5
+    // or other division?"). Trip could say one thing, 3-in-the-space-of-2; this says any of the
+    // odd divisions a beat is worth dividing into. Off is the default, so a session saved before
+    // it plays straight - which is what a session with Trip off did - and migrateTuplet turns a
+    // session with Trip *on* into a 3 so it plays the same too.
+    //
+    // A choice rather than an int 1..9: the even numbers are not tuplets. 4 in the space of 4 is
+    // straight and 6 in the space of 4 is the same length as a triplet at half the division, so
+    // an int would have spent half its travel on values that duplicate a division the dial can
+    // already reach. Appending to the list is safe; inserting is not (see tupletChoices).
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Tuplet"), 1 }, nm + " Tuplet",
+                                                      tupletChoices(), 0));
+    // The Humanize spans (2026-08-03, Owen: "a serum style knob where you can set a range in
+    // the knob"). Each Humanize control was "random between nothing and the knob"; the span
+    // says how far under the knob the draw may fall, so the knob keeps meaning "the most this
+    // ever does" and the range **travels with it** - which is the behaviour Serum's mod ring
+    // has and the half of this Owen asked for by name. A line can then be *always* a little
+    // late and a little softer with variation on top, rather than everything anchored to zero.
+    //
+    // Default 100 is what makes them safe to append: a span of the whole scale puts the floor
+    // at zero wherever the knob sits, which is exactly what these two did alone, so a session
+    // that never heard of them plays the same. The engine clamps the floor to its own ceiling
+    // (see ArpEngine::Params), so nothing here has to police the pair.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanizeSpan"), 1 },
+                                                   nm + " Human Time Range", 0, 100, 100));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVelSpan"), 1 },
+                                                   nm + " Human Velocity Range", 0, 100, 100));
+}
+
+// The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
+// against zero everywhere, and ArpEngine::tupletFactor treats both as straight.
+int KeysProcessor::tupletFor(int choiceIndex)
+{
+    static constexpr int values[] = { 0, 3, 5, 7, 9 };
+    return values[(size_t) juce::jlimit(0, (int) (sizeof(values) / sizeof(values[0])) - 1, choiceIndex)];
 }
 
 // The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
@@ -425,7 +482,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction", "Pattern",
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
-        "OctShift", "Volume"
+        "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -854,7 +911,14 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     // dragged) notes stop landing perfectly quantized. Note-offs are never delayed, so
     // a note can never release before it has sounded. delaySeconds adds the strum offset.
     double when = nowSeconds() + delaySeconds;
-    if (apvts.getRawParameterValue("humanize")->load() > 0.5f)
+    // ...but never for a note bound for an arp line's queue (2026-08-02, Owen: "is it
+    // passing it through the humanized volume range? ... this might need its own separate
+    // thing"). A line has H.VEL for randomness and VEL for level now, and re-randomizing
+    // its input velocity here made VEL's "as played" reference wander per note. dest 0 is
+    // the track output - actually playing - and keeps the Humanize range as ever; what the
+    // keybed feeds a line keeps it too, because those notes pass through here as playing
+    // before runArpLines lifts them.
+    if (dest == 0 && apvts.getRawParameterValue("humanize")->load() > 0.5f)
     {
         const int a = (int) apvts.getRawParameterValue("humanizeVelMin")->load();
         const int b = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
@@ -1322,7 +1386,11 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.rateFree = arpParam(n, apRateFree) > 0.5f;
         ap.rateHz = (double) arpParam(n, apRateHz);
         ap.dotted = arpParam(n, apDot) > 0.5f;
-        ap.triplet = arpParam(n, apTrip) > 0.5f;
+        // apTrip is not read here any more: migrateTuplet folds it into Tuplet on load, and
+        // nothing on screen writes it. It stays registered so a saved session still parses.
+        ap.tuplet = tupletFor((int) arpParam(n, apTuplet));
+        ap.humanizeSpan = (int) arpParam(n, apHumanizeSpan);
+        ap.humanVelSpan = (int) arpParam(n, apHumanVelSpan);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;
@@ -1336,8 +1404,10 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.velRamp = (int) arpParam(n, apVelRamp);
         ap.rampBeats = (double) (int) arpParam(n, apRampBeats);
         ap.humanize = (int) arpParam(n, apHumanize);
+        ap.humanVel = (int) arpParam(n, apHumanVel);
         ap.octShift = (int) arpParam(n, apOctShift);
         ap.volume = (int) arpParam(n, apVolume);
+        ap.velTrim = (int) arpParam(n, apVelTrim);
         ap.chords = &l.chordTable; // what the Chord lane calls up, this line's slots
 
         // Distance: what each repeat past the first adds. The list names intervals rather
@@ -1388,6 +1458,8 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // be the host's last-known tempo, which was unreachable in the standalone (where
         // there is no host at all) and unchangeable everywhere.
         ap.fallbackBpm = (double) apvts.getRawParameterValue("bpm")->load();
+        // Tempo Sync: off pins every line to fallbackBpm above even with the host rolling.
+        ap.followHost = apvts.getRawParameterValue("bpmSync")->load() > 0.5f;
 
         // The engine's input is this line's buffer alone, never the merged stream: that is the
         // whole of the routing. Its output goes into midi with everything the other lines and
@@ -1408,19 +1480,29 @@ void KeysProcessor::advanceChainClock(int numSamples)
     // Tempo and bar length are the same question whichever line is asking, so they are asked
     // once and the three chains are stepped against the same answer.
     double bpm = (double) apvts.getRawParameterValue("bpm")->load();
+    // Tempo Sync: off keeps the parameter above even with the host rolling, the same escape
+    // hatch ArpEngine::process reads via Params::followHost. hostBpmLive is published below
+    // for the Controls bar to show and to grey its own stepper: neither the parameter nor a
+    // stepper drag can change anything while the host is the one actually setting the tempo.
+    const bool followHost = apvts.getRawParameterValue("bpmSync")->load() > 0.5f;
+    bool hostBpmLive = false;
     double beatsPerBar = 4.0;
     if (auto* playHead = getPlayHead())
         if (auto pos = playHead->getPosition())
         {
-            if (pos->getIsPlaying())
+            if (followHost && pos->getIsPlaying())
                 if (auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
+                {
                     bpm = *hostBpm;
+                    hostBpmLive = true;
+                }
             // A bar is four beats only in four-four. Asking the host costs nothing and is
             // the difference between a chain that lands on the bar in 3/4 and one that does
             // not; with no host to ask, four it is.
             if (auto sig = pos->getTimeSignature(); sig && sig->denominator > 0)
                 beatsPerBar = 4.0 * (double) sig->numerator / (double) sig->denominator;
         }
+    arpHostBpmLive.store(hostBpmLive, std::memory_order_relaxed);
 
     const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
     const double blockBeats = bpm / 60.0 / sr * numSamples;
@@ -1508,15 +1590,27 @@ void KeysProcessor::chordPadsFromTree(const juce::ValueTree& root)
     const auto pads = root.getChildWithName("chordPads");
     if (! pads.isValid())
         return;
-    // Sessions saved when pages held 8 pads store slots in 8-a-page terms; keep each
-    // pad on the page it was on by re-basing its slot into the current page width.
+    // A session stores its slots in its own page width; keep each pad on the page it was on by
+    // re-basing that slot into the current width.
+    //
+    // **Narrowing drops the overflow, and must.** This was written for 8 -> 16, where every old
+    // position still had a home; 16 -> 12 (2026-08-03) does not, and the old formula wrapped
+    // positions 12..15 onto the *front of the next page*, where they overwrote that page's own
+    // pads as the loop went on - silent, and worse than the loss it was trying to avoid. A pad
+    // past the end of its page now has nowhere to go and is dropped, which is Owen's call
+    // (2026-08-03) and is called out in the changelog: it is not reversible.
     const int savedPerPage = (int) pads.getProperty("padsPerPage", 8);
     for (int c = 0; c < pads.getNumChildren(); ++c)
     {
         const auto pad = pads.getChild(c);
         int slot = (int) pad.getProperty("slot", -1);
         if (slot >= 0 && savedPerPage > 0 && savedPerPage != padsPerPage)
-            slot = (slot / savedPerPage) * padsPerPage + (slot % savedPerPage);
+        {
+            const int pos = slot % savedPerPage;
+            if (pos >= padsPerPage)
+                continue; // the page got shorter under it
+            slot = (slot / savedPerPage) * padsPerPage + pos;
+        }
         if (slot < 0 || slot >= numChordPads)
             continue;
         ChordPad p;
@@ -2166,6 +2260,10 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     // shaped belongs here, not in either override.
     migrateStrumRange(root);
     migrateRateMode(root);
+    migrateVelTrim(root);
+    migrateBpmSync(root);
+    migrateTuplet(root);
+    migrateHumanSpans(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -2265,6 +2363,154 @@ void KeysProcessor::migrateRateMode(const juce::ValueTree& root)
     }
 }
 
+void KeysProcessor::migrateVelTrim(const juce::ValueTree& root)
+{
+    // VOL became VEL on 2026-08-02: "arpVelTrim" is bipolar, centred at 0, and the macro
+    // knob writes it where it used to write "arpVolume". A session saved before that carries
+    // its line levels in Volume and no VelTrim at all - and, as ever, an absent parameter
+    // keeps the live instance's current value rather than resetting (see migrateRateMode).
+    // The repair is exact, not approximate: volume% and 1 + (volume-100)/100 are the same
+    // multiplier, so VelTrim = Volume - 100 (and Volume back to its default 100) plays the
+    // session note-for-note identically. HumanVel gets its default written for the same
+    // absence reason; its old sessions' Humanize value stays as the timing half.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto trimId = arpParamId(line, apVelTrim);
+        const auto hVelId = arpParamId(line, apHumanVel);
+        const auto volId = arpParamId(line, apVolume);
+        bool sawTrim = false, sawHVel = false;
+        double savedVolume = 100.0; // the parameter's default, for sessions that predate it
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto child = params.getChild(i);
+            const auto id = child.getProperty("id").toString();
+            sawTrim = sawTrim || id == trimId;
+            sawHVel = sawHVel || id == hVelId;
+            if (id == volId)
+                savedVolume = (double) child.getProperty("value", 100.0);
+        }
+
+        if (! sawHVel)
+            if (auto* param = apvts.getParameter(hVelId))
+                param->setValueNotifyingHost(param->getDefaultValue());
+
+        if (! sawTrim)
+        {
+            if (auto* param = apvts.getParameter(trimId))
+            {
+                // Through the knob's curve (scale = ((100+trim)/100)^2), so the old
+                // volume% lands at the trim that plays the same level: trim =
+                // 100*(sqrt(volume%) - 1). Rounding to the int parameter costs at most
+                // ~1% of velocity, under the 1/127 the velocity is quantized to anyway.
+                const double frac = juce::jlimit(0.0, 100.0, savedVolume) / 100.0;
+                const float trim = (float) juce::jlimit(-100.0, 100.0,
+                                                        std::round((std::sqrt(frac) - 1.0) * 100.0));
+                param->setValueNotifyingHost(param->convertTo0to1(trim));
+            }
+            if (auto* param = apvts.getParameter(volId))
+                param->setValueNotifyingHost(param->getDefaultValue());
+        }
+    }
+}
+
+void KeysProcessor::migrateBpmSync(const juce::ValueTree& root)
+{
+    // Tempo Sync joined the tempo control on 2026-08-02: "bpmSync" decides whether a rolling
+    // host tempo can override the "bpm" parameter, and true reproduces exactly what Keys
+    // always did before this parameter existed. A session saved before it is absent, not
+    // "off" - and as ever, an absent parameter keeps the live instance's current value rather
+    // than resetting (see migrateRateMode). The repair is the same one line: write the
+    // default explicitly.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    bool saw = false;
+    for (int i = 0; i < params.getNumChildren(); ++i)
+        if (params.getChild(i).getProperty("id").toString() == "bpmSync")
+        {
+            saw = true;
+            break;
+        }
+
+    if (! saw)
+        if (auto* param = apvts.getParameter("bpmSync"))
+            param->setValueNotifyingHost(param->getDefaultValue());
+}
+
+void KeysProcessor::migrateTuplet(const juce::ValueTree& root)
+{
+    // Trip became Tuplet on 2026-08-03: "arpTuplet" is a choice over Straight / Triplet /
+    // 5-tuplet / 7-tuplet / 9-tuplet, and
+    // "arpTrip" - a bool that could only ever say 3 - is retired into it. A session saved before
+    // this has no Tuplet at all, and as ever an absent parameter keeps the live instance's
+    // current value rather than resetting (see migrateRateMode), so a preset load could leave
+    // the previous patch's quintuplets running under a session that never asked for one.
+    //
+    // The fold is exact, not approximate: index 1 is "3" and ArpEngine::tupletFactor(3) is the
+    // 2/3 the old triplet branch multiplied by, so an old session plays note for note as it did.
+    // Trip goes back to its default in the same breath - the migrateVelTrim shape, and for the
+    // same reason: two parameters saying the same thing, only one of them written, is a state
+    // that drifts the moment a host automates the dead one.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto tupId = arpParamId(line, apTuplet);
+        const auto tripId = arpParamId(line, apTrip);
+        bool sawTuplet = false, savedTrip = false;
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto child = params.getChild(i);
+            const auto id = child.getProperty("id").toString();
+            sawTuplet = sawTuplet || id == tupId;
+            if (id == tripId)
+                savedTrip = (double) child.getProperty("value", 0.0) > 0.5;
+        }
+
+        if (sawTuplet)
+            continue; // saved since the change; whatever it says is meant
+
+        if (auto* param = apvts.getParameter(tupId))
+            param->setValueNotifyingHost(param->convertTo0to1(savedTrip ? 1.0f : 0.0f));
+        if (auto* param = apvts.getParameter(tripId))
+            param->setValueNotifyingHost(param->getDefaultValue());
+    }
+}
+
+void KeysProcessor::migrateHumanSpans(const juce::ValueTree& root)
+{
+    // The two Humanize spans arrived 2026-08-03 and are absent from every session saved before
+    // them. Their default is 100 - the whole scale, so the floor is zero wherever the knob sits
+    // - which reproduces exactly what Humanize did alone. But an absent parameter is not a
+    // reset (see migrateRateMode), so without this a preset load would leave the previous
+    // patch's narrow span pinning every hit late in a session that never asked for one. That
+    // is a worse failure here than for most: the default is the *top* of the range, so an
+    // absent parameter inherits something quieter than the default rather than louder.
+    // Nothing to fold: there is no older parameter that meant this.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+        for (const auto which : { apHumanizeSpan, apHumanVelSpan })
+        {
+            const auto wanted = arpParamId(line, which);
+            bool saw = false;
+            for (int i = 0; i < params.getNumChildren() && ! saw; ++i)
+                saw = params.getChild(i).getProperty("id").toString() == wanted;
+            if (! saw)
+                if (auto* param = apvts.getParameter(wanted))
+                    param->setValueNotifyingHost(param->getDefaultValue());
+        }
+}
+
 juce::ValueTree KeysProcessor::layoutToTree() const
 {
     juce::ValueTree tree { "layout" };
@@ -2299,7 +2545,12 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     const auto flag = [&tree](const char* id, bool fallback)
     { return (bool) tree.getProperty(id, fallback); };
     layout.controls = flag("controls", true);
-    layout.knobs = flag("knobs", true);
+    // The Knobs chip that folded the knob row off is gone (2026-08-02, Owen: "make the knobs
+    // visible when you open controls"): the row is unconditional now, so a session saved with
+    // it off (knobs=false, from before the chip left) must not reopen with the knobs hidden -
+    // there is no control left on screen that could turn them back on. The field stays so the
+    // tree still round-trips cleanly; nothing reads it as false again.
+    layout.knobs = true;
     layout.pads = flag("pads", true);
     layout.arp = flag("arp", false);
     layout.wheels = flag("wheels", true);
