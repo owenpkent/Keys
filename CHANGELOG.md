@@ -5,6 +5,47 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: tests that could have caught this week's bugs
+
+Two new test files, and the link that makes them possible: `Keys_tests` now links the plugin
+itself, so a test can hold a real `KeysProcessor` and a real `ArpPanel`.
+
+**`StateTests.cpp` pins the migrations.** That mechanism was silently dead for months - the
+kit's `state::load` handed `replaceState` a shared node, so `onExtra` saw a tree in which every
+parameter existed whether the session saved it or not (fixed 2026-08-14, kit PR #6). Nothing in
+Keys exercised a migration, so a dead one and a working one looked identical from outside. Each
+test now loads a session with a parameter *removed* and asserts the migration noticed:
+`migrateVelTrim` folding Volume 25 into VelTrim -50 through the same curve, `migrateTuplet`
+folding a set Trip into Triplet and retiring it, the spans and Drift resetting to their defaults
+rather than inheriting the live value, and `bpmSync` backfilling while a *saved* off survives
+untouched. Every one of these would have failed before the kit fix.
+
+**`LayoutTests.cpp` pins the layout rules.** Every bug of 2026-08-14 was a layout bug and the
+engine suite caught none of them - the Chain tab at zero width, Mute's phantom tab eating a
+cell, the Voice button at 22 px, three lanes at the wrong length. Screenshots and UI Automation
+found all four, which needs a running app. The rules those bugs broke are now tests: no visible
+control is starved in any view or page, all twelve lane tabs are laid out at the same width and
+above their floor, the panel is one height in every view and page, and opening the panel repairs
+lanes that disagree about length while leaving a deliberate polymeter alone.
+
+They are **rules, not pixel snapshots**: a snapshot of a layout still being designed fails every
+time the design moves, which trains people to delete tests.
+
+201 -> 206 cases, 3,787 checks.
+
+### Fixed: a chord card let go mid-drag destroyed the chord
+
+Dragging a card off the strip clears it, which is the documented gesture. The test for it was
+"nobody claimed the drop" - so letting a card go anywhere that merely *happens* not to be a drop
+target destroyed the chord: the gap between two sections, a bar, the keybed. Changing your mind
+mid-drag and putting the card back down on the strip is the commonest way to do that, and it is
+the one gesture that most obviously should not delete anything. There is no undo anywhere in
+Keys.
+
+The release now has to have actually left the strip as well. A locked card was already immune,
+and still is.
+
+
 ### Fixed: lanes of different lengths, and a draw that slid sideways
 
 Owen: *"Sometimes the steps do not match each other"* and *"when you're drawing, I don't want

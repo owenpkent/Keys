@@ -129,9 +129,17 @@ endif()
 # Unit tests (console, JUCE UnitTest). Not built by the plugin targets; build and run
 # with: cmake --build build --target Keys_tests && ctest --test-dir build -C Release
 enable_testing()
-add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp tests/ChordSourceTests.cpp)
+add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp
+                          tests/ChordSourceTests.cpp tests/StateTests.cpp tests/LayoutTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
 # juce_audio_basics is for ArpEngine's MidiBuffer/MidiMessage; the kit does not
 # re-export it.
-target_link_libraries(Keys_tests PRIVATE okstudio_kit juce::juce_audio_basics)
+# Keys_SharedCode is the plugin itself: the processor, its APVTS and the editor. StateTests
+# and LayoutTests need real ones - a migration is only observable through setStateInformation,
+# and a layout invariant only through a panel that has actually been resized. Everything else
+# here stays header-only against juce_audio_basics, which is why that stays too.
+#
+# This link is what those two files cost, and it is worth naming why it was paid: the migration
+# mechanism was dead for months and nothing noticed, because no test could reach an APVTS.
+target_link_libraries(Keys_tests PRIVATE okstudio_kit juce::juce_audio_basics Keys)
 add_test(NAME Keys_tests COMMAND Keys_tests)
