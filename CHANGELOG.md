@@ -5,6 +5,47 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Undo and Redo
+
+Owen: *"we should have undo"*. **"There is no undo anywhere in Keys" was the stated reason for
+at least four design compromises** - Reset beside Roll, Clear page living in a window rather
+than on a bar, locks on pads, and the drag guard in `ChordPads::mouseUp`. All four stay, because
+all four are still good behaviour; they simply stop being load-bearing.
+
+**Content only, and that is the design rather than a shortcut.** Undo covers what destroys
+music - chord pads, arp lanes, arp slots - and deliberately not parameters. Sweeping the rate
+dial would otherwise push forty entries onto the stack and shove the pad you actually wanted
+back off the end of it, which is an undo that cannot undo anything. A knob you can always turn
+back; a cleared pad you cannot.
+
+An entry is a **snapshot of the affected subtree before the edit**, taken with the same
+`chordPadsToTree` / `arpToTree` the session file already uses. That is what makes it affordable:
+no action needs a hand-written inverse, so no action can have a *wrong* one, and anything added
+later is undoable the moment its data lands in one of those two trees.
+
+**One entry per gesture, not per change.** A lane drag pushes on the press and not again, or a
+single stroke would fill the stack by itself; `KeysProcessor::UndoGesture` is the RAII guard
+that lets a high-level action (a drop clears a pad and then sets it) cost one entry rather than
+two. Depth is 32, oldest dropped first.
+
+Covered: clear / overwrite / move a pad, capture the live chord, drop a tray candidate, Fill,
+Regen, Clear page, drag a card off the strip, Roll, Reset, Randomize, Euclid, copy a slot, draw
+a lane, mute steps.
+
+**Undo and Redo ride the Controls bar**, at the left end, because that bar never hides with its
+fold - the same rule that keeps the tempo and Root on it. An undo you cannot reach because a
+section is collapsed is an undo you cannot trust. They grey rather than vanish when their stack
+is empty, so the pair never reflows the bar under the mouse, and each carries a tooltip naming
+what would come back - which is why every push site passes a label rather than a bare marker.
+
+Undoing releases every sounding chord first (`stopAllChordPads`), for the same reason an
+audition does: restoring pads can rewrite the chord a sustained card is holding, and restoring
+the arp can rewrite the lanes under a running line.
+
+Six new test cases (211 total, 3,801 checks), including the one that matters most - an open
+gesture costs one entry however many edits are inside it.
+
+
 ### Added: tests that could have caught this week's bugs
 
 Two new test files, and the link that makes them possible: `Keys_tests` now links the plugin

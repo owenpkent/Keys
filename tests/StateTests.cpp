@@ -160,6 +160,95 @@ public:
                    "a saved off is not migrated over - the tell is absence, not value");
         }
 
+        beginTest("undo puts a cleared pad back, and redo takes it away again");
+        {
+            Host h;
+            h.processor.setChordPad(3, { 60, 64, 67 }, "C");
+            expectEquals((int) h.processor.chordPad(3).notes.size(), 3, "the pad was filled");
+
+            h.processor.pushUndo("Clear pad", KeysProcessor::UndoScope::pads);
+            h.processor.clearChordPad(3);
+            expect(h.processor.chordPad(3).notes.empty(), "...and cleared");
+
+            expect(h.processor.canUndo(), "there is something to undo");
+            h.processor.undo();
+            expectEquals((int) h.processor.chordPad(3).notes.size(), 3, "undo put the chord back");
+            expectEquals(h.processor.chordPad(3).name, juce::String("C"), "...with its name");
+
+            expect(h.processor.canRedo(), "there is something to redo");
+            h.processor.redo();
+            expect(h.processor.chordPad(3).notes.empty(), "redo cleared it again");
+        }
+
+        beginTest("an open gesture costs one entry, however many edits are inside it");
+        {
+            // The rule a lane drag rests on: the press pushes, and the thirty writes that
+            // follow do not. Without it one stroke buries the stack.
+            Host h;
+            h.processor.setChordPad(0, { 60 }, "before");
+            {
+                const KeysProcessor::UndoGesture g { h.processor, "Big edit",
+                                                     KeysProcessor::UndoScope::pads };
+                for (int i = 0; i < 10; ++i)
+                {
+                    h.processor.pushUndo("noise", KeysProcessor::UndoScope::pads);
+                    h.processor.setChordPad(0, { 62 + i }, "during");
+                }
+            }
+            h.processor.undo();
+            expectEquals(h.processor.chordPad(0).name, juce::String("before"),
+                         "one undo went back past the whole gesture");
+            expect(! h.processor.canUndo(), "...and it really was a single entry");
+        }
+
+        beginTest("undo covers the arp lanes too, not just the pads");
+        {
+            Host h;
+            auto& lanes = h.processor.arpLine(0).lanes;
+            lanes.value[ArpEngine::laneNote][0].store(5);
+            h.processor.pushUndo("Roll lane", KeysProcessor::UndoScope::arp);
+            h.processor.rerollArpLane(0, ArpEngine::laneNote, 100);
+            h.processor.undo();
+            expectEquals(lanes.value[ArpEngine::laneNote][0].load(), 5,
+                         "the drawn step came back after a full-scramble roll");
+        }
+
+        beginTest("a new edit after an undo drops the redo branch");
+        {
+            Host h;
+            h.processor.setChordPad(1, { 60 }, "first");
+            h.processor.pushUndo("a", KeysProcessor::UndoScope::pads);
+            h.processor.setChordPad(1, { 62 }, "second");
+            h.processor.undo();
+            expect(h.processor.canRedo(), "redo is available right after an undo");
+
+            h.processor.pushUndo("b", KeysProcessor::UndoScope::pads);
+            h.processor.setChordPad(1, { 64 }, "third");
+            expect(! h.processor.canRedo(), "a new edit ended the future that was undone");
+        }
+
+        beginTest("the stack has a floor and a ceiling, and neither throws");
+        {
+            Host h;
+            h.processor.undo(); // nothing to undo
+            h.processor.redo(); // nothing to redo
+            expect(! h.processor.canUndo() && ! h.processor.canRedo(), "empty stacks stay empty");
+
+            for (int i = 0; i < 60; ++i) // well past maxUndoDepth
+            {
+                h.processor.pushUndo("edit " + juce::String(i), KeysProcessor::UndoScope::pads);
+                h.processor.setChordPad(2, { 60 + (i % 12) }, juce::String(i));
+            }
+            int undone = 0;
+            while (h.processor.canUndo() && undone < 200)
+            {
+                h.processor.undo();
+                ++undone;
+            }
+            expect(undone > 0 && undone <= 32, "the stack capped at its depth, and drained: "
+                                                   + juce::String(undone));
+        }
+
         beginTest("a whole state round-trips with every parameter present");
         {
             // The control case. If this ever fails the migrations are firing on sessions that

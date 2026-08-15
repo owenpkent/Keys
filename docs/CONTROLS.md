@@ -759,6 +759,23 @@ in seconds instead.
 | **Human Vel** | Feel | 0-100%. Takes a little off each hit's velocity, by a different amount every time. Late and quieter, never early and never louder - a *player* wandering. |
 | **Drift** | Feel | 0-100%. Strays from what the lanes hold **while it plays**, either side of the drawn value, so the part never repeats exactly and the lane on screen never changes. Octave, velocity, gate, lateness and chance wander; the notes never do. A *machine* wandering, which is why it is bipolar where Humanize is one-sided. |
 
+### Undo and Redo
+
+Left end of the **Controls bar**, so they are reachable whatever is folded. They grey out when
+there is nothing to undo, and hovering either one says what would come back.
+
+They cover **anything that destroys music**: clearing, overwriting or moving a chord pad,
+capturing the live chord, Fill, Regen, Clear page, dragging a card off the strip, and on the arp
+side Roll, Reset, Randomize, Euclid, copying a slot, drawing a lane and muting steps. Thirty-two
+deep.
+
+They deliberately do **not** cover knobs and switches. A knob you can always turn back, and if
+every dial sweep filled the stack the pad you actually wanted back would be pushed off the end
+of it.
+
+One click undoes one *gesture*, not one change - drawing a whole lane in a single drag is one
+entry, and so is generating a whole page.
+
 ### The three pages of a line (2026-08-14)
 
 A line's deep view is three pages, picked on the ARP bar beside **All**. It used to be every

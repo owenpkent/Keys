@@ -546,6 +546,73 @@ public:
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
         juce::Rectangle<int> chordGenBounds {};     // the generator's window
     };
+    enum class UndoScope { pads, arp };
+
+    // --- Undo (2026-08-14, Owen: "we should have undo") ---------------------------------
+    //
+    // **Content only, and that is the design, not a shortcut.** Undo covers what destroys
+    // music - chord pads, arp lanes, arp slots - and deliberately not parameters. Sweeping the
+    // rate dial would otherwise push forty entries onto the stack and shove the pad you
+    // actually wanted back off the end of it, which is an undo that cannot undo anything.
+    // A knob you can always turn back; a cleared pad you cannot.
+    //
+    // "no undo anywhere in Keys" was the stated reason for at least four design compromises -
+    // Reset beside Roll, Clear page living in a window rather than on a bar, locks on pads, and
+    // the drag guard in ChordPads::mouseUp. None of them should be removed on the strength of
+    // this: they are all still good behaviour, they just stop being *load-bearing*.
+    //
+    // An entry is a **snapshot of the affected subtree before the edit**, taken with the same
+    // chordPadsToTree/arpToTree the session file uses. That is why this is affordable at all:
+    // no action needs a hand-written inverse, so no action can have a *wrong* one, and a
+    // feature added later is undoable the moment its data is in one of those two trees.
+
+    // Snapshot before an edit. **One call per gesture, not per change** - a lane drag calls it
+    // on mouse-down and not again, or a single stroke would fill the stack by itself. Nested
+    // calls are ignored (see UndoGesture), so a high-level action that internally clears and
+    // then sets a pad still costs one entry.
+    void pushUndo(const juce::String& label, UndoScope scope);
+
+    // RAII around pushUndo, and the reason nesting is safe: a drop calls clearChordPad then
+    // setChordPad, and each of those may push on its own behalf. The outermost gesture wins and
+    // the inner ones are no-ops, so an entry is always the state before the *whole* action.
+    struct UndoGesture
+    {
+        UndoGesture(KeysProcessor& p, const juce::String& label, UndoScope scope);
+        ~UndoGesture();
+        KeysProcessor& processor;
+    };
+
+    bool canUndo() const { return ! undoStack.empty(); }
+    bool canRedo() const { return ! redoStack.empty(); }
+    // What the next undo/redo would put back, for the button's tooltip. Empty when there is none.
+    juce::String undoLabel() const { return undoStack.empty() ? juce::String() : undoStack.back().label; }
+    juce::String redoLabel() const { return redoStack.empty() ? juce::String() : redoStack.back().label; }
+    void undo();
+    void redo();
+    void clearUndoHistory();
+    // Bumped on every push, undo and redo, so the editor can poll cheaply and only repaint the
+    // buttons when something actually moved - the soundingGeneration() pattern.
+    juce::uint32 undoGeneration() const { return undoGen.load(); }
+
+    // The stacks the API above drives. Public alongside `layout` rather than tucked away,
+    // because that is how this processor already exposes its state to the editor.
+
+    // The undo stacks. Depth 32: deep enough that a run of edits stays recoverable, shallow
+    // enough that the arp snapshots (twelve slots x thirteen lanes x thirty-two steps, twice)
+    // do not add up to real memory. Oldest is dropped from the front when it overflows.
+    struct UndoEntry
+    {
+        juce::String label;
+        UndoScope scope;
+        juce::ValueTree before;
+    };
+    static constexpr int maxUndoDepth = 32;
+    std::vector<UndoEntry> undoStack, redoStack;
+    int undoGestureDepth = 0;      // >0 means a gesture is open and pushes are absorbed
+    std::atomic<juce::uint32> undoGen { 0 };
+    juce::ValueTree snapshotFor(UndoScope scope) const;
+    void restore(const UndoEntry& e);
+
     LayoutState layout;
 
 protected:

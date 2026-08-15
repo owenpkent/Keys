@@ -197,10 +197,14 @@ void ChordPads::itemDropped(const SourceDetails& details)
     }
     else if (p->from == From::padSlot)
     {
+        const KeysProcessor::UndoGesture undoable { processor, "Move chord",
+                                                   KeysProcessor::UndoScope::pads };
         processor.moveChordPad(p->index, cell); // rearrange, locked or not
     }
     else if (p->from == From::liveCard)
     {
+        const KeysProcessor::UndoGesture undoable { processor, "Capture chord",
+                                                   KeysProcessor::UndoScope::pads };
         processor.setChordPad(cell, p->chord.notes, p->chord.name); // capture the live chord
     }
     else
@@ -212,6 +216,8 @@ void ChordPads::itemDropped(const SourceDetails& details)
         // would have had its old notes stranded on with nothing left owning them. clearChordPad
         // is the one public call that stops the pad *and* releases the arp hold if this card is
         // the one holding it, so the old chord is properly given up before the new one lands.
+        const KeysProcessor::UndoGesture undoable { processor, "Drop chord",
+                                                   KeysProcessor::UndoScope::pads };
         processor.clearChordPad(cell);
         processor.setChordPad(cell, p->chord);
         // Committed, so the tray's cell goes empty. `taken` alone would not say this: the
@@ -580,6 +586,7 @@ void ChordPads::showPadMenu(int slot)
         {
             if (slot == safe->editingSlot && safe->onEditToggle)
                 safe->onEditToggle(slot); // end the edit before wiping its target
+            safe->processor.pushUndo("Clear pad", KeysProcessor::UndoScope::pads);
             safe->processor.clearChordPad(slot);
         }
         else if (choice == 3)
@@ -846,7 +853,10 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
                 if (! p.taken && p.from == chorddrag::Payload::From::padSlot
                     && ! pads.getScreenBounds().contains(releasedAt)
                     && ! pads.processor.chordPad(p.index).locked)
+                {
+                    pads.processor.pushUndo("Clear pad", KeysProcessor::UndoScope::pads);
                     pads.processor.clearChordPad(p.index);
+                }
 
                 pads.inFlight = nullptr;
                 pads.repaint();

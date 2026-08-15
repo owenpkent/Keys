@@ -1568,6 +1568,99 @@ void KeysProcessor::advanceChainClock(int numSamples)
     }
 }
 
+// --- Undo -------------------------------------------------------------------------------
+//
+// See the header for why this is content-only and why an entry is a whole-subtree snapshot
+// rather than a hand-written inverse of each action.
+
+juce::ValueTree KeysProcessor::snapshotFor(UndoScope scope) const
+{
+    return scope == UndoScope::pads ? chordPadsToTree() : arpToTree();
+}
+
+void KeysProcessor::restore(const UndoEntry& e)
+{
+    // Both of these want the *root* the session file uses, and each snapshot is already that
+    // subtree - so wrap it back up in a root of the right shape before handing it over.
+    juce::ValueTree root { "KEYS" };
+    root.appendChild(e.before.createCopy(), nullptr);
+    if (e.scope == UndoScope::pads)
+        chordPadsFromTree(root);
+    else
+        arpFromTree(root);
+}
+
+void KeysProcessor::pushUndo(const juce::String& label, UndoScope scope)
+{
+    if (undoGestureDepth > 0)
+        return; // inside an open gesture: the outermost push already took the "before"
+
+    undoStack.push_back({ label, scope, snapshotFor(scope) });
+    if ((int) undoStack.size() > maxUndoDepth)
+        undoStack.erase(undoStack.begin());
+
+    // A new edit ends the redo branch, which is what every undo stack does and what people
+    // expect: once you change something after undoing, the future you undid is gone.
+    redoStack.clear();
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
+KeysProcessor::UndoGesture::UndoGesture(KeysProcessor& p, const juce::String& label, UndoScope scope)
+    : processor(p)
+{
+    p.pushUndo(label, scope);   // the outermost one; any nested push is absorbed
+    ++p.undoGestureDepth;
+}
+
+KeysProcessor::UndoGesture::~UndoGesture()
+{
+    --processor.undoGestureDepth;
+}
+
+void KeysProcessor::undo()
+{
+    if (undoStack.empty())
+        return;
+    auto entry = undoStack.back();
+    undoStack.pop_back();
+
+    // The current state becomes the redo entry, taken *before* the restore overwrites it.
+    redoStack.push_back({ entry.label, entry.scope, snapshotFor(entry.scope) });
+    if ((int) redoStack.size() > maxUndoDepth)
+        redoStack.erase(redoStack.begin());
+
+    // Undoing must never leave a note ringing that nothing owns any more. Restoring pads can
+    // rewrite the chord a sustained card is holding, and restoring the arp can rewrite the
+    // lanes under a running line, so let go of everything first - the same choke point an
+    // audition uses, and for the same reason.
+    stopAllChordPads();
+    restore(entry);
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
+void KeysProcessor::redo()
+{
+    if (redoStack.empty())
+        return;
+    auto entry = redoStack.back();
+    redoStack.pop_back();
+
+    undoStack.push_back({ entry.label, entry.scope, snapshotFor(entry.scope) });
+    if ((int) undoStack.size() > maxUndoDepth)
+        undoStack.erase(undoStack.begin());
+
+    stopAllChordPads();
+    restore(entry);
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
+void KeysProcessor::clearUndoHistory()
+{
+    undoStack.clear();
+    redoStack.clear();
+    undoGen.fetch_add(1, std::memory_order_relaxed);
+}
+
 juce::ValueTree KeysProcessor::chordPadsToTree() const
 {
     juce::ValueTree pads { "chordPads" };
