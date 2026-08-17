@@ -507,7 +507,8 @@ void ChordGenPanel::buildControls()
     // The audition tray, and the one line that says what a card in it does. The label is worth
     // its 20 px: a drag is the only way a candidate reaches a pad, and a gesture nothing on
     // screen mentions is a gesture nobody finds.
-    styleLabel(trayLabel, "Audition - click a chord to hear it, drag it onto a pad to keep it");
+    styleLabel(trayLabel,
+               "Audition - click to hear, drag onto a pad to keep, click a gap for a new chord");
     addAndMakeVisible(trayLabel);
 
     // The reference chord: one slot the tray's own actions cannot reach. Fill, Regen and Clear
@@ -749,8 +750,8 @@ void ChordGenPanel::timerCallback()
                           ? juce::String::fromUTF8("Audition - settings changed since these were "
                                                    "generated. Regen for new ones.")
                                 .toUpperCase()
-                          : juce::String("Audition - click a chord to hear it, drag it onto a pad "
-                                         "to keep it")
+                          : juce::String("Audition - click to hear, drag onto a pad to keep, "
+                                         "click a gap for a new chord")
                                 .toUpperCase(),
                       juce::dontSendNotification);
 

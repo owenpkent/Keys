@@ -5,6 +5,44 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Send a chord pad to arp A or B from its own menu
+
+Owen: *"I'd like to be able to right click on a chord pad and say send to ARP a or b"*. Two rows
+on a pad's card menu, beside the Send to arp slot submenu that has always been there: the chord
+goes straight into that line and the line becomes the current one, which is what a card
+**dragged** onto that line's switch or its macro card has done since 2026-08-02.
+
+**An accelerator, not a new right-click-only path.** It is the drag with the aim taken out of the
+mouse, exactly the relationship Send to arp slot has with a drop on a slot card, and both now run
+through one method - `KeysEditor::sendPadToArpLine` - so the two gestures cannot drift.
+`ArpPanel::takeChordOnLine` takes a pad slot rather than a drag payload to make that possible,
+which is all the drop ever wanted out of one.
+
+One row per line the UI shows, so C returns here the day it returns anywhere. Both rows are live
+on a line that is switched **off**, on purpose: a line that is off still takes a chord in, and
+switching it on then plays what it was handed.
+
+The menu is 11 rows and 408 px now, up from 9 and 340. Two rows rather than a submenu costing
+one, because Owen asked for the two by name and this menu can afford the height.
+
+### Fixed: the hole a taken tray card leaves can be filled again
+
+Owen: *"when you are generating chords and you move one off, there's an empty space, and then you
+can't regenerate it"*. **Clicking an empty tray cell now generates a chord into it and auditions
+it**, so taking a card and getting another one back is the same gesture twice.
+
+The hole itself was never the bug and has not changed: it is the record of which of the sixteen
+you have already taken, and it is what gives Fill something to do. The bug is that the way back
+was **invisible and unaimed**. Fill on the tray's header did reach it, but Fill does every empty
+cell at once; Regen deliberately rerolls only the cards you kept; the cell's right-click menu
+returned before it was built because every one of its eight rows needs a seed chord; and
+`ChordTray::mouseDown` returned before even reaching that. Meanwhile the cell painted as a plain
+unmarked well - no hover, no mark - so it read as scenery rather than as somewhere to click.
+
+So: an empty cell hovers like a card and carries a `+`, a left click fills and sounds it, and a
+right click offers the two rows that need no seed (New chord here, Fill every empty card) instead
+of nothing at all. The tray's caption says the third gesture out loud.
+
 ### Added: Undo and Redo
 
 Owen: *"we should have undo"*. **"There is no undo anywhere in Keys" was the stated reason for

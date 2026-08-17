@@ -96,6 +96,14 @@ public:
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
+    // Fired from a pad's right-click menu: hand this pad's chord straight to an arp line
+    // (Owen, 2026-08-16: "I'd like to be able to right click on a chord pad and say send to
+    // ARP a or b"). The editor services it rather than this strip calling the processor the way
+    // "Send to arp slot" does, so the item lands on exactly the path a chord *dragged* onto that
+    // line's switch or its macro card takes - `KeysEditor::sendPadToArpLine`, which prefers the
+    // panel while it is open and moves the aim to the line you named.
+    std::function<void(int slot, int line)> onSendToArpLine;
+
     // Every drop this strip takes, wherever the chord came from: a pad moved to another pad, a
     // pad dropped on the live card to recall it, the live card captured onto a pad, and a
     // candidate dragged in from the generator's audition tray in a window of its own.

@@ -181,7 +181,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   line at all, and those same tabs say it now. **Dragging a chord card onto an arp slot binds it there**, or
   onto a tab - or onto a line's **card in the macro view**, which is the same target the size
   of half the panel rather than the size of a tab - to hand it over now. The left-click twin
-  *Send to arp slot* never had. The slot cards, the tabs and the macro cards are each a
+  *Send to arp slot* never had. **The pad menu's `Send to arp A` / `B` rows are the aimed
+  accelerator** for the same thing (2026-08-16), through `KeysEditor::sendPadToArpLine`;
+  `ArpPanel::takeChordOnLine` takes a **pad slot** rather than a drag payload for that reason,
+  since the pad slot was the only thing a line ever wanted out of a drop. The slot cards, the tabs and the macro cards are each a
   `juce::DragAndDropTarget` (2026-08-02, see the chord-drag bullet below); JUCE walks *up* from
   whatever is under the point, which is what makes the whole macro row a target including the
   knobs on it. A drop sets the current line and never changes the view
@@ -942,6 +945,16 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   deliberately, and this window was it. A committed card **leaves its cell empty**, which is both
   the record of what you have taken and the thing that gives Fill a job. The Pads bar still
   carries Fill and Regen for the page, next to the pads they write.
+  **A hole is a target** (2026-08-16, Owen: "when you are generating chords and you move one off,
+  there's an empty space, and then you can't regenerate it"). Clicking an empty cell generates a
+  chord into it and auditions it, so taking a card and getting another one is the same gesture
+  twice. Nothing about the hole changed - Regen still means "reroll the cards I kept", which is
+  the distinction that earns Fill and Regen separate buttons - what changed is that the way back
+  was **invisible and unaimed**: the only route was Fill on the header, which does all of them,
+  and the cell painted as an unmarked well with no hover and no mark, so it read as scenery. It
+  hovers and carries a `+` now, and `ChordTray::mouseDown` no longer returns before the
+  right-click branch, so an empty cell's menu offers the two rows that need no seed (New chord
+  here, Fill every empty card) instead of nothing at all.
   **The reference card is the tray's fixed point** (`ChordRefCard`, same files as `ChordTray`;
   Owen: "another box for the reference chord ... so when you regenerate everything, it doesn't
   erase your reference chord"). One chord that no tray action touches, filled by dragging a tray
@@ -973,8 +986,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   rows**: it is anchored to a pad near the bottom of a 699 px window at a 34 px item height, so
   it grows *upwards* off the screen, and JUCE answers a too-tall menu by splitting it into
   columns or making it hover-scroll - and a scrolling popup cannot be worked with one mouse. It
-  is **9 rows and 2 separators, 340 px** (rows 34, separators 17); the settings took it to 23
-  rows and about 820 px for part of 2026-07-30, which is what the window fixed.
+  is **11 rows and 2 separators, 408 px** (rows 34, separators 17) since Send to arp A and B
+  joined it on 2026-08-16; the settings took it to 23 rows and about 820 px for part of
+  2026-07-30, which is what the window fixed. Two rows rather than a `Send to arp line` submenu
+  costing one: Owen asked for it by name ("say send to ARP a or b"), and a submenu would have
+  spent a hover to save 68 px this menu can afford.
   **Nothing generation does overwrites a chord** (Owen, same day): `fillPage()` writes
   only empty pads, a picked suggestion goes to the first empty pad and the row greys when
   there is none, `regeneratePage()` is the destructive one and skips locks, and each button
@@ -1096,9 +1112,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   so it works with both buttons off).
   **Owner-directed exceptions, and they are a closed list.** Each one is Owen's call on a
   stated date, not something that drifted in:
-  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30). Nine rows:
+  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30 and 2026-08-16).
+     Eleven rows:
      Edit on keyboard / Clear pad / Lock, the two chord-shaping edits (Octave down/up, Next
-     voicing), the generator's two per-card actions (New chord, Next: could follow), and
+     voicing), the generator's two per-card actions (New chord, Next: could follow),
+     **Send to arp A** and **Send to arp B**, and
      **Send to arp slot**. Some of it is an accelerator - Clear pad is also a drag off the
      strip, and Fill and Regen on the bar are New chord in bulk - but the per-card edits are
      reached from this menu and nowhere else, because a card is all playing surface and there
@@ -1117,6 +1135,12 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      to send it to the arpeggiator unless you drag it"), so the drag - onto a line's card,
      its letter tab on the arp bar, or a slot - is now the *only* left-click path into a
      line, and a click just plays the pad. Still mouse-only clean: a drag is a left gesture.
+     **`Send to arp A` / `B` on the same menu are that drag's accelerator** (2026-08-16, Owen:
+     "I'd like to be able to right click on a chord pad and say send to ARP a or b"), the exact
+     relationship Send to arp slot has with a drop on a slot card - so it opens no new
+     right-click-only path, and the drag stays the left-click one. Both go through
+     `KeysEditor::sendPadToArpLine`, the one path a pad's chord takes into a line, and both are
+     live on a line that is switched **off**: a line that is off still takes chords in.
   3. ***Lock / Unlock has no left-click twin*** (2026-07-30, Owen: "I don't want the lock
      button to be visible. I only want it to be in right click"). This is the one path where a
      left-click twin was **built and then deliberately taken away**: a lock chip sat in the
@@ -1136,9 +1160,12 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      by design, and that is the one behaviour Latch exists to distinguish from.
   5. *The **audition tray**'s card menu is right-click* (2026-08-01, Owen: "when you right click
      on a chord in there, I want you to have a whole bunch of options about trying to find
-     similar ones or what might come next"). Eight rows: Send to first empty pad, the two seeded
+     similar ones or what might come next"). Eight rows on a filled card: Send to first empty pad,
+     the two seeded
      fills (Fill tray with similar chords / with what could follow), the three shaping edits
-     (Octave down/up, Next voicing), New chord here and Clear this card. It earns the exception
+     (Octave down/up, Next voicing), New chord here and Clear this card. **Two rows on an empty
+     one** (2026-08-16): New chord here and Fill every empty card, the only two that need no seed.
+     It earns the exception
      the way the pad card menu did - a tray card is all playing surface, and there is nowhere on
      it for eight buttons. Most of it has a left-click twin: Send to first empty pad is the
      commit drag with the aim taken out, and the two fills are the **Similar** and **Could

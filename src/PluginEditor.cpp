@@ -809,6 +809,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
+    chordPads.onSendToArpLine = [this](int slot, int line) { sendPadToArpLine(slot, line); };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
@@ -1062,19 +1063,26 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
     repaint();
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        // Through the panel when it is open, the same path a drop on a macro card takes; the
-        // tabs are only on screen while the section is, so the fallback is for safety, not
-        // for a state the UI can reach.
-        if (owner.arpPanel != nullptr)
-            owner.arpPanel->takeChordOnLine(line, *p);
-        else
-        {
-            owner.processor.holdArpChordFromPad(p->index, line);
-            owner.processor.setArpCurrentLine(line);
-            owner.refreshArpBarTabs();
-        }
+        owner.sendPadToArpLine(p->index, line);
         p->taken = true;
     }
+}
+
+// Through the panel when it is open, the same path a drop on a macro card takes - which is what
+// moves the aim to this line without moving the view. A / B are power switches now and stay on
+// the bar with the section folded, so the fallback below is reachable in earnest: it is what a
+// drop, or the pad menu's "Send to arp A", does while the arp panel does not exist.
+void KeysEditor::sendPadToArpLine(int padSlot, int line)
+{
+    if (arpPanel != nullptr)
+    {
+        arpPanel->takeChordOnLine(line, padSlot);
+        return;
+    }
+
+    processor.holdArpChordFromPad(padSlot, line);
+    processor.setArpCurrentLine(line);
+    refreshArpBarTabs();
 }
 
 ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)

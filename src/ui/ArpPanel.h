@@ -108,7 +108,10 @@ public:
     // what made the whole macro row a target including the knobs sitting on it, is exactly what
     // JUCE's own `findTarget` does, so the behaviour survived the deletion.
     void takeChordOnSlot(int slot, const chorddrag::Payload&);
-    void takeChordOnLine(int line, const chorddrag::Payload&);
+    // By pad slot rather than by payload: the only thing a line ever wanted out of a drag was
+    // which pad it came from, and taking the slot lets a pad's own "Send to arp A" menu row
+    // (2026-08-16) reach this same method instead of growing a second copy of it.
+    void takeChordOnLine(int line, int padSlot);
 
     // **The panel itself takes a chord, anywhere on it** (2026-08-14, Owen: "need to be able to
     // drag chords to not just the main arp window"). Paging the deep view is what made this

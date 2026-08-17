@@ -407,9 +407,9 @@ void ArpPanel::takeChordOnSlot(int slot, const chorddrag::Payload& p)
 // should follow the same aim. The view does not move with it (`leaveMacroView` false); in the
 // macro view you dropped onto the line itself, and being thrown into that line's deep controls
 // is not what the gesture asked for.
-void ArpPanel::takeChordOnLine(int line, const chorddrag::Payload& p)
+void ArpPanel::takeChordOnLine(int line, int padSlot)
 {
-    processor.holdArpChordFromPad(p.index, line);
+    processor.holdArpChordFromPad(padSlot, line);
     setEditLine(line, /*leaveMacroView*/ false);
 }
 
@@ -431,7 +431,7 @@ void ArpPanel::itemDropped(const SourceDetails& details)
     repaint();
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        takeChordOnLine(editLine(), *p);
+        takeChordOnLine(editLine(), p->index);
         p->taken = true;
     }
 }
@@ -1608,7 +1608,7 @@ void ArpPanel::MacroRow::itemDropped(const SourceDetails& details)
     setDropTarget(false);
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        owner.takeChordOnLine(line, *p);
+        owner.takeChordOnLine(line, p->index);
         p->taken = true;
     }
 }
