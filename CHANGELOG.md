@@ -69,6 +69,26 @@ Unlike the generator window, the take window's bounds are **not** kept in `Layou
 is transient, and a session reopening onto this window would be reopening onto a take that no
 longer exists.
 
+### Documented: keeping Keys on screen, and which product to reach for
+
+Two things that read as Keys bugs and are neither, both now answered in `docs/ABLETON_LIVE.md`
+rather than rediscovered:
+
+**Keys vanishing when another track is selected** is Live's **Auto-Hide Plug-In Windows**, on by
+default, plus **Multiple Plug-In Windows** being off. Worth its own section because auto-hide is
+designed for effects you set and forget, and Keys is *played* - wanting it on screen while a
+different track is selected is the normal way to use it here, not an edge case. Confirmed working
+by Owen, 2026-08-17. Live's switch is global and Live has no per-plugin pin; Keys' own **Detach**
+buttons are the nearest thing, since a detached section is a desktop window Live does not manage.
+That is also why the hosted synth's GUI in Keys Host stays put while Keys' own window goes: two
+window kinds, one screen.
+
+**Which product to use** now leads the page, because picking wrong is the most common way to end
+up stuck. The deciding question is whether Live should record what you play: plain Keys puts the
+clip on the instrument's own track so it plays straight back, while Keys Host exists to avoid the
+routing that recording requires. Those two cannot both come from one product, and the page says
+so instead of leaving it to be found.
+
 ### Fixed: the editor was much more expensive to paint than it needed to be
 
 Owen: *"sluggish overall"*, in Ableton, with the standalone fine. Three things, each defensible

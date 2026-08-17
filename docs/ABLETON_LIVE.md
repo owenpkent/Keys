@@ -56,6 +56,40 @@ the default set in Options → Preferences → File/Folder → "Save Current Set
 Default"). Every new project then opens with the Keys track, the routing, and the
 monitor settings already in place. Nothing to rewire, ever.
 
+## Keeping Keys on screen while you work on other tracks
+
+By default, selecting a different track makes the Keys window disappear. That is a Live
+setting, not a Keys bug, and two switches fix it:
+
+**Preferences (Ctrl+,) → Plug-Ins:**
+
+- **Auto-Hide Plug-In Windows → OFF.** The manual: *"Using the Auto-Hide Plug-In Windows
+  option, you can choose to have Live display only those plug-in windows belonging to the
+  track that is currently selected."* That restriction is the symptom; off, Keys stays.
+- **Multiple Plug-In Windows → ON**, so opening another plugin joins Keys on screen
+  rather than replacing it.
+
+**This matters more for Keys than for most plugins.** Auto-hide is built for effects you
+set and forget — you open the compressor, adjust it, move on. Keys is *played*. Wanting
+it on screen while a different track is selected is not an edge case here, it is the
+normal way to use it, which is why this is worth setting once and forgetting.
+
+The catch is Live's: that switch is **global**, so every plugin window then stays open and
+a busy set fills the screen. Live has no per-plugin "pin" — it is a long-standing feature
+request and it does not exist.
+
+### Why some plugins seem to ignore auto-hide
+
+Plugins that open their **own** desktop windows are never managed by Live's auto-hide,
+because Live does not own those windows. You can watch both behaviours at once in Keys
+Host: the hosted synth's GUI is a separate floating window and stays put, while Keys' own
+window vanishes with the track selection.
+
+Keys' **Detach** buttons work the same way. Every section (Controls, Arp, Chord Pads,
+Keyboard) can be detached into a desktop window of its own, so detaching just the
+**Keyboard** keeps the keys reachable without turning auto-hide off globally. That is
+effectively the per-plugin pin Live lacks, for the part of Keys you actually play.
+
 ## The knob row and CC mappings persist too
 
 The eight knobs above the keyboard send MIDI CCs down the same routing as the notes.
@@ -222,6 +256,11 @@ splitting it back out afterwards is a job for Live, not for Keys.
 - **No sound.** Check the instrument track's **Monitor** is **In** and its **MIDI
   From** points at the Keys track → Keys. Keys itself never makes sound; it only
   sends notes.
+- **Keys disappears when I select another track.** Live's **Auto-Hide Plug-In Windows**,
+  on by default. See "Keeping Keys on screen while you work on other tracks" above.
+- **I armed the Keys track, recorded, and got an empty clip.** Expected, and it is a
+  Live limit rather than a Keys bug — Live records at the track *input*, upstream of
+  where Keys makes its notes. See "Recording what you play".
 - **Wrong octave.** The Octave control transposes the keys you click, not the chord
   cards: those carry absolute notes, fixed by the generator's own Octave at the moment
   they were made. Also check the receiving instrument's own range.
