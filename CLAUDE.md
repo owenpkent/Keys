@@ -1203,7 +1203,8 @@ the same effort. Both were lifted; `text` was never the problem.
 
 ## Reference manuals
 
-Seven manuals sit in the repo root, and `docs/REFERENCES.md` records what each one contributed,
+Eight manuals sit in the repo root (they are gitignored, so a fresh clone has none - download the
+one you need), and `docs/REFERENCES.md` records what each one contributed,
 what Keys took from it and what it deliberately did not. **Read the relevant one before
 designing a feature, not after.** This is not a formality: the Serum guide corrected a built
 `RangeKnob` satellite that looked right on screen, and the Cthulhu manual corrected a whole
@@ -1216,8 +1217,9 @@ step lanes, Link Lengths, the Rand lane, mute-preserves-value); **Kirnu Cream** 
 per-step vocabulary and the best source of unbuilt ideas; **Stochas** is probability and the
 chain/conditional trigger Keys does not have; **Serum 2** is UI, not sequencing; **Subharmonicon**
 is the polyrhythm dividers and the undertone series; **MatrixBrute** has ties and slides;
-**Numerology 4** draws the skip-versus-mute distinction. `docs/REFERENCES.md` ranks the three
-unbuilt ideas worth having.
+**Numerology 4** draws the skip-versus-mute distinction; **Arturia Acid V** is the 303 sequencer
+and the source of `docs/ACID_DESIGN.md` (added 2026-08-16, proposed and unbuilt).
+`docs/REFERENCES.md` ranks the three unbuilt ideas worth having.
 
 ## Screenshots for docs
 

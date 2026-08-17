@@ -1,6 +1,6 @@
 # Reference manuals
 
-Seven manuals sit in the repo root. They are not decoration: eight features in Keys were built
+Eight manuals sit in the repo root. They are not decoration: eight features in Keys were built
 from a specific page of one of them, and at least twice a manual **corrected a guess** that had
 already been coded and looked right on screen. This file records what each one contributes, what
 Keys took, and what it deliberately did not - so the next person does not re-derive a decision
@@ -167,6 +167,34 @@ distinction Keys does not:
   Ratchet. The other three are not built.
 - *"the first and last steps of the sequence cannot be skipped"* - a guard worth copying if skip
   is ever built, since a pattern that can skip its own boundaries has no length.
+
+---
+
+## Arturia Acid V (`Acid-V-Manual.pdf`, ~100pp)
+
+Added 2026-08-16, at Owen's ask, to spec an acid line for Keys. Chapter 4 is the whole
+sequencer and is the only chapter that matters here (chapters 3, 5 and 6 are a synth Keys does
+not have). `docs/ACID_DESIGN.md` is the spec that came out of it; the short version:
+
+- **The sequence owns its pitch.** This is the one thing Keys' arp cannot express: its Note
+  lane picks degrees of a chord you hand it, and a 303 is handed nothing. One new lane.
+- **Rows are the twelve pitch classes, octave is a separate per-step slider.** Not a
+  conventional piano roll, and the reason a 303 grid fits in a panel that a four-octave roll
+  does not. Load-bearing for Keys' fixed-height arp panel.
+- **Accent is binary per step with one global amount**, because on the hardware it moves VCA
+  level and filter decay together (3.2.8). A continuous velocity lane says it worse.
+- **Slide is portamento into the step from the one before**, and *"if you place a slide on step
+  1 the pitch will glide from the final step in the pattern"* - a wrap that is easy to miss.
+- **Polymetric mode** is five independent lane lengths plus a **realign count**. Keys has the
+  first half already (Link Lengths off); the reset count is new and cheap.
+- **The dice are per-lane live probability**, which is Keys' Drift, not its Roll and not its
+  Rand lane. Acid V puts its loudest dice on pitch and octave, where `laneDrifts` currently
+  forbids them. That exception is per-mode, not global.
+- **Density** thins a pattern by muting steps non-destructively; turning it up restores them.
+  It must never write the Mute lane or it stops being reversible.
+- Not taken: the sequence browser (Keys has twelve slots), MIDI-file export by drag, the
+  hover-reveal dice (a discovery problem on a mouse-only surface), and right-click to remove a
+  note (left-click-to-clear does it, and the right-click exception list stays closed).
 
 ---
 
