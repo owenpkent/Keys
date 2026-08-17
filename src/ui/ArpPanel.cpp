@@ -2630,13 +2630,28 @@ void ArpPanel::refreshVoiceButton()
 
 void ArpPanel::timerCallback()
 {
+    // The lane-length repair runs whether or not anyone is looking. A session saved before a
+    // lane existed loads that lane at ArpPattern's default 8 while its neighbours are at 16 or
+    // 32, and the ARP section may well be folded when it lands - so gating this on being on
+    // screen would leave the repair waiting for the user to open the panel.
+    refreshLaneReadouts();
+
+    // Everything below here is display. The panel keeps existing while its section is folded
+    // and while it sits in a closed detached window, and refreshing controls nobody can see
+    // costs the message thread - which in a plugin is the DAW's UI thread, not ours.
+    if (! isShowing())
+        return;
+
     refreshMacro(); // rate, shape and the held chord, none of which an attachment drives
 
     refreshShape(); // the host can automate arpPattern/arpDirection out from under us
     refreshRateMode(); // ... and arpRateFree, which decides what the dial is even measuring
     refreshTuplet();   // ... and arpTuplet, which has no attachment to hear it change
     refreshRetrig();
-    refreshLaneReadouts();
+    // No second refreshLaneReadouts() here: the one above the isShowing() gate already ran this
+    // tick, and having both meant enforceLinkedLengths walked all thirteen lanes twice and both
+    // readouts were written twice, per tick, in a pass whose whole point is removing per-tick
+    // cost.
     refreshPatternButtons();
     if (! patternMode())
         return; // nothing of the step editor is on screen to repaint

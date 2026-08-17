@@ -86,6 +86,12 @@ protected:
     virtual int noteChannel() const { return 0; }      // 0 = the global channel param
     virtual int drawnForOutputNote(int note) const { juce::ignoreUnused(note); return -1; }
 
+    // Where one drawn id sits, so a note going on or off repaints that key and not the whole
+    // surface. An empty rectangle means "this surface cannot say", which falls the caller back
+    // to repainting everything - the behaviour every surface had before this existed.
+    virtual juce::Rectangle<int> drawnBounds(int drawn) const
+    { juce::ignoreUnused(drawn); return {}; }
+
     void refresh(); // diff the sounding set, emit note on/off
 
     // Drawn ids whose output note is sounding right now but which this surface did not
@@ -115,6 +121,19 @@ protected:
 private:
     void timerCallback() override; // polls the processor's sounding generation, repaints on change
     juce::uint32 lastSoundingGen = 0;
+
+    // Repaint the keys whose lit state actually moved, and only those. `lastLit` maps each key
+    // this surface last drew as lit to *which* of the two lit colours it drew - a set of lit keys
+    // is not enough, because `pressed` paints hotter than latched / sustained / external and a key
+    // moving between them leaves the set unchanged. See the .cpp.
+    void repaintLitChanges();
+    static constexpr int stateHeld = 1;   // latched, sustained, or sounding from elsewhere
+    static constexpr int stateActive = 2; // under the mouse right now, drawn hotter
+    // How far past a key's own rectangle paint() can reach: a lit black key's outer glow is a
+    // 4 px stroke centred 2.5 px outside it. Anything less leaves a ring of accent behind when
+    // the note goes off.
+    static constexpr int litOverdrawPx = 5;
+    std::map<int, int> lastLit;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoteSurface)
 };

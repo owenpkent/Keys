@@ -16,6 +16,20 @@ namespace
 
 PianoKeyboard::PianoKeyboard(KeysProcessor& p) : NoteSurface(p)
 {
+    // paint() fills the whole component with the instrument-body gradient before it draws a
+    // single key, so nothing behind this is ever visible. Saying so stops JUCE repainting the
+    // editor's own full-window gradient underneath every time a key lights.
+    setOpaque(true);
+}
+
+// The keys are in no particular order and there are at most 88 of them, so a scan is cheaper
+// than a map that would have to be rebuilt by layoutKeys on every resize.
+juce::Rectangle<int> PianoKeyboard::drawnBounds(int drawnNote) const
+{
+    for (const auto& k : keys)
+        if (k.note == drawnNote)
+            return k.bounds.getSmallestIntegerContainer();
+    return {};
 }
 
 void PianoKeyboard::setRange(int newLow, int newCount)

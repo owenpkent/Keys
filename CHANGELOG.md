@@ -5,6 +5,144 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: REC, because Ableton cannot record Keys onto the Keys track
+
+Owen: *"host in ableton does not record midi"*. Arming the Keys Host track in Live and pressing
+record captures an empty clip, and **it is a Live limit rather than a Keys bug**: Live records
+what arrives at a track's *input*, and Keys' notes are made inside the plugin, downstream of
+that input. No plugin-side setting changes it, in Keys or in any other MIDI-generating plugin.
+The listener-track routing in `docs/ABLETON_LIVE.md` has always worked and still does - it is
+also a second track, a re-patch and an arm, which on a one-track Keys Host set is the entire
+thing that set was arranged to avoid.
+
+So Keys records itself. **REC** and a take chip ride the *Keyboard* bar, beside Exclusive /
+Sustain / Latch / All Off, and neither hides when the section folds - a stop button that folds
+away mid-take is not a stop button. That bar had the room; unlike the Controls bar, whose budget
+is accounted for down to the pixel, this pair costs no change to the window's minimum width.
+
+**What is captured is the stream that leaves `processBlock`** - after the arp, after strum, on
+the channels the lines sent it on. That is what you heard, and it is deliberately not what the
+UI asked for: recording the note path instead would capture the chord you clicked rather than
+the arpeggio it produced, which is the wrong take by exactly the interesting part.
+
+**The audio thread writes into a ring and publishes one index**; the 50 Hz heartbeat drains it
+into a vector on the message thread. Nothing on the audio thread allocates, locks, or touches
+that vector. Events longer than three bytes are skipped - every channel voice message fits, and
+admitting sysex would mean a variable-size slot and an allocation on the wrong thread.
+
+**The take is trimmed to its first note**, so arming and then thinking costs the file nothing,
+and it carries the tempo Keys was running at, so the clip lands on the grid. Its first *note* and
+not its first event, which matters because Keys' own mod wheel and pitch bend land on the very
+stream the capture reads: a wheel nudged before you played would otherwise become the take's zero
+and push every note that far off the top of the clip, which is exactly what the frozen tempo
+exists to prevent. A take with no note in it is not a take and writes no file, so an accidental
+arm-and-stop cannot replace the one you meant to keep. Anything still ringing when recording
+stops is given an end: left alone that is a hanging note Live holds until the next stop, which
+reads as Keys emitting a stuck note.
+
+**Stopping writes the file, so a take is never a thing a click can lose.** Pressing REC again
+starts a fresh one, and the only thing cleared is a copy of a file already on disk. Closing the
+set or deleting the plugin mid-take writes it too, from the destructor, since that is otherwise
+the one click that *could* lose one. A write that fails - no folder, no stream, a read-only
+Documents - keeps the take you already had and says **"Take failed"** on the chip rather than
+going on offering the previous file captioned with the new take's length. Every take
+goes to one fixed folder (`Documents\OK Studio\Keys Takes`) rather than through a save dialog,
+and that is the point: add the folder to Live's Places once and every take afterwards is a short
+drag inside Live's own browser. Dragging out of a plugin window and across the screen works too
+(drag the chip), and clicking the chip shows the file in Explorer - but the long drag is the
+fallback here, not the intended gesture.
+
+`setRecording` and `writeTake` are two calls on purpose, so the capture can be tested without
+writing into the user's Documents folder. `tests/TakeTests.cpp` pins the pair, the trim, the
+hanging-note repair, the tempo, that arming again starts a new take rather than appending, that a
+controller move before the first note does not shift the take off the grid, and that a capture of
+nothing but controller moves is not a take at all.
+
+**The take window** (`src/ui/TakePanel.h`) is what stops a take being a filename you have to
+trust. Clicking the chip opens a picture of what was captured - length, note count, tempo, and
+the notes as bars - with **Save MIDI as…**, **Show in Explorer**, and the roll itself as the
+drag source, because the thing you are dragging should be the thing you can see. It is a *view*
+and not an editor: editing a take belongs in a piano roll, Keys has a sibling for that
+(Lattice), and half of one here would be a second, worse one.
+
+**`takeNotes()` is built from `buildTakeMidiFile`'s own sequence**, not from the raw capture, so
+the trim, the pairing and the supplied note-offs are applied once and the picture is provably
+the bytes. That property has a test, and the test earned its keep immediately: `takeNotes` first
+shipped with a 10 ms floor on note length so short notes stayed visible, which made every short
+note in the preview disagree with the file. The floor belongs in `Roll::paint`, which already
+floors the *bar* at 2 px. A minimum length is a question about drawing, not about data.
+
+**The take's tempo is frozen when recording arms** rather than read when the file is built. The
+file is written once, at stop; a host tempo that moved afterwards would have made every later
+preview disagree with bytes already on disk. It is also simply the tempo you played to.
+
+Unlike the generator window, the take window's bounds are **not** kept in `LayoutState`: a take
+is transient, and a session reopening onto this window would be reopening onto a take that no
+longer exists.
+
+### Documented: keeping Keys on screen, and which product to reach for
+
+Two things that read as Keys bugs and are neither, both now answered in `docs/ABLETON_LIVE.md`
+rather than rediscovered:
+
+**Keys vanishing when another track is selected** is Live's **Auto-Hide Plug-In Windows**, on by
+default, plus **Multiple Plug-In Windows** being off. Worth its own section because auto-hide is
+designed for effects you set and forget, and Keys is *played* - wanting it on screen while a
+different track is selected is the normal way to use it here, not an edge case. Confirmed working
+by Owen, 2026-08-17. Live's switch is global and Live has no per-plugin pin; Keys' own **Detach**
+buttons are the nearest thing, since a detached section is a desktop window Live does not manage.
+That is also why the hosted synth's GUI in Keys Host stays put while Keys' own window goes: two
+window kinds, one screen.
+
+**Which product to use** now leads the page, because picking wrong is the most common way to end
+up stuck. The deciding question is whether Live should record what you play: plain Keys puts the
+clip on the instrument's own track so it plays straight back, while Keys Host exists to avoid the
+routing that recording requires. Those two cannot both come from one product, and the page says
+so instead of leaving it to be found.
+
+### Fixed: the editor was much more expensive to paint than it needed to be
+
+Owen: *"sluggish overall"*, in Ableton, with the standalone fine. Three things, each defensible
+on its own:
+
+**The keybed repainted in full on every note change.** Every key is a rounded `Path`, a vertical
+gradient, a clipped bevel and two seam strokes, and `paint()` rasterises all of them - up to 33
+times a second while an arpeggio runs, and once per key crossed during a drag glide.
+`NoteSurface` now diffs the lit keys and repaints only the ones that moved (`repaintLitChanges`,
+via a new `drawnBounds` a surface may decline to answer, in which case it gets the old full
+repaint). `paint()` itself is untouched: JUCE hands it the clip region either way, so keys
+outside it cost a bounds test instead of a rasterisation.
+
+It diffs a **map of state and not a set of lit keys**, which is the whole correctness of it: the
+keybed draws `pressed` in a hotter accent than latched, sustained or externally sounding, so a
+set says nothing changed for every move *between* those. Releasing a key under Sustain, a latch
+toggle, a sustained drag glide and a key going from your own press to the arp sounding it are all
+that move - the first of them would have left the key in the bright press colour permanently.
+The dirty rectangle is also grown by the widest thing `paint()` draws outside a key rather than
+by a guessed two pixels: a lit black key's glow is a 4 px stroke centred 2.5 px out, so it
+reaches 4.5, and two pixels of margin left a ring of accent hanging in the air after note-off.
+
+**Nothing in Keys was opaque**, so every one of those repaints also redrew the editor's
+full-window gradient underneath. `PianoKeyboard` fills its whole bounds before it draws a key,
+so it says so now.
+
+**Two timers ran flat out with nothing to do.** The MCP bridge polled at 5 ms - 200 message-thread
+wake-ups a second for a queue that is empty unless an MCP client is actively driving the plugin -
+and now starts on demand and stops when its queues run dry. `ArpPanel` refreshed its whole
+control set at 10 Hz whether or not it was on screen, and now returns early when it is not; the
+lane-length repair stays outside that gate, because a session can load with the section folded.
+
+**And three costs this pass had added itself.** The take chip stat'ed the take file twice per
+30 Hz tick, forever, for an answer only a REC click can change (cached against its path now, so
+a network or OneDrive-backed Documents folder is not asked sixty times a second); the take window
+rebuilt the entire `MidiFile` on every tick while recording, because its identity check keys on
+an event count that is by definition growing, at a cost rising with the take's length (throttled
+to 5 Hz while a take runs, which is invisible on a picture of something still being played); and
+`refreshLaneReadouts` ended up called twice per tick, once either side of the new gate.
+
+In a plugin, that message thread is the DAW's UI thread, which is why this is felt in Live and
+not in the standalone.
+
 ### Added: Send a chord pad to arp A or B from its own menu
 
 Owen: *"I'd like to be able to right click on a chord pad and say send to ARP a or b"*. Two rows

@@ -11,6 +11,7 @@
 #include "ui/RangeKnob.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
+#include "ui/TakePanel.h"
 // StepComboBox.h went with the Pads bar's Scale Compliance box on 2026-08-02. The class is
 // still in the tree: it is the answer for any future value shown as coarse steps of a
 // continuous parameter, and the bug it documents (a ComboBoxAttachment swallowing a pick of
@@ -294,6 +295,51 @@ private:
     juce::ToggleButton humanizeButton { "Humanize" };
     juce::ToggleButton chordExclusiveButton { "Exclusive" };
     juce::TextButton panicButton { "All Off" };
+
+    // --- Take: REC and the chip that gets it out -----------------------------------------
+    // Both ride the *Keyboard* bar, beside Exclusive / Sustain / Latch / All Off, and neither
+    // hides when the section folds: recording is the same reach-for-it-while-playing case
+    // those four are, and folding the keybed away mid-take must not take the stop button with
+    // it. The bar had the room - unlike the Controls bar, whose budget is spoken for down to
+    // the pixel (see minWidthForView) - so this costs no floor.
+    juce::TextButton recButton { "REC" };
+
+    // A click reveals the written file in Explorer; a drag hands it to whatever is under the
+    // pointer, Live included. Two paths on purpose: a drag out of a plugin window and across
+    // the screen is a long, precise gesture, and the reason every take is written to one fixed
+    // folder is that the folder can be added to Live's Places once and dragged from *inside*
+    // Live afterwards, which is a far kinder gesture with one mouse.
+    struct TakeChip : public juce::TextButton
+    {
+        std::function<juce::File()> getFile;
+
+        void mouseDown(const juce::MouseEvent&) override;
+        void mouseDrag(const juce::MouseEvent&) override;
+        void mouseUp(const juce::MouseEvent&) override;
+
+    private:
+        bool wasDrag = false; // this gesture became a drag, so its mouse-up is not a click
+    };
+    TakeChip takeChip;
+    void refreshTakeControls(); // lit state, caption and enablement; polled from timerCallback
+    juce::String lastTakeCaption;
+
+    // Whether lastTakeFile() is actually on disk, cached against the path it was asked about.
+    // refreshTakeControls runs at 30 Hz for the life of the editor and stat'ed the file twice on
+    // every one of those ticks, on the DAW's UI thread, for an answer only a REC click can
+    // change - which is the sort of cost this whole pass exists to remove.
+    juce::File lastTakeStatPath;
+    bool haveTakeFile = false;
+
+    // The take window: a picture of what was captured, plus Save as / Show in Explorer, so a
+    // take is something you can look at before it leaves rather than a filename you trust.
+    // Built when opened and destroyed when closed, the ChordGenPanel pattern - and unlike that
+    // one its bounds are not kept in LayoutState, because a take is transient and a session
+    // reopening onto this window would be reopening onto a take that no longer exists.
+    void setTakeWindowOpen(bool open);
+    std::unique_ptr<TakePanel> takePanel;
+    std::unique_ptr<DetachedWindow> takeWindow;
+    juce::Rectangle<int> takeWindowBounds; // this run only; see above
     juce::TextButton updateButton;
 
     // Chord-pad page navigation, riding the Pads bar.

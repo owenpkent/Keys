@@ -1,5 +1,6 @@
 #include "NoteSurface.h"
 #include <algorithm>
+#include <iterator>
 #include <okstudio/MouseOnly.h>
 
 namespace keys
@@ -24,7 +25,85 @@ void NoteSurface::timerCallback()
     if (gen == lastSoundingGen)
         return;
     lastSoundingGen = gen;
-    repaint();
+    repaintLitChanges();
+}
+
+// The keybed is the most expensive paint in the window: every key is a rounded Path, a
+// vertical gradient, a clipped bevel and two seam strokes, and paint() rasterises all of them.
+// This used to repaint the whole surface on any note change - up to 33 times a second while an
+// arpeggio runs, and once per key crossed during a drag glide - which is fine standalone and is
+// not fine in a DAW that scales the plugin window, where every one of those paths goes through
+// a transform on the way to the screen.
+//
+// So repaint the keys that changed and nothing else. paint() itself is untouched: JUCE hands it
+// the clip region either way, and the keys outside that region cost a bounds test instead of a
+// rasterisation. Correctness does not depend on the geometry, only on which ids are lit, so a
+// surface that cannot map an id to a rectangle (drawnBounds returns empty) still gets the whole
+// surface back, which is exactly what every surface did before.
+void NoteSurface::repaintLitChanges()
+{
+    // **A map of state, not a set of lit keys**, and that distinction is the whole correctness of
+    // this. PianoKeyboard::paint draws three states: `pressed` is the hot accent, latched /
+    // sustained / externally sounding are the deeper held accent, and the rest are resting. A set
+    // of "which keys are lit" cannot tell the first two apart, so every move *between* them
+    // compared equal and repainted nothing - release a key under Sustain and it stayed in the
+    // bright press colour for good, because it left `pressed` and entered `sustained` in the same
+    // breath and the union never moved. Same for a latch toggle, a sustained drag glide, and a key
+    // going from your own press to the arp sounding it.
+    std::map<int, int> lit;
+    for (const int drawn : latched)
+        lit[drawn] = stateHeld;
+    for (const int drawn : sustained)
+        lit[drawn] = stateHeld;
+    for (const int drawn : externallySounding())
+        lit[drawn] = stateHeld;
+    for (const int drawn : pressed)
+        lit[drawn] = stateActive; // last: paint checks `pressed` first, so this wins the same way
+
+    if (lit == lastLit)
+        return; // the generation moved for a note this surface does not draw
+
+    std::vector<int> changed;
+    auto a = lit.begin();
+    auto b = lastLit.begin();
+    while (a != lit.end() || b != lastLit.end())
+    {
+        if (b == lastLit.end() || (a != lit.end() && a->first < b->first))
+            changed.push_back(a++->first); // newly lit
+        else if (a == lit.end() || b->first < a->first)
+            changed.push_back(b++->first); // no longer lit
+        else
+        {
+            if (a->second != b->second)
+                changed.push_back(a->first); // lit before and lit now, in a different colour
+            ++a;
+            ++b;
+        }
+    }
+    lastLit.swap(lit);
+
+    // One union rather than a repaint per key: a chord is a handful of neighbours, and JUCE
+    // coalesces overlapping dirty rectangles anyway.
+    //
+    // Expanded by `litOverdrawPx`, which is measured off the widest thing paint() draws outside a
+    // key's own rectangle rather than guessed. A lit black key strokes `b.expanded(2.5f)` at a
+    // width of 4, so the outer half of that stroke reaches 4.5 px past the key; a lit white key's
+    // path stroke reaches 2.5, its seams a little over 1, and a black key's drop shadow 2.2. This
+    // was 2 for one build, which covered the seams and not the glow, so turning a note off left a
+    // ring of accent hanging in the air until something else forced a full repaint.
+    juce::Rectangle<int> dirty;
+    for (const int drawn : changed)
+    {
+        const auto keyBounds = drawnBounds(drawn);
+        if (keyBounds.isEmpty())
+        {
+            repaint();
+            return;
+        }
+        dirty = dirty.getUnion(keyBounds);
+    }
+    if (! dirty.isEmpty())
+        repaint(dirty.expanded(litOverdrawPx));
 }
 
 std::set<int> NoteSurface::externallySounding() const
@@ -202,7 +281,9 @@ void NoteSurface::refresh()
             next.push_back(kv.first);
     voiceOrder.swap(next);
 
-    repaint();
+    // Same narrowed repaint the timer takes. A drag glide calls this once per key crossed, so
+    // it is the other place a full-surface repaint used to land in a run.
+    repaintLitChanges();
 }
 
 void NoteSurface::mouseDown(const juce::MouseEvent& e)

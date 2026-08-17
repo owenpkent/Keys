@@ -461,6 +461,37 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     pitchLabel.setJustificationType(juce::Justification::centred);
     keybedHolder.addAndMakeVisible(pitchLabel);
 
+    // REC. Live cannot record a plugin's own MIDI onto that plugin's own track, so Keys keeps
+    // its own take instead - see KeysProcessor::setRecording for why that is a DAW limit and
+    // not something a Keys setting can turn off. Stopping writes the file, so the take is on
+    // disk before the chip beside this updates and there is nothing to lose by clicking again.
+    recButton.setClickingTogglesState(false); // refreshTakeControls owns the lit state
+    recButton.setTooltip("Record what Keys plays into a MIDI file. Ableton cannot record a "
+                         "plugin's own notes onto its own track, so Keys records itself; each "
+                         "take is written to Documents\\OK Studio\\Keys Takes.");
+    recButton.setTitle("Record take");
+    recButton.onClick = [this]
+    {
+        const bool wasRecording = processor.isRecording();
+        processor.setRecording(! wasRecording);
+        if (wasRecording)
+            processor.writeTake(); // stopping and saving always go together; see writeTake
+        refreshTakeControls();
+    };
+    addAndMakeVisible(recButton);
+
+    takeChip.setTooltip("The last take. Click to open it - a picture of what was captured, with "
+                        "Save as and Show in Explorer - or drag it straight onto a track. Add "
+                        "Documents\\OK Studio\\Keys Takes to Live's Places and every take is one "
+                        "short drag inside Live's own browser.");
+    takeChip.setTitle("Last take");
+    takeChip.getFile = [this] { return processor.lastTakeFile(); };
+    // Click opens the window rather than jumping to Explorer. Reveal is still one click, it is
+    // just inside the window now, next to the picture that tells you whether you want it.
+    takeChip.onClick = [this] { setTakeWindowOpen(takeWindow == nullptr); };
+    addAndMakeVisible(takeChip);
+    refreshTakeControls();
+
     panicButton.onClick = [this]
     {
         processor.stopAllChordPads(); // else pads keep rendering active after the silence
@@ -884,6 +915,9 @@ KeysEditor::~KeysEditor()
     rememberChordGenBounds();
     chordGenWindow.reset();
     chordGenPanel.reset();
+    // And the take window, same order and same reason.
+    takeWindow.reset();
+    takePanel.reset();
     if (styledWindow != nullptr)
         styledWindow->setLookAndFeel(nullptr);
     modWheel.setLookAndFeel(nullptr);
@@ -1898,8 +1932,148 @@ void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
     resized();
 }
 
+void KeysEditor::setTakeWindowOpen(bool open)
+{
+    if (open == (takeWindow != nullptr))
+        return;
+
+    if (open)
+    {
+        takePanel = std::make_unique<TakePanel>(processor);
+        // Deferred a message-loop turn, the same reason the generator window defers: both ways
+        // out (the panel's Close button, the title bar's X) are *inside* what this destroys.
+        juce::Component::SafePointer<KeysEditor> safe(this);
+        const auto close = [safe]
+        {
+            juce::MessageManager::callAsync([safe]
+            {
+                if (auto* e = safe.getComponent())
+                    e->setTakeWindowOpen(false);
+            });
+        };
+        takePanel->onClose = close;
+        takeWindow = std::make_unique<DetachedWindow>(
+            "Keys Take", lnf, *takePanel, takeWindowBounds,
+            TakePanel::minWindowSize(), TakePanel::defaultWindowSize(),
+            close, [this] { if (takeWindow != nullptr) takeWindowBounds = takeWindow->getBounds(); });
+        takePanel->sendLookAndFeelChange(); // built before it was ever parented
+    }
+    else
+    {
+        if (takeWindow != nullptr)
+            takeWindowBounds = takeWindow->getBounds();
+        takeWindow.reset(); // clears its content first, so the panel is unparented
+        takePanel.reset();
+    }
+}
+
+// The take chip's two gestures. Four pixels of slop tell them apart, the same tolerance
+// RangeKnob's lamp uses: a click on a mouse-only surface is allowed to be untidy.
+void KeysEditor::TakeChip::mouseDown(const juce::MouseEvent& e)
+{
+    wasDrag = false;
+    juce::TextButton::mouseDown(e);
+}
+
+void KeysEditor::TakeChip::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! wasDrag && e.getDistanceFromDragStart() > 4 && getFile != nullptr)
+    {
+        const auto f = getFile();
+        if (f.existsAsFile())
+        {
+            wasDrag = true;
+            TakePanel::dragTakeOut(this, f); // one spelling of the drag, shared with the roll
+            return;
+        }
+    }
+    if (! wasDrag)
+        juce::TextButton::mouseDrag(e);
+}
+
+void KeysEditor::TakeChip::mouseUp(const juce::MouseEvent& e)
+{
+    if (wasDrag)
+    {
+        setState(buttonNormal); // the gesture was a drag; it must not also fire onClick
+        return;
+    }
+    juce::TextButton::mouseUp(e);
+}
+
+// Polled rather than pushed: recording stops from the button here, but the take's duration
+// grows on the processor's heartbeat and nothing owes the editor a callback for it.
+void KeysEditor::refreshTakeControls()
+{
+    const bool rec = processor.isRecording();
+    recButton.setButtonText(rec ? "STOP" : "REC");
+    recButton.setToggleState(rec, juce::dontSendNotification);
+    recButton.setColour(juce::TextButton::buttonColourId, rec ? skin::recordLit : skin::control);
+
+    // While recording the chip counts the take up; stopped, it names what is on disk. Greyed
+    // rather than hidden when there is no take at all, so the pair never reflows the bar - the
+    // Undo/Redo rule.
+    const auto clock = [](double seconds)
+    {
+        const int s = juce::jmax(0, (int) seconds);
+        return juce::String(s / 60) + ":" + juce::String(s % 60).paddedLeft('0', 2);
+    };
+
+    juce::String caption;
+    if (rec)
+    {
+        // "Waiting" until the first **note**, because the take is trimmed to it: arming and then
+        // thinking costs the file nothing, and a counter running before anything is captured
+        // would say otherwise. Keys' own wheels put CC on the captured stream, so this asks
+        // whether a note has arrived and not whether an event has.
+        caption = processor.capturedHasNotes() ? clock(processor.capturedSeconds())
+                                               : juce::String("Waiting");
+        takeChip.setEnabled(false); // there is no file to reveal or drag until it is written
+        haveTakeFile = false;       // recomputed on the tick after this one stops
+    }
+    else if (processor.lastTakeWriteFailed())
+    {
+        // Say so rather than showing the take *before* this one as though it were the take you
+        // just played. writeTake keeps the older file on a failure precisely so nothing is lost;
+        // what must not happen is the UI reporting it as the new one.
+        caption = "Take failed";
+        takeChip.setEnabled(false);
+        haveTakeFile = false;
+    }
+    else
+    {
+        // One filesystem stat per *change*, not two per tick. This runs at 30 Hz forever on the
+        // DAW's UI thread, and nothing here can move except by the user's own REC click, so the
+        // answer is cached against the path it was computed for. It was two `existsAsFile()`
+        // calls per tick - 60 syscalls a second, and a network or OneDrive-backed Documents
+        // folder can block for milliseconds on each.
+        const auto f = processor.lastTakeFile();
+        if (f != lastTakeStatPath)
+        {
+            lastTakeStatPath = f;
+            haveTakeFile = f.existsAsFile();
+        }
+        caption = haveTakeFile ? "Take " + clock(processor.capturedSeconds())
+                               : juce::String("No take");
+        takeChip.setEnabled(haveTakeFile);
+    }
+
+    if (caption != lastTakeCaption)
+    {
+        lastTakeCaption = caption;
+        takeChip.setButtonText(caption);
+    }
+
+    // So a take recorded with the window already open appears in it. The panel's own check is
+    // the cheap one (a file path and an event count); it only rebuilds when those move.
+    if (takePanel != nullptr)
+        takePanel->refresh();
+}
+
 void KeysEditor::timerCallback()
 {
+    refreshTakeControls();
+
     refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
 
     const auto& apvts = processor.apvts;
@@ -2459,6 +2633,17 @@ void KeysEditor::resized()
         octaveReadout.setBounds(bar.removeFromLeft(42).withSizeKeepingCentre(42, 24));
         bar.removeFromLeft(3);
         octNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+
+        // REC and the take chip, off the left after Octave. Fixed widths taken before the
+        // caption gets what is left, the standing reserve-first rule - though this bar has
+        // room to spare at the floor (the four right-hand toggles and the Size/Octave group
+        // spend ~634 px of the ~1048 the bar hands out at 1280), so unlike the Controls bar
+        // this pair costs no floor. They stay put when the section folds for the same reason
+        // Sustain and All Off do: a stop button that folds away mid-take is not a stop button.
+        bar.removeFromLeft(14);
+        recButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(62, 24));
+        bar.removeFromLeft(6);
+        takeChip.setBounds(bar.removeFromLeft(116).withSizeKeepingCentre(116, 24));
 
         section(secKeyboard).caption = bar;
     }
