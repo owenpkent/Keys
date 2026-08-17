@@ -122,11 +122,18 @@ private:
     void timerCallback() override; // polls the processor's sounding generation, repaints on change
     juce::uint32 lastSoundingGen = 0;
 
-    // Repaint the keys whose lit state actually moved, and only those. `lastLit` is the union
-    // this surface last drew as lit - its own three sets plus externallySounding() - so the
-    // diff against it names exactly the keys that have to be redrawn. See the .cpp.
+    // Repaint the keys whose lit state actually moved, and only those. `lastLit` maps each key
+    // this surface last drew as lit to *which* of the two lit colours it drew - a set of lit keys
+    // is not enough, because `pressed` paints hotter than latched / sustained / external and a key
+    // moving between them leaves the set unchanged. See the .cpp.
     void repaintLitChanges();
-    std::set<int> lastLit;
+    static constexpr int stateHeld = 1;   // latched, sustained, or sounding from elsewhere
+    static constexpr int stateActive = 2; // under the mouse right now, drawn hotter
+    // How far past a key's own rectangle paint() can reach: a lit black key's outer glow is a
+    // 4 px stroke centred 2.5 px outside it. Anything less leaves a ring of accent behind when
+    // the note goes off.
+    static constexpr int litOverdrawPx = 5;
+    std::map<int, int> lastLit;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoteSurface)
 };

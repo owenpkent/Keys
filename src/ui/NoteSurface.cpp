@@ -42,37 +42,68 @@ void NoteSurface::timerCallback()
 // surface back, which is exactly what every surface did before.
 void NoteSurface::repaintLitChanges()
 {
-    std::set<int> lit;
-    lit.insert(pressed.begin(), pressed.end());
-    lit.insert(latched.begin(), latched.end());
-    lit.insert(sustained.begin(), sustained.end());
+    // **A map of state, not a set of lit keys**, and that distinction is the whole correctness of
+    // this. PianoKeyboard::paint draws three states: `pressed` is the hot accent, latched /
+    // sustained / externally sounding are the deeper held accent, and the rest are resting. A set
+    // of "which keys are lit" cannot tell the first two apart, so every move *between* them
+    // compared equal and repainted nothing - release a key under Sustain and it stayed in the
+    // bright press colour for good, because it left `pressed` and entered `sustained` in the same
+    // breath and the union never moved. Same for a latch toggle, a sustained drag glide, and a key
+    // going from your own press to the arp sounding it.
+    std::map<int, int> lit;
+    for (const int drawn : latched)
+        lit[drawn] = stateHeld;
+    for (const int drawn : sustained)
+        lit[drawn] = stateHeld;
     for (const int drawn : externallySounding())
-        lit.insert(drawn);
+        lit[drawn] = stateHeld;
+    for (const int drawn : pressed)
+        lit[drawn] = stateActive; // last: paint checks `pressed` first, so this wins the same way
 
     if (lit == lastLit)
         return; // the generation moved for a note this surface does not draw
 
     std::vector<int> changed;
-    std::set_symmetric_difference(lit.begin(), lit.end(), lastLit.begin(), lastLit.end(),
-                                  std::back_inserter(changed));
+    auto a = lit.begin();
+    auto b = lastLit.begin();
+    while (a != lit.end() || b != lastLit.end())
+    {
+        if (b == lastLit.end() || (a != lit.end() && a->first < b->first))
+            changed.push_back(a++->first); // newly lit
+        else if (a == lit.end() || b->first < a->first)
+            changed.push_back(b++->first); // no longer lit
+        else
+        {
+            if (a->second != b->second)
+                changed.push_back(a->first); // lit before and lit now, in a different colour
+            ++a;
+            ++b;
+        }
+    }
     lastLit.swap(lit);
 
     // One union rather than a repaint per key: a chord is a handful of neighbours, and JUCE
-    // coalesces overlapping dirty rectangles anyway. Expanded by 2 because a key's seam
-    // strokes and the black keys sitting over it reach a pixel past its own bounds.
+    // coalesces overlapping dirty rectangles anyway.
+    //
+    // Expanded by `litOverdrawPx`, which is measured off the widest thing paint() draws outside a
+    // key's own rectangle rather than guessed. A lit black key strokes `b.expanded(2.5f)` at a
+    // width of 4, so the outer half of that stroke reaches 4.5 px past the key; a lit white key's
+    // path stroke reaches 2.5, its seams a little over 1, and a black key's drop shadow 2.2. This
+    // was 2 for one build, which covered the seams and not the glow, so turning a note off left a
+    // ring of accent hanging in the air until something else forced a full repaint.
     juce::Rectangle<int> dirty;
     for (const int drawn : changed)
     {
-        const auto b = drawnBounds(drawn);
-        if (b.isEmpty())
+        const auto keyBounds = drawnBounds(drawn);
+        if (keyBounds.isEmpty())
         {
             repaint();
             return;
         }
-        dirty = dirty.getUnion(b);
+        dirty = dirty.getUnion(keyBounds);
     }
     if (! dirty.isEmpty())
-        repaint(dirty.expanded(2));
+        repaint(dirty.expanded(litOverdrawPx));
 }
 
 std::set<int> NoteSurface::externallySounding() const

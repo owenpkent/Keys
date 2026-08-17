@@ -2648,7 +2648,10 @@ void ArpPanel::timerCallback()
     refreshRateMode(); // ... and arpRateFree, which decides what the dial is even measuring
     refreshTuplet();   // ... and arpTuplet, which has no attachment to hear it change
     refreshRetrig();
-    refreshLaneReadouts();
+    // No second refreshLaneReadouts() here: the one above the isShowing() gate already ran this
+    // tick, and having both meant enforceLinkedLengths walked all thirteen lanes twice and both
+    // readouts were written twice, per tick, in a pass whose whole point is removing per-tick
+    // cost.
     refreshPatternButtons();
     if (! patternMode())
         return; // nothing of the step editor is on screen to repaint

@@ -27,6 +27,12 @@ namespace skin
     const juce::Colour control    { 0xff262a31 };  // raised control top
     const juce::Colour controlBot { 0xff1f2227 };
 
+    // Armed REC. The one red in Keys, and deliberately *not* part of the Accent family below:
+    // the accent is per instance and this must not be, because "recording" has to read the same
+    // on the pad track and the bass track. A token rather than a literal in PluginEditor.cpp,
+    // which is the standing rule for every colour in this product.
+    const juce::Colour recordLit  { 0xffb0343c };
+
     // The accent: a base, a hot core and a deep shade for gradient ends. Every lit state
     // on every surface uses this family.
     //

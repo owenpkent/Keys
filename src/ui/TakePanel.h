@@ -71,6 +71,12 @@ private:
     // without rebuilding the MidiFile to find out.
     juce::File shownFile;
     int shownEvents = -1;
+
+    // While a take is running its event count moves on every drain, so the identity check above
+    // can never hold and the preview would rebuild the whole MidiFile at the editor's full 30 Hz.
+    // Throttled to this instead: it is a picture of something still being played.
+    static constexpr juce::uint32 liveRefreshMs = 200;
+    juce::uint32 lastLiveRefreshMs = 0;
     double span = 0.0; // seconds, first note to last release
     int lowNote = 60, highNote = 72;
 

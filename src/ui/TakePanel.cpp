@@ -60,12 +60,30 @@ void TakePanel::refresh()
 {
     // Polled from the editor's 30 Hz timer, so the cheap identity check comes first: rebuilding
     // the notes means building the whole MidiFile, which is not a thing to do thirty times a
-    // second at rest. A take is only ever replaced wholesale, so its file plus its event count
-    // name it - there is no edit that could change the notes and leave both.
+    // second. A take is only ever replaced wholesale, so its file plus its event count name it -
+    // there is no edit that could change the notes and leave both.
+    //
+    // **While recording, that check never holds**, because the event count grows on every drain -
+    // so leaving this window open through a take rebuilt a MidiMessageSequence over the whole
+    // capture so far, ran updateMatchedPairs twice and reallocated the note list, thirty times a
+    // second, at a cost rising with the take's length, on the DAW's UI thread. That is the exact
+    // cost the rest of this branch removes. The preview is throttled to `liveRefreshMs` while the
+    // take is running: it is a picture of something still being played, and a fifth of a second
+    // late is invisible. Stopping refreshes at once, because `recording` goes false and this test
+    // is skipped entirely.
     const auto file = processor.lastTakeFile();
     const int events = processor.capturedEventCount();
     if (file == shownFile && events == shownEvents)
         return;
+
+    if (processor.isRecording())
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - lastLiveRefreshMs < liveRefreshMs)
+            return;
+        lastLiveRefreshMs = now;
+    }
+
     shownFile = file;
     shownEvents = events;
 
@@ -101,7 +119,7 @@ void TakePanel::refresh()
                       : juce::String("Nothing recorded yet - press REC on the Keyboard bar."),
                   juce::dontSendNotification);
     saveButton.setEnabled(has);
-    revealButton.setEnabled(has && processor.lastTakeFile().existsAsFile());
+    revealButton.setEnabled(has && file.existsAsFile()); // `file` is the stat we already have
     roll.repaint();
 }
 
@@ -114,18 +132,43 @@ void TakePanel::saveAs()
     chooser = std::make_unique<juce::FileChooser>("Save this take as...", source, "*.mid");
     // Async, and the chooser is a member: launchAsync returns immediately and the callback runs
     // a turn later, so a stack-local one would be gone by the time it fired.
+    juce::Component::SafePointer<TakePanel> safe(this);
     chooser->launchAsync(juce::FileBrowserComponent::saveMode
                              | juce::FileBrowserComponent::canSelectFiles
                              | juce::FileBrowserComponent::warnAboutOverwriting,
-                         [source](const juce::FileChooser& fc)
+                         [source, safe](const juce::FileChooser& fc)
                          {
-                             const auto target = fc.getResult();
-                             if (target == juce::File())
+                             const auto chosen = fc.getResult();
+                             if (chosen == juce::File())
                                  return; // cancelled
+
+                             // **Only the chooser may overwrite.** It warned about the name as
+                             // typed; rewriting the extension afterwards moved the target out
+                             // from under that warning, so typing `verse` with a `verse.mid`
+                             // already beside it prompted for nothing and then destroyed it.
+                             //
+                             // So the name the user confirmed is written as confirmed, and the
+                             // extension is only supplied when they left it off - where, having
+                             // been warned about nothing, the write must not land on an existing
+                             // file at all. A second modal prompt is not an option here: a plugin
+                             // may not run a modal loop on the host's UI thread.
+                             auto target = chosen;
+                             if (! target.hasFileExtension("mid"))
+                                 target = target.withFileExtension("mid").getNonexistentSibling();
+
                              // Copied rather than rebuilt: the bytes already on disk are the
                              // ones the preview drew, and rebuilding could only introduce a
                              // difference between what was shown and what was saved.
-                             source.copyFileTo(target.withFileExtension("mid"));
+                             //
+                             // The result is checked. A read-only folder or a file Live has open
+                             // fails here, and a Save that silently did nothing is the worst
+                             // possible answer to "keep this take".
+                             if (! source.copyFileTo(target) && safe != nullptr)
+                                 juce::NativeMessageBox::showMessageBoxAsync(
+                                     juce::MessageBoxIconType::WarningIcon, "Could not save",
+                                     "Keys could not write " + target.getFullPathName()
+                                         + ".\nThe take is still in " + source.getParentDirectory().getFullPathName()
+                                         + ".");
                          });
 }
 

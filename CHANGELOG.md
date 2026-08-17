@@ -31,12 +31,21 @@ that vector. Events longer than three bytes are skipped - every channel voice me
 admitting sysex would mean a variable-size slot and an allocation on the wrong thread.
 
 **The take is trimmed to its first note**, so arming and then thinking costs the file nothing,
-and it carries the tempo Keys was running at, so the clip lands on the grid. Anything still
-ringing when recording stops is given an end: left alone that is a hanging note Live holds until
-the next stop, which reads as Keys emitting a stuck note.
+and it carries the tempo Keys was running at, so the clip lands on the grid. Its first *note* and
+not its first event, which matters because Keys' own mod wheel and pitch bend land on the very
+stream the capture reads: a wheel nudged before you played would otherwise become the take's zero
+and push every note that far off the top of the clip, which is exactly what the frozen tempo
+exists to prevent. A take with no note in it is not a take and writes no file, so an accidental
+arm-and-stop cannot replace the one you meant to keep. Anything still ringing when recording
+stops is given an end: left alone that is a hanging note Live holds until the next stop, which
+reads as Keys emitting a stuck note.
 
 **Stopping writes the file, so a take is never a thing a click can lose.** Pressing REC again
-starts a fresh one, and the only thing cleared is a copy of a file already on disk. Every take
+starts a fresh one, and the only thing cleared is a copy of a file already on disk. Closing the
+set or deleting the plugin mid-take writes it too, from the destructor, since that is otherwise
+the one click that *could* lose one. A write that fails - no folder, no stream, a read-only
+Documents - keeps the take you already had and says **"Take failed"** on the chip rather than
+going on offering the previous file captioned with the new take's length. Every take
 goes to one fixed folder (`Documents\OK Studio\Keys Takes`) rather than through a save dialog,
 and that is the point: add the folder to Live's Places once and every take afterwards is a short
 drag inside Live's own browser. Dragging out of a plugin window and across the screen works too
@@ -45,7 +54,9 @@ fallback here, not the intended gesture.
 
 `setRecording` and `writeTake` are two calls on purpose, so the capture can be tested without
 writing into the user's Documents folder. `tests/TakeTests.cpp` pins the pair, the trim, the
-hanging-note repair, the tempo, and that arming again starts a new take rather than appending.
+hanging-note repair, the tempo, that arming again starts a new take rather than appending, that a
+controller move before the first note does not shift the take off the grid, and that a capture of
+nothing but controller moves is not a take at all.
 
 **The take window** (`src/ui/TakePanel.h`) is what stops a take being a filename you have to
 trust. Clicking the chip opens a picture of what was captured - length, note count, tempo, and
@@ -97,10 +108,19 @@ on its own:
 **The keybed repainted in full on every note change.** Every key is a rounded `Path`, a vertical
 gradient, a clipped bevel and two seam strokes, and `paint()` rasterises all of them - up to 33
 times a second while an arpeggio runs, and once per key crossed during a drag glide.
-`NoteSurface` now diffs the lit set and repaints only the keys that moved (`repaintLitChanges`,
+`NoteSurface` now diffs the lit keys and repaints only the ones that moved (`repaintLitChanges`,
 via a new `drawnBounds` a surface may decline to answer, in which case it gets the old full
 repaint). `paint()` itself is untouched: JUCE hands it the clip region either way, so keys
 outside it cost a bounds test instead of a rasterisation.
+
+It diffs a **map of state and not a set of lit keys**, which is the whole correctness of it: the
+keybed draws `pressed` in a hotter accent than latched, sustained or externally sounding, so a
+set says nothing changed for every move *between* those. Releasing a key under Sustain, a latch
+toggle, a sustained drag glide and a key going from your own press to the arp sounding it are all
+that move - the first of them would have left the key in the bright press colour permanently.
+The dirty rectangle is also grown by the widest thing `paint()` draws outside a key rather than
+by a guessed two pixels: a lit black key's glow is a 4 px stroke centred 2.5 px out, so it
+reaches 4.5, and two pixels of margin left a ring of accent hanging in the air after note-off.
 
 **Nothing in Keys was opaque**, so every one of those repaints also redrew the editor's
 full-window gradient underneath. `PianoKeyboard` fills its whole bounds before it draws a key,
@@ -111,6 +131,14 @@ wake-ups a second for a queue that is empty unless an MCP client is actively dri
 and now starts on demand and stops when its queues run dry. `ArpPanel` refreshed its whole
 control set at 10 Hz whether or not it was on screen, and now returns early when it is not; the
 lane-length repair stays outside that gate, because a session can load with the section folded.
+
+**And three costs this pass had added itself.** The take chip stat'ed the take file twice per
+30 Hz tick, forever, for an answer only a REC click can change (cached against its path now, so
+a network or OneDrive-backed Documents folder is not asked sixty times a second); the take window
+rebuilt the entire `MidiFile` on every tick while recording, because its identity check keys on
+an event count that is by definition growing, at a cost rising with the take's length (throttled
+to 5 Hz while a take runs, which is invisible on a picture of something still being played); and
+`refreshLaneReadouts` ended up called twice per tick, once either side of the new gate.
 
 In a plugin, that message thread is the DAW's UI thread, which is why this is felt in Live and
 not in the standalone.

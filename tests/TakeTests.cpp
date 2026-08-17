@@ -146,6 +146,59 @@ public:
             }
         }
 
+        beginTest("a controller move before the first note does not shift the take off the grid");
+        {
+            // Keys' own wheels put CC and pitch bend on the very stream captureBlock reads, so
+            // "trim to the first event" and "trim to the first note" are different answers and
+            // only the second one is right. Nudge a wheel, think for a second, then play: the
+            // note has to land at zero, or the clip does not sit on the bar it was played to.
+            Host h;
+            h.processor.setRecording(true);
+            juce::MidiBuffer wheel;
+            wheel.addEvent(juce::MidiMessage::controllerEvent(1, 1, 64), 0);
+            h.run(wheel);
+            expect(! h.processor.capturedHasNotes()); // a wheel is not a take
+            expectWithinAbsoluteError(h.processor.capturedSeconds(), 0.0, 0.0001);
+
+            h.silentBlocks(100); // a full second of thinking
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8) 100), 0);
+            midi.addEvent(juce::MidiMessage::noteOff(1, 64), 240);
+            h.run(midi);
+            h.processor.setRecording(false);
+
+            expect(h.processor.capturedHasNotes());
+            auto seq = takeTrack(h.processor);
+            expectEquals(countNoteOns(seq), 1);
+            for (int i = 0; i < seq.getNumEvents(); ++i)
+            {
+                const auto& m = seq.getEventPointer(i)->message;
+                if (m.isNoteOn())
+                    expectWithinAbsoluteError(m.getTimeStamp(), 0.0, 1.0);
+                // Nothing may carry a negative tick: that puts the sequence out of order and
+                // makes updateMatchedPairs pair the wrong events.
+                expect(m.getTimeStamp() >= 0.0);
+            }
+        }
+
+        beginTest("a take of nothing but controller moves is not a take");
+        {
+            // So an armed REC that caught only a wheel writes no file - which is what stops it
+            // replacing the take you actually meant to keep.
+            Host h;
+            h.processor.setRecording(true);
+            juce::MidiBuffer wheel;
+            wheel.addEvent(juce::MidiMessage::controllerEvent(1, 1, 20), 0);
+            wheel.addEvent(juce::MidiMessage::pitchWheel(1, 9000), 120);
+            h.run(wheel);
+            h.processor.setRecording(false);
+
+            expect(h.processor.capturedEventCount() > 0); // the events were captured...
+            expect(! h.processor.capturedHasNotes());     // ...and they are still not a take
+            juce::MidiFile file;
+            expect(! h.processor.buildTakeMidiFile(file));
+        }
+
         beginTest("a note still ringing when recording stops is given an end");
         {
             Host h;

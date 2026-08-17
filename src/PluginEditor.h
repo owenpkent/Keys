@@ -324,6 +324,13 @@ private:
     void refreshTakeControls(); // lit state, caption and enablement; polled from timerCallback
     juce::String lastTakeCaption;
 
+    // Whether lastTakeFile() is actually on disk, cached against the path it was asked about.
+    // refreshTakeControls runs at 30 Hz for the life of the editor and stat'ed the file twice on
+    // every one of those ticks, on the DAW's UI thread, for an answer only a REC click can
+    // change - which is the sort of cost this whole pass exists to remove.
+    juce::File lastTakeStatPath;
+    bool haveTakeFile = false;
+
     // The take window: a picture of what was captured, plus Save as / Show in Explorer, so a
     // take is something you can look at before it leaves rather than a filename you trust.
     // Built when opened and destroyed when closed, the ChordGenPanel pattern - and unlike that

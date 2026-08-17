@@ -2008,8 +2008,7 @@ void KeysEditor::refreshTakeControls()
     const bool rec = processor.isRecording();
     recButton.setButtonText(rec ? "STOP" : "REC");
     recButton.setToggleState(rec, juce::dontSendNotification);
-    recButton.setColour(juce::TextButton::buttonColourId,
-                        rec ? juce::Colour(0xffb0343c) : skin::control);
+    recButton.setColour(juce::TextButton::buttonColourId, rec ? skin::recordLit : skin::control);
 
     // While recording the chip counts the take up; stopped, it names what is on disk. Greyed
     // rather than hidden when there is no take at all, so the pair never reflows the bar - the
@@ -2023,19 +2022,40 @@ void KeysEditor::refreshTakeControls()
     juce::String caption;
     if (rec)
     {
-        // "Waiting" until the first note, because the take is trimmed to it: arming and then
+        // "Waiting" until the first **note**, because the take is trimmed to it: arming and then
         // thinking costs the file nothing, and a counter running before anything is captured
-        // would say otherwise.
-        caption = processor.capturedEventCount() > 0 ? clock(processor.capturedSeconds())
-                                                     : juce::String("Waiting");
+        // would say otherwise. Keys' own wheels put CC on the captured stream, so this asks
+        // whether a note has arrived and not whether an event has.
+        caption = processor.capturedHasNotes() ? clock(processor.capturedSeconds())
+                                               : juce::String("Waiting");
         takeChip.setEnabled(false); // there is no file to reveal or drag until it is written
+        haveTakeFile = false;       // recomputed on the tick after this one stops
+    }
+    else if (processor.lastTakeWriteFailed())
+    {
+        // Say so rather than showing the take *before* this one as though it were the take you
+        // just played. writeTake keeps the older file on a failure precisely so nothing is lost;
+        // what must not happen is the UI reporting it as the new one.
+        caption = "Take failed";
+        takeChip.setEnabled(false);
+        haveTakeFile = false;
     }
     else
     {
+        // One filesystem stat per *change*, not two per tick. This runs at 30 Hz forever on the
+        // DAW's UI thread, and nothing here can move except by the user's own REC click, so the
+        // answer is cached against the path it was computed for. It was two `existsAsFile()`
+        // calls per tick - 60 syscalls a second, and a network or OneDrive-backed Documents
+        // folder can block for milliseconds on each.
         const auto f = processor.lastTakeFile();
-        caption = f.existsAsFile() ? "Take " + clock(processor.capturedSeconds())
-                                   : juce::String("No take");
-        takeChip.setEnabled(f.existsAsFile());
+        if (f != lastTakeStatPath)
+        {
+            lastTakeStatPath = f;
+            haveTakeFile = f.existsAsFile();
+        }
+        caption = haveTakeFile ? "Take " + clock(processor.capturedSeconds())
+                               : juce::String("No take");
+        takeChip.setEnabled(haveTakeFile);
     }
 
     if (caption != lastTakeCaption)
