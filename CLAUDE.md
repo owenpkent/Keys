@@ -1203,8 +1203,11 @@ the same effort. Both were lifted; `text` was never the problem.
 
 ## Reference manuals
 
-Eight manuals sit in the repo root (they are gitignored, so a fresh clone has none - download the
-one you need), and `docs/REFERENCES.md` records what each one contributed,
+Nineteen PDFs sit in **`manuals/`**, eighteen products (they are gitignored, so a fresh clone has
+none - `manuals/README.md` is the manifest and carries a working download URL for every one of
+them, plus the traps: two are account-gated, two Arturia links are a version behind, and the
+Turing Machine PDF is a build guide rather than the concept). They were loose in the repo root
+until 2026-08-17. `docs/REFERENCES.md` records what each one contributed,
 what Keys took from it and what it deliberately did not. **Read the relevant one before
 designing a feature, not after.** This is not a formality: the Serum guide corrected a built
 `RangeKnob` satellite that looked right on screen, and the Cthulhu manual corrected a whole
@@ -1220,6 +1223,19 @@ is the polyrhythm dividers and the undertone series; **MatrixBrute** has ties an
 **Numerology 4** draws the skip-versus-mute distinction; **Arturia Acid V** is the 303 sequencer
 and the source of `docs/ACID_DESIGN.md` (added 2026-08-16, proposed and unbuilt).
 `docs/REFERENCES.md` ranks the three unbuilt ideas worth having.
+
+**Eleven more arrived 2026-08-17** (Owen: "get the manuals. wide research") and they are surveyed
+in `docs/SEQUENCER_LANDSCAPE.md`, not here: REFERENCES.md is the record of what Keys **took** from
+a manual, and nothing has been taken from these yet. That file is the layer above it - the map of
+which sequencer archetypes exist, which six Keys already is, and which six it is one feature away
+from. The short version: **Hapax** has offline transforms over a selection (Flip, Curve, Shuffle,
+Randomize), which is the palette Keys' own Select has been waiting for; **Metropolix** has the
+accumulator, movement without randomness; **Torso T-1** dials a part instead of drawing one
+(Phrase, Range, Style); **Ableton's Follow Actions** are the general form of Keys' Chain;
+**Digitakt II** has the rest of the conditional-trigger vocabulary (A:B, 1ST/LST, NEI, FILL);
+the **Turing Machine** is the one randomness Keys lacks, the kind that wanders and then hardens.
+**René**, **Deluge**, **OXI One**, **Pamela's Pro Workout** and **KeyStep Pro** are coverage and
+cross-checks rather than sources.
 
 ## Screenshots for docs
 

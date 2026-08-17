@@ -690,7 +690,7 @@ v2 and later (nice-to-have per the research ranking), with what became of each:
 ## The generative round (2026-08-14)
 
 A third research round, sourced from hardware rather than the v2 ranking: the Moog
-Subharmonicon (its manual sits in the repo root), whose whole design is division - pitch
+Subharmonicon (its manual sits in `manuals/`), whose whole design is division - pitch
 from the undertone series, rhythm from OR-ed clock dividers. Three additions, engine and
 MCP first; the UI pass landed after, in `src/ui/ArpPanel.{h,cpp}`, following the mouse-only
 contract like everything else.
@@ -747,7 +747,8 @@ tell a new feature exists.
 ## The manual round (2026-08-14, second pass)
 
 Owen, looking at a randomness feature that had shipped as a global knob: *"not good UI. look at
-reference manuals"*. Seven manuals sit in the repo root and `docs/REFERENCES.md` now records
+reference manuals"*. Seven manuals sat in the repo root that day (they are in `manuals/` now,
+nineteen of them) and `docs/REFERENCES.md` now records
 what each one contributes. Two of them corrected features that were already built and looked
 right on screen, which is why that file exists and why reading comes before designing.
 

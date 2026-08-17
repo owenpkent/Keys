@@ -1,10 +1,15 @@
 # Reference manuals
 
-Eight manuals sit in the repo root. They are not decoration: eight features in Keys were built
+Eight manuals feed this file. They are not decoration: eight features in Keys were built
 from a specific page of one of them, and at least twice a manual **corrected a guess** that had
 already been coded and looked right on screen. This file records what each one contributes, what
 Keys took, and what it deliberately did not - so the next person does not re-derive a decision
 that was already made, or re-invent one that was already rejected.
+
+**Eleven more PDFs are in `manuals/` and are not in this file.** They arrived 2026-08-17 and
+are surveyed in `docs/SEQUENCER_LANDSCAPE.md` instead, because this file's contract is what Keys
+**took** from a manual and nothing has been taken from them yet. Move an entry here the day
+something ships from it, and not before.
 
 Read the manual before designing the feature, not after. Owen's instruction, 2026-08-14: *"look
 at reference manuals"*, given while looking at a randomness feature that had been built as a
@@ -214,7 +219,10 @@ contact with the code unchanged.
 
 ### What is still on the table
 
-In rough order of what would change the instrument most:
+In rough order of what would change the instrument most. This list is **within the eight manuals
+above**; `docs/SEQUENCER_LANDSCAPE.md` ranks a wider six from the eleven added on 2026-08-17, and
+its number one (Hapax's Curve and Flip over a Select span) is a better answer than the Copy /
+Paste / Clear ranked first here.
 
 1. **Copy / Paste / Clear over a selection** (Kirnu). The three remaining tools of that palette,
    now that Select exists to aim them.
