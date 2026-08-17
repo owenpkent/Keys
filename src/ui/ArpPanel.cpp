@@ -398,6 +398,9 @@ int ArpPanel::editLine() const
 // pattern; what it gains is the chord a launch will hold into the line.
 void ArpPanel::takeChordOnSlot(int slot, const chorddrag::Payload& p)
 {
+    // Undoable, like Copy slot and Randomize pattern beside it: this replaces the slot's chord,
+    // name, shape and rate in place, and an arp slot is one of the two trees undo covers.
+    processor.pushUndo("Chord to arp slot", KeysProcessor::UndoScope::arp);
     processor.setArpSlotChord(slot, p.chord.notes, p.chord.name, editLine());
     repaint();
 }
@@ -407,10 +410,15 @@ void ArpPanel::takeChordOnSlot(int slot, const chorddrag::Payload& p)
 // should follow the same aim. The view does not move with it (`leaveMacroView` false); in the
 // macro view you dropped onto the line itself, and being thrown into that line's deep controls
 // is not what the gesture asked for.
-void ArpPanel::takeChordOnLine(int line, const chorddrag::Payload& p)
+//
+// `makeCurrent` false is the pad menu's "Send to arp A / B", which is routing and not aiming -
+// see the header. Either way the chord lands, because that is the first line and it is
+// unconditional; all the flag decides is whether the panel goes and looks at the line.
+void ArpPanel::takeChordOnLine(int line, int padSlot, bool makeCurrent)
 {
-    processor.holdArpChordFromPad(p.index, line);
-    setEditLine(line, /*leaveMacroView*/ false);
+    processor.holdArpChordFromPad(padSlot, line);
+    if (makeCurrent)
+        setEditLine(line, /*leaveMacroView*/ false);
 }
 
 // The panel as a whole is a drop target for a chord card. It hands the chord to the line the
@@ -431,7 +439,7 @@ void ArpPanel::itemDropped(const SourceDetails& details)
     repaint();
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        takeChordOnLine(editLine(), *p);
+        takeChordOnLine(editLine(), p->index);
         p->taken = true;
     }
 }
@@ -1608,7 +1616,7 @@ void ArpPanel::MacroRow::itemDropped(const SourceDetails& details)
     setDropTarget(false);
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        owner.takeChordOnLine(line, *p);
+        owner.takeChordOnLine(line, p->index);
         p->taken = true;
     }
 }

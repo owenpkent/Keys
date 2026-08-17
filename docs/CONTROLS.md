@@ -285,7 +285,7 @@ work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ### A pad's card menu
 
-Right-click any pad. Everything that can act on that card is here: nine rows in three groups,
+Right-click any pad. Everything that can act on that card is here: eleven rows in three groups,
 separated by rules.
 
 | Item | What it does |
@@ -297,7 +297,8 @@ separated by rules.
 | **Next voicing** | The same chord arranged differently: root position, first inversion, second, (third, on a four-note chord), then a spread with the root left in the bass, then round to root again. The item says which one the card is in now. Greyed while the card is linked to the keyboard, like Octave |
 | **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
 | **Next: could follow** | Four submenus of chords that could follow this one, described below. On a filled pad only, since there has to be a chord to follow |
-| **Send to arp slot** | Park a copy of this chord in one of the current line's twelve arp slots, to launch later. Its left-click twin is dragging this card onto the slot you mean |
+| **Send to arp A** / **Send to arp B** | Hand this chord to that arpeggiator line now. Its left-click twin is dragging the card onto the line: its letter on the arp bar, or its card in the All view. Live on a line that is switched **off**, because a line that is off still takes a chord in and plays it the moment you switch it on. It routes and does not navigate: the arp panel stays on whatever line and page you had open |
+| **Send to arp slot** | Park a copy of this chord in one of the current line's twelve arp slots, to launch later. Its left-click twin is dragging this card onto the slot you mean. Undoable, like every other write to a slot |
 
 **One of these has no left-click twin**, and it is deliberate: **Lock**, which had a clickable
 chip in the card's corner for a few hours and lost it at Owen's request. The chip took roughly
@@ -323,9 +324,11 @@ press until it ran off the keyboard.
 **The menu is kept short on purpose.** It hangs off a pad near the bottom of the window and
 every row is 34 px measured *upwards* from there, so a long menu runs off the top of the
 screen and turns into one you have to scroll by hovering, which is unusable with one mouse.
-Nine rows is the budget. That is why the four **Next** families sit behind one row, and it is
-why the generator's settings are not on this menu at all: they were, for a few hours, and they
-took it to 23 rows.
+Eleven rows and two rules, about 408 px, is the budget today. That is why the four **Next**
+families sit behind one row, and it is why the generator's settings are not on this menu at all:
+they were, for a few hours, and they took it to 23 rows and about 820 px. Send to arp A and B
+were spent as two rows rather than one **Send to arp line** submenu because Owen asked for them
+by name, and a submenu costs a hover to save 68 px the menu can still afford.
 
 ## Chord generator
 
@@ -360,7 +363,13 @@ card and card menu), and two items on a pad's card menu**:
   it is what gives Fill something to do. Click a card to hear it for 800 ms; drag it onto a pad
   to keep it, written the same way capturing a chord from the live card is - and Send to first
   empty pad, on the card's own right-click menu (below), is the same commit with the aim taken
-  out. **Changing a generator setting generates nothing** (2026-08-01, Owen: "I don't want
+  out. **Click the hole a taken card left and you get another chord there**, auditioned on the
+  spot (2026-08-16, Owen: "when you are generating chords and you move one off, there's an empty
+  space, and then you can't regenerate it") - so taking a card and getting one back is the same
+  gesture twice. The cell hovers and carries a `+` to say so; before that it was an unmarked
+  well and read as scenery, with Fill on the header the only way back and Fill doing all
+  sixteen. It fills that one cell, so the caption goes on saying the other fifteen are stale if
+  they are. **Changing a generator setting generates nothing** (2026-08-01, Owen: "I don't want
   it to auto generate when you change a source"): the tray rerolled on any settings change
   for part of that day, and sweeping Source to compare the seven of them threw the tray
   away six times on the way past - a control you cannot explore without destroying your
@@ -380,10 +389,11 @@ card and card menu), and two items on a pad's card menu**:
   list in `CLAUDE.md` (Owen, 2026-08-01: "when you right click on a chord in there, I want you
   to have a whole bunch of options about trying to find similar ones or what might come
   next"): Send to first empty pad, Fill tray with similar chords, Fill tray with what could
-  follow, Octave down, Octave up, Next voicing, New chord here, Clear this card. **Opening the
-  menu makes no sound, and neither do the shaping edits** - it auditioned the card for a few
-  minutes on the day it was built and Owen had that taken out, since the left click is already
-  how you hear a card.
+  follow, Octave down, Octave up, Next voicing, New chord here, Clear this card. **An empty cell
+  gets the two rows that need no seed** instead of no menu at all: New chord here, and Fill every
+  empty card. **Opening the menu makes no sound, and neither do the shaping edits** - it
+  auditioned the card for a few minutes on the day it was built and Owen had that taken out,
+  since the left click is already how you hear a card.
 - **Key**, a combo box beside the chips. It is the one setting you change most while
   auditioning a page, so it is on the bar as well as in the window: one click opens the list,
   one picks, and a change in one place shows in the other immediately. **Mode** and **Scale

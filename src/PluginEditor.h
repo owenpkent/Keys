@@ -456,6 +456,13 @@ private:
     // Which tab is lit, derived from the processor's state so a drop, a session load and a
     // click all land in the same place.
     void refreshArpBarTabs();
+    // A pad's chord into one line, whichever surface asked: a card dropped on that line's switch
+    // on the bar, and the "Send to arp A / B" rows on a pad's own menu (2026-08-16). One method
+    // because the two must not drift - it prefers the panel while the arp section is open, since
+    // the panel is what also moves the aim to the line you named.
+    // `followAim` true for a drop, which aimed at the line; false for the pad menu's
+    // Send to arp A / B, which routes a chord and must leave the panel where it was.
+    void sendPadToArpLine(int padSlot, int line, bool followAim = true);
     void nudgeBpm(int delta);
     void nudgeOctave(int delta); // the Keyboard bar's < > pair beside the octave read-out
 

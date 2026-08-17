@@ -18,8 +18,9 @@ Thumbs.db
 __pycache__/
 *.pyc
 
-# Reference manuals for the hardware and plugins the design borrows from, dropped in the
-# repo root while reading them. They are third-party PDFs and they are large, so they are
-# research material sitting next to the code rather than part of it. Anything worth keeping
-# out of one belongs in docs/ as our own prose.
+# Reference manuals for the hardware and plugins the design borrows from, in manuals/.
+# They are third-party PDFs and they are large, so they are research material sitting next
+# to the code rather than part of it. manuals/README.md is tracked and carries a download
+# URL for every one of them. Anything worth keeping out of a manual belongs in docs/ as our
+# own prose.
 *.pdf

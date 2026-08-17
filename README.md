@@ -105,9 +105,10 @@ progression to play with before you know any theory. There is exactly one set of
 what you keep on a page is what you play. Its window also carries a 4x4 **audition tray**
 (2026-08-01) with a reference card above it: sixteen candidate chords that belong to no pad.
 Click one to preview it, drag it onto a pad to keep it - the cell it came from is left empty
-rather than refilling itself, which is what shows you which ones you have already taken. A
-candidate you never took is thrown away when the window closes; nothing in the window writes a
-pad any more except that drag (or the same commit through a tray card's right-click menu).
+rather than refilling itself, which is what shows you which ones you have already taken, and
+clicking that hole rolls another chord into it. A candidate you never took is thrown away when
+the window closes; nothing in the window writes a pad any more except that drag (or the same
+commit through a tray card's right-click menu).
 
 It is three chips, three combo boxes, a window (with its own tray, reference card and card
 menu), and two items on a pad's card menu.

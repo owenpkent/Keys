@@ -690,7 +690,7 @@ v2 and later (nice-to-have per the research ranking), with what became of each:
 ## The generative round (2026-08-14)
 
 A third research round, sourced from hardware rather than the v2 ranking: the Moog
-Subharmonicon (its manual sits in the repo root), whose whole design is division - pitch
+Subharmonicon (its manual sits in `manuals/`), whose whole design is division - pitch
 from the undertone series, rhythm from OR-ed clock dividers. Three additions, engine and
 MCP first; the UI pass landed after, in `src/ui/ArpPanel.{h,cpp}`, following the mouse-only
 contract like everything else.
@@ -747,7 +747,8 @@ tell a new feature exists.
 ## The manual round (2026-08-14, second pass)
 
 Owen, looking at a randomness feature that had shipped as a global knob: *"not good UI. look at
-reference manuals"*. Seven manuals sit in the repo root and `docs/REFERENCES.md` now records
+reference manuals"*. Seven manuals sat in the repo root that day (they are in `manuals/` now,
+nineteen of them) and `docs/REFERENCES.md` now records
 what each one contributes. Two of them corrected features that were already built and looked
 right on screen, which is why that file exists and why reading comes before designing.
 
@@ -903,13 +904,22 @@ already fed the arp - but the arp was a centre view and picking it put the pads 
 pad was momentary anyway. Paths that close that were added from 2026-07-25 on; what feeds a
 line today is a **drag**, and that took the last of them off the left click 2026-08-02.
 
-- **A drag onto a line's card in the macro view, its tab on the Arp bar, or a slot.** Each
-  calls `KeysProcessor::holdArpChordFromPad` (through `ArpPanel::takeChordOnLine` for the
-  first two), which emits the note-ons and never the note-offs until the next call.
+- **A drag onto a line's card in the macro view, its switch on the Arp bar, or a slot.** Each
+  calls `KeysProcessor::holdArpChordFromPad` (through `KeysEditor::sendPadToArpLine` and
+  `ArpPanel::takeChordOnLine` for the first two), which emits the note-ons and never the
+  note-offs until the next call.
   `holdArpChordFromPad` goes through `holdArpChord`, which releases the previous hold first
   (`releaseNotes` on `arpChordTag`, so the refcounts and the arp's held set both unwind) and
   then fires, applying Exclusive to the new one - so dropping the same card on a line it is
   already feeding is a restrike and never a second owner of the same pitches.
+
+- **`Send to arp A` / `Send to arp B` on a pad's right-click menu** (2026-08-16, Owen: "I'd like
+  to be able to right click on a chord pad and say send to ARP a or b"). The drag above with the
+  aim taken out of the mouse, on the same `sendPadToArpLine` path, so it can hold no chord the
+  drag could not. One row per line the UI shows (`uiArpLines`), enabled whether or not that line
+  is switched on, because a line that is off still takes a chord in and plays it when it is
+  switched on. The accelerator relationship is exactly Send to arp slot's with a drop on a slot
+  card, which is why this is not a new right-click-only path.
 
   **A click never feeds a line any more** (2026-08-02, Owen: "when an arpeggiator's
   running and you click on a pad, I don't want it to send it to the arpeggiator unless you

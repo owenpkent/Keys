@@ -96,6 +96,33 @@ public:
     std::function<void(int slot, juce::PopupMenu&)> onExtraMenuItems;
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
+    // The rest of the card menu's id space, recorded here rather than at the two call sites so
+    // the ranges can be seen to be disjoint. The fixed rows are 1..6; these two are the ranges
+    // that grow, and both grow with a count that lives on KeysProcessor:
+    //
+    //   * `arpSlotIdBase` + 0..numArpPatterns-1  - Send to arp slot's submenu;
+    //   * `arpLineIdBase` + 0..uiArpLines-1      - Send to arp A / B;
+    //   * `extraMenuIdBase` and up               - the supplier's.
+    //
+    // Written as literals inside showPadMenu until 2026-08-17, where nothing recorded that 120
+    // was taken: raising numArpPatterns past 20 would have run the slot range into the line
+    // range, and since the slot branch is tested first the symptom is "Send to arp A binds the
+    // pad to slot 21" with nothing failing to compile. The static_assert is the point of this.
+    static constexpr int arpSlotIdBase = 100;
+    static constexpr int arpLineIdBase = 120;
+    static_assert(arpSlotIdBase + KeysProcessor::numArpPatterns <= arpLineIdBase,
+                  "the arp slot menu ids have grown into the arp line ids");
+    static_assert(arpLineIdBase + KeysProcessor::uiArpLines <= extraMenuIdBase,
+                  "the arp line menu ids have grown into the supplier's range");
+
+    // Fired from a pad's right-click menu: hand this pad's chord straight to an arp line
+    // (Owen, 2026-08-16: "I'd like to be able to right click on a chord pad and say send to
+    // ARP a or b"). The editor services it rather than this strip calling the processor the way
+    // "Send to arp slot" does, so the item lands on exactly the path a chord *dragged* onto that
+    // line's switch or its macro card takes - `KeysEditor::sendPadToArpLine`, which prefers the
+    // panel while it is open and moves the aim to the line you named.
+    std::function<void(int slot, int line)> onSendToArpLine;
+
     // Every drop this strip takes, wherever the chord came from: a pad moved to another pad, a
     // pad dropped on the live card to recall it, the live card captured onto a pad, and a
     // candidate dragged in from the generator's audition tray in a window of its own.

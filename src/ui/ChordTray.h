@@ -23,14 +23,17 @@ namespace keys
 // meant either filling the page with seven you did not want or rerolling one slot eight times
 // and losing each candidate as you looked at the next.
 //
-// Two things happen on a card, both left button, which is what keeps this inside the mouse-only
+// Three things happen on a card, all left button, which is what keeps this inside the mouse-only
 // contract without adding a right-click path to a closed list:
 //
 //   * **click** - audition it. The notes go out through ChordGenMenu, whose 800 ms timer
 //     releases them. This class never calls noteOn, for exactly the reason ChordGenPanel does
 //     not: the brain outlives every window, so a close cannot strand a preview note;
 //   * **drag onto a pad** - commit it there. A drag is the only gesture that can name a slot,
-//     which is why it and not a second click is the commit.
+//     which is why it and not a second click is the commit;
+//   * **click the hole a commit left** - generate one chord into it and hear it, so taking a
+//     card and getting another one back is the same gesture twice (Owen, 2026-08-16: "you can't
+//     regenerate it"). See mouseDown for why this is a fill of one cell and not a tiny Fill.
 //
 // The drag crosses windows, and JUCE does that for free - which is the opposite of what this
 // comment said until 2026-08-02. `DragAndDropContainer::startDragging` takes a fourth parameter,
@@ -44,9 +47,11 @@ namespace keys
 // A committed card **leaves its cell empty**, which is the one piece of state the tray keeps:
 // the hole is how you see which candidates you have already taken, and it is what gives Fill
 // something to do. Fill it back up, reroll what you have not used, and keep going until the page
-// is what you wanted. Nothing here is ever lost by rerolling, which is also why the panel's
-// timer refills the whole tray whenever a generator setting moves: the tray is a view of what
-// the settings would produce, and sixteen answers to the old Key are worth nothing.
+// is what you wanted. Nothing here is ever lost by rerolling.
+//
+// A settings change does **not** refill the tray - it only makes the caption say the candidates
+// are stale. This comment claimed the opposite until 2026-08-17, fifty lines above the doc on
+// settingsMovedSinceFill that records why the auto-refill was removed by name; read that one.
 class ChordTray : public juce::Component
 {
 public:
@@ -141,8 +146,14 @@ private:
     std::vector<KeysProcessor::ChordPad> cells;
 
     juce::String lastSignature;
-    int pressed = -1; // card under the button, or -1
+    int pressed = -1; // card under the button and still able to become a drag, or -1
     int hovered = -1; // card under the mouse, for the hover lift
+
+    // The card sounding from the current press, which is what paint() lights. Separate from
+    // `pressed` because the two came apart the moment a hole became clickable: filling one clears
+    // `pressed` at once so the card it just made cannot be dragged by the press that made it,
+    // and keying the lit state off `pressed` left that card silent-looking while it played.
+    int auditioning = -1;
     bool dragging = false;
     juce::Point<float> downPos;
 

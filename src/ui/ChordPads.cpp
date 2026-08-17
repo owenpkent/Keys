@@ -481,9 +481,9 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
-// A pad's card menu. Nine rows and two separators, which at the 34 px mouse-only item height
-// (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) is 9 * 34 + 2 * 17 =
-// 340 px. That budget is the reason this list is short: the menu hangs off a pad near the
+// A pad's card menu. Eleven rows and two separators, which at the 34 px mouse-only item height
+// (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) is 11 * 34 + 2 * 17 =
+// 408 px. That budget is the reason this list is short: the menu hangs off a pad near the
 // bottom of a 699 px window and grows *upwards*, and JUCE answers one taller than the space it
 // has by splitting it into columns or making it hover-scroll. A scrolling popup cannot be used
 // with one mouse at all - hovering the arrow scrolls, and moving to click scrolls the item
@@ -492,7 +492,7 @@ void ChordPads::setEditingSlot(int slot)
 //
 //   Edit on keyboard / Clear pad / Lock
 //   Octave down / Octave up / Next voicing
-//   New chord / Next: could follow > / Send to arp slot >
+//   New chord / Next: could follow > / Send to arp A / Send to arp B / Send to arp slot >
 //
 // The fourth group went with the generator's settings, into the window that now holds them
 // (ChordGenPanel): its Fill, Regen and Clear act on the audition tray, not on this page, where
@@ -555,9 +555,25 @@ void ChordPads::showPadMenu(int slot)
     if (onExtraMenuItems)
         onExtraMenuItems(slot, menu);
 
+    // Hand this card to a line right now (Owen, 2026-08-16: "I'd like to be able to right click
+    // on a chord pad and say send to ARP a or b"). Dragging a card onto a line's switch on the arp
+    // bar or onto its macro card has been the only left-click path into a line since 2026-08-02,
+    // when a plain click stopped feeding one; this is that gesture's accelerator, exactly the
+    // relationship "Send to arp slot" below has with a drop on a slot card, so it opens no new
+    // right-click-only path.
+    //
+    // One row per **UI** line, not per engine: `uiArpLines` is what the screen counts off, so C
+    // comes back here the day it comes back anywhere. Live on a line that is switched off, on
+    // purpose - a line that is off still takes chords in, and switching it on then plays what it
+    // was handed.
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
+        menu.addItem(arpLineIdBase + n,
+                     "Send to arp " + juce::String::charToString((juce::juce_wchar) ('A' + n)),
+                     filled && onSendToArpLine != nullptr);
+
     // Bind this card to an arp slot, so launching that slot plays this chord through that
-    // slot's pattern. The other half of the "cards into the arp" pair: a click with the arp
-    // On holds a card right now, this parks one in a slot for later.
+    // slot's pattern. The other half of the "cards into the arp" pair: the two rows above hold a
+    // card in a line right now, this parks one in a slot for later.
     juce::PopupMenu slots;
     for (int s = 0; s < KeysProcessor::numArpPatterns; ++s)
     {
@@ -565,7 +581,7 @@ void ChordPads::showPadMenu(int slot)
         auto label = juce::String(s + 1);
         if (target.chordName.isNotEmpty())
             label += "  (" + target.chordName + ")";
-        slots.addItem(100 + s, label, filled);
+        slots.addItem(arpSlotIdBase + s, label, filled);
     }
     menu.addSubMenu("Send to arp slot", slots, filled);
 
@@ -605,10 +621,20 @@ void ChordPads::showPadMenu(int slot)
         {
             safe->nextPadVoicing(slot);
         }
-        else if (choice >= 100 && choice < 100 + KeysProcessor::numArpPatterns)
+        else if (choice >= arpSlotIdBase && choice < arpSlotIdBase + KeysProcessor::numArpPatterns)
         {
+            // Undoable: this replaces the slot's chord, name, shape and rate in place, and a slot
+            // is one of the two trees undo covers. Copy slot and Randomize pattern in ArpPanel
+            // both push for the same data; this one did not until 2026-08-17, so sending a pad to
+            // a slot you had already dressed threw that slot away with no way back.
+            safe->processor.pushUndo("Send pad to arp slot", KeysProcessor::UndoScope::arp);
             const auto& pad = safe->processor.chordPad(slot);
-            safe->processor.setArpSlotChord(choice - 100, pad.notes, pad.name);
+            safe->processor.setArpSlotChord(choice - arpSlotIdBase, pad.notes, pad.name);
+        }
+        else if (choice >= arpLineIdBase && choice < arpLineIdBase + KeysProcessor::uiArpLines)
+        {
+            if (safe->onSendToArpLine)
+                safe->onSendToArpLine(slot, choice - arpLineIdBase);
         }
         else if (choice >= extraMenuIdBase && safe->onExtraMenuChoice)
         {
