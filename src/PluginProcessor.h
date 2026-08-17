@@ -382,10 +382,27 @@ public:
     int capturedEventCount() const { return (int) capturedTake.size(); }
     double capturedSeconds() const;
 
-    // The take as a type-0 MIDI file at the tempo the arp clock is running at, note-offs
-    // supplied for anything still ringing when recording stopped, and shifted so the first
-    // event sits at zero. False when there is nothing to write.
+    // The take as a type-0 MIDI file at the tempo it was played to, note-offs supplied for
+    // anything still ringing when recording stopped, and shifted so the first event sits at
+    // zero. False when there is nothing to write.
     bool buildTakeMidiFile(juce::MidiFile& out) const;
+
+    // The take's notes, for drawing it. **Built from buildTakeMidiFile's own sequence**, not
+    // from the raw capture, so what the preview draws is provably what the file holds - the
+    // trim, the pairing and the supplied note-offs are all applied once, in one place, and a
+    // preview that disagreed with the file would be worse than no preview at all.
+    struct TakeNote
+    {
+        double startSec = 0.0, lengthSec = 0.0;
+        int note = 0, channel = 1;
+        float velocity = 0.0f;
+    };
+    std::vector<TakeNote> takeNotes() const;
+
+    // The tempo the take was played to, frozen when recording armed. Not `currentTempo()`: the
+    // file is written once, at stop, and a host tempo that moved afterwards would make every
+    // later preview disagree with the bytes already on disk.
+    double takeTempo() const { return takeBpm; }
 
     // Where a stopped take is written, created on demand. One fixed folder rather than a save
     // dialog per take: add it to Live's Places once and every take afterwards is a short drag
@@ -827,6 +844,10 @@ private:
     juce::int64 captureSamples = 0;               // audio thread only; blocks since arming
     std::vector<CapturedEvent> capturedTake;      // message thread only
     juce::File lastTake;
+
+    static constexpr short takeTicksPerQuarter = 960;
+    double takeBpm = 120.0;      // frozen at arm time; see takeTempo()
+    double takeTicksPerSecond() const;
 
     void captureBlock(const juce::MidiBuffer&, int numSamples); // audio thread, end of the block
     void drainCapture();                                        // message thread, off heartbeatTick

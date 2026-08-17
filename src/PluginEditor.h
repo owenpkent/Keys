@@ -11,6 +11,7 @@
 #include "ui/RangeKnob.h"
 #include "ui/RangeSlider.h"
 #include "ui/SectionBar.h"
+#include "ui/TakePanel.h"
 // StepComboBox.h went with the Pads bar's Scale Compliance box on 2026-08-02. The class is
 // still in the tree: it is the answer for any future value shown as coarse steps of a
 // continuous parameter, and the bug it documents (a ComboBoxAttachment swallowing a pick of
@@ -322,6 +323,16 @@ private:
     TakeChip takeChip;
     void refreshTakeControls(); // lit state, caption and enablement; polled from timerCallback
     juce::String lastTakeCaption;
+
+    // The take window: a picture of what was captured, plus Save as / Show in Explorer, so a
+    // take is something you can look at before it leaves rather than a filename you trust.
+    // Built when opened and destroyed when closed, the ChordGenPanel pattern - and unlike that
+    // one its bounds are not kept in LayoutState, because a take is transient and a session
+    // reopening onto this window would be reopening onto a take that no longer exists.
+    void setTakeWindowOpen(bool open);
+    std::unique_ptr<TakePanel> takePanel;
+    std::unique_ptr<DetachedWindow> takeWindow;
+    juce::Rectangle<int> takeWindowBounds; // this run only; see above
     juce::TextButton updateButton;
 
     // Chord-pad page navigation, riding the Pads bar.

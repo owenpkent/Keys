@@ -47,6 +47,28 @@ fallback here, not the intended gesture.
 writing into the user's Documents folder. `tests/TakeTests.cpp` pins the pair, the trim, the
 hanging-note repair, the tempo, and that arming again starts a new take rather than appending.
 
+**The take window** (`src/ui/TakePanel.h`) is what stops a take being a filename you have to
+trust. Clicking the chip opens a picture of what was captured - length, note count, tempo, and
+the notes as bars - with **Save MIDI as…**, **Show in Explorer**, and the roll itself as the
+drag source, because the thing you are dragging should be the thing you can see. It is a *view*
+and not an editor: editing a take belongs in a piano roll, Keys has a sibling for that
+(Lattice), and half of one here would be a second, worse one.
+
+**`takeNotes()` is built from `buildTakeMidiFile`'s own sequence**, not from the raw capture, so
+the trim, the pairing and the supplied note-offs are applied once and the picture is provably
+the bytes. That property has a test, and the test earned its keep immediately: `takeNotes` first
+shipped with a 10 ms floor on note length so short notes stayed visible, which made every short
+note in the preview disagree with the file. The floor belongs in `Roll::paint`, which already
+floors the *bar* at 2 px. A minimum length is a question about drawing, not about data.
+
+**The take's tempo is frozen when recording arms** rather than read when the file is built. The
+file is written once, at stop; a host tempo that moved afterwards would have made every later
+preview disagree with bytes already on disk. It is also simply the tempo you played to.
+
+Unlike the generator window, the take window's bounds are **not** kept in `LayoutState`: a take
+is transient, and a session reopening onto this window would be reopening onto a take that no
+longer exists.
+
 ### Fixed: the editor was much more expensive to paint than it needed to be
 
 Owen: *"sluggish overall"*, in Ableton, with the standalone fine. Three things, each defensible

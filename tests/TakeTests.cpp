@@ -225,6 +225,82 @@ public:
                 }
             expect(sawTempo);
         }
+
+        beginTest("the preview is the file: takeNotes agrees with what was written");
+        {
+            Host h;
+            h.processor.setRecording(true);
+            juce::MidiBuffer midi;
+            // A chord and a note after it, so the preview has something with shape to get wrong.
+            midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 0);
+            midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8) 100), 0);
+            midi.addEvent(juce::MidiMessage::noteOn(1, 67, (juce::uint8) 100), 0);
+            midi.addEvent(juce::MidiMessage::noteOff(1, 60), 240);
+            midi.addEvent(juce::MidiMessage::noteOff(1, 64), 240);
+            midi.addEvent(juce::MidiMessage::noteOff(1, 67), 240);
+            h.run(midi);
+            juce::MidiBuffer after;
+            after.addEvent(juce::MidiMessage::noteOn(1, 72, (juce::uint8) 80), 0);
+            after.addEvent(juce::MidiMessage::noteOff(1, 72), 120);
+            h.run(after);
+            h.processor.setRecording(false);
+
+            const auto notes = h.processor.takeNotes();
+            auto seq = takeTrack(h.processor);
+            expectEquals((int) notes.size(), countNoteOns(seq));
+            expectEquals((int) notes.size(), 4);
+
+            // Every drawn note has to be a note in the file, at the same time, for the same
+            // length. A preview that disagreed with the bytes would be worse than none.
+            const double ticksPerSec = 960.0 * h.processor.takeTempo() / 60.0;
+            for (const auto& n : notes)
+            {
+                bool matched = false;
+                for (int i = 0; i < seq.getNumEvents() && ! matched; ++i)
+                {
+                    const auto* ev = seq.getEventPointer(i);
+                    if (! ev->message.isNoteOn() || ev->message.getNoteNumber() != n.note)
+                        continue;
+                    const double start = ev->message.getTimeStamp() / ticksPerSec;
+                    if (std::abs(start - n.startSec) > 0.001)
+                        continue;
+                    const double len = (seq.getTimeOfMatchingKeyUp(i)
+                                        - ev->message.getTimeStamp()) / ticksPerSec;
+                    matched = std::abs(len - n.lengthSec) < 0.001;
+                }
+                expect(matched);
+            }
+        }
+
+        beginTest("the take's tempo is frozen when it arms, not read again when it is drawn");
+        {
+            Host h;
+            if (auto* bpm = h.processor.apvts.getParameter("bpm"))
+                bpm->setValueNotifyingHost(bpm->convertTo0to1(100.0f));
+            h.silentBlocks(2);
+
+            h.processor.setRecording(true);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 0);
+            midi.addEvent(juce::MidiMessage::noteOff(1, 60), 240);
+            h.run(midi);
+            h.processor.setRecording(false);
+
+            const double frozen = h.processor.takeTempo();
+            const auto before = h.processor.takeNotes();
+            expect(! before.empty());
+
+            // The file is written once, at stop. Moving the tempo afterwards must not move the
+            // take: otherwise every later preview disagrees with the bytes already on disk.
+            if (auto* bpm = h.processor.apvts.getParameter("bpm"))
+                bpm->setValueNotifyingHost(bpm->convertTo0to1(160.0f));
+            h.silentBlocks(2);
+
+            expectWithinAbsoluteError(h.processor.takeTempo(), frozen, 0.001);
+            const auto after = h.processor.takeNotes();
+            expectEquals((int) after.size(), (int) before.size());
+            expectWithinAbsoluteError(after.front().lengthSec, before.front().lengthSec, 0.0001);
+        }
     }
 };
 

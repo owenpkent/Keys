@@ -1,11 +1,34 @@
 # Using Keys in Ableton Live
 
-Keys is an instrument that outputs MIDI. It goes on one track; the instrument it
-drives goes on another, fed from the Keys track.
+## Which one do I use?
 
-**Keys Host** is the one-window variant: it hosts a (third-party) instrument VST3
-*inside* itself, so keyboard and synth live on a single track with no routing. See
-"Keys Host" below for how it fits with everything on this page.
+Keys ships as two products, and picking the wrong one is the single most common way to
+end up frustrated. **The question that decides it is whether you want Live to record
+what you play.**
+
+| | Use **Keys** | Use **Keys Host** |
+|---|---|---|
+| Tracks | Two: Keys, and your instrument | One |
+| Your instrument is | a normal Live device | loaded inside the plugin |
+| Live records what you play | **Yes**, natively, on the grid | **No** — use Keys' own REC |
+| Setup | routing, once, into a template | none |
+
+**Want Live to record it? Use plain Keys.** The instrument sits on its own track as an
+ordinary Live device, so you get the browser, presets, effects after it, freezing, all
+of it — and, crucially, **the clip you record lands on the track that makes the sound**,
+so it plays straight back with no further routing.
+
+**Want one track and no routing at all? Use Keys Host**, and record with **REC** on its
+Keyboard bar (see "Recording what you play"). Keys Host also drives Ableton's own
+instruments on other tracks, and it is what the standalone build uses.
+
+Note the tension, because it is real and it is not going away: Keys Host exists to avoid
+routing, and Live's recording *requires* routing. You cannot have both from one product.
+Adding a listener track to a Keys Host set gets you a recording, but the clip lands on a
+track with no instrument on it — so you would then need a third routing to hear it back.
+At that point plain Keys is simpler and strictly better.
+
+The rest of this page assumes plain Keys unless it says otherwise.
 
 ## Routing
 
@@ -110,10 +133,14 @@ plain Keys: on the Ableton-instrument track set **MIDI From → Keys Host** (and
 while it is also playing its hosted VST3 — so one Keys Host can drive its own synth
 *and* Ableton devices on other tracks; arm/monitor per track decides who listens.
 
-Recording note: what you play into the *hosted* instrument stays inside the plugin,
-so Live doesn't capture it as a MIDI clip on the Keys Host track itself. Either use a
-listener track ("MIDI From: Keys Host"), exactly like the routing above, or press
-**REC** on the Keyboard bar and let Keys record itself — see "Recording what you play".
+**Recording note.** Arming the Keys Host track and recording gets you an empty clip, for
+the reason under "Recording what you play": Live records at the track input, and the notes
+are made downstream of it. Press **REC** on the Keyboard bar instead.
+
+A listener track ("MIDI From: Keys Host") *does* capture it, but think twice — the clip
+lands on a track with no instrument, so playing it back needs a further routing back into
+Keys Host. If you want Live to record and play it natively, that is what plain Keys is
+for; see "Which one do I use?" at the top.
 
 ## Channels
 
@@ -122,13 +149,37 @@ Ch** on Keys and filter by channel on the receiving tracks. Otherwise leave it a
 
 ## Recording what you play
 
-**Arming the Keys track itself records nothing, and that is a Live limit, not a Keys
-bug.** Live records what arrives at a track's *input*. The notes you click are made
-inside the plugin, downstream of that input, so there is nothing at the input to record
-and the clip comes out empty. No plugin-side setting changes this, in Keys or in any
-other MIDI-generating plugin. There are two ways round it, and they are both one click.
+**Arming a track that has Keys on it and recording gets you nothing, and that is a Live
+limit rather than a Keys bug.** Live records what arrives at a track's *input*. The notes
+you click are made inside the plugin, downstream of that input, so there is nothing at
+the input to record and the clip comes out empty. No plugin-side setting changes this, in
+Keys or in any other MIDI-generating plugin.
 
-### REC: Keys records itself (one track, nothing to route)
+The proof is one you can run in ten seconds without Keys at all: put Live's own
+**Arpeggiator** on a track and record it. You get the plain chord you played, not the
+arpeggio. Same tap point, same result.
+
+This is also why Scaler, Cthulhu and every other chord/arp plugin ship exactly the two
+answers below — route to a second track, or capture inside the plugin and drag the file
+out. There is no third one hiding in Live's routing.
+
+### The normal way: record the instrument track (plain Keys)
+
+With the routing above already in place, **you are done** — recording is just recording.
+Arm your instrument track, hit record, click the keys. The notes land as an ordinary MIDI
+clip on the instrument's own track, in time, on the grid, and play straight back.
+
+This is the answer for almost everything. The two-track setup is a *one-time* cost if you
+save it into your template (see above): after that, every new project already has the
+Keys track and the routing, and there is nothing to set up per song.
+
+Scale Lock, octave and velocity all apply to what is recorded, because Keys sends
+already-resolved notes. With either arp line lit (**A**, **B**), what lands is the
+arpeggiated stream rather than the chord you clicked — the arp rewrites the note stream
+on its way out of the plugin, so the clip holds what you heard, both lines at once if
+both are running.
+
+### REC: Keys records itself (for Keys Host, or one-track sets)
 
 Press **REC** on the Keyboard bar, play, press **STOP**. Keys writes the take to
 `Documents\OK Studio\Keys Takes` and the chip beside REC names it and how long it is.
@@ -138,28 +189,27 @@ strummed where a pad strummed, on whichever channel each line sent it on. It is 
 heard, not what you clicked. The take carries the tempo Keys was running at, so the clip
 lands on the grid; notes still ringing when you stop are given an end, so nothing hangs.
 
-Two ways to get it into Live, both left-button:
+**Click the chip** to open the take: a picture of what was captured, its length, note
+count and tempo, and three ways out.
 
-- **Drag the chip** straight onto a track. One long drag across the screen.
-- **Click the chip** to show the file in Explorer, and drag from there.
+- **Drag the roll** (or the chip) straight onto a Live track. One long drag.
+- **Save MIDI as…** to put a copy anywhere, under a name that means something.
+- **Show in Explorer**, and drag from there.
 
 Best of all, once: add `Documents\OK Studio\Keys Takes` to Live's browser as a **Place**
 (drag the folder into the browser's sidebar, or Add Folder). Every take afterwards
 appears there and is a short drag *inside* Live — much the kindest gesture with one mouse.
 
+The window is a view, not an editor. It draws the take from the same MIDI file that was
+written, so what you see is what the file holds; trimming or rearranging it is a job for
+Live's own piano roll once it is in.
+
 Pressing REC again starts a fresh take. Nothing is lost by that: the previous one was
 written to disk the moment you stopped.
 
-### The listener track (records into Live's own timeline)
+### Channels, either way
 
-Arm the instrument track and record; the notes you click land as a normal MIDI clip.
-Scale Lock, octave, and velocity all apply to what's recorded, because Keys sends the
-already-resolved notes. With either of the Arp section's line switches (**A**, **B**) lit,
-what lands is the arpeggiated stream rather than the chord you clicked: the arp rewrites the
-note stream on its way out of the plugin, so the clip holds what you heard — both lines
-at once, if both are running.
-
-Each line can also name its own **Channel** (Global, or 1–16). That is what makes two lines
+Each arp line can name its own **Channel** (Global, or 1–16). That is what makes two lines
 useful against a multitimbral rack: set A and B to different channels and one Keys drives
 three sounds. Live records all of it into the one clip, on the channels the lines sent it on;
 splitting it back out afterwards is a job for Live, not for Keys.

@@ -1328,6 +1328,10 @@ void KeysProcessor::setRecording(bool shouldRecord)
         capturedTake.clear();
         captureRead = captureWrite.load(std::memory_order_acquire);
         captureSamples = 0;
+        // Frozen here rather than read at build time: the file is written once, at stop, and a
+        // host tempo that moved afterwards would make every later preview disagree with the
+        // bytes already on disk. This is also the tempo you actually played to.
+        takeBpm = juce::jlimit(20.0, 999.0, currentTempo());
         recording.store(true, std::memory_order_relaxed);
         return;
     }
@@ -1345,14 +1349,59 @@ double KeysProcessor::capturedSeconds() const
     return juce::jmax(0.0, capturedTake.back().atSec - capturedTake.front().atSec);
 }
 
+double KeysProcessor::takeTicksPerSecond() const
+{
+    // One place, so the file and the preview drawn from it can never disagree about time.
+    return (double) takeTicksPerQuarter * takeBpm / 60.0;
+}
+
+std::vector<KeysProcessor::TakeNote> KeysProcessor::takeNotes() const
+{
+    std::vector<TakeNote> out;
+
+    // Built from the file's own sequence rather than from `capturedTake`, so the trim, the
+    // pairing and the supplied note-offs are applied once and the picture is the bytes.
+    juce::MidiFile file;
+    if (! buildTakeMidiFile(file) || file.getNumTracks() < 1)
+        return out;
+
+    const double ticksPerSecond = takeTicksPerSecond();
+    if (ticksPerSecond <= 0.0)
+        return out;
+
+    const auto& seq = *file.getTrack(0);
+    out.reserve((size_t) seq.getNumEvents() / 2);
+    for (int i = 0; i < seq.getNumEvents(); ++i)
+    {
+        const auto* ev = seq.getEventPointer(i);
+        if (! ev->message.isNoteOn())
+            continue;
+
+        const double startTicks = ev->message.getTimeStamp();
+        const double endTicks = ev->noteOffObject != nullptr ? seq.getTimeOfMatchingKeyUp(i)
+                                                             : startTicks;
+        // The true length, with no floor under it. A short note has to stay *visible*, but that
+        // is a question about drawing and belongs in Roll::paint, which already floors the bar
+        // at 2 px. Putting the floor here instead made the preview disagree with the file by up
+        // to 10 ms on every short note - which is the one thing this function must never do,
+        // and is exactly what the "the preview is the file" test caught.
+        out.push_back({ startTicks / ticksPerSecond,
+                        (endTicks - startTicks) / ticksPerSecond,
+                        ev->message.getNoteNumber(),
+                        ev->message.getChannel(),
+                        ev->message.getFloatVelocity() });
+    }
+    return out;
+}
+
 bool KeysProcessor::buildTakeMidiFile(juce::MidiFile& out) const
 {
     if (capturedTake.empty())
         return false;
 
-    constexpr short ticksPerQuarter = 960;
-    const double bpm = juce::jlimit(20.0, 999.0, currentTempo());
-    const double ticksPerSecond = (double) ticksPerQuarter * bpm / 60.0;
+    constexpr short ticksPerQuarter = takeTicksPerQuarter;
+    const double bpm = takeBpm;
+    const double ticksPerSecond = takeTicksPerSecond();
     const double zero = capturedTake.front().atSec; // the take starts when you played, not when you armed
 
     juce::MidiMessageSequence seq;

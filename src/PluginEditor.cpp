@@ -480,17 +480,15 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addAndMakeVisible(recButton);
 
-    takeChip.setTooltip("The last take. Click to show it in Explorer, or drag it straight onto "
-                        "a track. Add Documents\\OK Studio\\Keys Takes to Live's Places and "
-                        "every take is one short drag inside Live's own browser.");
+    takeChip.setTooltip("The last take. Click to open it - a picture of what was captured, with "
+                        "Save as and Show in Explorer - or drag it straight onto a track. Add "
+                        "Documents\\OK Studio\\Keys Takes to Live's Places and every take is one "
+                        "short drag inside Live's own browser.");
     takeChip.setTitle("Last take");
     takeChip.getFile = [this] { return processor.lastTakeFile(); };
-    takeChip.onClick = [this]
-    {
-        const auto f = processor.lastTakeFile();
-        if (f.existsAsFile())
-            f.revealToUser();
-    };
+    // Click opens the window rather than jumping to Explorer. Reveal is still one click, it is
+    // just inside the window now, next to the picture that tells you whether you want it.
+    takeChip.onClick = [this] { setTakeWindowOpen(takeWindow == nullptr); };
     addAndMakeVisible(takeChip);
     refreshTakeControls();
 
@@ -917,6 +915,9 @@ KeysEditor::~KeysEditor()
     rememberChordGenBounds();
     chordGenWindow.reset();
     chordGenPanel.reset();
+    // And the take window, same order and same reason.
+    takeWindow.reset();
+    takePanel.reset();
     if (styledWindow != nullptr)
         styledWindow->setLookAndFeel(nullptr);
     modWheel.setLookAndFeel(nullptr);
@@ -1931,6 +1932,41 @@ void KeysEditor::showUpdate(const okstudio::updater::UpdateInfo& info)
     resized();
 }
 
+void KeysEditor::setTakeWindowOpen(bool open)
+{
+    if (open == (takeWindow != nullptr))
+        return;
+
+    if (open)
+    {
+        takePanel = std::make_unique<TakePanel>(processor);
+        // Deferred a message-loop turn, the same reason the generator window defers: both ways
+        // out (the panel's Close button, the title bar's X) are *inside* what this destroys.
+        juce::Component::SafePointer<KeysEditor> safe(this);
+        const auto close = [safe]
+        {
+            juce::MessageManager::callAsync([safe]
+            {
+                if (auto* e = safe.getComponent())
+                    e->setTakeWindowOpen(false);
+            });
+        };
+        takePanel->onClose = close;
+        takeWindow = std::make_unique<DetachedWindow>(
+            "Keys Take", lnf, *takePanel, takeWindowBounds,
+            TakePanel::minWindowSize(), TakePanel::defaultWindowSize(),
+            close, [this] { if (takeWindow != nullptr) takeWindowBounds = takeWindow->getBounds(); });
+        takePanel->sendLookAndFeelChange(); // built before it was ever parented
+    }
+    else
+    {
+        if (takeWindow != nullptr)
+            takeWindowBounds = takeWindow->getBounds();
+        takeWindow.reset(); // clears its content first, so the panel is unparented
+        takePanel.reset();
+    }
+}
+
 // The take chip's two gestures. Four pixels of slop tell them apart, the same tolerance
 // RangeKnob's lamp uses: a click on a mouse-only surface is allowed to be untidy.
 void KeysEditor::TakeChip::mouseDown(const juce::MouseEvent& e)
@@ -1947,12 +1983,7 @@ void KeysEditor::TakeChip::mouseDrag(const juce::MouseEvent& e)
         if (f.existsAsFile())
         {
             wasDrag = true;
-            // canMoveFiles false: the take stays in its folder whatever the drop target does
-            // with it. Live copies a dropped .mid into the set, so moving would empty the
-            // folder the moment it was used, which is the opposite of what one fixed folder
-            // is for.
-            juce::DragAndDropContainer::performExternalDragDropOfFiles(
-                { f.getFullPathName() }, false, this);
+            TakePanel::dragTakeOut(this, f); // one spelling of the drag, shared with the roll
             return;
         }
     }
@@ -2012,6 +2043,11 @@ void KeysEditor::refreshTakeControls()
         lastTakeCaption = caption;
         takeChip.setButtonText(caption);
     }
+
+    // So a take recorded with the window already open appears in it. The panel's own check is
+    // the cheap one (a file path and an event count); it only rebuilds when those move.
+    if (takePanel != nullptr)
+        takePanel->refresh();
 }
 
 void KeysEditor::timerCallback()
