@@ -245,9 +245,10 @@ old outer LINES box gone, since a frame around both was what made two arpeggiato
 (*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
 panel's width cannot hold what used to be one full-width row: a detented rate knob with `<`
 `>` and its Sync/Hz switch, and the shape with steppers of its own, under **RATE / SHAPE**
-micro-caps so the two stepper pairs read as belonging to their words; **eight knobs** under
-their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel, the last two being
-**range knobs** since 2026-08-03 (face for the most a draw ever does, the ring around it for how
+micro-caps so the two stepper pairs read as belonging to their words; **seven knobs** under
+their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time (eight until 2026-08-17,
+when H.Vel folded into Vel's own ring - see below), Vel and H.Time both being
+**range knobs** (face for the most a draw ever does, the ring around it for how
 far under that it may fall, arc between them the range, and the whole range travels with the
 face - see `src/ui/RangeKnob.h`, and the note below on the satellite that opens it); and the
 rate's
@@ -280,10 +281,16 @@ three 2026-08-02, Owen: "I was at negative 96, and it was still pretty loud"). I
 **Vol** (`arpVolume`, cut-only, misnamed for what it touched -
 the parameter survives for old sessions and `migrateVelTrim` folds it in exactly), which had
 itself taken the place of **Ramp *and* Time** together - they are one feature between them,
-and a row carrying Time with no Ramp would be a control with nothing to time. **H.Time** and
-**H.Vel** are Humanize split into its halves (`arpHumanize`, now timing-only, and
-`arpHumanVel`), so the late-nudge and the velocity shave randomize independently. Ramp, Time
-and the split Human pair all live on the per-line tab's FEEL group.
+and a row carrying Time with no Ramp would be a control with nothing to time. **H.Time and
+Vel's own ring** are Humanize split into its halves (`arpHumanize`, timing-only, and
+`arpHumanVel`, the velocity half), so the late-nudge and the velocity shave randomize
+independently. **H.Vel had a seventh column of its own until 2026-08-17** (Owen, looking at the
+card: "I didn't realize there was a separate velocity knob. I only want one velocity knob, and
+I want this humanize section to be the outer ring") - it did not move, it became Vel's ring
+instead, so the merge is a UI change and not a parameter one. Ramp, Time
+and the split Human pair still live unchanged on the per-line tab's FEEL group; that per-line
+**Human Vel** slider is not part of this merge, the same carve-out the original RangeKnob entry
+below left for it.
 
 The knobs are the band's own machined rotary rather than sliders, and each column heading is
 written once on the top row while every row reserves the same strip, so the columns line up
@@ -446,7 +453,7 @@ math was adversarially refuted as a pattern to copy. Requirements:
   became **Tempo**, a plain draggable number with `<` `>` steppers on the *Controls bar* itself
   (Owen: "the bpm should live in the controls header. I want it to be like the bpm in ableton,
   just a number") - it stays reachable with that section folded now, where the slider did not.
-  **A host that is playing still wins only while Tempo Sync is on** (`bpmSync`, appended
+  **A host that reports a tempo wins while Tempo Sync is on** (`bpmSync`, appended
   2026-08-02, default on - Owen: "we need a BPM sync toggle to sync with DAW"). Keys had no
   opt-out from the host's tempo until this parameter existed; on reproduces exactly the
   behaviour above, off pins the arp (and the progression chain, `advanceChainClock`) to the
@@ -458,6 +465,17 @@ math was adversarially refuted as a pattern to copy. Requirements:
   since none of the field or its steppers can change anything in that state. Read only in Sync
   mode - the Hz free-rate path below never looked at the host clock to begin with, so the
   toggle changes nothing there.
+  **`clock.playing` dropped back out of that check on 2026-08-16** (Owen: "bpm isn't syncing
+  with daw"). The `followHost` branch above had kept it - `clock.playing && clock.bpm > 0` was
+  the *pre-bpmSync* test, and the new parameter was threaded in beside it rather than in place
+  of it, so a host sitting stopped at its own tempo was still ignored, and Keys sat on its own
+  number for exactly as long as you were setting up, which is when you look at it. `playing`
+  came out of both `ArpEngine::process`'s tempo choice and `advanceChainClock`; the *position*
+  each of them still reads (`clock.ppq`) keeps its own `playing` test, since a position
+  genuinely means nothing while the transport is stopped. `HostClock` gained a `hasBpm` flag
+  for the tempo half rather than testing `bpm > 0`: `HostClock::bpm` defaults to **120, not
+  0**, so `> 0` would have read that default as a real host answer and, in the standalone
+  especially, quietly stopped following the Tempo field it was supposed to fall back to.
 - Engine is a pure class (`ArpEngine.h`, UI-free, unit-tested like ChordGen):
   inputs = sounding-note set + params + (ppq, bpm, numSamples); output = timestamped
   note events.
@@ -1207,9 +1225,15 @@ What carries it:
   there is no negative span: Serum flips the halo's hue for an inverted depth, but a range has
   nothing to invert into, so `Direction` picks which side of the value it reaches instead.
   The component owns no parameter: the span comes in through `setSpan()` and goes out through
-  three callbacks, so the consumer keeps the parameter and the gesture brackets. In Keys those
-  are `arpHumanizeSpan` and `arpHumanVelSpan`, default 100 - a span of the whole scale, which
-  puts the floor at zero wherever the knob sits and is what Humanize did before it had a ring.
+  three callbacks, so the consumer keeps the parameter and the gesture brackets. In Keys that is
+  `arpHumanizeSpan`, H.TIME's own span (default 100 - a span of the whole scale, which puts the
+  floor at zero wherever the knob sits and is what Humanize did before it had a ring), and,
+  since 2026-08-17, `arpHumanVel` feeding VEL's ring directly - a different wiring of the same
+  component, since VEL's ring is *not* a span of VEL's own value the way H.TIME's is: it is
+  Humanize Velocity's own amount, handed straight to `setSpan()`. `arpHumanVelSpan`, H.VEL's own
+  former span from when it was a knob of its own, is pinned to 100 by every write the new ring
+  makes rather than removed - the draw was already uniform at that default, so pinning it keeps
+  that true with one fewer number on screen.
   The engine, not the layout, clamps the floor to its own ceiling, since either can be
   automated past the other.
 - **Tuplet is a combo box, and was briefly not.** For one build it was a `ToggleButton` that

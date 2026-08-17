@@ -9,9 +9,12 @@ namespace keys
 {
 // A read-only picture of what the currently selected chord-generation source is doing (Owen,
 // 2026-08-01: "a visualization for the generation source so people understand what it's
-// doing"). It draws the shape a source walks - the fifths wheel, the PLR triangle, the mirror
-// clock - and, when the audition tray holds chords, highlights the actual walk that produced
-// them on top of it.
+// doing"). It draws the shape a source walks - the fifths wheel, the PLR chain, the mirror
+// clock - and, when the audition tray holds chords, draws the actual walk that produced them on
+// top of it, plus a one-line legend saying in words what the picture shows (2026-08-17: every
+// diagram used to give the picture a fixed square and spend the rest of its width on a row of
+// chips restating chord names the tray below already lists - gone now, in favour of the legend
+// and a diagram that gets the full band).
 //
 // This is a diagram, not a control surface: it generates nothing, plays nothing, and writes no
 // parameter. Everything it needs is pushed in from outside (source, key, the tray's current
@@ -34,9 +37,10 @@ public:
     void setKey(int rootPc, int mode);
     void setChords(const std::vector<KeysProcessor::ChordPad>& chords); // what the tray holds
 
-    // What the panel should give it. 112 px: enough for a two-line diagram (a 9 px micro-caps
-    // caption plus a wheel/strip beneath it wide enough to read at arm's length) without
-    // costing the window a whole extra control row.
+    // What the panel should give it. 160 px (up from 112, 2026-08-17): a 9 px micro-caps caption
+    // row plus the diagram itself at the full width of the window. Every source used to spend
+    // most of that width on a row of chips restating chord names the tray below already shows;
+    // those are gone, so the whole band goes to the picture instead.
     static int preferredHeight();
 
 private:

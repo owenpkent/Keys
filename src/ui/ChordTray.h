@@ -189,9 +189,17 @@ private:
 // own target search answers "which window is on top here" better than a bounds test could - the
 // reference box used to light up through a window sitting over it.
 //
-// Left-click auditions it, the same as a tray card. It is not a drag source: it is where chords
-// come to be kept, and the pads are one click away through Similar / Could follow rather than a
-// second commit path nobody asked for.
+// Left-click auditions it, the same as a tray card. **And since 2026-08-17 a drag off it commits
+// it**, the same as a tray card too (Owen: "I'm not able to drag the currently held chord into the
+// chord pad"). It was drop-only until then, on the reading that Similar / Could follow were route
+// enough to the pads - but those two fill the *tray* with new chords, and neither of them puts the
+// reference chord itself anywhere. A card that visibly holds a chord and cannot give it up is a
+// dead end you have to be told about, which is how it was found.
+//
+// The one thing it does not share with a tray card: dragging it off **copies**. The reference is
+// the tray's fixed point (that is the whole reason it exists - "so when you regenerate everything,
+// it doesn't erase your reference chord"), so it keeps its chord however many pads it fills. That
+// is `From::refCard` rather than `From::trayCell`, and it is the only difference between them.
 class ChordRefCard : public juce::Component,
                      public juce::DragAndDropTarget
 {
@@ -200,12 +208,14 @@ public:
 
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseEnter(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
 
     // A chord card from the tray beside it or from the pad strip in another window. The live
     // card is refused: it is what is under your hand on the keyboard, not a chord you have kept.
+    // So is this card's own chord, which has nowhere to land but where it already is.
     bool isInterestedInDragSource(const SourceDetails&) override;
     void itemDragEnter(const SourceDetails&) override;
     void itemDragExit(const SourceDetails&) override;
@@ -221,10 +231,18 @@ public:
     void setDropHighlight(bool);
 
 private:
+    void beginDrag(const juce::MouseEvent&);
+
     KeysProcessor& processor;
     ChordGenMenu& gen;
     KeysProcessor::ChordPad held;
     bool pressed = false, hovered = false, dropHighlight = false;
+    // The drag half, the same three fields ChordTray carries and for the same reasons: where the
+    // press landed (so a 6 px threshold can tell a click from a drag), whether one is in flight,
+    // and the payload held by Ptr so it outlives the drag image.
+    juce::Point<float> downPos;
+    bool dragging = false;
+    chorddrag::Payload::Ptr inFlight;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordRefCard)
 };

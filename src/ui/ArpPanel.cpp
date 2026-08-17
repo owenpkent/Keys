@@ -487,11 +487,14 @@ void ArpPanel::setMacroView(bool on)
     refreshMacro();
     // The bar's page tabs come and go with this view (they pick a page of a line's deep view,
     // and the macro view has no page), so it has to hear about the change now rather than on
-    // the next tick. The panel is the *same* height in both views since 2026-08-14 - that is
-    // the whole point of arpFixedH - so there is no onPreferredHeightChanged here any more,
-    // and switching views no longer moves the window.
+    // the next tick.
     if (onPageChanged)
         onPageChanged();
+    // ...and the two views are different heights again since 2026-08-17, so the window has to
+    // re-fit. This is the *only* gesture that resizes it: paging inside a deep view shares one
+    // height, and a fold is the other thing allowed to move the window. See contentHeight().
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
     resized();
     repaint();
 }
@@ -783,7 +786,7 @@ void ArpPanel::refreshShape()
     // only ever hides, so the order is what makes it correct - see applyPageVisibility().
     applyPageVisibility();
 
-    // Shape no longer changes the panel's height - every page fits inside arpFixedH - but it
+    // Shape no longer changes the panel's height - every page fits inside arpDeepH - but it
     // still changes what is *in* the Setup page and whether Steps is reachable at all, so the
     // relayout stays. Only on an actual change, since refreshShape() runs on the 10 Hz timer.
     if (lastPatternMode != (int) pattern)
@@ -1180,18 +1183,21 @@ namespace
         // turn it up or down. But really, the volume is controlling velocity"): bipolar,
         // centred at "as played", and named for what it actually touches. The old arpVolume
         // parameter still exists for saved sessions; migrateVelTrim folds it into this.
+        // Humanize Velocity folded into its ring on 2026-08-17 (Owen: "I didn't realize there
+        // was a separate velocity knob. I only want one velocity knob, and I want this
+        // humanize section to be the outer ring") - see the RangeKnob wiring in the
+        // constructor for how the ring reaches arpHumanVel instead of a span of VEL itself.
         { KeysProcessor::apVelTrim, "VEL",
           "This line's level, as velocity: centre plays the notes as they came, right pushes "
           "them louder, left quieter, and full left is silence. The way to balance two lines "
-          "without playing one of them softer." },
-        // ...and HUMAN split into its halves the same day (Owen: "maybe we could split it up
-        // into two knobs"), so timing and dynamics randomize independently.
+          "without playing one of them softer. The ring is how far under that level a hit can "
+          "wander - Humanize Velocity, folded in here rather than living as its own knob." },
+        // HUMAN split into its halves on 2026-08-02 (Owen: "maybe we could split it up into
+        // two knobs"), so timing and dynamics randomize independently. H.VEL, the velocity
+        // half, moved onto VEL's own ring above; only the timing half is still its own knob.
         { KeysProcessor::apHumanize, "H.TIME",
           "Nudges each hit a little late, by a different amount every time. At 0 the line is "
           "dead on the grid." },
-        { KeysProcessor::apHumanVel, "H.VEL",
-          "Takes a little off each hit's velocity, by a different amount every time. At 0 "
-          "every hit lands at full strength." },
     };
     static_assert(sizeof(macroKnobSpecs) / sizeof(macroKnobSpecs[0])
                       == (size_t) ArpPanel::MacroRow::numKnobs,
@@ -1309,16 +1315,20 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
     for (auto* b : { &shapePrev, &shapeNext })
         addAndMakeVisible(*b);
 
-    // The eight settings a regular arpeggiator has, as the skin's machined rotary - the same
+    // The seven settings a regular arpeggiator has, as the skin's machined rotary - the same
     // knob the band above draws the same parameters with (Owen, 2026-08-01: "what other knobs
     // can we have? should be like regular arp settings").
     for (int k = 0; k < numKnobs; ++k)
     {
         const auto name = juce::String(macroKnobSpecs[(size_t) k].heading);
-        // The two Humanize knobs are ranges: their parameter is the *ceiling* of a random
-        // draw, and the ring around them is its floor. Everything below is written against
-        // knobFace(), so a range knob is attached, titled and tooltipped exactly as a plain
-        // one - the ring is the only extra, and it is wired once, here.
+        // Two of the knobs are ranges. Everything below is written against knobFace(), so a
+        // range knob is attached, titled and tooltipped exactly as a plain one - the ring is
+        // the only extra, and it is wired once, here. The two rings are not the same shape:
+        // H.TIME's is a genuine span of its own face (the parameter is the draw's ceiling,
+        // the ring is its floor); VEL's ring is a *different* parameter's own value -
+        // Humanize Velocity, folded in here on 2026-08-17 (Owen: "I only want one velocity
+        // knob, and I want this humanize section to be the outer ring") so loudness has one
+        // knob per line instead of two two cells apart.
         if (isRangeKnob(k))
         {
             auto& rk = *(ranges[(size_t) k] = std::make_unique<RangeKnob>());
@@ -1326,39 +1336,128 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
             rk.setReadoutHeight(15); // the plain knobs' text box, so the row's numbers line up
             rk.setTitle("Macro " + name + " range " + letter);
             rk.spanHandle().setTitle("Macro " + name + " range handle " + letter);
-            rk.setTooltip("The knob is the most this ever does; the ring around it is how far "
-                          "under that a hit can fall. Drag the little dial at the top left - or "
-                          "anywhere on the ring - to open and close it. Wide open, every hit is "
-                          "drawn from nothing up to the knob, which is what this did before it "
-                          "had a ring; close it and every hit gets at least that much, with the "
-                          "variation on top. Turn the knob and the whole range moves with it.");
-            rk.setSpanTooltip("Drag up and down to open or close this knob's range.");
-            // Both ends in one readout, in the knob's own units - a range that only shows one
-            // of its ends is the readout problem the arp rate had this morning.
-            rk.textFromRange = [](double lo, double hi)
-            { return juce::String((int) lo) + "-" + juce::String((int) hi); };
             addAndMakeVisible(rk);
 
-            const auto spanId = id(k == kHTime ? KeysProcessor::apHumanizeSpan
-                                               : KeysProcessor::apHumanVelSpan);
-            // By hand, with the gesture brackets an attachment would have given it: the ring
-            // is not a Slider, so there is nothing for a SliderAttachment to bind to. The
-            // same shape Shape and the rate steppers use a few hundred lines up.
-            rk.onSpanDragStart = [this, spanId]
+            if (k == kVel)
             {
-                if (auto* p = processor.apvts.getParameter(spanId))
-                    p->beginChangeGesture();
-            };
-            rk.onSpanChanged = [this, spanId](double v)
+                // arpHumanVel (0-100, "Human Velocity") *is* the ring here, not a span of
+                // VEL's own value - VEL can sit anywhere from -100 to 100 and the ring still
+                // reaches straight down from wherever that is. Its own former ring,
+                // arpHumanVelSpan, is pinned to 100 by every write below rather than removed:
+                // the draw was already uniform between the floor and the knob before this
+                // merge (the parameter's own default), and pinning it is what keeps that true
+                // with one fewer number on screen. The engine reads both parameters exactly
+                // as it always did; only the card stops exposing the span as its own control.
+                rk.setTooltip("This line's level, as velocity, and how far it can wander under "
+                              "that: the knob is the level, the ring is Humanize Velocity - how "
+                              "much a hit can fall short of it, by a different amount every "
+                              "time. Click the little dial at the top left to switch Humanize "
+                              "Velocity on or off; drag it, or anywhere on the ring, to set how "
+                              "far it reaches.");
+                rk.setSpanTooltip("Drag up and down to set how far this line's velocity can "
+                                  "wander under its level, or click to switch Humanize "
+                                  "Velocity on or off.");
+                // **Not the lo-hi readout H.TIME uses, and the difference is not cosmetic.**
+                // There the face and the ring are the same quantity in the same unit (milliseconds
+                // late), so naming both ends of the band is the honest reading. Here they are two
+                // different quantities: the face is this line's level as a velocity trim, and the
+                // ring is Humanize Velocity, a percentage of shave. The inherited lo-hi rendered
+                // a trim of -50 with a wander of 40 as **"-90--50"** - unreadable at a glance (two
+                // minus signs running together), and worse, a plausible lie: it names a trim range
+                // the line never visits, since the engine shaves a *proportion* rather than
+                // subtracting trim. Level first, then how far it can fall short of it.
+                rk.textFromRange = [](double lo, double hi)
+                { return juce::String((int) hi) + " ~" + juce::String((int) (hi - lo)); };
+
+                const auto velId = id(KeysProcessor::apHumanVel);
+                const auto spanId = id(KeysProcessor::apHumanVelSpan);
+                // A lamp, unlike H.TIME's ring: VEL keeps a level even with Humanize off (its
+                // knob at zero means "as played", not "silent" and not "no wander"), so there
+                // is no zero position that already means off the way there is for a plain
+                // Humanize knob. isOn/setOn give the lamp that job instead (2026-08-17, Owen:
+                // "whether humanize velocity is on at all"); off parks the amount at zero and
+                // remembers what it was, the same shape ChordPads' Strum lamp uses.
+                rk.isOn = [this, velId]
+                { return processor.apvts.getRawParameterValue(velId)->load() > 0.0f; };
+                rk.setOn = [this, velId, spanId](bool on)
+                {
+                    auto* vp = processor.apvts.getParameter(velId);
+                    if (vp == nullptr)
+                        return;
+                    if (! on)
+                        lastHumanVelAmount = juce::jmax(1.0, (double) processor.apvts
+                                                 .getRawParameterValue(velId)->load());
+                    vp->beginChangeGesture();
+                    vp->setValueNotifyingHost(vp->convertTo0to1((float) (on ? lastHumanVelAmount : 0.0)));
+                    vp->endChangeGesture();
+                    if (auto* sp = processor.apvts.getParameter(spanId))
+                    {
+                        sp->beginChangeGesture();
+                        sp->setValueNotifyingHost(sp->convertTo0to1(100.0f));
+                        sp->endChangeGesture();
+                    }
+                };
+                // By hand, with the gesture brackets an attachment would have given it: the
+                // ring is not a Slider, so there is nothing for a SliderAttachment to bind to.
+                // The same shape Shape and the rate steppers use a few hundred lines up - and
+                // now two parameters move together instead of one, since every drag also pins
+                // the span.
+                rk.onSpanDragStart = [this, velId, spanId]
+                {
+                    if (auto* p = processor.apvts.getParameter(velId))
+                        p->beginChangeGesture();
+                    if (auto* p = processor.apvts.getParameter(spanId))
+                        p->beginChangeGesture();
+                };
+                rk.onSpanChanged = [this, velId, spanId](double v)
+                {
+                    if (auto* p = processor.apvts.getParameter(velId))
+                        p->setValueNotifyingHost(p->convertTo0to1((float) v));
+                    if (auto* p = processor.apvts.getParameter(spanId))
+                        p->setValueNotifyingHost(p->convertTo0to1(100.0f));
+                };
+                rk.onSpanDragEnd = [this, velId, spanId]
+                {
+                    if (auto* p = processor.apvts.getParameter(velId))
+                        p->endChangeGesture();
+                    if (auto* p = processor.apvts.getParameter(spanId))
+                        p->endChangeGesture();
+                };
+            }
+            else // kHTime
             {
-                if (auto* p = processor.apvts.getParameter(spanId))
-                    p->setValueNotifyingHost(p->convertTo0to1((float) v));
-            };
-            rk.onSpanDragEnd = [this, spanId]
-            {
-                if (auto* p = processor.apvts.getParameter(spanId))
-                    p->endChangeGesture();
-            };
+                rk.setTooltip("The knob is the most this ever does; the ring around it is how far "
+                              "under that a hit can fall. Drag the little dial at the top left - or "
+                              "anywhere on the ring - to open and close it. Wide open, every hit is "
+                              "drawn from nothing up to the knob, which is what this did before it "
+                              "had a ring; close it and every hit gets at least that much, with the "
+                              "variation on top. Turn the knob and the whole range moves with it.");
+                rk.setSpanTooltip("Drag up and down to open or close this knob's range.");
+                // Both ends in one readout, in the knob's own units - a range that only shows one
+                // of its ends is the readout problem the arp rate had this morning.
+                rk.textFromRange = [](double lo, double hi)
+                { return juce::String((int) lo) + "-" + juce::String((int) hi); };
+
+                const auto spanId = id(KeysProcessor::apHumanizeSpan);
+                // By hand, with the gesture brackets an attachment would have given it: the ring
+                // is not a Slider, so there is nothing for a SliderAttachment to bind to. The
+                // same shape Shape and the rate steppers use a few hundred lines up.
+                rk.onSpanDragStart = [this, spanId]
+                {
+                    if (auto* p = processor.apvts.getParameter(spanId))
+                        p->beginChangeGesture();
+                };
+                rk.onSpanChanged = [this, spanId](double v)
+                {
+                    if (auto* p = processor.apvts.getParameter(spanId))
+                        p->setValueNotifyingHost(p->convertTo0to1((float) v));
+                };
+                rk.onSpanDragEnd = [this, spanId]
+                {
+                    if (auto* p = processor.apvts.getParameter(spanId))
+                        p->endChangeGesture();
+                };
+            }
         }
 
         auto& knob = knobFace(k);
@@ -1550,16 +1649,20 @@ void ArpPanel::MacroRow::refresh()
     refreshTuplet();   // ... and the tuplet, which has no attachment to hear it change
 
     auto& apvts = processor.apvts;
-    // ... and the two Humanize spans, for the same reason: the ring writes its parameter but
+    // ... and the two ring values, for the same reason: the ring writes its parameter but
     // nothing reads it back, so a session load, a host lane or an MCP client would otherwise
     // move the value and leave the arc where it was. setSpan no-ops when nothing changed, so
-    // this costs a comparison per tick and never fights an open drag.
+    // this costs a comparison per tick and never fights an open drag. H.TIME's ring reads its
+    // own span parameter, same as ever; VEL's reads arpHumanVel directly, since that is what
+    // its ring now *is* rather than a span of VEL's own value - and the same read is what the
+    // lamp's isOn() already uses, so the two can never disagree about whether Humanize
+    // Velocity is on.
     for (int k = 0; k < numKnobs; ++k)
         if (auto& rk = ranges[(size_t) k])
             rk->setSpan(apvts.getRawParameterValue(
                                  KeysProcessor::arpParamId(line, k == kHTime
                                                                      ? KeysProcessor::apHumanizeSpan
-                                                                     : KeysProcessor::apHumanVelSpan))
+                                                                     : KeysProcessor::apHumanVel))
                             ->load());
     const bool pattern = apvts.getRawParameterValue(
                              KeysProcessor::arpParamId(line, KeysProcessor::apPattern))->load() > 0.5f;
@@ -1692,11 +1795,13 @@ void ArpPanel::MacroRow::resized()
 {
     // Three lines inside one card (2026-08-02, Owen: "having the arpeggiators parallel to
     // each other instead of one on top of the other"): what the line plays (On, rate,
-    // shape), the eight knobs under their own heading strip, and the rate's modifiers with
-    // the held chord. Stacked *inside* the card because two cards now share the panel's
-    // width, and the old single line needed more width than half the panel has. The heights
-    // here are arpMacroCap / arpMacroLine / arpMacroHeads / arpMacroMods; arpMacroCard is
-    // their sum and has to agree with this function exactly.
+    // shape), the seven knobs under their own heading strip (eight until VEL absorbed H.VEL
+    // as its own ring, 2026-08-17), and the rate's modifiers with the held chord. Stacked
+    // *inside* the card because two cards now share the panel's width, and the old single
+    // line needed more width than half the panel has. The heights here are
+    // arpMacroCap / arpMacroLine / arpMacroHeads / arpMacroMods; arpMacroCard is their sum
+    // and has to agree with this function exactly - the knob *count* changed with the merge,
+    // but every one of those heights is independent of it, so arpMacroCard did not move.
     auto full = getLocalBounds().reduced(10, 0);
     full.removeFromTop(arpMacroCap); // the LINE A / LINE B caption rule, drawn by paint()
     // The single-height controls sit centred against the knobs beside them.
@@ -1734,11 +1839,11 @@ void ArpPanel::MacroRow::resized()
     const auto headStrip = full.removeFromTop(arpMacroHeads);
     auto knobLine = full.removeFromTop(arpMacroKnobLine);
     // 38 keeps the card solvable at the editor's minimum width, where a column is ~430 px
-    // inside and eight knobs land at 48; they stop growing at 96 as before. The two range
-    // knobs are `each` wide *plus their ring on both sides*, reserved out of the row here
-    // rather than taken off a neighbour later: the face inside a range knob is then exactly
-    // as wide as every plain one, so the row reads as eight knobs of one size with a ring
-    // round two of them, which is what it is.
+    // inside and seven knobs land at ~52 (eight landed at 48 before the VEL/H.VEL merge);
+    // they stop growing at 96 as before. The two range knobs are `each` wide *plus their
+    // ring on both sides*, reserved out of the row here rather than taken off a neighbour
+    // later: the face inside a range knob is then exactly as wide as every plain one, so the
+    // row reads as seven knobs of one size with a ring round two of them, which is what it is.
     const int rings = 2 * 2 * arpRingPx; // two range knobs, a ring either side of each
     const int each = juce::jlimit(38, 96,
                                   (knobLine.getWidth() - rings - 6 * (numKnobs - 1)) / numKnobs);
@@ -2053,7 +2158,9 @@ void ArpPanel::buildControls()
         "out, right swells it, centre is flat.");
     bar(rampTimeSlider, rampTimeLabel, "Time", 1.0, 32.0, " beats", "How long the Ramp takes.");
     // One Humanize control until 2026-08-02, split at Owen's ask so timing and dynamics
-    // randomize independently. Same split as the macro rows' H.TIME / H.VEL pair.
+    // randomize independently. The band keeps both halves as sliders even after the macro
+    // card folded its own H.VEL into VEL's ring (2026-08-17): this view is the one place
+    // Human Vel is still its own control, per the task that asked for the merge.
     bar(humanSlider, humanLabel, "Human Time", 0.0, 100.0, "%",
         "Nudges each hit a little late, by a different amount every time. "
         "The arp is dead on the grid at 0.");
@@ -2696,7 +2803,7 @@ namespace
     // The macro view: one *card* per line, side by side (2026-08-02, Owen: "having the
     // arpeggiators parallel to each other instead of one on top of the other"), and nothing
     // else - the tabs, BPM and Quantize ride the ARP section bar. A card is its caption rule
-    // and three stacked lines - rate and shape under their RATE / SHAPE headings, the eight
+    // and three stacked lines - rate and shape under their RATE / SHAPE headings, the seven
     // knobs under theirs, the rate's modifiers with the held chord - because half the panel's
     // width cannot hold the old single-line row, and side by side is the point: two parallel
     // instruments, each a drop target half the panel wide. This sum has to agree with
@@ -2738,18 +2845,26 @@ namespace
     // un-paged deep view. So the panel takes one fixed height for every view and page it has,
     // and the window stops resizing between them at all.
     // + the lane-tools strip (34 + 6), added 2026-08-14 when twelve tabs stopped fitting
-    // beside the buttons. arpFixedH is a max over these, so the window grew once and stopped.
+    // beside the buttons. arpDeepH is a max over these, so the deep view grew once and stopped.
     constexpr int arpPageStepsH = 12 + (34 + 6) + (34 + 6) + (140 + 6) + (14 + 2) + 32 + 12; // 298
     constexpr int arpPageSlotsH = 12 + (arpSlotsH + 8) + 34 + 12;                  // 124
     constexpr int arpPageSetupH = 12 + (arpBandH + 8) + arpBand2H + 12;            // 208
-    // The one height the panel is, ever. Written as a max rather than as the 258 it currently
-    // works out to: every one of these five is a sum of constants above, and the day one of
-    // them grows past the others this picks it up instead of silently clipping that view.
-    // The macro view is in the max for the same reason, not because it is the tallest.
+    // The one height a *deep view* is, whichever of its three pages is up. Written as a max
+    // rather than as the 298 it currently works out to: each is a sum of constants above, and
+    // the day one grows past the others this picks it up instead of silently clipping that page.
+    // Paging between Play, Cards and Draw is the thing that must never move the window, and this
+    // is what stops it - the whole 2026-08-14 win, kept.
+    //
+    // **The macro view is deliberately not in this max any more** (2026-08-17, Owen: "there's
+    // some deadspace I want to remove at bottom"). It was, and it cost the *default* view 58 px
+    // of nothing: the macro view needs 240, arpPageStepsH grew from 258 to 298 when the
+    // lane-tools strip landed the same day this was written, and nobody re-checked the gap it
+    // opened underneath. contentHeight() answers per view now, so entering or leaving the macro
+    // view is the one gesture that resizes the window, and it moves by 58 rather than by the 372
+    // that made the un-paged deep view untenable. Paging still never moves it.
     constexpr int arpMax2(int a, int b) { return a > b ? a : b; }
-    constexpr int arpFixedH = arpMax2(arpMacroTotalH,
-                                      arpMax2(arpPageStepsH, arpMax2(arpPageSlotsH, arpPageSetupH)));
-    // A strip opens on the Slots page (124 + 42 = 166), which is well inside arpFixedH, so
+    constexpr int arpDeepH = arpMax2(arpPageStepsH, arpMax2(arpPageSlotsH, arpPageSetupH));
+    // A strip opens on the Slots page (124 + 42 = 166), which is well inside arpDeepH, so
     // neither strip changes the panel's height any more and contentHeight() has no branch.
 
     // The band's groups. Weights, not pixels: the panel is as wide as the editor and the
@@ -2775,18 +2890,34 @@ int ArpPanel::preferredHeight() const
     return contentHeight() + 16; // + the 8 px margin at both ends
 }
 
-// One height for every view, page and shape the panel has (2026-08-14). It used to be three
-// different answers, and switching between them is what resized the whole window - see
-// arpFixedH for the arithmetic and for why paging removed the problem rather than shrinking
-// it. A page shorter than this simply leaves the space below it empty; the macro view, which
-// is 18 px under, gives its two cards the slack.
+// **The panel is exactly as tall as what is in it** (2026-08-16, Owen: "fix arp"). This and
+// pageHeight() were a pair for two days and are now one answer, which is worth explaining
+// because the pairing was a deliberate design and undoing it is too.
 //
-// This being a constant is load-bearing beyond the resize: preferredHeight() feeds the
-// editor's idealHeight(), so a constant here means a fold is the only thing that can move the
-// window, which is the one time it should.
+// 2026-08-14 made this a constant so that opening a line's deep view could not resize the
+// window - the un-paged deep view was 612 px against the macro view's 240, so Details grew the
+// window by 372 and All shrank it back, and on a screen that could not afford the 372 the keybed
+// lost it off the bottom. Paging solved the *size*; the constant then solved the *movement*.
+//
+// What the constant cost was invisible and permanent: every view shorter than the tallest page
+// carried the difference as dead panel. The macro view carried 58 px of it (fixed earlier the
+// same day), and the Cards page carried **174** - 124 px of slots in a 298 px reservation - on a
+// window Owen had already asked twice to make shorter. A constant that is a max over several sums
+// grows the gap under every view but the tallest, silently, and nothing on screen says so.
+//
+// So the window moves again, and the honest accounting is: All <-> Details moves it by 58, and
+// paging Play / Cards / Draw moves it by up to 174. That is a real cost and it was Owen's call to
+// pay it. It is not the 2026-08-14 problem returning - that was 372 px on a *fold*, this is a
+// window that fits its contents - but if paging ever feels unsettled, the fix is to pin the three
+// pages back to `arpMax2(arpPageStepsH, arpMax2(arpPageSlotsH, arpPageSetupH))` and leave only
+// the macro view answering for itself. That is one line, here.
+//
+// Still load-bearing that this answers from view and page state alone, never from what is *in* a
+// page: preferredHeight() feeds the editor's idealHeight(), and anything finer-grained would be a
+// window that moved while you worked inside one page.
 int ArpPanel::contentHeight() const
 {
-    return arpFixedH;
+    return pageHeight();
 }
 
 // What *this* view or page actually needs, as opposed to the fixed height the panel reserves.
@@ -2836,6 +2967,11 @@ void ArpPanel::setPage(Page p)
     refreshShape();  // shape gates first, then applyPageVisibility() at its end
     if (onPageChanged)
         onPageChanged();
+    // The pages are three different heights again since 2026-08-16, so changing one re-fits the
+    // window. Cheap and idempotent: refreshShape() above may already have come back through here
+    // on the Pattern fallback, and applyLayout() twice in a turn costs one extra layout pass.
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
     resized();
     repaint();
 }

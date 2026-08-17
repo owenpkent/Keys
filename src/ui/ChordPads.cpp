@@ -6,6 +6,7 @@
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 #include <algorithm>
+#include <cmath>
 
 namespace keys
 {
@@ -56,6 +57,42 @@ namespace
         return out;
     }
 
+    // "Save chord as MIDI": one bar of every note in the chord, on together at tick zero and
+    // off together a bar later, at whatever tempo is playing right now.
+    //
+    // Not a call into KeysProcessor::buildTakeMidiFile, and that was checked rather than
+    // assumed - it is the only MidiFile writer in this codebase, but its shape is a *recorded
+    // performance*: it walks `capturedTake`, a message-thread log of arbitrary events over real
+    // time, trims to the first captured note-on, and freezes at the tempo recording was armed
+    // at. There is no note list in it to hand a chord through, and reusing it would mean
+    // stuffing synthetic events into a live take buffer from a menu click - real recording
+    // state a card menu has no business touching. A chord is the other shape entirely: every
+    // note starts together and the file is exactly one bar long, so this is its own small
+    // function rather than a second copy of the take writer's plumbing.
+    bool oneBarChordMidiFile(const std::vector<int>& notes, float velocity01, double bpm,
+                             juce::MidiFile& out)
+    {
+        if (notes.empty() || bpm <= 0.0)
+            return false;
+
+        constexpr short ticksPerQuarter = 960; // ample resolution; nothing here is quantized finer
+        const double barTicks = (double) ticksPerQuarter * 4.0; // one bar of 4/4
+
+        juce::MidiMessageSequence seq;
+        seq.addEvent(juce::MidiMessage::tempoMetaEvent((int) std::llround(60000000.0 / bpm)), 0.0);
+        seq.addEvent(juce::MidiMessage::timeSignatureMetaEvent(4, 4), 0.0);
+        const float vel = juce::jlimit(0.04f, 1.0f, velocity01); // the floor noteOn() itself uses
+        for (const int n : notes)
+            seq.addEvent(juce::MidiMessage::noteOn(1, n, vel), 0.0);
+        for (const int n : notes)
+            seq.addEvent(juce::MidiMessage::noteOff(1, n), barTicks);
+        seq.updateMatchedPairs();
+
+        out.setTicksPerQuarterNote(ticksPerQuarter);
+        out.addTrack(seq);
+        return true;
+    }
+
 } // namespace
 
 ChordPads::ChordPads(KeysProcessor& p) : processor(p)
@@ -80,7 +117,7 @@ juce::Rectangle<float> ChordPads::padBounds(int visibleIndex) const
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
     constexpr int rows = 2;
-    constexpr int cols = KeysProcessor::padsPerPage / rows; // sixteen as two rows of eight
+    constexpr int cols = KeysProcessor::padsPerPage / rows; // twelve as two rows of six
     r.removeFromLeft(kCardW + 10.0f); // card + separation
     const int row = visibleIndex / cols;
     const int col = visibleIndex % cols;
@@ -140,7 +177,7 @@ int ChordPads::dropCellFor(const chorddrag::Payload& p, juce::Point<int> local) 
     // moveChordPad only swaps two slots and destroys nothing, so rearranging a page is not what
     // a lock is protecting against. Capturing the live card onto a locked pad has always been
     // allowed too, and stays that way here rather than being quietly tightened in a refactor.
-    if (p.from == From::trayCell && processor.chordPad(cell).locked)
+    if ((p.from == From::trayCell || p.from == From::refCard) && processor.chordPad(cell).locked)
         return -1;
     return cell;
 }
@@ -222,7 +259,13 @@ void ChordPads::itemDropped(const SourceDetails& details)
         processor.setChordPad(cell, p->chord);
         // Committed, so the tray's cell goes empty. `taken` alone would not say this: the
         // reference box sets that and keeps the candidate.
-        p->consumed = true;
+        //
+        // And the reference box is why this is a test rather than an unconditional write
+        // (2026-08-17): a chord dragged *out* of the reference is the same drop as a tray
+        // candidate in every respect but this one. The reference is the tray's fixed point, so
+        // it keeps its chord however many pads it fills - `consumed` there would empty the box
+        // the first time you used it, which is the opposite of what it is for.
+        p->consumed = p->from == From::trayCell;
     }
     repaint();
 }
@@ -481,16 +524,29 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
-// A pad's card menu. Eleven rows and two separators, which at the 34 px mouse-only item height
-// (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) is 11 * 34 + 2 * 17 =
-// 408 px. That budget is the reason this list is short: the menu hangs off a pad near the
-// bottom of a 699 px window and grows *upwards*, and JUCE answers one taller than the space it
-// has by splitting it into columns or making it hover-scroll. A scrolling popup cannot be used
-// with one mouse at all - hovering the arrow scrolls, and moving to click scrolls the item
-// away. It ran to 23 rows and roughly 820 px earlier on 2026-07-30. Three groups, no headers,
-// nothing three levels deep except the suggestion families:
+// A pad's card menu. Fourteen rows and two separators (2026-08-17: Copy chord, Paste chord and
+// Save chord as MIDI joined the first group, Owen: "need to be able to copy paste chords"),
+// which at the 34 px mouse-only item height (a separator is half that,
+// KeysLookAndFeel::getIdealPopupMenuItemSize) is 14 * 34 + 2 * 17 = 510 px. That budget is the
+// reason the three new rows landed flat in the existing first group rather than behind a
+// submenu: the menu hangs off a pad near the bottom of the window and grows *upwards*, and JUCE
+// answers one taller than the space it has by splitting it into columns or making it
+// hover-scroll, neither of which can be worked with one mouse.
 //
-//   Edit on keyboard / Clear pad / Lock
+// Checked against KeysEditor::idealHeight() before adding these three, not assumed - the arp
+// panel's own height now varies by view (240 px in its default macro view, up to 298 px on its
+// tallest deep-view page), which moves this menu's anchor rather than the menu itself, since
+// the Pads section sits below the arp. Worked out from sectionHeight()'s own arithmetic: with
+// the arp at its tallest, the Pads band - and so a pad's card - lands at roughly y=714 of a
+// ~957 px window, which leaves comfortably more than 510 px of room for this menu to grow
+// upward into; in the default macro view the anchor sits a little higher still, around y=656 of
+// an ~899 px window, with the same margin to spare. Both numbers move together (a taller arp
+// pushes the anchor *down*, which only helps), so there is no view where the arp's own height
+// eats into this budget. It ran to 23 rows and roughly 820 px on 2026-07-30, which is what a
+// menu genuinely too tall for this budget looks like. Three groups, no headers, nothing three
+// levels deep except the suggestion families:
+//
+//   Edit on keyboard / Clear pad / Lock / Copy chord / Paste chord / Save chord as MIDI
 //   Octave down / Octave up / Next voicing
 //   New chord / Next: could follow > / Send to arp A / Send to arp B / Send to arp slot >
 //
@@ -513,6 +569,25 @@ void ChordPads::showPadMenu(int slot)
     // still *shows* a lock as a corner dot, so the state is readable without opening this menu.
     // Recorded as an owner-directed right-click-only path in CLAUDE.md.
     menu.addItem(3, pad.locked ? "Unlock" : "Lock", filled);
+
+    // Copy chord / Paste chord (2026-08-17, Owen: "need to be able to copy paste chords").
+    // Copy reads whatever this card holds whether or not it is locked - a lock protects the
+    // *slot* from being overwritten, not the chord underneath from being read - and stripping
+    // `locked` happens at copy time (see the field's own comment in ChordPads.h), so Paste never
+    // has to ask. Paste goes through the same choke a drop does: clearChordPad first, so a pad
+    // left ringing by Sustain or feeding an arp line gives its old notes up before the pasted
+    // chord lands rather than stranding them, all inside one undo entry. It greys on an empty
+    // clipboard and on a locked target, the same refusal Clear pad makes just above.
+    menu.addItem(7, "Copy chord", filled);
+    menu.addItem(8, "Paste chord", clipboard.has_value() && ! pad.locked);
+
+    // Save chord as MIDI (2026-08-17). Ableton's own clipboard is internal to Live and will not
+    // take a paste from the Windows clipboard, so the only way a chord built here reaches a Live
+    // clip is a .mid file dropped onto a track - the same route Keys already offers for a
+    // recorded take (TakePanel::dragTakeOut). A menu row cannot start a drag, so this writes one
+    // bar of the chord into KeysProcessor::takeFolder() and reveals it in Explorer instead,
+    // ready for that same short drag.
+    menu.addItem(9, "Save chord as MIDI", filled);
 
     // Octave and voicing: the two ways to move a chord without changing what it is. Both act
     // on the stored chord, and both are offered on a locked pad on purpose - a lock protects a
@@ -621,6 +696,29 @@ void ChordPads::showPadMenu(int slot)
         {
             safe->nextPadVoicing(slot);
         }
+        else if (choice == 7) // Copy chord
+        {
+            auto copied = safe->processor.chordPad(slot);
+            copied.locked = false; // a lock belongs to the slot, never travels with the chord
+            safe->clipboard = copied;
+        }
+        else if (choice == 8) // Paste chord
+        {
+            if (safe->clipboard && ! safe->processor.chordPad(slot).locked)
+            {
+                // Same choke as a drop - see itemDropped's own comment on why the clear has to
+                // come first: it is what stops a pad left ringing by Sustain, or one feeding an
+                // arp line, stranding its old notes with nothing left owning them.
+                const KeysProcessor::UndoGesture undoable { safe->processor, "Paste chord",
+                                                           KeysProcessor::UndoScope::pads };
+                safe->processor.clearChordPad(slot);
+                safe->processor.setChordPad(slot, *safe->clipboard);
+            }
+        }
+        else if (choice == 9) // Save chord as MIDI
+        {
+            safe->saveChordAsMidi(slot);
+        }
         else if (choice >= arpSlotIdBase && choice < arpSlotIdBase + KeysProcessor::numArpPatterns)
         {
             // Undoable: this replaces the slot's chord, name, shape and rate in place, and a slot
@@ -711,6 +809,42 @@ void ChordPads::nextPadVoicing(int slot)
         rewritePadChord(slot, next);
 }
 
+// "Save chord as MIDI" (2026-08-17). A menu row cannot start a drag, so this is the other way a
+// chord leaves the plugin: write it to disk and hand Explorer the file already selected
+// (juce::File::revealToUser), ready for the same short drag TakePanel::dragTakeOut offers for a
+// recorded take - Ableton's own clipboard is internal to Live and will not accept a paste from
+// the Windows clipboard, so a file dropped onto a track is the only route in.
+//
+// The velocity is `baseVelocity01()`, the same value `pressChordPad` fires this very pad at - a
+// pad has no per-note velocities of its own to read, so the base the processor already plays it
+// with *is* "the pad's own velocity path", not a guess standing in for one.
+void ChordPads::saveChordAsMidi(int slot)
+{
+    const auto& pad = processor.chordPad(slot);
+    if (pad.notes.empty()) // matches the menu item's own enable test
+        return;
+
+    juce::MidiFile file;
+    if (! oneBarChordMidiFile(pad.notes, processor.baseVelocity01(), processor.currentTempo(), file))
+        return;
+
+    auto folder = KeysProcessor::takeFolder();
+    if (! folder.createDirectory().wasOk())
+        return;
+
+    // createLegalFileName rather than trusting the detected name outright: the generator's own
+    // fallback label can carry parentheses, and nothing stops a hand-built session naming a pad
+    // something a filesystem would refuse.
+    const auto legalName = juce::File::createLegalFileName(pad.name.isNotEmpty() ? pad.name : "Chord");
+    auto out = folder.getChildFile("Keys chord " + legalName + ".mid").getNonexistentSibling();
+
+    juce::FileOutputStream stream(out);
+    if (! stream.openedOk() || ! file.writeTo(stream))
+        return;
+    stream.flush();
+    out.revealToUser();
+}
+
 void ChordPads::mouseDown(const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
@@ -752,14 +886,39 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     // of the card from playing, dragging and feeding the arp, and every one of those is a
     // gesture the whole surface is supposed to answer. Lock is a right-click item now, and only
     // that; the card paints a dot when it is set, which is a mark and not a target.
-    // Press does nothing but remember where it landed. Every meaning this gesture can have -
-    // play the chord, hand it to an arp line, drag it onto a pad, a slot or a line's row - is
-    // decided in mouseUp, because the two families are told apart by whether the mouse moved,
-    // and that is not knowable yet (2026-08-02; see the note on the class).
+    // **The press sounds the chord, and holding it is what keeps it sounding** (2026-08-16,
+    // Owen: "when you click a pad cord, it should only play it for the amount of time that
+    // you're holding it, not a fixed value"). A pad is an instrument you play, and a fixed
+    // 800 ms blip is a preview of one - you could not stab it short or lean on it long, which
+    // is most of what a pad is for.
     //
+    // This restores sounding-on-press, which 2026-08-02 removed, so it is worth being exact
+    // about what that change was really fixing. The bug then was not the noise: it was that the
+    // press branch also handed the card to a running arp line *and cleared `dragSource`*, so a
+    // card could not be dragged in the one mode where dragging it onto a line is the point.
+    // That branch is gone for other reasons (a click no longer feeds a line at all), and
+    // `dragSource` is set here and left alone, so sounding on press costs nothing this time.
+    // Which gesture it was is still decided by whether the mouse moved - mouseDrag silences
+    // this before it starts carrying the card, and mouseUp releases it if it never moved.
     downPos = e.position;
     dragging = false;
     dragSource = cellAt(e.position);
+
+    if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
+    {
+        processor.pressChordPad(dragSource);
+        playing = dragSource;
+    }
+    else if (dragSource == -2 && isChord(currentNotes))
+    {
+        // The live card plays too, and for the same length of time as a pad: holding a chord on
+        // the keyboard sounds the keys, and pressing the card fires the same notes as one chord,
+        // strummed and humanized the way a pad plays it. Owen named the pads, but leaving this
+        // one on a fixed blip would make two cards on one strip answer the same press
+        // differently.
+        processor.pressLiveChord(currentNotes);
+        playingLive = true;
+    }
     repaint();
 }
 
@@ -791,16 +950,22 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
     if (dragging || e.position.getDistanceFrom(downPos) <= 6.0f)
         return;
 
-    // Nothing to silence here: the press never sounded. What a drag has to decide is only
-    // whether there was something under it worth carrying, and a *filled* pad is the test -
-    // dragging an empty cell has never meant anything. The arp branch used to clear dragSource
-    // before this ran, which is what made a card undraggable with a line on.
+    // What a drag has to decide is only whether there was something under it worth carrying,
+    // and a *filled* pad is the test - dragging an empty cell has never meant anything. The arp
+    // branch used to clear dragSource before this ran, which is what made a card undraggable
+    // with a line on.
     if (! sourceIsDraggable())
     {
         dragSource = -1; // nothing grabbable under the press
         return;
     }
 
+    // A drag is not a performance, so silence what the press started. There is a blurt of
+    // whatever it took to travel six pixels, and that is the honest cost of hold-to-play: the
+    // press cannot know yet which gesture it is, and waiting for the drag threshold before
+    // sounding would put a lag on every note. Six pixels of deliberate movement is a few tens of
+    // milliseconds - the same trade every drum pad makes.
+    endAudition();
     beginChordDrag(e);
 }
 
@@ -890,42 +1055,27 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
     }
     else
     {
-        // A click: the mouse went down on a card and came back up without travelling. This is
-        // where everything the press used to do now happens, in the same order it used to be
-        // tested in, so only the *timing* changed and not which branch a given card takes.
-
-        // A click never hands a chord to the arpeggiator any more (2026-08-02, Owen: "when
-        // an arpeggiator's running and you click on a pad, I don't want it to send it to the
+        // The button came up without travelling, so the press was a play and this is the end of
+        // it. The note ends here rather than on a timer (2026-08-16): letting go is the release,
+        // which is what makes a stab short and a lean long. Sustain and Latch still decide what
+        // "release" means - endAudition goes through releaseChordPad / releaseLiveChord, so a
+        // pedalled chord keeps ringing exactly as it did before.
+        //
+        // A click never hands a chord to the arpeggiator (2026-08-02, Owen: "when an
+        // arpeggiator's running and you click on a pad, I don't want it to send it to the
         // arpeggiator unless you drag it"). Feeding a line is the *drag* - onto a line's card,
-        // its letter tab on the arp bar, or a slot - and a click just plays the pad, whatever
-        // the lines are doing. The per-card menu's Send to arp slot is still the aimed
-        // accelerator. One arp behaviour survives on the left button, and it is a stop, not a
-        // send: a *cleared* card still feeding a line wears the ring with no notes behind it,
-        // so a click on it has nothing to play and keeps meaning the only other thing it can -
-        // let go. Without that branch the click would fall through every test below and do
-        // nothing at all, a dead click on a lit target.
+        // its letter tab on the arp bar, or a slot. One arp behaviour survives on the left
+        // button, and it is a stop, not a send: a *cleared* card still feeding a line wears the
+        // ring with no notes behind it, so a click on it has nothing to play and keeps meaning
+        // the only other thing it can - let go. It sits before the release rather than instead
+        // of it: the press found no notes on that card, so there is nothing sounding to end, and
+        // running both keeps this branch from being the one path that skips the cleanup.
         if (const int holder = dragSource >= 0 ? processor.arpLineHoldingPad(dragSource) : -1;
             holder >= 0 && dragSource >= 0 && processor.chordPad(dragSource).notes.empty())
         {
             processor.releaseArpChord(holder);
         }
-        // The click auditions the chord. It sounds now and the timer lets it go, because the
-        // button is already up and nothing else is coming to end it.
-        else if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
-        {
-            processor.pressChordPad(dragSource);
-            playing = dragSource;
-            startTimer(auditionMs);
-        }
-        else if (dragSource == -2 && isChord(currentNotes))
-        {
-            // The live card plays too. Holding a chord on the keyboard sounds the keys you are
-            // holding; clicking the card fires the same notes as one chord, so you hear it
-            // strummed and humanized the way a pad would play it.
-            processor.pressLiveChord(currentNotes);
-            playingLive = true;
-            startTimer(auditionMs);
-        }
+        endAudition();
     }
     // Putting the outside taker's highlight back out is nobody's job here any more. Every target
     // gets `itemDragExit` from JUCE on every path a drag can end - dropped elsewhere, dragged

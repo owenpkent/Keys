@@ -78,8 +78,15 @@ public:
     // A line's deep view is three pages (2026-08-14, Owen: "can we simplify the detail view or
     // organize into pages"). Un-paged it was the band, the lane editor, the twelve slots and
     // the action row all at once - 612 px against the macro view's 240, so Details grew the
-    // *window* by 372 px and All shrank it back again. Each page fits inside one fixed panel
-    // height (see arpFixedH), which is what stops the window moving between views at all.
+    // *window* by 372 px and All shrank it back again. Paging is what fixed the size: the three
+    // pages come apart at Draw 298 / Setup 208 / Cards 124, so the tallest is eighteen over the
+    // macro view rather than 372 over it.
+    //
+    // **Each page is now its own height** (2026-08-16, Owen: "fix arp"). They shared one for two
+    // days, which stopped the window moving at all but made every page but the tallest carry the
+    // difference as dead panel - 174 px of it on Cards. See ArpPanel::contentHeight for the
+    // accounting, and for the one line that pins them back together if paging ever feels
+    // unsettled.
     //
     // The split is by what you are doing, not by what fits: Steps is the lane editor, Slots is
     // the twelve cards and everything that acts on them, Setup is the band's two rows.
@@ -181,12 +188,14 @@ public:
         // top row, and every row reserves the same strip so the columns line up.
         // OCT is the *transpose* (centred at zero, down as readily as up) rather than the
         // upward-only stacking range, which stays on the per-line tab beside Distance, the
-        // rest of that same feature. Eight since the second 2026-08-02 pass: VEL is the
-        // bipolar velocity trim that replaced VOL (centred, up boosts, down cuts), and
-        // Humanize is two knobs, H.TIME for the timing nudge and H.VEL for the velocity
-        // shave - Owen's split, so the two randomize independently. Ramp and Time still
+        // rest of that same feature. Seven since the merge below: VEL is the bipolar velocity
+        // trim that replaced VOL (centred, up boosts, down cuts) and now carries Humanize
+        // Velocity as its own outer ring (2026-08-17, Owen: "I only want one velocity knob,
+        // and I want this humanize section to be the outer ring") - H.VEL is gone as a
+        // separate knob, so there is one loudness control per line rather than two two cells
+        // apart. H.TIME stays its own RangeKnob for the timing nudge; Ramp and Time still
         // live on the per-line tab.
-        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVel, kHTime, kHVel,
+        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVel, kHTime,
                     numKnobs };
 
     private:
@@ -234,15 +243,17 @@ public:
         juce::TextButton detailsButton { "Details" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
-        // Six of the eight are plain rotaries. H.TIME and H.VEL are RangeKnobs, because each
+        // Five of the seven are plain rotaries. H.TIME and VEL are RangeKnobs, because each
         // of them is a random draw and a draw has two ends (2026-08-03) - `ranges` holds one
         // for those two indices and nullptr for the rest, and `knobFace()` is what everything
-        // else walks so the layout, the headings and the attachments stay one loop.
+        // else walks so the layout, the headings and the attachments stay one loop. VEL's ring
+        // is Humanize Velocity (2026-08-17), not a span of its own value the way H.TIME's is -
+        // see the wiring in the constructor for why the two range knobs are not symmetric.
         std::array<juce::Slider, numKnobs> knobs;
         std::array<std::unique_ptr<RangeKnob>, numKnobs> ranges;
         juce::Component& knobCell(int k);
         juce::Slider& knobFace(int k);
-        static bool isRangeKnob(int k) { return k == kHTime || k == kHVel; }
+        static bool isRangeKnob(int k) { return k == kHTime || k == kVel; }
         std::array<juce::Label, numKnobs> knobLabels;
         // RATE and SHAPE, over the top line's two stepper groups (2026-08-02, Owen: "the
         // arrows to adjust certain parameters are not clear as to what they're adjusting"):
@@ -255,6 +266,10 @@ public:
         std::unique_ptr<ComboAtt> tupletAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
+        // What VEL's ring puts back when its lamp switches Humanize Velocity back on - the
+        // same shape ChordPads' lastStrumMax uses for Strum's own zero-is-off lamp. UI-only
+        // and deliberately not persisted: a session saved with it off should open off.
+        double lastHumanVelAmount = 20.0;
 
         ArpPanel& owner;
         // Exactly one of these is ever non-null; refreshRateMode owns that invariant.
@@ -536,7 +551,9 @@ private:
     // both rows of a group and this row is one row tall, which is what keeps the panel from
     // growing by a whole band.
     // humanSlider is the timing half and humanVelSlider the velocity half of what was one
-    // Humanize control until 2026-08-02; see the macro row's H.TIME / H.VEL pair.
+    // Humanize control until 2026-08-02. The macro card folded its own velocity half into
+    // VEL's outer ring on 2026-08-17; this band keeps both as separate sliders regardless -
+    // it was not part of that merge.
     // driftSlider joined FEEL on 2026-08-14. It belongs beside Humanize rather than on the
     // Draw page where it was asked for: Humanize is a *player* wandering (late and quieter,
     // never early and never louder) and Drift is a *machine* wandering (either way, on the

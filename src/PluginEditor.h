@@ -585,6 +585,34 @@ private:
     juce::TextButton themeButton;
     void showThemeMenu();
 
+    // The settings gear (2026-08-17, Owen: "we need a settings icon and menu. populate
+    // menu."). Plugin-level like the theme swatch it sits immediately left of, rather than
+    // section-level, and for the same reason: it never hides with a fold (see resized() and
+    // "what stays on a folded bar" in CLAUDE.md). A plain TextButton subclass rather than a
+    // bespoke Component so it inherits the ordinary chip background every other button on
+    // this bar draws (raised fill, hover, down); only the gear itself is drawn by hand, in
+    // paintButton, after the base class has painted its chrome - this repo draws its own
+    // chrome rather than shipping icon assets, the same rule the fold chevron follows in
+    // SectionBar.
+    struct GearButton : public juce::TextButton
+    {
+        void paintButton(juce::Graphics&, bool highlighted, bool down) override;
+    };
+    GearButton gearButton;
+    void showSettingsMenu();
+    // "Check for updates" on the settings menu: an explicit, user-initiated re-check, as
+    // opposed to the one silent pass the constructor already runs. Reuses updaterConfig and
+    // okstudio::updater::checkNowAsync (the kit's, not a second updater written here) and
+    // reports every outcome with a small dismissable message box - found, up to date, or
+    // failed - because a button the user just clicked has to say something back, which
+    // checkAsync's own once-per-process, found-only callback cannot.
+    void checkForUpdatesNow();
+    // "About": product name and version, both read live off processor.getName() and
+    // KEYS_VERSION (the same macro updaterConfig.currentVersion is built from) rather than
+    // written out a second time, plus the OK Studio line. A NativeMessageBox, the same
+    // mouse-dismissable shape TakePanel already uses for its own "could not save" alert.
+    void showAboutDialog();
+
     // The Instrument chip (2026-08-02, Owen: "the load instrument section with all that
     // should go in the controls submenu"). Keys Host is the only thing that ever sets
     // onBuildInstrumentMenu / instrumentName; plain Keys (the VST3, the plain standalone)
@@ -628,6 +656,12 @@ private:
     bool lastSustain = false; // to release held pad chords when the sustain pedal lifts
     bool pitchReturning = false; // pitch wheel is gliding back to centre (Octavium's ~160 ms ease)
     float panicFlash = 0.0f;  // 1 -> 0 decay behind the All Off button, on an explicit click only
+
+    // Which chord the live card shows when both the keybed and another source are holding one.
+    // The heartbeat compares each against its last value and prefers whichever just moved, so
+    // "currently held" means the most recent gesture rather than everything ringing at once.
+    std::vector<int> lastPlayedChord, lastHeldChord;
+    bool preferHeldChord = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysEditor)
 };

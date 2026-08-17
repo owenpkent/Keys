@@ -99,6 +99,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // Velocity, same story. The fixed slider only ever applied while Humanize was off, so
     // it and the Humanize range were one control in two costumes; the range absorbed it
     // (baseVelocity01).
+    //
+    // **Retained, and the reason is stronger than "older sessions carry it"** (2026-08-16, after
+    // Owen found this in a parameter listing and asked why there was "a separate velocity knob":
+    // there is no knob, and has not been since the range absorbed it). A VST3 host addresses
+    // parameters by *index*, so deleting one silently renumbers every parameter after it and
+    // repoints every automation lane in every saved Live set onto the wrong control. The three
+    // dead parameters above and this one cost an atomic each and nothing else; the delete costs
+    // somebody's automation. Same append-only rule the `genSource` choice list follows, read from
+    // the other end.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "velocity", 1 }, "Velocity", 1, 127, 100));
     // Latch is read again (2026-07-30). It was briefly a retained-but-dead parameter, on the
     // reasoning that a left click on a held note releases it and so a whole mode earned
@@ -741,10 +750,17 @@ void KeysProcessor::releaseNotes(std::vector<int>& sounding, int tag, int dest)
     sounding.clear();
 }
 
-void KeysProcessor::stopAllChordPads(bool includeArpHolds)
+void KeysProcessor::stopAllChordPads(bool includeArpHolds, bool includeKeybed)
 {
     for (int i = 0; i < numChordPads; ++i)
         stopChordPad(i);
+    // The keybed's own holds, through the editor, because they are the one chord source the
+    // processor does not own (2026-08-16). `includeKeybed` false has exactly one caller and it
+    // is pressLiveChord: that chord *is* what the keybed is holding, so clearing it there would
+    // unlatch the keys in the same breath as firing them and leave the card playing a chord the
+    // surface has just forgotten.
+    if (includeKeybed && releaseKeybedHolds)
+        releaseKeybedHolds();
     // Every chord source, not just the pads. Exclusive is a rule about *sources* - one chord
     // at a time, whichever surface started it - so it has to reach the live card and the
     // chord held into the arp as well, or a lit Exclusive quietly does nothing in one
@@ -755,6 +771,51 @@ void KeysProcessor::stopAllChordPads(bool includeArpHolds)
             releaseArpChord(n);
 }
 
+// What a scheduling tag is still sounding, or nullptr if the tag names no chord source. The
+// tags are the ones fireChord already takes, so this is a lookup rather than a second notion of
+// which sources exist.
+const std::vector<int>* KeysProcessor::soundingForTag(int tag) const
+{
+    if (tag >= 0 && tag < numChordPads)
+        return &chordPadOn[(size_t) tag];
+    if (tag == liveChordTag)
+        return &liveChordOn;
+    if (const int line = arpChordTag - tag; tag <= arpChordTag && line < numArpLines)
+        return &arpHeldNotes(line);
+    return nullptr;
+}
+
+// The read half of the same list. See the header for why this is not isNoteSounding().
+//
+// **One chord, not the union of every source** (2026-08-16, Owen: "the currently held chord
+// should disappear when you play a new chord pad"). It unioned all of them for a few hours,
+// which is wrong on the plainest reading of its own name: with Sustain down, or Exclusive off,
+// pressing a second pad left the card naming the pile of both rather than the chord you just
+// played. "The currently held chord" is singular, so this answers with one.
+std::vector<int> KeysProcessor::heldChordNotes() const
+{
+    // The last source to start, while it is still sounding.
+    if (const auto* v = soundingForTag(lastChordSource); v != nullptr && ! v->empty())
+        return *v;
+
+    // It has been released, so fall back to anything still holding a chord - a pad left ringing
+    // by Sustain is genuinely still held, and going empty here would be a card that forgets a
+    // chord you can still hear. Pads first, then the live card, then the lines; ordering only
+    // decides which of several *older* holds wins, and there is no recency left to consult.
+    for (int i = 0; i < numChordPads; ++i)
+        if (! chordPadOn[(size_t) i].empty())
+            return chordPadOn[(size_t) i];
+    if (! liveChordOn.empty())
+        return liveChordOn;
+    // Not gated on arpLineOn: a line that is off still takes chords in and still holds what it
+    // was handed (see holdArpChord), and the card is asking what is *held*. A chord you dropped
+    // onto a line before switching it on is one you must still be able to pick back up.
+    for (int n = 0; n < numArpLines; ++n)
+        if (! arpHeldNotes(n).empty())
+            return arpHeldNotes(n);
+    return {};
+}
+
 void KeysProcessor::pressChordPad(int i)
 {
     if (i < 0 || i >= numChordPads)
@@ -762,16 +823,31 @@ void KeysProcessor::pressChordPad(int i)
     if (chordPads[(size_t) i].notes.empty())
         return;
 
+    // **A pad always chokes the other pads** (2026-08-16, Owen: "when you click a pad it should
+    // clear other presses"). It used to stop only the pad being re-pressed unless Exclusive was
+    // lit, so with Exclusive off - or with Sustain holding them - clicking round a page stacked
+    // chord on chord into a pile that is neither of them and cannot be named or dragged as
+    // either. Pads are one surface and one voice: the strip is a palette you pick *from*.
+    //
+    // Exclusive keeps its job and it is now a sharper one: whether a pad also chokes the *other*
+    // sources - the live card's own gesture and the chord held into each arp line. Those are
+    // different instruments, so stacking them is a real thing to want; stacking two pads was not.
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
-        stopAllChordPads();      // choke every pad before the new chord
+    {
+        stopAllChordPads(); // every source at once
+    }
     else
-        stopChordPad(i);         // re-pressing a sounding pad re-triggers it
+    {
+        for (int j = 0; j < numChordPads; ++j)
+            stopChordPad(j); // including `i` itself, so re-pressing a sounding pad re-triggers
+    }
 
     // Honour the Voices cap. The keyboard steals oldest-first across its own notes; a pad
     // fires as one gesture, so there is no "oldest" within it — drop the highest notes and
     // keep the lowest, matching how the keyboard resolves a too-big simultaneous chord.
     // (The cap applies per source: a pad and the keyboard each fit under it separately.)
     chordPadOn[(size_t) i] = fireChord(chordPads[(size_t) i].notes, i);
+    lastChordSource = i; // the live card names *this* chord now, not the pile of every pad
 }
 
 std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int tag, int dest)
@@ -827,8 +903,9 @@ void KeysProcessor::pressLiveChord(const std::vector<int>& notes)
         return;
     releaseLiveChord(true);
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
-        stopAllChordPads();
+        stopAllChordPads(/*includeArpHolds*/ true, /*includeKeybed*/ false);
     liveChordOn = fireChord(notes, liveChordTag);
+    lastChordSource = liveChordTag;
 }
 
 void KeysProcessor::releaseLiveChord(bool force)
@@ -1736,8 +1813,11 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             if (auto pos = playHead->getPosition())
             {
                 hc.playing = pos->getIsPlaying();
-                if (auto bpm = pos->getBpm())
+                if (auto bpm = pos->getBpm(); bpm && *bpm > 0.0)
+                {
                     hc.bpm = *bpm;
+                    hc.hasBpm = true; // an answer from the host, not HostClock's own default
+                }
                 if (auto ppq = pos->getPpqPosition())
                 {
                     hc.ppq = *ppq;
@@ -1780,7 +1860,12 @@ void KeysProcessor::advanceChainClock(int numSamples)
     if (auto* playHead = getPlayHead())
         if (auto pos = playHead->getPosition())
         {
-            if (followHost && pos->getIsPlaying())
+            // Not gated on getIsPlaying() (2026-08-16, Owen: "bpm isn't syncing with daw"). A
+            // DAW's tempo is its tempo stopped or rolling, and following it only while rolling
+            // meant the number on the bar disagreed with Live's for exactly as long as you were
+            // setting up - which is when you look at it. The *position* read below keeps its
+            // `playing` test, because a position genuinely means nothing while stopped.
+            if (followHost)
                 if (auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
                 {
                     bpm = *hostBpm;
@@ -2195,6 +2280,7 @@ void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::S
     // it still goes through fireChord, so the Voices cap, Strum and Humanize all apply and
     // the keybed lights up for it exactly as before.
     ln.chordOn = fireChord(notes, arpChordTagFor(line), line + 1);
+    lastChordSource = arpChordTagFor(line);
 }
 
 void KeysProcessor::releaseArpChord(int line)
@@ -2992,6 +3078,10 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
     tree.setProperty("arpPage", layout.arpPage, nullptr);
     tree.setProperty("arpLights", layout.arpLights, nullptr);
+    tree.setProperty("uiScalePercent", layout.uiScalePercent, nullptr);
+    tree.setProperty("holdVisualsOnSustain", layout.holdVisualsOnSustain, nullptr);
+    tree.setProperty("dragWhileSustain", layout.dragWhileSustain, nullptr);
+    tree.setProperty("sustainProposesChords", layout.sustainProposesChords, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -3034,6 +3124,13 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // and for a fresh instance: see the LayoutState comment for why not Draw.
     layout.arpPage = juce::jlimit(0, 2, (int) tree.getProperty("arpPage", 2));
     layout.arpLights = flag("arpLights", true);
+    // Absent before the settings menu existed (2026-08-17). 100% and today's behaviour are
+    // both the right defaults for a session that predates the flags entirely, the same
+    // absent-means-default rule every field on this struct already follows.
+    layout.uiScalePercent = juce::jlimit(1, 400, (int) tree.getProperty("uiScalePercent", 100));
+    layout.holdVisualsOnSustain = flag("holdVisualsOnSustain", true);
+    layout.dragWhileSustain = flag("dragWhileSustain", true);
+    layout.sustainProposesChords = flag("sustainProposesChords", false);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

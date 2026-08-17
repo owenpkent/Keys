@@ -476,6 +476,11 @@ public:
         bool hasPpq = false;
         double ppq = 0.0;  // position at the start of the block, in quarter notes
         double bpm = 120.0;
+        // Whether `bpm` above is the *host's* answer or just this struct's default. It has to be
+        // its own flag rather than a `bpm > 0` test, because the default is 120 and not 0: in the
+        // standalone there is no playhead to ask, so a `> 0` test would read that 120 as a host
+        // tempo and quietly ignore the BPM control. See the tempo choice in process().
+        bool hasBpm = false;
     };
 
     Lanes lanes;
@@ -594,8 +599,14 @@ public:
         // The two things measured in beats outright, Retrigger Every and the velocity ramp's
         // Ramp Time, therefore read as seconds while Hz is on. That is the honest reading:
         // there is no bar to restart on when nothing is following a transport.
+        // **Not gated on clock.playing** (2026-08-16, Owen: "bpm isn't syncing with daw"). A
+        // DAW's tempo is its tempo whether or not the transport is rolling - Ableton shows 120
+        // with everything stopped - so following it only while playing meant Keys sat at its own
+        // number for exactly as long as you were setting up, which is when you look at it. The
+        // *position* still needs a rolling transport and still checks `playing` (see the anchor
+        // branch below); the tempo never did.
         const double bpm = p.rateFree ? 60.0
-                                      : ((p.followHost && clock.playing && clock.bpm > 0)
+                                      : ((p.followHost && clock.hasBpm && clock.bpm > 0)
                                              ? clock.bpm
                                              : p.fallbackBpm);
         const double beatsPerSample = bpm / 60.0 / sr;
