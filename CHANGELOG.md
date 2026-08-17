@@ -9,8 +9,8 @@ All notable changes to Keys are documented here. Format follows
 
 Owen: *"I'd like to be able to right click on a chord pad and say send to ARP a or b"*. Two rows
 on a pad's card menu, beside the Send to arp slot submenu that has always been there: the chord
-goes straight into that line and the line becomes the current one, which is what a card
-**dragged** onto that line's switch or its macro card has done since 2026-08-02.
+goes straight into that line, which is what a card **dragged** onto that line's switch or its
+macro card has done since 2026-08-02.
 
 **An accelerator, not a new right-click-only path.** It is the drag with the aim taken out of the
 mouse, exactly the relationship Send to arp slot has with a drop on a slot card, and both now run
@@ -18,12 +18,27 @@ through one method - `KeysEditor::sendPadToArpLine` - so the two gestures cannot
 `ArpPanel::takeChordOnLine` takes a pad slot rather than a drag payload to make that possible,
 which is all the drop ever wanted out of one.
 
+**It routes; it does not navigate.** The drop and the menu row part company on exactly one point,
+carried by `followAim`: a drop *aimed* at the line, so the aim follows it and the panel starts
+editing that line, while a row reading "Send to arp B" promises to move a chord and nothing else.
+Sharing the drop's behaviour meant picking that row from line A's Draw page tore you off the page
+and lane you had open, rebuilt every attachment, and left you several clicks from getting back.
+
 One row per line the UI shows, so C returns here the day it returns anywhere. Both rows are live
 on a line that is switched **off**, on purpose: a line that is off still takes a chord in, and
 switching it on then plays what it was handed.
 
 The menu is 11 rows and 408 px now, up from 9 and 340. Two rows rather than a submenu costing
 one, because Owen asked for the two by name and this menu can afford the height.
+
+**Binding a chord to an arp slot is undoable at last**, from the menu row and from a drop on a
+slot card alike. Both replace that slot's chord, name, shape and rate in place, and an arp slot
+is one of the two trees undo covers - Copy slot and Randomize pattern beside them have always
+pushed an entry, and these two never had. The menu's own id ranges moved into `ChordPads.h` with
+a `static_assert` that they stay disjoint: the slot ids and the new line ids were bare literals
+100 and 120 at their call sites, and growing `numArpPatterns` past 20 would have run one range
+into the other with nothing failing to compile and "Send to arp A binds the pad to slot 21" as
+the symptom.
 
 ### Fixed: the hole a taken tray card leaves can be filled again
 
@@ -42,6 +57,25 @@ unmarked well - no hover, no mark - so it read as scenery rather than as somewhe
 So: an empty cell hovers like a card and carries a `+`, a left click fills and sounds it, and a
 right click offers the two rows that need no seed (New chord here, Fill every empty card) instead
 of nothing at all. The tray's caption says the third gesture out loud.
+
+**A one-cell fill no longer clears the whole tray's stale caption.** `writeInto` stamped the
+settings signature on every write, so filling a single hole declared the other fifteen candidates
+fresh: sweep Source to Markov with a full tray, take one card, click the hole it left, and the
+warning vanished while fifteen chords from the old Source sat there unchanged. It now stamps only
+when the write covered every chord on screen, which is stated exactly rather than by a flag per
+caller - a cell carrying a chord this call did not write is a cell the current settings have never
+seen. Regen and a Fill of an empty tray still clear it; a one-cell fill and a Fill around cards
+you kept do not.
+
+**The freshly generated card lights while it sounds.** The hole-filling press clears `pressed` at
+once so the card cannot be dragged by the press that made it, and the lit state was keyed to
+`pressed` - so the one card you had just asked for was the only audition in the window that stayed
+dark for its whole 800 ms. There is a separate `auditioning` cell now, which is what paint reads.
+
+**A middle-click over the tray does nothing again.** The old guard tested "no cell, or an empty
+cell" and so made every non-left button inert as a side effect; once a hole became a live target
+that press started rolling a chord and taking the room from every sounding pad. The left-button
+test is explicit now, ahead of both the hole path and the audition below it.
 
 ### Added: Undo and Redo
 

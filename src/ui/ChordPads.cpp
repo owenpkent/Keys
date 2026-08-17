@@ -566,7 +566,6 @@ void ChordPads::showPadMenu(int slot)
     // comes back here the day it comes back anywhere. Live on a line that is switched off, on
     // purpose - a line that is off still takes chords in, and switching it on then plays what it
     // was handed.
-    constexpr int arpLineIdBase = 120; // clear of the twelve slots at 100 and of extraMenuIdBase
     for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
         menu.addItem(arpLineIdBase + n,
                      "Send to arp " + juce::String::charToString((juce::juce_wchar) ('A' + n)),
@@ -582,7 +581,7 @@ void ChordPads::showPadMenu(int slot)
         auto label = juce::String(s + 1);
         if (target.chordName.isNotEmpty())
             label += "  (" + target.chordName + ")";
-        slots.addItem(100 + s, label, filled);
+        slots.addItem(arpSlotIdBase + s, label, filled);
     }
     menu.addSubMenu("Send to arp slot", slots, filled);
 
@@ -622,10 +621,15 @@ void ChordPads::showPadMenu(int slot)
         {
             safe->nextPadVoicing(slot);
         }
-        else if (choice >= 100 && choice < 100 + KeysProcessor::numArpPatterns)
+        else if (choice >= arpSlotIdBase && choice < arpSlotIdBase + KeysProcessor::numArpPatterns)
         {
+            // Undoable: this replaces the slot's chord, name, shape and rate in place, and a slot
+            // is one of the two trees undo covers. Copy slot and Randomize pattern in ArpPanel
+            // both push for the same data; this one did not until 2026-08-17, so sending a pad to
+            // a slot you had already dressed threw that slot away with no way back.
+            safe->processor.pushUndo("Send pad to arp slot", KeysProcessor::UndoScope::arp);
             const auto& pad = safe->processor.chordPad(slot);
-            safe->processor.setArpSlotChord(choice - 100, pad.notes, pad.name);
+            safe->processor.setArpSlotChord(choice - arpSlotIdBase, pad.notes, pad.name);
         }
         else if (choice >= arpLineIdBase && choice < arpLineIdBase + KeysProcessor::uiArpLines)
         {

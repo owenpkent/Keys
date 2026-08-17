@@ -189,6 +189,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   whatever is under the point, which is what makes the whole macro row a target including the
   knobs on it. A drop sets the current line and never changes the view
   (`setEditLine(line, false)`): it is routing a chord, not navigating.
+  **The menu row does not even set the line** (`followAim`, 2026-08-17). A drop *aimed* at the
+  line, so the aim may follow the hand; a row reading "Send to arp B" promises to move a chord,
+  and moving the panel with it tore you off the page and lane you had open - several clicks back
+  on a mouse-only surface. Same method, one flag, and the chord lands either way because that
+  call is unconditional; all the flag decides is whether the panel goes and looks.
   **A fourth tab, All, is the macro view** (2026-08-01, Owen: "the goal is to be able to create
   complex polyrhythms from one view"). It replaces the band and the step editor with one *card*
   per line, side by side under a 34 px header (2026-08-02, Owen: "parallel to each other
@@ -1140,7 +1145,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
      relationship Send to arp slot has with a drop on a slot card - so it opens no new
      right-click-only path, and the drag stays the left-click one. Both go through
      `KeysEditor::sendPadToArpLine`, the one path a pad's chord takes into a line, and both are
-     live on a line that is switched **off**: a line that is off still takes chords in.
+     live on a line that is switched **off**: a line that is off still takes chords in. They part
+     on `followAim` alone: the drop moves the aim to the line it landed on, the menu row moves a
+     chord and leaves the panel where it was.
   3. ***Lock / Unlock has no left-click twin*** (2026-07-30, Owen: "I don't want the lock
      button to be visible. I only want it to be in right click"). This is the one path where a
      left-click twin was **built and then deliberately taken away**: a lock chip sat in the

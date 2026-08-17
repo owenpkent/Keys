@@ -809,7 +809,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
-    chordPads.onSendToArpLine = [this](int slot, int line) { sendPadToArpLine(slot, line); };
+    // followAim false: this is the menu row, which routes a chord and must not navigate.
+    chordPads.onSendToArpLine = [this](int slot, int line)
+    { sendPadToArpLine(slot, line, /*followAim*/ false); };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
@@ -1072,17 +1074,25 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
 // moves the aim to this line without moving the view. A / B are power switches now and stay on
 // the bar with the section folded, so the fallback below is reachable in earnest: it is what a
 // drop, or the pad menu's "Send to arp A", does while the arp panel does not exist.
-void KeysEditor::sendPadToArpLine(int padSlot, int line)
+//
+// `followAim` separates the two callers. A **drop** on a line's tab or macro card aimed at that
+// line, so the aim moves with it. The pad menu's **Send to arp A / B** did not: that row promises
+// to route a chord, and taking the panel to the other line on the strength of it threw away the
+// page and lane the user had open - several clicks to get back, on a surface with one mouse.
+void KeysEditor::sendPadToArpLine(int padSlot, int line, bool followAim)
 {
     if (arpPanel != nullptr)
     {
-        arpPanel->takeChordOnLine(line, padSlot);
+        arpPanel->takeChordOnLine(line, padSlot, followAim);
         return;
     }
 
     processor.holdArpChordFromPad(padSlot, line);
-    processor.setArpCurrentLine(line);
-    refreshArpBarTabs();
+    if (followAim)
+    {
+        processor.setArpCurrentLine(line);
+        refreshArpBarTabs();
+    }
 }
 
 ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)

@@ -127,7 +127,23 @@ void ChordTray::writeInto(const std::vector<int>& targets)
     const auto fresh = gen.generateCandidates((int) targets.size());
     for (size_t i = 0; i < targets.size() && i < fresh.size(); ++i)
         cells[(size_t) targets[i]] = fresh[i];
-    lastSignature = settingsSignature();
+
+    // The caption speaks for the **whole tray** ("these were generated before you moved that
+    // setting"), so only a write that covers every chord now on screen may clear it. Stamping it
+    // unconditionally meant filling one hole declared the other fifteen fresh: sweep Source to
+    // Markov with a full tray, take one card, click the hole it left, and the warning vanished
+    // while fifteen candidates from the old Source stayed where they were.
+    //
+    // Cheap to state exactly rather than by a flag per caller: a cell that carries a chord and
+    // was not written by this call is a cell the current settings have never seen. Regen clears
+    // it (it targets every filled cell), Fill on an empty tray clears it, and neither a one-cell
+    // fill nor a Fill around cards you kept does.
+    bool coversEveryChord = true;
+    for (int i = 0; i < numCells && coversEveryChord; ++i)
+        if (! cells[(size_t) i].notes.empty())
+            coversEveryChord = std::find(targets.begin(), targets.end(), i) != targets.end();
+    if (coversEveryChord)
+        lastSignature = settingsSignature();
     repaint();
 }
 
@@ -166,6 +182,7 @@ void ChordTray::clear()
     // existing, and the 800 ms timer would otherwise release notes belonging to a chord the
     // window no longer shows.
     gen.stopAudition();
+    auditioning = -1; // nothing is sounding, so nothing may still be lit as if it were
     for (auto& c : cells)
         c = {};
     repaint();
@@ -218,9 +235,14 @@ void ChordTray::paint(juce::Graphics& g)
                 g.setOpacity(0.4f);
             skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
 
-            // Pressed and not yet dragged: this is the audition, so light it the way a sounding
-            // pad is lit. The press *is* the note, and the fill is the only thing that says so.
-            if (i == pressed && ! dragging)
+            // Sounding from this press and not yet dragged: light it the way a sounding pad is
+            // lit. The press *is* the note, and the fill is the only thing that says so.
+            //
+            // Keyed on `auditioning` rather than on `pressed`, because those two came apart when
+            // a hole became clickable: that path clears `pressed` at once so the new card cannot
+            // become a drag source mid-gesture, which also left the one card you had just asked
+            // for as the only audition in the window that never lit.
+            if (i == auditioning && ! dragging)
             {
                 g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(),
                                     skin::accentOf(*this).base, 0.0f, b.getBottom(), false });
@@ -233,7 +255,7 @@ void ChordTray::paint(juce::Graphics& g)
                 g.fillRoundedRectangle(b, kRadius);
             }
 
-            const bool lit = (i == pressed && ! dragging);
+            const bool lit = (i == auditioning && ! dragging);
             const auto ink = lit ? inkOnAccent : skin::text;
             auto text = b.reduced(4.0f, 3.0f);
             const auto noteLine = text.removeFromBottom(kNoteLineH);
@@ -316,7 +338,10 @@ void ChordTray::showCardMenu(int index)
     if (filled)
         m.addItem(8, "Clear this card");
     else
-        m.addItem(9, "Fill every empty card", hasEmptyCells());
+        // Unconditionally live, and no `hasEmptyCells()` guard: this row only exists on an empty
+        // cell, and that cell is one of the cells the predicate scans, so it could never be false
+        // here. A guard that cannot fail reads as a precondition and gets copied as one.
+        m.addItem(9, "Fill every empty card");
 
     juce::PopupMenu::Options opts;
     opts = opts.withTargetComponent(this).withTargetScreenArea(
@@ -395,6 +420,17 @@ void ChordTray::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // Everything below generates or sounds something, so it belongs to the left button alone.
+    // The guard this replaced was `pressed < 0 || cells[pressed].notes.empty()`, which made a
+    // middle or X-button press over the tray inert as a side effect of the empty-cell test; the
+    // moment a hole became a live target, that press started rolling a chord and taking the room
+    // instead. The contract in CLAUDE.md is "single left-click or drag".
+    if (! e.mods.isLeftButtonDown())
+    {
+        pressed = -1;
+        return;
+    }
+
     // A click on the hole a committed card left generates a chord into it, and then hears it, so
     // taking a card and getting another one back is the same gesture twice (Owen, 2026-08-16:
     // "you can't regenerate it"). It is a free gesture: an empty cell has nothing to audition and
@@ -406,7 +442,10 @@ void ChordTray::mouseDown(const juce::MouseEvent& e)
         pressed = -1; // filled now, but not by a press that may still become a drag
         writeInto({ cell });
         if (! cells[(size_t) cell].notes.empty())
+        {
             gen.auditionChord(cells[(size_t) cell].notes); // a click on a tray card makes a sound
+            auditioning = cell; // and a card that is sounding lights, this one included
+        }
         repaint();
         return;
     }
@@ -415,6 +454,7 @@ void ChordTray::mouseDown(const juce::MouseEvent& e)
     // matters, and a chord you only hear after letting go is a chord you cannot compare with
     // the next one. A drag cancels it below the moment the mouse actually moves.
     gen.auditionChord(cells[(size_t) pressed].notes);
+    auditioning = pressed;
     repaint();
 }
 
@@ -461,8 +501,17 @@ void ChordTray::beginDrag(const juce::MouseEvent& e)
 
 void ChordTray::mouseUp(const juce::MouseEvent&)
 {
+    // Ahead of the early return below, because the hole-filling press clears `pressed` on the way
+    // down and would otherwise leave its card lit until the next press landed somewhere.
+    const bool wasLit = auditioning >= 0;
+    auditioning = -1;
+
     if (pressed < 0)
+    {
+        if (wasLit)
+            repaint();
         return;
+    }
 
     if (! dragging)
     {

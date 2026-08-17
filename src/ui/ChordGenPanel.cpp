@@ -98,6 +98,14 @@ namespace
         l.setFont(skin::micro(10.0f));
         l.setColour(juce::Label::textColourId, skin::textDim);
     }
+
+    // The tray caption's two readings, written once. Both are set from two places - the
+    // constructor and the 10 Hz tick - so as literals they were a wording change waiting to be
+    // made in one of them and missed in the other.
+    const char* const kTrayHint = "Audition - click to hear, drag onto a pad to keep, "
+                                  "click a gap for a new chord";
+    const char* const kTrayStale = "Audition - settings changed since these were generated. "
+                                   "Regen for new ones.";
 } // namespace
 
 juce::Point<int> ChordGenPanel::contentSize()
@@ -507,8 +515,7 @@ void ChordGenPanel::buildControls()
     // The audition tray, and the one line that says what a card in it does. The label is worth
     // its 20 px: a drag is the only way a candidate reaches a pad, and a gesture nothing on
     // screen mentions is a gesture nobody finds.
-    styleLabel(trayLabel,
-               "Audition - click to hear, drag onto a pad to keep, click a gap for a new chord");
+    styleLabel(trayLabel, kTrayHint);
     addAndMakeVisible(trayLabel);
 
     // The reference chord: one slot the tray's own actions cannot reach. Fill, Regen and Clear
@@ -746,13 +753,8 @@ void ChordGenPanel::timerCallback()
     // Say the tray is out of date; never act on it. Changing a setting generates nothing (Owen,
     // 2026-08-01), so this is the whole of what a settings change does to the tray: the caption
     // tells you Regen would now give you something different.
-    trayLabel.setText(tray.settingsMovedSinceFill()
-                          ? juce::String::fromUTF8("Audition - settings changed since these were "
-                                                   "generated. Regen for new ones.")
-                                .toUpperCase()
-                          : juce::String("Audition - click to hear, drag onto a pad to keep, "
-                                         "click a gap for a new chord")
-                                .toUpperCase(),
+    trayLabel.setText(juce::String(tray.settingsMovedSinceFill() ? kTrayStale : kTrayHint)
+                          .toUpperCase(),
                       juce::dontSendNotification);
 
     // Compliance and Lock Influence are on the fixed row now, so they grey where they are dead
