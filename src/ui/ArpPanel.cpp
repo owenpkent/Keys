@@ -2630,6 +2630,18 @@ void ArpPanel::refreshVoiceButton()
 
 void ArpPanel::timerCallback()
 {
+    // The lane-length repair runs whether or not anyone is looking. A session saved before a
+    // lane existed loads that lane at ArpPattern's default 8 while its neighbours are at 16 or
+    // 32, and the ARP section may well be folded when it lands - so gating this on being on
+    // screen would leave the repair waiting for the user to open the panel.
+    refreshLaneReadouts();
+
+    // Everything below here is display. The panel keeps existing while its section is folded
+    // and while it sits in a closed detached window, and refreshing controls nobody can see
+    // costs the message thread - which in a plugin is the DAW's UI thread, not ours.
+    if (! isShowing())
+        return;
+
     refreshMacro(); // rate, shape and the held chord, none of which an attachment drives
 
     refreshShape(); // the host can automate arpPattern/arpDirection out from under us

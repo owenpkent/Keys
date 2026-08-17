@@ -86,6 +86,12 @@ protected:
     virtual int noteChannel() const { return 0; }      // 0 = the global channel param
     virtual int drawnForOutputNote(int note) const { juce::ignoreUnused(note); return -1; }
 
+    // Where one drawn id sits, so a note going on or off repaints that key and not the whole
+    // surface. An empty rectangle means "this surface cannot say", which falls the caller back
+    // to repainting everything - the behaviour every surface had before this existed.
+    virtual juce::Rectangle<int> drawnBounds(int drawn) const
+    { juce::ignoreUnused(drawn); return {}; }
+
     void refresh(); // diff the sounding set, emit note on/off
 
     // Drawn ids whose output note is sounding right now but which this surface did not
@@ -115,6 +121,12 @@ protected:
 private:
     void timerCallback() override; // polls the processor's sounding generation, repaints on change
     juce::uint32 lastSoundingGen = 0;
+
+    // Repaint the keys whose lit state actually moved, and only those. `lastLit` is the union
+    // this surface last drew as lit - its own three sets plus externallySounding() - so the
+    // diff against it names exactly the keys that have to be redrawn. See the .cpp.
+    void repaintLitChanges();
+    std::set<int> lastLit;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoteSurface)
 };

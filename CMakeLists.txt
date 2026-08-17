@@ -130,7 +130,8 @@ endif()
 # with: cmake --build build --target Keys_tests && ctest --test-dir build -C Release
 enable_testing()
 add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp
-                          tests/ChordSourceTests.cpp tests/StateTests.cpp tests/LayoutTests.cpp)
+                          tests/ChordSourceTests.cpp tests/StateTests.cpp tests/LayoutTests.cpp
+                          tests/TakeTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
 # juce_audio_basics is for ArpEngine's MidiBuffer/MidiMessage; the kit does not
 # re-export it.

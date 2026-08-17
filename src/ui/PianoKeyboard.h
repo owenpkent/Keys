@@ -32,6 +32,7 @@ protected:
     int drawnAt(juce::Point<float>) const override;  // drawn note under the point, or -1
     int outputNote(int drawnNote) const override;    // scale-lock + octave applied, clamped
     int drawnForOutputNote(int note) const override; // undo the octave; -1 if off the keybed
+    juce::Rectangle<int> drawnBounds(int drawnNote) const override; // one key's cell
 
 private:
     struct Key

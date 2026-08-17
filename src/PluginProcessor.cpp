@@ -1257,6 +1257,158 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     runArpLines(midi, buffer.getNumSamples());
 
     advanceChainClock(buffer.getNumSamples());
+
+    // Last, so the take holds the stream that actually leaves: arpeggiated where a line is
+    // running, strummed where a pad strummed, on whichever channel the line sent it on.
+    // Recording what the *UI* asked for instead would capture the chord you clicked and not
+    // the arpeggio you heard, which is the wrong take by exactly the interesting part.
+    if (recording.load(std::memory_order_relaxed))
+        captureBlock(midi, buffer.getNumSamples());
+}
+
+// Audio thread. Writes into the ring and publishes one index; allocates nothing (the ring is
+// sized in the constructor) and takes no lock.
+void KeysProcessor::captureBlock(const juce::MidiBuffer& midi, int numSamples)
+{
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    auto w = captureWrite.load(std::memory_order_relaxed);
+
+    for (const auto meta : midi)
+    {
+        const auto m = meta.getMessage();
+        const int size = m.getRawDataSize();
+        // Three bytes or fewer covers every channel voice message. Sysex, MTC and the rest are
+        // not what a played take is made of, and admitting them would mean a variable-size slot
+        // and an allocation somewhere on this thread.
+        if (size <= 0 || size > 3 || ! m.getChannel())
+            continue;
+
+        auto& e = captureRing[(size_t) (w % (juce::uint32) captureCapacity)];
+        e.atSec = (double) (captureSamples + meta.samplePosition) / sr;
+        e.size = (juce::uint8) size;
+        const auto* raw = m.getRawData();
+        for (int i = 0; i < size; ++i)
+            e.bytes[i] = raw[i];
+        ++w;
+    }
+
+    captureWrite.store(w, std::memory_order_release); // slots filled before the index admits them
+    captureSamples += numSamples;
+}
+
+// Message thread, off the 50 Hz heartbeat.
+void KeysProcessor::drainCapture()
+{
+    const auto w = captureWrite.load(std::memory_order_acquire);
+    if (w == captureRead)
+        return;
+
+    // Lapped: the audio thread has overwritten slots we never read. Cannot happen at any rate a
+    // keyboard produces, but reading them anyway would hand back torn events, so skip to the
+    // oldest slot still intact and lose the gap rather than the take.
+    if (w - captureRead > (juce::uint32) captureCapacity)
+        captureRead = w - (juce::uint32) captureCapacity;
+
+    for (; captureRead != w; ++captureRead)
+        capturedTake.push_back(captureRing[(size_t) (captureRead % (juce::uint32) captureCapacity)]);
+}
+
+void KeysProcessor::setRecording(bool shouldRecord)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    if (shouldRecord == recording.load(std::memory_order_relaxed))
+        return;
+
+    if (shouldRecord)
+    {
+        // Arming starts a new take. Nothing is lost by that: the previous one was written to
+        // disk the moment it stopped (see writeTake), so the only thing being cleared here is a
+        // copy of a file that already exists.
+        drainCapture();
+        capturedTake.clear();
+        captureRead = captureWrite.load(std::memory_order_acquire);
+        captureSamples = 0;
+        recording.store(true, std::memory_order_relaxed);
+        return;
+    }
+
+    recording.store(false, std::memory_order_relaxed);
+    drainCapture(); // the last block or two the audio thread wrote before the flag went down
+}
+
+double KeysProcessor::capturedSeconds() const
+{
+    if (capturedTake.size() < 2)
+        return 0.0;
+    // First event to last, so arming and then thinking for a minute costs the take nothing -
+    // the same offset buildTakeMidiFile shifts away.
+    return juce::jmax(0.0, capturedTake.back().atSec - capturedTake.front().atSec);
+}
+
+bool KeysProcessor::buildTakeMidiFile(juce::MidiFile& out) const
+{
+    if (capturedTake.empty())
+        return false;
+
+    constexpr short ticksPerQuarter = 960;
+    const double bpm = juce::jlimit(20.0, 999.0, currentTempo());
+    const double ticksPerSecond = (double) ticksPerQuarter * bpm / 60.0;
+    const double zero = capturedTake.front().atSec; // the take starts when you played, not when you armed
+
+    juce::MidiMessageSequence seq;
+    seq.addEvent(juce::MidiMessage::tempoMetaEvent((int) std::llround(60000000.0 / bpm)), 0.0);
+    seq.addEvent(juce::MidiMessage::timeSignatureMetaEvent(4, 4), 0.0);
+    for (const auto& e : capturedTake)
+        seq.addEvent(juce::MidiMessage(e.bytes, (int) e.size), (e.atSec - zero) * ticksPerSecond);
+
+    seq.updateMatchedPairs();
+
+    // Anything still ringing when recording stopped has no note-off in the take. Left alone
+    // that is a hanging note in the clip - Live holds it until the next stop, which sounds like
+    // Keys emitted a stuck note. Give each one an end just past the last event instead.
+    const double end = seq.getEndTime() + (double) ticksPerQuarter / 4.0;
+    for (int i = seq.getNumEvents(); --i >= 0;)
+    {
+        const auto* ev = seq.getEventPointer(i);
+        if (ev->message.isNoteOn() && ev->noteOffObject == nullptr)
+            seq.addEvent(juce::MidiMessage::noteOff(ev->message.getChannel(),
+                                                    ev->message.getNoteNumber()), end);
+    }
+    seq.updateMatchedPairs();
+
+    out.setTicksPerQuarterNote(ticksPerQuarter);
+    out.addTrack(seq);
+    return true;
+}
+
+juce::File KeysProcessor::takeFolder()
+{
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+               .getChildFile("OK Studio")
+               .getChildFile("Keys Takes");
+}
+
+juce::File KeysProcessor::writeTake()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    juce::MidiFile file;
+    if (! buildTakeMidiFile(file))
+        return lastTake = {};
+
+    auto folder = takeFolder();
+    if (! folder.createDirectory().wasOk())
+        return {};
+
+    const auto stamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d-%H%M%S");
+    auto out = folder.getChildFile("Keys take " + stamp + ".mid").getNonexistentSibling();
+
+    juce::FileOutputStream stream(out);
+    if (! stream.openedOk())
+        return {};
+    if (! file.writeTo(stream))
+        return {};
+    stream.flush();
+    return lastTake = out;
 }
 
 namespace
@@ -2206,6 +2358,12 @@ int KeysProcessor::arpSlotBars(int index, int line) const
 
 void KeysProcessor::heartbeatTick()
 {
+    // Move the take out of the audio thread's ring while it is still being played into, so the
+    // ring never has to hold a whole performance and the chip's duration is live rather than
+    // arriving all at once when recording stops.
+    if (recording.load(std::memory_order_relaxed))
+        drainCapture();
+
     // Releasing a chord held into the arp when the arp goes off. This lived in the editor's
     // timer and was gated on the chord having come from a *pad*, so a chord handed over from
     // the live card was never released - and with no editor open nothing polled at all, so

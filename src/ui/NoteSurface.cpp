@@ -1,5 +1,6 @@
 #include "NoteSurface.h"
 #include <algorithm>
+#include <iterator>
 #include <okstudio/MouseOnly.h>
 
 namespace keys
@@ -24,7 +25,54 @@ void NoteSurface::timerCallback()
     if (gen == lastSoundingGen)
         return;
     lastSoundingGen = gen;
-    repaint();
+    repaintLitChanges();
+}
+
+// The keybed is the most expensive paint in the window: every key is a rounded Path, a
+// vertical gradient, a clipped bevel and two seam strokes, and paint() rasterises all of them.
+// This used to repaint the whole surface on any note change - up to 33 times a second while an
+// arpeggio runs, and once per key crossed during a drag glide - which is fine standalone and is
+// not fine in a DAW that scales the plugin window, where every one of those paths goes through
+// a transform on the way to the screen.
+//
+// So repaint the keys that changed and nothing else. paint() itself is untouched: JUCE hands it
+// the clip region either way, and the keys outside that region cost a bounds test instead of a
+// rasterisation. Correctness does not depend on the geometry, only on which ids are lit, so a
+// surface that cannot map an id to a rectangle (drawnBounds returns empty) still gets the whole
+// surface back, which is exactly what every surface did before.
+void NoteSurface::repaintLitChanges()
+{
+    std::set<int> lit;
+    lit.insert(pressed.begin(), pressed.end());
+    lit.insert(latched.begin(), latched.end());
+    lit.insert(sustained.begin(), sustained.end());
+    for (const int drawn : externallySounding())
+        lit.insert(drawn);
+
+    if (lit == lastLit)
+        return; // the generation moved for a note this surface does not draw
+
+    std::vector<int> changed;
+    std::set_symmetric_difference(lit.begin(), lit.end(), lastLit.begin(), lastLit.end(),
+                                  std::back_inserter(changed));
+    lastLit.swap(lit);
+
+    // One union rather than a repaint per key: a chord is a handful of neighbours, and JUCE
+    // coalesces overlapping dirty rectangles anyway. Expanded by 2 because a key's seam
+    // strokes and the black keys sitting over it reach a pixel past its own bounds.
+    juce::Rectangle<int> dirty;
+    for (const int drawn : changed)
+    {
+        const auto b = drawnBounds(drawn);
+        if (b.isEmpty())
+        {
+            repaint();
+            return;
+        }
+        dirty = dirty.getUnion(b);
+    }
+    if (! dirty.isEmpty())
+        repaint(dirty.expanded(2));
 }
 
 std::set<int> NoteSurface::externallySounding() const
@@ -202,7 +250,9 @@ void NoteSurface::refresh()
             next.push_back(kv.first);
     voiceOrder.swap(next);
 
-    repaint();
+    // Same narrowed repaint the timer takes. A drag glide calls this once per key crossed, so
+    // it is the other place a full-surface repaint used to land in a run.
+    repaintLitChanges();
 }
 
 void NoteSurface::mouseDown(const juce::MouseEvent& e)

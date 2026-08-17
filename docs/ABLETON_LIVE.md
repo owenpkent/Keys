@@ -111,8 +111,9 @@ while it is also playing its hosted VST3 — so one Keys Host can drive its own 
 *and* Ableton devices on other tracks; arm/monitor per track decides who listens.
 
 Recording note: what you play into the *hosted* instrument stays inside the plugin,
-so Live doesn't capture it as a MIDI clip on the Keys Host track itself. To record,
-use a listener track ("MIDI From: Keys Host"), exactly like the routing above.
+so Live doesn't capture it as a MIDI clip on the Keys Host track itself. Either use a
+listener track ("MIDI From: Keys Host"), exactly like the routing above, or press
+**REC** on the Keyboard bar and let Keys record itself — see "Recording what you play".
 
 ## Channels
 
@@ -120,6 +121,36 @@ If you want Keys to drive different instruments on different channels, set **MID
 Ch** on Keys and filter by channel on the receiving tracks. Otherwise leave it at 1.
 
 ## Recording what you play
+
+**Arming the Keys track itself records nothing, and that is a Live limit, not a Keys
+bug.** Live records what arrives at a track's *input*. The notes you click are made
+inside the plugin, downstream of that input, so there is nothing at the input to record
+and the clip comes out empty. No plugin-side setting changes this, in Keys or in any
+other MIDI-generating plugin. There are two ways round it, and they are both one click.
+
+### REC: Keys records itself (one track, nothing to route)
+
+Press **REC** on the Keyboard bar, play, press **STOP**. Keys writes the take to
+`Documents\OK Studio\Keys Takes` and the chip beside REC names it and how long it is.
+
+What is captured is the stream that *leaves* Keys — arpeggiated where a line is running,
+strummed where a pad strummed, on whichever channel each line sent it on. It is what you
+heard, not what you clicked. The take carries the tempo Keys was running at, so the clip
+lands on the grid; notes still ringing when you stop are given an end, so nothing hangs.
+
+Two ways to get it into Live, both left-button:
+
+- **Drag the chip** straight onto a track. One long drag across the screen.
+- **Click the chip** to show the file in Explorer, and drag from there.
+
+Best of all, once: add `Documents\OK Studio\Keys Takes` to Live's browser as a **Place**
+(drag the folder into the browser's sidebar, or Add Folder). Every take afterwards
+appears there and is a short drag *inside* Live — much the kindest gesture with one mouse.
+
+Pressing REC again starts a fresh take. Nothing is lost by that: the previous one was
+written to disk the moment you stopped.
+
+### The listener track (records into Live's own timeline)
 
 Arm the instrument track and record; the notes you click land as a normal MIDI clip.
 Scale Lock, octave, and velocity all apply to what's recorded, because Keys sends the

@@ -107,7 +107,19 @@ KeysMcp::KeysMcp(KeysProcessor& p)
     server.addTool(toolStoreArpPattern());
     server.addTool(toolApplyEuclid());
     server.start();
-    startTimer(5); // was 30: chord releases tolerate it, scheduled notes do not
+    // No timer here. 5 ms is the rate a *scheduled* note needs (30 ms was audibly loose), but
+    // that is 200 message-thread wake-ups a second for a queue that is empty except while an
+    // MCP client is actually driving the plugin - and in a plugin that message thread belongs
+    // to the DAW. wake() starts it when there is something to fire; timerCallback stops it
+    // again when the queues run dry.
+}
+
+// Called by every path that queues work for timerCallback. Idempotent: juce::Timer ignores a
+// startTimer at the rate it is already running at.
+void KeysMcp::wake()
+{
+    if (! isTimerRunning())
+        startTimer(5);
 }
 
 KeysMcp::~KeysMcp()
@@ -146,7 +158,11 @@ void KeysMcp::timerCallback()
     // that run in one pass and erase it in one go, and emit in order so a note-off can
     // never overtake the note-on it belongs to.
     if (pendingNotes.empty())
+    {
+        if (pendingReleases.empty())
+            stopTimer(); // nothing left to wait for; wake() starts it again when there is
         return;
+    }
 
     size_t due = 0;
     while (due < pendingNotes.size() && pendingNotes[due].atMs <= now)
@@ -183,6 +199,7 @@ void KeysMcp::scheduleNote(double atMs, int note, int channel, float vel01, bool
         return a.atMs != b.atMs ? a.atMs < b.atMs : (! a.isOn && b.isOn);
     };
     pendingNotes.insert(std::upper_bound(pendingNotes.begin(), pendingNotes.end(), pn, before), pn);
+    wake();
 }
 
 void KeysMcp::cancelPendingRelease(int slot)
@@ -639,6 +656,7 @@ okstudio::mcp::Tool KeysMcp::toolPressChordPad()
         {
             durationMs = juce::jlimit(10, 60000, (int) args.getProperty("durationMs", 500));
             pendingReleases.push_back({ juce::Time::getMillisecondCounterHiRes() + durationMs, slot });
+            wake();
             scheduled = true;
         }
 

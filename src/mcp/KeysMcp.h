@@ -37,6 +37,7 @@ public:
 
 private:
     void timerCallback() override;
+    void wake(); // start the poll timer if a queue just gained work; see the constructor
     void cancelPendingRelease(int slot);
     void scheduleNote(double atMs, int note, int channel, float vel01, bool isOn);
     static juce::String productSlug();

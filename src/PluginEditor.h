@@ -294,6 +294,34 @@ private:
     juce::ToggleButton humanizeButton { "Humanize" };
     juce::ToggleButton chordExclusiveButton { "Exclusive" };
     juce::TextButton panicButton { "All Off" };
+
+    // --- Take: REC and the chip that gets it out -----------------------------------------
+    // Both ride the *Keyboard* bar, beside Exclusive / Sustain / Latch / All Off, and neither
+    // hides when the section folds: recording is the same reach-for-it-while-playing case
+    // those four are, and folding the keybed away mid-take must not take the stop button with
+    // it. The bar had the room - unlike the Controls bar, whose budget is spoken for down to
+    // the pixel (see minWidthForView) - so this costs no floor.
+    juce::TextButton recButton { "REC" };
+
+    // A click reveals the written file in Explorer; a drag hands it to whatever is under the
+    // pointer, Live included. Two paths on purpose: a drag out of a plugin window and across
+    // the screen is a long, precise gesture, and the reason every take is written to one fixed
+    // folder is that the folder can be added to Live's Places once and dragged from *inside*
+    // Live afterwards, which is a far kinder gesture with one mouse.
+    struct TakeChip : public juce::TextButton
+    {
+        std::function<juce::File()> getFile;
+
+        void mouseDown(const juce::MouseEvent&) override;
+        void mouseDrag(const juce::MouseEvent&) override;
+        void mouseUp(const juce::MouseEvent&) override;
+
+    private:
+        bool wasDrag = false; // this gesture became a drag, so its mouse-up is not a click
+    };
+    TakeChip takeChip;
+    void refreshTakeControls(); // lit state, caption and enablement; polled from timerCallback
+    juce::String lastTakeCaption;
     juce::TextButton updateButton;
 
     // Chord-pad page navigation, riding the Pads bar.
