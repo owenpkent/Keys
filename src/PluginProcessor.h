@@ -605,6 +605,9 @@ public:
         // here all the same because it is the same question - where did Owen leave a window,
         // and was it open - and the answer has to survive the editor closing.
         bool chordGen = false;
+        // And the same for the Library window (2026-08-18), which is the second surface onto
+        // ChordLibrary.h and is opened by its own chip on the same bar.
+        bool chordLib = false;
 
         // Which arp line the panel is editing and a chord card feeds. See arpCurrentLine().
         int  arpLine = 0;
@@ -698,6 +701,7 @@ public:
         juce::Rectangle<int> padsDetachedBounds {};
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
         juce::Rectangle<int> chordGenBounds {};     // the generator's window
+        juce::Rectangle<int> chordLibBounds {};     // the library's window
     };
     enum class UndoScope { pads, arp };
 

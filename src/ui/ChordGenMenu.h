@@ -100,6 +100,18 @@ public:
     void auditionChord(const std::vector<int>& notes) { previewChord(notes); }
     void stopAudition() { stopPreview(); }
 
+    // A whole progression, played through one chord at a time (2026-08-18, for the Library
+    // window). It is here rather than in that window for the same reason `previewChord` is: it
+    // calls noteOn with no pad behind it, this object outlives every window, and a window closing
+    // mid-audition must not strand a note. `stopAudition` ends it at any point, and so does an
+    // ordinary single-chord audition - one thing is sounding at a time, always.
+    //
+    // A progression is the unit the library is *about*, so hearing one chord of it tells you
+    // almost nothing: ii-V-I and ii-V-vi start identically. This is the button that answers the
+    // question the tray cannot.
+    void auditionProgression(const std::vector<std::vector<int>>& chords);
+    bool auditioningProgression() const { return ! progressionQueue.empty(); }
+
     // What each of those two would find to do, for the bar and the window to grey their
     // buttons on.
     bool pageHasEmptyPads() const { return ! emptyPadsOnPage().empty(); }
@@ -168,9 +180,17 @@ public:
     void setLibraryGenre(juce::String s) { libGenre = std::move(s); }
     void setLibraryFunction(int f) { libFunction = f; }
 
-    // The entry the last Library generation actually used, for the window's diagram to name. The
-    // pick is three filters, not a row, so which row came back is a thing only generation knows.
+    // **The library row the tray is currently holding**, for the generator window's diagram and
+    // readout to name. Two things write it and that is the point: a Library generation (where the
+    // pick is three filters, so which row came back is a thing only generation knows) and the
+    // Library window's "To tray", which puts one named row there on purpose.
+    //
+    // It said "the row the last *generation* used" for about an hour, and the To-tray push made
+    // that reading wrong on screen straight away: the tray held Bird changes and the diagram was
+    // still captioned Folia, because the last generation was the last thing to write it. One
+    // field, one meaning - what is in the tray.
     const juce::String& lastLibraryEntry() const { return libLastEntry; }
+    void setLastLibraryEntry(juce::String s) { libLastEntry = std::move(s); }
 
 private:
     void timerCallback() override;
@@ -259,6 +279,12 @@ private:
     int lastSuggestTarget = -1;
 
     std::vector<int> previewNotes; // suggestion audition currently sounding
+
+    // The chords still to play of a progression audition, in reverse (the next one is the back,
+    // so stepping is a pop rather than an erase from the front). Empty means nothing is walking,
+    // which is also what `auditioningProgression` answers with and what tells `timerCallback`
+    // whether its tick is the end of an 800 ms preview or the start of the next chord.
+    std::vector<std::vector<int>> progressionQueue;
 
     int editingSlot = -1; // pad the keyboard is editing, pushed from the editor; see the setter
 

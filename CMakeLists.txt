@@ -38,6 +38,7 @@ set(KEYS_SOURCES
     src/ui/ChordGenMenu.cpp
     src/ui/ChordGenPanel.cpp
     src/ui/ChordTray.cpp
+    src/ui/ChordLibraryPanel.cpp
     src/ui/SourceViz.cpp
     src/ui/TakePanel.cpp
     src/ui/ArpPanel.cpp)

@@ -261,19 +261,19 @@ three-axis library** rather than mood alone or a retag of the existing 88, and *
 the generator source first, the browsable window after. The source is built; the rest is below, in
 the order it is worth doing.
 
-1. **The browsable window.** A Library chip on the Pads bar opening a list you scroll, click to
-   hear, and drag onto a pad. The source that shipped is the engine and it is genuinely useful on
-   its own - Fill under a Mood is a fast way to work - but a filter is not browsing. You cannot see
-   what is in the table, only what came out of it. This is the half that makes it feel like a
-   library rather than a dice roll with tags.
-   **The one design problem to solve first:** 271 rows is a scroll, and a scroll is the gesture the
-   mouse-only contract is worst at. Pages of twelve with `<` `>`, the way the pad strip already
-   works, is the shape that fits Keys - not a scrollbar.
-2. **Fold `MarkovData.h`'s 88 rows in.** They are already mood-tagged; what they need is a genre, a
-   function, and their old vocabulary mapped onto the new one (five words were added to the mood
-   list for exactly this, so nothing has to be retagged onto a near neighbour). They stay in
-   `MarkovData.h` as well - the Markov source still wants its bigrams - so this is a copy, not a
-   move, and the duplicate-content test will have opinions about where they land.
+**Both are now built.** What is left is (3) and (4) below.
+
+- ~~**The browsable window.**~~ Built: `src/ui/ChordLibraryPanel.h`, opened by a **Library** chip
+  on the Pads bar beside Generator. **Paged, not scrolled** - twelve rows and a `<` `>` pair, the
+  shape the pad strip already uses, because 348 rows is a scroll and a scroll is the gesture the
+  mouse-only contract is worst at: a scrollbar thumb is a small target that has to be dragged, and
+  a wheel is not a gesture Keys may require. A row is a chord card that holds several chords: the
+  whole row is the Hear button, a second click on the walking row stops it, and two buttons at its
+  right end place the progression into the generator's tray or straight onto the page's empty pads.
+- ~~**Fold `MarkovData.h`'s 88 rows in.**~~ Built: sixty of the 88 were new, twenty-eight were rows
+  the table already carried under a name of its own. They stay in `MarkovData.h` too - the Markov
+  source still wants its bigrams - so it is a copy, not a move.
+
 3. **Does a progression keep its identity after it lands?** A pad remembers `degree` and `numeral`
    but not "you came from the Andalusian cadence, chord 3 of 4". A `progressionId` + `step` on
    `ChordPad` would let the strip draw the bracket the Progressions diagram already draws - and

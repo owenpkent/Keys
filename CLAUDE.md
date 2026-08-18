@@ -1459,8 +1459,18 @@ Four things will bite otherwise:
   (that GUI is a top-level window of the same process) and on an arbitrary section once any
   are detached. The titles are `Keys Host`, and `Keys Controls` / `Keys Arpeggiator` /
   `Keys Chord Pads` / `Keys Keyboard` for the four detached sections (the `wire(...)` calls in
-  `PluginEditor.cpp`), plus `Keys Chord Generator`, which is a window but not a section
-  (`KeysEditor::setChordGenWindowOpen`). `Keys Centre` and `Keys Transcribe` no longer exist.
+  `PluginEditor.cpp`), plus `Keys Chord Generator` and `Keys Chord Library`, which are windows
+  but not sections (`KeysEditor::setChordGenWindowOpen` / `setChordLibWindowOpen`). `Keys Centre`
+  and `Keys Transcribe` no longer exist.
+  **Opening a second window moves `MainWindowHandle`** (2026-08-18, hit while shooting the library):
+  with the library up, `-InvokeButtons "Chord generator window"` fails, because that chip is on the
+  *main* window and the heuristic has landed on the library. Enumerate the `Keys` top-level element
+  yourself and `FindFirst` under it - the same five-line UIA script the Keys Host trap needs.
+- **A disabled control is absent from the UIA tree, not merely marked disabled** (2026-08-18). The
+  library window's twenty-four row buttons could not be found at all until the generator window was
+  open, which is what makes their greying real rather than cosmetic - but it also means "element not
+  found" is the *expected* answer for a control that is correctly greyed, and not evidence that the
+  control is missing. Check whether it should be enabled before hunting for the name.
 - **The Detach buttons are named per section**, because four buttons reading "Detach" are
   four identical accessible names. Invoke `Detach Pads`, `Re-dock Keyboard`, and so on; the
   name flips with the button's state.

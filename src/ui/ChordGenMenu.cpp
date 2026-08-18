@@ -585,11 +585,66 @@ void ChordGenMenu::stopPreview()
     for (const int n : previewNotes)
         processor.noteOff(n);
     previewNotes.clear();
+    progressionQueue.clear(); // a walk ends when anything else takes the room
+}
+
+// 550 ms a chord: fast enough that a four-chord progression is over in a little over two seconds -
+// short enough to sit through while comparing twelve of them - and slow enough that a ii-V-I still
+// sounds like a cadence rather than a chord with grace notes. Deliberately not the 800 ms a single
+// chord gets: one chord you are examining, a progression you are hearing the shape of.
+static constexpr int kProgressionStepMs = 550;
+
+void ChordGenMenu::auditionProgression(const std::vector<std::vector<int>>& chords)
+{
+    stopPreview(); // whatever was sounding gives way, including another progression
+
+    if (chords.empty())
+        return;
+
+    // Held in reverse so stepping is a pop_back. The first chord is fired here rather than waiting
+    // out a tick: a Hear button that stays silent for half a second reads as broken.
+    progressionQueue.assign(chords.rbegin(), chords.rend());
+    const auto first = progressionQueue.back();
+    progressionQueue.pop_back();
+
+    // Straight to the sound path rather than through previewChord, which would call stopPreview
+    // and clear the queue this just filled.
+    processor.stopAllChordPads();
+    const float vel = processor.baseVelocity01();
+    for (const int n : first)
+        processor.noteOn(n, vel);
+    previewNotes = first;
+    startTimer(kProgressionStepMs);
 }
 
 void ChordGenMenu::timerCallback()
 {
-    stopPreview(); // the only thing on a clock here: an audition that has had its 800 ms
+    // Two things share this timer and the queue is what tells them apart: empty means the tick is
+    // the end of a single chord's 800 ms, and anything in it means the tick is the next step of a
+    // progression. One timer rather than two because only one audition may sound at a time
+    // anyway - `stopPreview` is the single place that ends either - and a second timer would be a
+    // second thing able to leave a note on.
+    if (progressionQueue.empty())
+    {
+        stopPreview(); // an audition that has had its 800 ms
+        return;
+    }
+
+    for (const int n : previewNotes)
+        processor.noteOff(n);
+    previewNotes.clear();
+
+    const auto next = progressionQueue.back();
+    progressionQueue.pop_back();
+    const float vel = processor.baseVelocity01();
+    for (const int n : next)
+        processor.noteOn(n, vel);
+    previewNotes = next;
+
+    // The last chord of a walk gets the full single-chord length, so a progression lands on its
+    // final chord rather than clipping it off at the same pace as the ones leading there. That is
+    // the difference between hearing a cadence arrive and hearing it stop.
+    startTimer(progressionQueue.empty() ? 800 : kProgressionStepMs);
 }
 
 void ChordGenMenu::regeneratePageMarkov()

@@ -4,6 +4,7 @@
 #include "ui/ArpPanel.h"
 #include "ui/ChordGenMenu.h"
 #include "ui/ChordGenPanel.h"
+#include "ui/ChordLibraryPanel.h"
 #include "ui/ChordPads.h"
 #include "ui/DetachedWindow.h"
 #include "ui/KeysLookAndFeel.h"
@@ -117,6 +118,12 @@ private:
     // it exists while it is shut.
     void setChordGenWindowOpen(bool);
     void rememberChordGenBounds();
+
+    // The library's window, the same shape exactly: not a section, its own DetachedWindow, its
+    // flag and frame beside the generator's in LayoutState. The two are a pair on the Pads bar
+    // and a pair here.
+    void setChordLibWindowOpen(bool);
+    void rememberChordLibBounds();
     // Places a section's Detach button, plus anything travelling with it, at the right-hand
     // end of `row`, and hands back what is left for that section's own controls. `onBar` says
     // which of the two rows this is - the section bar, or the strip a detached window carries
@@ -247,7 +254,9 @@ private:
     // control is an APVTS attachment and the two transient picks (Mood, Start) live on
     // chordGen, so shutting this loses nothing.
     std::unique_ptr<ChordGenPanel> chordGenPanel;
+    std::unique_ptr<ChordLibraryPanel> chordLibPanel;
     std::unique_ptr<DetachedWindow> chordGenWindow;
+    std::unique_ptr<DetachedWindow> chordLibWindow;
 
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
@@ -365,6 +374,7 @@ private:
     // Markov chains and the audition tray live; they were submenus of a pad's card menu for a few
     // hours earlier that day, which took the menu to 23 rows and 820 px.
     juce::TextButton chordGenButton { "Generator" };
+    juce::TextButton chordLibButton { "Library" };
 
     // The three generator settings that get reached for constantly, as combo boxes on the same
     // bar (2026-07-30, Owen's ask). Every setting the generator has is also in its window, and

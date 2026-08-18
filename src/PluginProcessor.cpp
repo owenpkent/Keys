@@ -3078,6 +3078,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
     tree.setProperty("chordGen", layout.chordGen, nullptr);
+    tree.setProperty("chordLib", layout.chordLib, nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
     tree.setProperty("arpPage", layout.arpPage, nullptr);
@@ -3092,6 +3093,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
     tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
     tree.setProperty("chordGenBounds", layout.chordGenBounds.toString(), nullptr);
+    tree.setProperty("chordLibBounds", layout.chordLibBounds.toString(), nullptr);
     return tree;
 }
 
@@ -3120,6 +3122,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // Absent before the generator had a window of its own; shut is the right default either
     // way, since it is a settings window rather than something you play from.
     layout.chordGen = flag("chordGen", false);
+    layout.chordLib = flag("chordLib", false);
     // Absent before there were three lines, and line A is the right answer for those: it is
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
@@ -3160,6 +3163,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     frame("controlsDetachedBounds", layout.controlsDetachedBounds);
     frame("padsDetachedBounds", layout.padsDetachedBounds);
     frame("chordGenBounds", layout.chordGenBounds);
+    frame("chordLibBounds", layout.chordLibBounds);
 }
 
 void KeysProcessor::arpLineToTree(juce::ValueTree& dest, int line) const

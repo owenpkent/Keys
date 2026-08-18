@@ -5,6 +5,48 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a Library window you can actually browse
+
+Owen chose both surfaces when the library was designed - the generator source first, a window
+after. This is the window, opened by a **Library** chip on the Pads bar beside Generator.
+
+The source that shipped first is genuinely useful, but a filter is not browsing: you can see what
+came *out* of the table and never what is *in* it. This shows you the table.
+
+**Paged, not scrolled.** Twelve rows and a `<` `>` pair, exactly the shape the pad strip already
+uses. 348 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at - a
+scrollbar thumb is a small target that has to be dragged, and a wheel is not a gesture Keys may
+require. A page is two clicks and every target on it is full size.
+
+**A row is a chord card that happens to hold several chords.** It shows the name, what it does, the
+progression in roman numerals as *written* rather than resolved into a key ("i bVII bVI V" says
+what the Andalusian cadence is in a way "Cm Bb Ab G" only says if you already knew the key), and
+its mood and genre tags. The whole row is the Hear button, and a second click on the row that is
+walking stops it - the way out is the same target that started it rather than a hunt for a Stop
+button.
+
+**Hearing a progression is the thing the tray could not do.** ii-V-I and ii-V-vi start identically,
+so one chord of a progression tells you almost nothing. `ChordGenMenu::auditionProgression` walks
+the chords at 550 ms each and gives the last one the full 800 ms a single chord gets, so a cadence
+is heard arriving rather than stopping. It lives on the brain rather than in the window for the
+reason every audition does: it calls noteOn with no pad behind it, and the brain outlives every
+window, so no close can strand a note. One timer serves both auditions and the queue is what tells
+a tick which kind it is - a second timer would be a second thing able to leave a note on.
+
+**Two buttons per row place it**: into the generator's tray, where each chord becomes a candidate
+you can hear and drag one at a time, or straight onto the page's empty pads. The pads route goes
+through the same `sendChordToFirstEmptyPad` every generation uses, so **nothing overwrites a chord
+you already have**, and it is one undo entry for the whole progression rather than one per chord.
+"To tray" greys when the generator window is shut rather than opening it behind your back: a button
+that summons a window you did not ask for is a surprise.
+
+**The three filters are the generator's own state**, so this window and the Library band are one
+thing rather than two that drift - pick a mood here and Fill on the Pads bar obeys it. Each window
+polls the other's changes, because neither knows the other exists and neither should have to.
+
+The Pads bar is two pixels past what the *old* 1070 floor would have handed it, and comfortably
+inside the current 1280. Noted in `minWidthForView` rather than tidied away: it means the Pads bar
+is one chip from being the binding constraint again.
 ### Added: Library, a source that looks a progression up instead of computing one
 
 Owen: "an outstanding library that makes it easy to compose, maybe organized by emotion or

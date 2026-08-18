@@ -81,6 +81,13 @@ public:
     std::function<bool(const KeysProcessor::ChordPad&)> onCandidateToFirstEmptyPad;
     std::function<bool()> onPageHasEmptyPad;
 
+    // Write a set of chords straight into the tray (2026-08-18, for the Library window's "To
+    // tray"). It goes through `ChordTray::setAll`, which is the same door the reference card's
+    // Similar and Could follow already use, so a seeded trayful behaves identically whichever of
+    // the three seeded it - including not being rerolled by the settings poll, which is exactly
+    // what you want for a progression you asked for by name.
+    void fillTrayWith(const std::vector<KeysProcessor::ChordPad>& chords) { tray.setAll(chords); }
+
     // What the layout below actually needs, so the window's minimum is derived rather than
     // guessed. Widest row is the algorithmic settings row; tallest is all four rows plus the
     // gaps between them. See resized() for the arithmetic each of these adds up.
