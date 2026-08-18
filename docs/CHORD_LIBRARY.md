@@ -254,17 +254,36 @@ is what "everything downstream is the same either way" buys.
 
 ---
 
-## 9. Open questions
+## 9. What is next
 
-1. **Reached how?** A new entry appended to the `genSource` list, with Mood / Genre / Function
-   combos in the generator panel exactly where the Progression combo sits today - or its own
-   browsable window off a Library chip on the Pads bar, with a list you scroll and preview. The
-   first is nearly free and fits the architecture as written; the second is the one that feels like
-   a library.
-2. **Does the library write the tray, the pads, or an arp slot?** The tray is the safe answer (a
-   candidate is one drag from a pad and costs nothing), and it is what every other generator source
-   does since 2026-08-01.
+Owen answered the two questions this section opened with, on the day it was written: **the full
+three-axis library** rather than mood alone or a retag of the existing 88, and **both** surfaces -
+the generator source first, the browsable window after. The source is built; the rest is below, in
+the order it is worth doing.
+
+1. **The browsable window.** A Library chip on the Pads bar opening a list you scroll, click to
+   hear, and drag onto a pad. The source that shipped is the engine and it is genuinely useful on
+   its own - Fill under a Mood is a fast way to work - but a filter is not browsing. You cannot see
+   what is in the table, only what came out of it. This is the half that makes it feel like a
+   library rather than a dice roll with tags.
+   **The one design problem to solve first:** 271 rows is a scroll, and a scroll is the gesture the
+   mouse-only contract is worst at. Pages of twelve with `<` `>`, the way the pad strip already
+   works, is the shape that fits Keys - not a scrollbar.
+2. **Fold `MarkovData.h`'s 88 rows in.** They are already mood-tagged; what they need is a genre, a
+   function, and their old vocabulary mapped onto the new one (five words were added to the mood
+   list for exactly this, so nothing has to be retagged onto a near neighbour). They stay in
+   `MarkovData.h` as well - the Markov source still wants its bigrams - so this is a copy, not a
+   move, and the duplicate-content test will have opinions about where they land.
 3. **Does a progression keep its identity after it lands?** A pad remembers `degree` and `numeral`
    but not "you came from the Andalusian cadence, chord 3 of 4". A `progressionId` + `step` on
    `ChordPad` would let the strip draw the bracket the Progressions diagram already draws - and
    would be the first field added to that struct since Markov's numeral.
+4. **The relational layer** in §7: **Could follow** meaning "a progression that could follow this
+   progression". It needs (3) to know what you are standing on.
+
+### Known thin spots in the table
+
+`Loop` has 99 rows and `Open` has 10, `Turnaround` 12. That is partly honest - loops are what gets
+written - but Open and Turnaround are thin enough that a filter on either returns nearly the same
+handful every time. Worth topping up before the browser ships, since a browser makes the imbalance
+visible in a way a random pick does not.
