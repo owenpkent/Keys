@@ -330,7 +330,7 @@ void ChordGenPanel::buildControls()
             "Transposes a real progression to your key: ii-V-I, the axis, 12-bar blues and more.",
             "Mirrors the key about the axis between tonic and dominant. C major becomes C minor.",
             "Takes one chord shape and slides it, through the scale or chromatically.",
-            "Looks a named progression up by mood, genre and what it does. 271 of them."
+            "Looks a named progression up by mood, genre and what it does. 348 of them."
         };
         for (int i = 0; i < (int) sourceButtons.size(); ++i)
         {

@@ -773,6 +773,197 @@ namespace keys::chordlib
               { "Nostalgic", "Reflective", "Beautiful" }, { "80s", "Easy Listening", "Chillout" } },
             { "Haunting lullaby (i-bVI-iv-V)", "i bVI iv V", Function::loop, kHarmMinor,
               { "Haunting", "Tender", "Sombre" }, { "Cinematic", "Ballads", "Theatre" } },
+
+            // ==========================================================================
+            // Folded in from `MarkovData.h` (2026-08-18), where they had been mood-tagged
+            // since the day that corpus was written and unreachable by anyone ever since:
+            // the Markov source shreds them into bigrams and throws the sequences away.
+            //
+            // **Only the ones that were not already here.** Twenty-eight of the 88 turned
+            // out to be rows this table already had under a name of their own - the axis,
+            // doo-wop, ii-V-I, the Andalusian cadence - which is a decent sign both were
+            // drawn from the same canon. The other sixty are below, keeping their original
+            // mood tags (mapped onto this file's vocabulary, which is why Nostalgic,
+            // Rebellious, Spiritual, Tender and Haunting had to be added to it) and gaining
+            // the genre and function they never had.
+            //
+            // They stay in `MarkovData.h` as well. This is a copy, not a move: the Markov
+            // source still wants its transition table, and the two uses do not conflict.
+            // ==========================================================================
+
+            // --- Major ---
+            { "Simple anthem (I-I-IV-I-V-IV-I-I)", "I I IV I V IV I I", Function::loop, kIonian,
+              { "Spiritual", "Triumphant", "Confident" }, { "Gospel", "Folk" } },
+            { "Gospel vamp (I-IV-I-IV-V-I)", "I IV I IV V I", Function::cadence, kIonian,
+              { "Spiritual", "Triumphant", "Uplifting" }, { "Gospel", "Theatre" } },
+            { "Extended plagal (I-IV-I-vi-IV-V-I)", "I IV I vi IV V I", Function::cadence, kIonian,
+              { "Triumphant", "Hopeful", "Solemn" }, { "Classical", "Folk" } },
+            { "ii insertion (I-IV-ii-V-I)", "I IV ii V I", Function::cadence, kIonian,
+              { "Hopeful", "Resolved", "Happy" }, { "Pop", "Easy Listening" } },
+            { "Extended cadence (I-vi-IV-I-V-I)", "I vi IV I V I", Function::cadence, kIonian,
+              { "Triumphant", "Spiritual", "Resolved" }, { "Gospel", "Ballads" } },
+            { "Extended hymn (I-vi-IV-I-IV-V-I)", "I vi IV I IV V I", Function::cadence, kIonian,
+              { "Spiritual", "Calm", "Solemn" }, { "Classical", "Theatre" } },
+            { "Extended sentimental (I-iii-vi-IV-I-V-I)", "I iii vi IV I V I", Function::cadence, kIonian,
+              { "Nostalgic", "Romantic", "Calm" }, { "Ballads", "Easy Listening" } },
+            { "Supertonic approach (I-ii-IV-V)", "I ii IV V", Function::lift, kIonian,
+              { "Playful", "Hopeful", "Animated" }, { "Pop", "Country" } },
+            { "Rock and roll (I-V-IV-V)", "I V IV V", Function::loop, kIonian,
+              { "Happy", "Energetic", "Fun" }, { "Rock", "Punk", "Disco" } },
+            { "Descending emotional (vi-iii-IV-I-V)", "vi iii IV I V", Function::descent, kIonian,
+              { "Nostalgic", "Tender", "Longing" }, { "Ballads", "Theatre" } },
+            { "Sixth-chord colour (I6-IV-V-vi)", "I6 IV V vi", Function::loop, kIonian,
+              { "Mellow", "Romantic", "Beautiful" }, { "Easy Listening", "Bossa" } },
+            { "Lounge 6/9 (I69-IV-I69-V)", "I69 IV I69 V", Function::vamp, kIonian,
+              { "Mellow", "Playful", "Smooth" }, { "Easy Listening", "Jazz" } },
+            { "Jazz ballad turnaround (IM7-IVM7-iim7-V7)", "IM7 IVM7 iim7 V7", Function::turnaround, kIonian,
+              { "Romantic", "Mellow", "Smooth" }, { "Jazz", "Ballads" } },
+            { "Add9 colour (Iadd9-IV-V-Iadd9)", "Iadd9 IV V Iadd9", Function::loop, kIonian,
+              { "Romantic", "Tender", "Beautiful" }, { "Ballads", "Folk" } },
+            { "Sus resolution, long (Isus4-I-IV-V)", "Isus4 I IV V", Function::loop, kIonian,
+              { "Tender", "Calm", "Hopeful" }, { "Folk", "Chillout" } },
+            { "Soft cadence (I-Vsus4-V-I)", "I Vsus4 V I", Function::cadence, kIonian,
+              { "Calm", "Tender", "Resolved" }, { "Ballads", "Easy Listening" } },
+            { "Condensed 12-bar", "I7 IV7 I7 I7 IV7 IV7 I7 V7", Function::loop, kBlues,
+              { "Fun", "Energetic", "Funky" }, { "Blues", "Rock" } },
+
+            // --- Minor ---
+            { "Natural minor cadence (i-iv-v-i)", "i iv v i", Function::cadence, kAeolian,
+              { "Melancholic", "Dark", "Resolved" }, { "Folk", "World Music" } },
+            { "Harmonic minor cadence (i-iv-i-V)", "i iv i V", Function::cadence, kHarmMinor,
+              { "Dramatic", "Tense", "Inconclusive" }, { "Classical", "Theatre" } },
+            { "Functional minor cadence (i-iidim-V-i)", "i iidim V i", Function::cadence, kHarmMinor,
+              { "Dramatic", "Suspenseful", "Resolved" }, { "Classical", "Cinematic" } },
+            { "Minor circle (i-V-bVI-bIII)", "i V bVI bIII", Function::loop, kHarmMinor,
+              { "Melancholic", "Dramatic", "Longing" }, { "Cinematic", "Theatre" } },
+            { "Melancholic build (i-v-bVI-bIII)", "i v bVI bIII", Function::loop, kAeolian,
+              { "Melancholic", "Nostalgic", "Sombre" }, { "Ballads", "Alternative" } },
+            { "Epic extended minor", "i V i iv bVII bIII bVII V", Function::loop, kHarmMinor,
+              { "Triumphant", "Confident", "Dramatic" }, { "Cinematic", "Progressive Rock" } },
+            { "Drone riff (i-bVII-iv-i)", "i bVII iv i", Function::loop, kAeolian,
+              { "Haunting", "Mysterious", "Dark" }, { "Alternative", "Downtempo" } },
+            { "Minor jazz turnaround (im7-ivm7-V7-im7)", "im7 ivm7 V7 im7", Function::turnaround, kHarmMinor,
+              { "Melancholic", "Suspenseful", "Smooth" }, { "Jazz", "Bossa" } },
+            { "Ascending tension (i-iidim-bIII-iv)", "i iidim bIII iv", Function::lift, kAeolian,
+              { "Tense", "Suspenseful", "Intense" }, { "Cinematic", "Theatre" } },
+            { "Dramatic rise (i-bVI-bIII-V)", "i bVI bIII V", Function::lift, kHarmMinor,
+              { "Dramatic", "Confident", "Epic" }, { "Trance", "EDM" } },
+            { "Simple rock vamp (i-iv-bVII-i)", "i iv bVII i", Function::loop, kAeolian,
+              { "Rebellious", "Dark", "Driving" }, { "Rock", "Punk" } },
+            { "Deceptive minor cadence (i-iv-V-bVI)", "i iv V bVI", Function::open, kHarmMinor,
+              { "Suspenseful", "Tense", "Inconclusive" }, { "Classical", "Cinematic" } },
+            { "Rising anthem (i-bIII-bVI-bVII)", "i bIII bVI bVII", Function::lift, kAeolian,
+              { "Confident", "Triumphant", "Epic" }, { "Rock", "EDM" } },
+            { "Pure natural minor (i-v-iv-i)", "i v iv i", Function::loop, kAeolian,
+              { "Melancholic", "Nostalgic", "Solemn" }, { "Folk", "World Music" } },
+            { "Jazz-inflected minor (i-iidim-iv-V)", "i iidim iv V", Function::lift, kHarmMinor,
+              { "Tense", "Suspenseful", "Serious" }, { "Jazz", "Theatre" } },
+            { "Extended minor cadence (i-iv-i-bVII-bVI-V)", "i iv i bVII bVI V", Function::descent, kHarmMinor,
+              { "Dramatic", "Rebellious", "Sombre" }, { "Progressive Rock", "Cinematic" } },
+            { "Folk-rock minor (i-bIII-iv-V)", "i bIII iv V", Function::loop, kHarmMinor,
+              { "Nostalgic", "Melancholic", "Longing" }, { "Folk", "Alternative" } },
+            { "Minor with dominant seven", "i V7 i iv V7 i", Function::loop, kHarmMinor,
+              { "Dramatic", "Tense", "Confident" }, { "Classical", "Latin" } },
+            { "Rock cadence variant (i-bVII-iv-V)", "i bVII iv V", Function::lift, kHarmMinor,
+              { "Rebellious", "Tense", "Driving" }, { "Rock", "Alternative" } },
+
+            // --- Dorian ---
+            { "Dorian vamp, four bars (i-IV-i-IV)", "i IV i IV", Function::vamp, kDorian,
+              { "Mellow", "Mysterious", "Chill" }, { "Downtempo", "Funk" } },
+            { "Dorian rise and fall (i-IV-bVII-i)", "i IV bVII i", Function::loop, kDorian,
+              { "Confident", "Mellow", "Driving" }, { "Rock", "Deep House" } },
+            { "Dorian extended loop", "i IV i bVII IV i", Function::loop, kDorian,
+              { "Dreamy", "Atmospheric", "Contemplative" }, { "Cinematic", "Downtempo" } },
+            { "Dorian minor-v colour (i-v-IV-i)", "i v IV i", Function::loop, kDorian,
+              { "Mysterious", "Dark", "Reflective" }, { "Alternative", "Progressive Rock" } },
+            { "Dorian turnaround (i-bVII-i-IV)", "i bVII i IV", Function::turnaround, kDorian,
+              { "Mellow", "Nostalgic", "Chill" }, { "Folk", "Lo-fi" } },
+            { "Dorian anthem vamp (i-IV-bVII-IV-i)", "i IV bVII IV i", Function::loop, kDorian,
+              { "Confident", "Epic", "Driving" }, { "Progressive House", "Trance" } },
+
+            // --- Mixolydian ---
+            { "Mixolydian rock, IV first (I-IV-bVII-I)", "I IV bVII I", Function::loop, kMixolydian,
+              { "Confident", "Triumphant", "Fun" }, { "Rock", "Country" } },
+            { "Mixolydian build (I-IV-bVII-IV-I)", "I IV bVII IV I", Function::lift, kMixolydian,
+              { "Confident", "Epic", "Driving" }, { "Cinematic", "Progressive Rock" } },
+            { "Mixolydian lift (I-IV-I-bVII)", "I IV I bVII", Function::loop, kMixolydian,
+              { "Playful", "Mellow", "Happy" }, { "Rock", "Folk" } },
+            { "Mixolydian oscillation (I-bVII-I-bVII)", "I bVII I bVII", Function::vamp, kMixolydian,
+              { "Mellow", "Playful", "Chill" }, { "Reggae", "Blues" } },
+            { "Mixolydian extended vamp", "I bVII IV I bVII I", Function::loop, kMixolydian,
+              { "Triumphant", "Nostalgic", "Confident" }, { "Rock", "Progressive Rock" } },
+            { "Mixolydian float (I-bVII-IV-bVII-I)", "I bVII IV bVII I", Function::loop, kMixolydian,
+              { "Dreamy", "Playful", "Atmospheric" }, { "Folk", "Chillout" } },
+
+            // --- Lydian ---
+            { "Lydian raised-4 colour (I-II-I-II)", "I II I II", Function::vamp, kLydian,
+              { "Dreamy", "Playful", "Beautiful" }, { "Progressive Rock", "Downtempo" } },
+            { "Lydian cadence (I-II-V-I)", "I II V I", Function::cadence, kLydian,
+              { "Dreamy", "Triumphant", "Resolved" }, { "Cinematic", "Theatre" } },
+            { "Lydian float (I-V-II-I)", "I V II I", Function::loop, kLydian,
+              { "Calm", "Dreamy", "Atmospheric" }, { "Chillout", "Easy Listening" } },
+            { "Lydian mediant colour (I-II-iii-I)", "I II iii I", Function::loop, kLydian,
+              { "Playful", "Dreamy", "Animated" }, { "Progressive Rock", "Electronica" } },
+            { "Lydian submediant colour (I-vi-II-I)", "I vi II I", Function::loop, kLydian,
+              { "Nostalgic", "Dreamy", "Longing" }, { "80s", "Synthwave" } },
+            { "Lydian gentle vamp (I-II-vi-I)", "I II vi I", Function::vamp, kLydian,
+              { "Calm", "Dreamy", "Spiritual" }, { "Folk", "Minimal" } },
+            { "Lydian extended float", "I II I V II I", Function::loop, kLydian,
+              { "Epic", "Dreamy", "Triumphant" }, { "Cinematic", "Future Bass" } },
+
+            // --- Phrygian ---
+            { "Phrygian half-step colour (i-bII-i-bII)", "i bII i bII", Function::vamp, kPhrygian,
+              { "Dark", "Mysterious", "Intense" }, { "World Music", "Trap" } },
+            { "Phrygian vamp, bVII first (i-bVII-bII-i)", "i bVII bII i", Function::loop, kPhrygian,
+              { "Dark", "Ominous", "Serious" }, { "Cinematic", "Techno" } },
+            { "Phrygian dark colour (i-bVI-bII-i)", "i bVI bII i", Function::loop, kPhrygian,
+              { "Haunting", "Mysterious", "Ominous" }, { "Downtempo", "Theatre" } },
+            { "Phrygian rise (i-bII-bVII-i)", "i bII bVII i", Function::loop, kPhrygian,
+              { "Dark", "Confident", "Rebellious" }, { "Rock", "Alternative" } },
+            { "Phrygian extended loop", "i bII i bVII bII i", Function::loop, kPhrygian,
+              { "Haunting", "Intense", "Epic" }, { "Progressive Rock", "Electronica" } },
+            { "Phrygian mediant colour (i-bIII-bII-i)", "i bIII bII i", Function::loop, kPhrygian,
+              { "Mysterious", "Nostalgic", "Atmospheric" }, { "Minimal", "Lo-fi" } },
+
+            // ==========================================================================
+            // Topping up the two thin functions (2026-08-18). `Open` had ten rows and
+            // `Turnaround` twelve against `Loop`'s ninety-nine, which is partly honest -
+            // loops are what gets written - but thin enough that a filter on either
+            // returned nearly the same handful every time. A picker whose answer barely
+            // changes is one you stop trusting.
+            // ==========================================================================
+            { "Open on ii (I-V-ii)", "I V ii", Function::open, kIonian,
+              { "Inconclusive", "Contemplative", "Longing" }, { "Alternative", "Jazz" } },
+            { "Open on iii (IV-I-iii)", "IV I iii", Function::open, kIonian,
+              { "Inconclusive", "Reflective", "Beautiful" }, { "Ballads", "Chillout" } },
+            { "Open on bVII (i-iv-bVII)", "i iv bVII", Function::open, kAeolian,
+              { "Inconclusive", "Sombre", "Atmospheric" }, { "Cinematic", "Downtempo" } },
+            { "Open on the tritone (I-IV-bV)", "I IV bV", Function::open, kLocrian,
+              { "Eerie", "Tense", "Inconclusive" }, { "Progressive Rock", "Techno" } },
+            { "Question and no answer (vi-ii-V)", "vi ii V", Function::open, kIonian,
+              { "Longing", "Inconclusive", "Smooth" }, { "Jazz", "Bossa" } },
+            { "Hanging sus (I-IVsus2-V sus4)", "I IVsus2 Vsus4", Function::open, kIonian,
+              { "Atmospheric", "Inconclusive", "Dreamy" }, { "Future Bass", "Minimal" } },
+            { "Minor hang (i-bVI-iv)", "i bVI iv", Function::open, kAeolian,
+              { "Longing", "Sombre", "Inconclusive" }, { "Ballads", "Trap" } },
+            { "Modal hang (i-bVII-v)", "i bVII v", Function::open, kDorian,
+              { "Contemplative", "Inconclusive", "Mellow" }, { "Folk", "Lo-fi" } },
+            { "Blues turnaround, minor (im7-bVI7-V7)", "im7 bVI7 V7", Function::turnaround, kHarmMinor,
+              { "Dark", "Smooth", "Serious" }, { "Blues", "Jazz" } },
+            { "Doo-wop turnaround (I-vi-IV-V-I)", "I vi IV V I", Function::turnaround, kIonian,
+              { "Nostalgic", "Romantic", "Resolved" }, { "80s", "Ballads" } },
+            { "Modal turnaround (I-bVII-IV-V)", "I bVII IV V", Function::turnaround, kMixolydian,
+              { "Confident", "Fun", "Driving" }, { "Country", "Rock" } },
+            { "Neo soul turnaround (IM9-VI7-iim9-V7)", "IM9 VI7 iim9 V7", Function::turnaround, kIonian,
+              { "Smooth", "Romantic", "Mellow" }, { "Neo Soul", "RnB" } },
+            { "Half-step turnaround (IM7-bVIIM7-IM7)", "IM7 bVIIM7 IM7", Function::turnaround, kMixolydian,
+              { "Smooth", "Dreamy", "Mysterious" }, { "Lo-fi", "Downtempo" } },
+            { "House turnaround (im7-bVIM7-bVIIM7-im7)", "im7 bVIM7 bVIIM7 im7", Function::turnaround, kAeolian,
+              { "Driving", "Longing", "Energetic" }, { "House", "Deep House" } },
+            { "Gospel turnaround (I-VI7-ii-V)", "I VI7 ii V", Function::turnaround, kIonian,
+              { "Spiritual", "Animated", "Uplifting" }, { "Gospel", "Theatre" } },
+            { "Cinematic turnaround (i-bVI-bVII-V)", "i bVI bVII V", Function::turnaround, kHarmMinor,
+              { "Epic", "Dramatic", "Intense" }, { "Cinematic", "Theatre" } },
         };
         return t;
     }
