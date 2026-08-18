@@ -74,6 +74,75 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**The 2026-08-18 round, and what it supersedes.** Nine changes landed in one session; each is
+written up where it belongs below, but they contradict older bullets in this file, so the list of
+what is no longer true lives here in one place:
+
+- **A pad click never reaches the arpeggiator, one level lower than before.** The click path had
+  been clean since 2026-08-02, but a chord still got there: a line with **Play** on lifts note
+  events out of the outgoing stream, and a pad's chord sat in that stream beside the keys you
+  play, indistinguishable. Play means *the keys you play* now. Pads, the live card and the
+  generator's audition queue into a second output collector (`chordCollector`) that drains
+  **after** the lift, so no line can reach them; the keybed, the MIDI input and the MCP bridge are
+  unchanged. Both queues feed the same buffer and the same instrument - only the *ordering*
+  separates them, because the audio thread cannot recover who asked for a note from the
+  MidiMessage that arrives, the same reason `dest` exists. `chordStream` records which of dest 0's
+  two queues opened each pitch so its note-off follows it there: `noteRefs` counts owners across
+  both, so a pitch can be opened by the keys and closed by a pad, and a release down the other
+  queue would strand the note in a listening line's engine forever.
+- **A card sounds on release, and a drag makes no sound at all.** This reverses hold-to-play
+  (2026-08-16, still described below), and the reason is not the noise: firing a chord *chokes*
+  the other chord sources, and with Exclusive on that reaches each line's held chord - so a press
+  that turned out to be a drag had already stopped line A before the card moved. Silencing the
+  blurt on the drag does not put that back. **Settings gear -> Chord pads play while held**
+  (`LayoutState::padHoldToPlay`, default **off**) puts the press back for anyone who wants to lean
+  on a chord; turning Exclusive off alongside it is what makes the drag free.
+- **A drag that lands on nothing is a cancelled drag.** Dropping a card where no target claimed it
+  used to clear the pad. Too much of the window is neither the strip nor a target, and dragging
+  *up* into the arpeggiator crosses the Pads bar on the way, so a near miss destroyed the chord.
+  Clear pad is the card menu's, which is where it was already documented to live. **The
+  `ChordPads::mouseUp` drag guard named in the undo bullet below is gone**; the other three
+  entries in that list stand.
+- **Routing a chord never navigates to the line.** `followAim` / `makeCurrent` are deleted: a drop
+  on a line's switch, its macro card or the panel no longer calls `setEditLine`. It wrote nothing,
+  but every per-line readout jumped to the dropped-on line's own settings under the hand that was
+  routing a chord, which is indistinguishable from the drop having changed them (Owen: "the number
+  of steps changes, straight vs triplet etc"). The justification had expired anyway - it existed so
+  "the next card click follows the same aim", and a card click stopped feeding a line on
+  2026-08-02.
+- **Two lines share one grid, and never cut each other short.** `HostClock::hasGrid` hands the
+  engines the beat count Keys already kept for Launch Quantize, so Anchor works with no transport
+  and two anchored lines walk in lockstep; `ArpMerge` folds their outputs under one note-on per
+  sounding pitch, released by the last line holding it. Both are written up in
+  `docs/ARP_DESIGN.md` under **Two lines at once**.
+- **VEL is MIDI velocity, 0-127.** `arpVelLevel` replaces `arpVelTrim`, which stays registered and
+  is read by nothing; `migrateVelLevel` converts through the old trim's own squared curve against
+  76, the midpoint of the pads' default Humanize band. `arpHumanVel` widens to 0..127 and is now
+  velocity units below the level rather than a percentage of a 30% shave. The engine's 0.05
+  audibility floor went with the trim: it existed because a *trim* had to reach silence past a
+  floor protecting programmed dynamics, and a level is the velocity itself. **Every bullet below
+  describing Vel as bipolar, squared, or centred on "as played" is history.** The pads' own
+  Humanize range moved 1..127 -> 0..127 for the same reason, and `noteOn`'s emitted floor dropped
+  from 0.04 (about velocity 5) to one MIDI step, so the bottom of that band stopped lying.
+- **The generator's Key and Mode drive Root and Scale.** They were independent settings that both
+  read as "the key", so the keybed greyed to Scale while you were setting Mode - accurate, and
+  about something else. One-way: `modes::kitScaleIndexFor` is total, but Whole Tone and Chromatic
+  are scales the generator cannot express. **Mode is back on the Pads bar** beside Key.
+- **The audition tray is twelve cards in three rows, not sixteen in four.** The pad strip went to
+  twelve a page on 2026-08-03 and the tray never followed, so Fill generated four candidates that
+  could never be committed. `ChordGenPanel` reads the row count off `ChordTray::rows` so the two
+  cannot disagree again. The generator window also gained **page tabs**, a **Send all to pads**
+  button, **SET / ROLL chips** in place of the six constraint tick boxes, and a **maximum height**:
+  it had a floor and no ceiling, and nothing in that layout absorbs slack any more.
+- **A drag out of the main window while a second Keys window is open.** JUCE resolves a
+  cross-window drop through `Desktop::findComponentAt`, which returns from the first window whose
+  bounds contain the point and never falls through to a lower one. The generator calls `toFront`
+  when it opens; the plugin editor is a *child* window inside the host's and never reports the
+  same thing, so JUCE's ordering kept the generator on top for good and swallowed every drop aimed
+  at the arpeggiator. `ChordPads::beginChordDrag` reports its own window as front before starting
+  a drag, which is simply true - the press that began it was there.
+
+
 - **Kit-based.** Theme, scales, state persistence, the mouse-only contract and the updater all
   come from `../okstudio-juce-kit`. Fix shared behaviour there, not here. (The kit still ships
   `okstudio/Transcribe.h`; Keys stopped using it on 2026-07-30 and consumes no audio at all.)
@@ -128,7 +197,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   rerolled on any settings change for part of that day, which threw it away six times while you
   swept Source to hear the seven brains: a control you cannot explore without destroying your work
   is one you stop touching. Fill and Regen generate; nothing else does.
-  **The tick boxes are constraints, not enables** (`genUseKey`, `genUseMode`, `genUseOctave`,
+  **The gates are constraints, not enables** (`genUseKey`, `genUseMode`, `genUseOctave`,
+  and they are SET / ROLL word chips rather than tick boxes since 2026-08-18 - see the round at
+  the top of this section)
   `genUseNotes`, `genUseInversions`, `genUseCompliance`). Unticked means the generator rolls that
   setting itself, and Key and Mode roll **once per generation** rather than per chord, because
   every source takes a single root and mode for a whole batch. Lock Influence, Smooth Voicing and
@@ -404,7 +475,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   user armed minutes ago. The view is ~110 px shorter, which is most of what the ask was about.
   **VOL became VEL and HUMAN split into H.TIME and H.VEL the same day** (Owen: "the volume is
   weird ... it should start in the middle", "maybe we could split it up into two knobs").
-  `arpVelTrim` is bipolar around "as played" (up boosts, down cuts, -100 mutes exactly as VOL 0
+  `arpVelTrim` is bipolar around "as played" (**retired 2026-08-18**; up boosts, down cuts, -100 mutes exactly as VOL 0
   did) and `arpHumanVel` is the velocity shave, leaving `arpHumanize` timing-only. Both are
   **appended** parameters; `migrateVelTrim` folds an old session's Volume into VelTrim exactly
   (volume% == 1 + (volume-100)/100, no approximation) and writes the absent parameters' defaults
@@ -421,7 +492,9 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   below**: `arpHumanVel` still means exactly what it meant the day it was appended, and so does
   this per-line FEEL slider that reads it. Only the *macro card's* knob strip stopped giving
   H.Vel a face of its own.
-- **VEL is squared, floored last, and its input is clean** (2026-08-02, third pass, Owen: "I
+- **VEL is squared, floored last, and its input is clean** (2026-08-02, third pass - **all
+  three of those are history from 2026-08-18**, when Vel became plain MIDI velocity and the
+  audibility floor went with the trim that needed it. Owen: "I
   was at negative 96, and it was still pretty loud. Is it passing it through the humanized
   volume range?"). Three causes compounded and each got its fix. The multiplier is
   `((100+VEL)/100)^2` - hearing is logarithmic, and the linear version crammed its audible
@@ -769,7 +842,8 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   is hardReset minus the held set, and hardReset there was what threw the waiting chord away.
   The keybed is unaffected: `listens[n]` is false with the line off, so notes you play are never
   lifted out of the stream. Playing the instrument is never gated on an arp switch.
-- **`arpOctShift` and `arpVolume`, appended 2026-08-02.** OctShift **is not Octaves**: it
+- **`arpOctShift` and `arpVolume`, appended 2026-08-02.** (Vel became `arpVelLevel`, MIDI
+  velocity, on 2026-08-18 - see the round at the top of this section.) OctShift **is not Octaves**: it
   transposes the whole run and is centred at 0, while `arpOctaves` beside it *stacks* copies
   upward and can only widen. "How high does it sit" and "how far does it reach" are different
   questions and only the first has a middle - the macro row's OCT knob drives the new one, and
@@ -1006,7 +1080,10 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   between and wrong once they are two instruments you feed side by side. Nothing collides:
   each line's chord is fired into that line's own queue (`dest` is line + 1) and `noteRefs` is
   per destination stream. Every other caller of `stopAllChordPads()` still means all of it.
-- **A chord card is hold-to-play** (2026-08-16, Owen: "when you click a pad cord, it should
+- **A chord card is hold-to-play** (2026-08-16) - **no longer true from 2026-08-18**, when it
+  went back to sounding on release; see the round above for why, and for the settings-menu item
+  that puts this behaviour back. The rest of the entry still explains what the 2026-08-02 change
+  was really fixing, which is why it is kept. (Owen: "when you click a pad cord, it should
   only play it for the amount of time that you're holding it, not a fixed value"). The press
   fires the chord and the release lets it go; Sustain and Latch still decide what "let go"
   means, since `ChordPads::mouseUp` ends the note through the same `releaseChordPad` /

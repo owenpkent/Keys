@@ -19,7 +19,8 @@ class KeysMcp; // src/mcp/KeysMcp.h; only PluginProcessor.cpp needs the full typ
 // (size, scale-lock, octave, channel, velocity, sustain, latch) persist with the
 // DAW session via the APVTS.
 class KeysProcessor : public juce::AudioProcessor,
-                      private juce::Timer // strum scheduling; see scheduleNoteOn
+                      private juce::Timer, // strum scheduling; see scheduleNoteOn
+                      private juce::AudioProcessorValueTreeState::Listener // genRoot/genMode
 {
 public:
     KeysProcessor();
@@ -71,8 +72,14 @@ public:
     // here, at the source, because the audio thread cannot recover who asked for a note from
     // the MidiMessage that arrives - see the note beside `lines` for why the obvious
     // alternative (a per-pitch ownership mask read on the audio thread) races and strands notes.
+    //
+    // `asChord` says this note is a *chord* going to the track output - a pad, the live card,
+    // an audition - rather than something played on the keys. It only ever matters for dest 0,
+    // where it picks `chordCollector` over `collector` so that a line's Play switch cannot lift
+    // it into the arpeggiator; see runArpLines. The keybed, the MIDI input and the MCP bridge
+    // leave it false, because those *are* the keys Play means.
     void noteOn(int midiNote, float velocity01, double delaySeconds = 0.0, int channelOverride = 0,
-                int dest = 0);
+                int dest = 0, bool asChord = false);
     void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0, int dest = 0);
     void allNotesOff();
 
@@ -286,7 +293,12 @@ public:
                     // range: the existing two stay the ceiling, and these say how far under it
                     // the draw may fall. Default 100 - a span of the whole scale - leaves
                     // exactly what those two did alone.
-                    apHumanizeSpan, apHumanVelSpan, apDrift, numArpParams };
+                    apHumanizeSpan, apHumanVelSpan, apDrift,
+                    // Appended 2026-08-18: the line's level as MIDI velocity outright, which is
+                    // what VEL on the macro card now writes. apVelTrim above stays registered so
+                    // saved sessions still round-trip, and is read by nothing - migrateVelLevel
+                    // folds it into this. See ArpEngine::Params::velLevel.
+                    apVelLevel, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
@@ -690,6 +702,19 @@ public:
         // reading back. See NoteSurface::proposedChordNotes.
         bool sustainProposesChords = false;
 
+        // Whether a chord pad sounds for as long as you hold it, or fires on the release for a
+        // fixed 800 ms (2026-08-18, Owen: "maybe we should have a checkbox to toggle that on and
+        // off so we can lean on chords when we want").
+        //
+        // **Default false**, which is release-and-fixed, because that is the one that cannot
+        // surprise you: firing a chord chokes the other chord sources, so in hold mode a press
+        // that turns out to be a drag has already choked them - and with Exclusive on that
+        // reaches each arp line's held chord, which is the report this pair of behaviours came
+        // out of. Hold mode is worth having anyway (a stab is short, a lean is long, which is
+        // most of what a pad is for), so it is a tick rather than a decision made for you. Turn
+        // Exclusive off alongside it and the drag costs nothing at all.
+        bool padHoldToPlay = false;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.
@@ -782,6 +807,27 @@ protected:
     // so the session sounds identical) and put Volume back to 100, and write HumanVel's
     // default explicitly so it does not inherit the live instance's value.
     void migrateVelTrim(const juce::ValueTree& root);
+    // VEL became an absolute 0..127 velocity band on 2026-08-18; this folds a saved
+    // session's bipolar trim into a level that plays it at the same loudness.
+    void migrateVelLevel(const juce::ValueTree& root);
+
+    // **The generator's key drives the keyboard's** (2026-08-18, Owen: "when you lock a scale on
+    // top, some of the keys turn gray, but I don't think they're accurate or I don't understand
+    // the UI"). Two independent key settings both reading as "the key" is what made the greying
+    // look wrong: it was answering honestly about `root`/`scale` while he was setting
+    // `genRoot`/`genMode`. Changing either generator control now moves its counterpart, so the
+    // keybed greys to the key you are generating in.
+    //
+    // One-way on purpose. Every generator mode has a kit scale (modes::kitScaleIndexFor is
+    // total), but the kit has Whole Tone and Chromatic, which the generator cannot express - it
+    // needs a chord quality per degree - so driving it backwards would have to invent an answer
+    // for those two, and picking one of them leaves the generator where it is instead.
+    void parameterChanged(const juce::String& id, float value) override;
+    // Applied on the message thread: parameterChanged can arrive on the audio thread from host
+    // automation, and setValueNotifyingHost from there is not something to do to another
+    // parameter mid-block. Nothing is lost by the hop - this only moves controls.
+    juce::Atomic<int> pendingGenKeyMirror { 0 };
+    void mirrorGenKeyToScale();
     // Same shape a third time: a session saved before Tempo Sync existed has no "bpmSync" at
     // all, and its absence is not "off" - it is a live instance's *current* value, which the
     // repair overwrites with the parameter's own default (true), reproducing exactly what
@@ -842,7 +888,8 @@ private:
     //
     // Message thread only, same approach as the MCP bridge's deferred notes. The timer
     // runs only while something is pending, so an idle plugin costs nothing.
-    void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot, int dest = 0);
+    void scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot,
+                        int dest = 0, bool asChord = false);
     // Drops this tag's un-fired notes (panicTag drops everything) and returns the pitches it
     // dropped, so a caller releasing the chord can tell which of its notes never sounded.
     std::vector<int> cancelScheduledNotes(int padSlot);
@@ -860,6 +907,7 @@ private:
         double atMs;
         int padSlot; // so stopping one pad drops only its own un-fired notes
         int dest;    // which stream it fires into; see noteOn
+        bool asChord; // ...and which of dest 0's two streams; see noteOn
     };
     std::vector<DeferredNote> deferred; // sorted by atMs; message thread only
 
@@ -895,11 +943,26 @@ private:
     std::atomic<bool> arpHostBpmLive { false }; // see hostTempoLive()
 
     juce::MidiMessageCollector collector; // thread-safe UI -> audio message queue
+
+    // The track output's *other* queue: chords fired as one gesture - a pad, the live card, the
+    // generator's audition - rather than notes played on the keys (2026-08-18, Owen: "as soon as
+    // you click a chord in the pad, it automatically sends it to the arpeggiator ... we only want
+    // the arpeggiator to go if you drag a chord on top of it").
+    //
+    // Both queues end up in the same outgoing buffer and the same downstream instrument; the only
+    // thing that separates them is *when*. `collector` drains before runArpLines, so a line with
+    // Play on lifts it; this one drains after, so nothing can. That is the whole mechanism, and
+    // it is a matter of ordering rather than of tagging because the audio thread cannot recover
+    // who asked for a note from the MidiMessage that arrives - the same reason `dest` exists.
+    juce::MidiMessageCollector chordCollector;
+
     juce::Random rng; // humanize jitter; touched only on the message thread
 
     // Where a queued message goes: `collector` for the track output, or the line's own
     // collector for an arp line. One place, so noteOn/noteOff/allNotesOff cannot disagree.
     juce::MidiMessageCollector& collectorFor(int dest);
+    // ...and which of the track output's two queues, for the sources that have a choice.
+    juce::MidiMessageCollector& chordQueueFor(int dest, bool asChord);
 
     // Refcount of what is sounding, per destination stream and per MIDI note.
     // Atomic because the emitting side is the message thread while readers are paint
@@ -913,6 +976,16 @@ private:
     // being played on the keybed - with one shared counter it did, and the note vanished from
     // the output while the key lit up.
     std::array<std::array<std::atomic<int>, 128>, 1 + numArpLines> noteRefs {};
+
+    // Which of dest 0's two queues the *currently sounding* note-on for this pitch went into, so
+    // its note-off can follow it there. Load-bearing, not bookkeeping: noteRefs counts owners
+    // across both queues (a pad and the keybed holding one pitch is still one note-on, which is
+    // the invariant), so the pitch can be opened by the keys and closed by the pad. Sending that
+    // note-off down the other queue would leave a listening line's engine holding a note it never
+    // gets a release for - `ArpEngine::Held` leaks and the chord arpeggiates forever, which is
+    // exactly the failure the one-note-on-per-pitch rule exists to prevent.
+    std::array<std::atomic<bool>, 128> chordStream {};
+
     std::atomic<juce::uint32> soundingGen { 0 };
 
     // --- Take capture (see setRecording) ------------------------------------------------
@@ -1046,12 +1119,35 @@ private:
     // The whole arp stage: split the merged stream, run the lines, merge them back.
     // Audio thread; see the definition for the routing rules.
     void runArpLines(juce::MidiBuffer& midi, int numSamples);
+    void mergeArpLines(juce::MidiBuffer& midi); // the overlap rule; see arpOutRefs
     void advanceChainClock(int numSamples); // audio thread; raises chainAdvance, never launches
     int nextChainSlot(int from, int line) const; // the next slot holding a chord, wrapping; -1 if none
     // The keybed's notes, lifted out of the merged stream so every listening line can have a
     // copy, and what was left behind when they were. Audio thread; sized in prepareToPlay
     // with the rest. juce::MidiBuffer cannot erase, so a split is two buffers and a swap.
     juce::MidiBuffer keyNotes, streamRest;
+
+    // Every line's output, merged in time order before any of it reaches the outgoing stream
+    // (2026-08-18, Owen: "when there's two arpeggiators happening, how does it handle when
+    // there's an overlap in a note that's being played?"). It did not handle it: `mergeArpOut`
+    // added each line's buffer straight to the output, so two lines on one channel sharing a
+    // pitch sent two note-ons for it and **whichever line released first ended it for both** -
+    // the other line's note cut short, its own note-off arriving later as a stray. The lines are
+    // usually fed related chords, so shared pitches are the common case, and the fault reads as
+    // random dropouts rather than as a fault.
+    //
+    // One buffer first, because the rule below is a state machine over time and the lines have to
+    // be interleaved before it runs: deduplicating line 0's whole buffer and then line 1's would
+    // read an event at sample 6000 before one at sample 0. Audio thread; sized in prepareToPlay.
+    juce::MidiBuffer arpMerged;
+
+    // Which lines are holding each (channel, pitch) in the outgoing stream, and the rule that
+    // reads it: one note-on per sounding pitch, released by the last line to let go. See
+    // ArpMerge in ArpEngine.h, which carries the whole story. Audio thread only.
+    ArpMerge arpOut;
+    // Set by allNotesOff on the message thread, consumed once by the audio thread; see
+    // ArpMerge::reset for why a panic is the one thing the counts cannot absorb themselves.
+    std::atomic<bool> arpOutClear { false };
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

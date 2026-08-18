@@ -104,6 +104,46 @@ public:
                                       "...and Volume went back to its default");
         }
 
+        beginTest("migrateVelLevel turns an old bipolar trim into the level that plays it");
+        {
+            Host h;
+            const auto trimId = KeysProcessor::arpParamId(0, KeysProcessor::apVelTrim);
+            const auto levelId = KeysProcessor::arpParamId(0, KeysProcessor::apVelLevel);
+
+            // VEL became MIDI velocity on 2026-08-18. An old session carries its level in the
+            // bipolar trim and has no VelLevel at all; the level is left somewhere else first, so
+            // "kept the live value" stays distinguishable from "migrated".
+            setParam(h.processor, trimId, -50.0f);
+            setParam(h.processor, levelId, 20.0f);
+            auto block = stateWithout(h.processor, { levelId });
+            h.processor.setStateInformation(block.getData(), (int) block.getSize());
+
+            // The trim's own curve, ((100+trim)/100)^2, against the velocity every chord Keys
+            // fires actually left at: the midpoint of the pads' default Humanize band, 76.
+            // trim -50 is a quarter of that: 19.
+            expectWithinAbsoluteError(paramOf(h.processor, levelId), 19.0f, 1.0f,
+                                      "trim -50 became the level that plays at the same loudness");
+
+            // "As played" - the default trim - is the band's own midpoint, so a session that
+            // never touched VEL opens playing exactly as loud as it always did.
+            Host h2;
+            setParam(h2.processor, trimId, 0.0f);
+            setParam(h2.processor, levelId, 20.0f);
+            block = stateWithout(h2.processor, { levelId });
+            h2.processor.setStateInformation(block.getData(), (int) block.getSize());
+            expectWithinAbsoluteError(paramOf(h2.processor, levelId), 76.0f, 1.0f,
+                                      "an untouched VEL lands on the pads' own played velocity");
+
+            // And the mute survives the change of units: full-left trim was silence, and 0 is.
+            Host h3;
+            setParam(h3.processor, trimId, -100.0f);
+            setParam(h3.processor, levelId, 20.0f);
+            block = stateWithout(h3.processor, { levelId });
+            h3.processor.setStateInformation(block.getData(), (int) block.getSize());
+            expectWithinAbsoluteError(paramOf(h3.processor, levelId), 0.0f, 0.5f,
+                                      "trim -100 was a mute and level 0 is one");
+        }
+
         beginTest("migrateTuplet folds a set Trip into Triplet and retires Trip");
         {
             Host h;

@@ -508,7 +508,9 @@ void ChordGenMenu::previewChord(const std::vector<int>& notes)
 
     const float vel = processor.baseVelocity01();
     for (const int n : notes)
-        processor.noteOn(n, vel); // Humanize colours the audition like everything else
+        // asChord: an audition is a monitor, not something played on the keys, so a running arp
+        // line with Play on must not lift it - the same rule a pad's chord follows. See noteOn.
+        processor.noteOn(n, vel, 0.0, 0, 0, /*asChord*/ true); // Humanize colours it like everything else
     previewNotes = notes;
     startTimer(800); // Octavium's preview length; the callback releases it
 }

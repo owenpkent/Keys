@@ -57,7 +57,17 @@ class ChordTray : public juce::Component
 public:
     ChordTray(KeysProcessor&, ChordGenMenu&);
 
-    static constexpr int rows = 4;
+    // **Twelve, matching a pad page** (2026-08-18, Owen, looking at a sixteen-cell tray: "should
+    // only be 12?"). It was four by four from the day it was built, and the pad strip went from
+    // sixteen slots a page to twelve on 2026-08-03 without this following - so Fill generated
+    // four candidates that could never be committed, and Send all to pads left exactly four
+    // behind however empty the page was. A tray that offers more than the page can take is
+    // arithmetic nobody should have to do.
+    //
+    // Three rows of four rather than the strip's own two rows of six: the cards carry a note
+    // list under the name, and at six across the layout's floor gives each one 100 px, which is
+    // not enough for "G#3 C4 C#4 E4 F4". Same count, same commit, one row less height.
+    static constexpr int rows = 3;
     static constexpr int cols = 4;
     static constexpr int numCells = rows * cols;
 
@@ -90,6 +100,14 @@ public:
     // button that would do nothing should say so without a tooltip.
     bool hasEmptyCells() const;
     bool hasFilledCells() const;
+
+    // Commit every card, left to right, top to bottom, into whatever empty pads the page has
+    // (2026-08-18). Each one that lands leaves its cell exactly as a drag or Send to first empty
+    // pad does, so the tray afterwards holds precisely what would not fit and Fill has somewhere
+    // to write. Stops at the first refusal rather than skipping past it: onSendToFirstEmpty
+    // answers false only when the page is full, and carrying on would ask fifteen more times for
+    // the same no. Returns how many were placed.
+    int sendAllToPads();
 
     // Replace the whole tray with a given list, short lists leaving blanks. This is how the
     // seeded answers land - Similar and Could follow beside the reference card, and the same two

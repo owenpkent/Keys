@@ -413,7 +413,10 @@ public:
         // different random draw per hit. Before the split one value drove both, so a session
         // saved then keeps its amount as the timing half and gets 0 for the velocity half.
         int humanize = 0;         // 0..100, timing only - the *ceiling* of the random draw
-        int humanVel = 0;         // 0..100, velocity only - likewise
+        // Velocity only, and in **MIDI velocity units** since 2026-08-18, not a percentage of a
+        // 30% shave: it is how far under `velLevel` a hit may fall, so the knob and its ring read
+        // as one 0-127 band. 0 is no wander, which is what it always meant.
+        int humanVel = 0;         // 0..127, velocity units below velLevel
         // The spans, appended 2026-08-03 with the range knobs (Owen: "a serum style knob where
         // you can set a range in the knob"). Each hit draws uniformly between `humanize - span`
         // and `humanize` instead of between zero and `humanize`, so the knob keeps meaning "the
@@ -457,6 +460,22 @@ public:
         // volume 0 does. Applied after the 0.05 audibility floor, not before it - see the
         // emit loop - so a deep cut reaches MIDI velocity 1 instead of pinning at 6.
         int velTrim = 0;          // -100..+100
+        // **The absolute level that replaced it** (2026-08-18, Owen, on the readout reading
+        // "-31 ~20": "still wrong", having just asked for velocity ranges to span 0-127).
+        // VelTrim was a *trim* on the velocity that arrived, so its numbers were percentages
+        // sitting on a control labelled VEL, next to a pads knob that had just become an
+        // absolute 0-127 band. Two velocity controls in two units is one too many.
+        //
+        // This is MIDI velocity outright: the top of the band this line plays at, whatever
+        // velocity the chord arrived with. `humanVel` is how far under it a hit can fall, in the
+        // same units, so the pair reads as one band the way the pads' Humanize knob does. 0 is
+        // silence, exactly as velTrim -100 was.
+        //
+        // What it costs is "as played" - a line following the velocity of the chord fed to it -
+        // and with one mouse that was a constant anyway: every chord Keys fires leaves at the
+        // pads' own Humanize velocity. velTrim stays registered for saved sessions and is read by
+        // nothing; KeysProcessor::migrateVelLevel folds it into this on load.
+        int velLevel = 100;       // 0..127, MIDI velocity
         double fallbackBpm = 120.0; // internal clock when the transport is stopped/absent
         // Tempo Sync (`bpmSync`, KeysProcessor::advanceChainClock/buildArpParams). True
         // reproduces exactly what Keys always did before this parameter existed: a rolling
@@ -481,6 +500,23 @@ public:
         // standalone there is no playhead to ask, so a `> 0` test would read that 120 as a host
         // tempo and quietly ignore the BPM control. See the tempo choice in process().
         bool hasBpm = false;
+        // Whether there is a **bar grid to anchor to**, whatever the transport is doing
+        // (2026-08-18, Owen: "I'm not convinced about the quantized arpeggiators ... I think that
+        // the notes should be playing at the same time, but they're not").
+        //
+        // Anchoring used to need a rolling host transport, so with none - the standalone, or a
+        // DAW sitting stopped - every line fell back to a phase of its own that `restart()` zeroes
+        // when the line is switched on. Two lines switched on a second apart were then a second
+        // out of phase for good, and no setting could bring them together: Launch Quantize aligns
+        // when a *chord* lands, not where the steps fall. The processor publishes a beat count of
+        // its own for exactly this reason already (see `arpBeats`, which Launch Quantize measures
+        // from) - the host's position while it rolls, its own count otherwise - so there has
+        // always been a grid here, it simply was not offered to the engines.
+        //
+        // One grid, read by every line in the same block, is what makes two anchored lines walk in
+        // lockstep. `anchored` is still the switch: off, a line keeps its own free-running phase
+        // and drifts on purpose.
+        bool hasGrid = false;
     };
 
     Lanes lanes;
@@ -615,8 +651,13 @@ public:
 
         // Position in beats at the start of this block. Hz mode never takes the anchored
         // branch: following the bar grid is the one thing a free-running rate cannot do.
+        //
+        // `hasGrid` is the processor's answer and covers the stopped and hostless cases too; the
+        // rolling-transport pair is kept beside it so a caller that fills only those - every test
+        // in ArpTests, and any host wiring that predates the flag - still anchors. See HostClock.
+        const bool onGrid = clock.hasGrid || (clock.playing && clock.hasPpq);
         double pos;
-        if (clock.playing && clock.hasPpq && p.anchored && ! p.rateFree)
+        if (onGrid && p.anchored && ! p.rateFree)
         {
             pos = clock.ppq;
             // A jump (loop, relocate) means owed note-offs' timelines are invalid.
@@ -1159,13 +1200,11 @@ private:
         const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
         const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
         const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
-        // The line's own fader (velTrim) is deliberately NOT in velScale: velScale feeds the
-        // 0.05 audibility floor below, which protects programmed dynamics, and the fader is
-        // applied after that floor precisely so it is not protected by it.
+        // What scales the line's level: the Velocity lane, the ramp, and the retired Volume
+        // parameter (pinned at its default by migrateVelTrim, so it is a multiply by one).
+        // These are the *programmed* dynamics, and the audibility floor below protects them.
         const float velScale = (float) driftedLane(p, laneVelocity, globalStep) / 100.0f * rampScale
                              * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
-        const float trimT = (100.0f + (float) juce::jlimit(-100, 100, p.velTrim)) / 100.0f;
-        const float trimScale = trimT * trimT; // squared: see the Params comment
         const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
         const double gate = juce::jlimit(5, 200, driftedLane(p, laneGate, globalStep))
                           * juce::jlimit(5, 200, p.gate) / 10000.0;
@@ -1272,7 +1311,7 @@ private:
         // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
         // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
         // the run up where it would have been rather than restarting it.
-        if (p.volume <= 0 || p.velTrim <= -100)
+        if (p.volume <= 0 || p.velLevel <= 0)
             hitCount = 0;
 
         for (int r = 0; r < ratchets; ++r)
@@ -1286,7 +1325,12 @@ private:
                 const int note = hit.note;
 
                 int on = at;
-                float vel = hit.vel;
+                // **The line's own level is the velocity, not the one that arrived**
+                // (2026-08-18). `hit.vel` is the source note's velocity times velScale; what
+                // replaces it is this line's level times the same velScale, so the Velocity lane,
+                // the ramp and Drift all still shape it exactly as they did - only the *base*
+                // moved from the incoming chord to the knob. See Params::velLevel.
+                float vel = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
                 // Late and quieter, never early and never louder: a nudge that can also
                 // rush is what Swing is for, and a velocity that can also rise makes an
                 // edited Velocity lane mean less than it says. Two knobs since 2026-08-02
@@ -1296,14 +1340,18 @@ private:
                     on += minLate + (int) (rng() % (unsigned) (maxLate - minLate + 1));
                 if (p.humanVel > 0)
                 {
-                    // Uniform between the floor and the ceiling. With the floor at 0 this is
-                    // the expression it replaced, term for term.
-                    const double amt = juce::jlimit(0, 100, p.humanVel) / 100.0;
-                    const double amtMin = juce::jmax(0, juce::jlimit(0, 100, p.humanVel)
-                                                            - juce::jlimit(0, 100, p.humanVelSpan))
-                                          / 100.0;
+                    // How far under the level this hit falls, in **MIDI velocity units** since
+                    // 2026-08-18 - the knob and its ring are one 0-127 band now, so the amount
+                    // subtracted has to be in the band's own units rather than a percentage of a
+                    // 30% shave. Uniform between the floor and the ceiling, exactly as before;
+                    // with the span at its default 100 the floor sits at the knob itself, which
+                    // is what makes the whole reach available.
+                    const int reach = juce::jlimit(0, 127, p.humanVel);
+                    const int reachMin = juce::jmax(0, reach - juce::jlimit(0, 100, p.humanVelSpan)
+                                                              * reach / 100);
                     const double u = (double) (rng() % 1000u) / 1000.0;
-                    vel *= (float) (1.0 - (amtMin + u * (amt - amtMin)) * 0.30);
+                    const double units = (double) reachMin + u * (double) (reach - reachMin);
+                    vel -= (float) (units / 127.0) * velScale;
                 }
                 // The 0.05 floor protects programmed dynamics: a Velocity lane at 0 or a
                 // hard H.VEL draw must stay audible rather than turn into a note-off. The
@@ -1312,7 +1360,12 @@ private:
                 // from about -90 downward, which on a patch with a shallow velocity
                 // response was still plainly audible (2026-08-02). The final clamp bottoms
                 // at one MIDI step; zero would be a note-off in disguise.
-                vel = juce::jlimit(0.05f, 1.0f, vel) * trimScale;
+                // The floor is one MIDI step, never zero, which would be a note-off in
+                // disguise. The old 0.05 audibility floor and the fader that multiplied after it
+                // both went with velTrim (2026-08-18): they existed because a *trim* had to be
+                // able to reach silence past a floor protecting programmed dynamics. The level
+                // is now the velocity itself, so a band drawn low is meant to be quiet and there
+                // is nothing to protect it from - the knob at 0 mutes the line outright, above.
                 vel = juce::jlimit(1.0f / 127.0f, 1.0f, vel);
 
                 // A ratchet subdivides one step, and a step is routinely longer than a buffer -
@@ -1506,4 +1559,75 @@ private:
     bool lastRateFree = false;
     std::mt19937 rng { 0xFAB1E5EDu }; // fixed seed: deterministic tests, free variation live
 };
+// Fold several arpeggiator lines' output into one stream under a single rule: **one note-on per
+// sounding pitch, released by the last line holding it**, and a line striking a pitch another one
+// already holds re-strikes it rather than doubling it (2026-08-18, Owen: "when there's two
+// arpeggiators happening, how does it handle when there's an overlap in a note that's being
+// played?").
+//
+// It did not handle it. Each line's buffer went straight to the output, so two lines on one
+// channel sharing a pitch sent two note-ons for it and **whichever released first ended it for
+// both**: the other line's note cut short, its own note-off arriving later as a stray. The lines
+// are usually fed related chords, so shared pitches are the common case, and it reads as random
+// dropouts rather than as a fault.
+//
+// This is the invariant KeysProcessor::noteRefs keeps on the UI side, applied where the engines
+// meet. The re-strike is a note-off at the *same sample offset* immediately before the note-on -
+// exactly what ArpEngine::fireStep already does for a tie inside one line, pulled back to just
+// before the pitch sounds again rather than left to fire in the middle of the note that replaced
+// it. The count is not decremented for it: the other line still owns its reference, and the pitch
+// ends when that line lets go.
+//
+// Lives here, beside the engine and free of the processor, so it can be driven from a test with
+// two hand-built buffers - the same reason ChordGen and ScaleModes are UI-free.
+struct ArpMerge
+{
+    // `in` must already hold every line's events interleaved in sample order, which is what a
+    // juce::MidiBuffer does for free. Deduplicating one line's whole buffer and then the next
+    // would read an event at sample 6000 before one at sample 0, and the rule is a state machine
+    // over time.
+    void merge(const juce::MidiBuffer& in, juce::MidiBuffer& out)
+    {
+        for (const auto meta : in)
+        {
+            const auto m = meta.getMessage();
+            const int ch = m.getChannel();
+            const bool on = m.isNoteOn();
+            // Everything else - the CCs, bend and clock an engine passes through from its own
+            // input - goes out untouched, as does anything with no channel, which no note has.
+            if (ch < 1 || ch > 16 || ! (on || m.isNoteOff()))
+            {
+                out.addEvent(m, meta.samplePosition);
+                continue;
+            }
+
+            auto& refs = held[(size_t) ((ch - 1) * 128 + m.getNoteNumber())];
+            if (on)
+            {
+                if (refs > 0) // another line holds it: close it so this attack is heard
+                    out.addEvent(juce::MidiMessage::noteOff(ch, m.getNoteNumber()), meta.samplePosition);
+                out.addEvent(m, meta.samplePosition);
+                if (refs < 255)
+                    ++refs;
+            }
+            else
+            {
+                if (refs > 0)
+                    --refs;
+                if (refs == 0) // the last line let go, so the pitch really does end here
+                    out.addEvent(m, meta.samplePosition);
+            }
+        }
+    }
+
+    // Every path that abandons a sounding arp note emits its note-offs first (ArpEngine::flushInto
+    // on the bypass edge and on a channel change), so the counts stay honest on their own. A
+    // panic is the exception: it silences the instrument directly and leaves the engines to catch
+    // up, and a stale count here would suppress a later note-off as "another line still holds it",
+    // which is a stuck note - the precise failure these counts exist to prevent.
+    void reset() { held.fill(0); }
+
+    std::array<std::uint8_t, 16 * 128> held {};
+};
+
 } // namespace keys

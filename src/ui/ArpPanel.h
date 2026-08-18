@@ -103,6 +103,17 @@ public:
     // have to be told about each other in both directions.
     std::function<void()> onPageChanged;
 
+    // Fired when this line's shape crosses into or out of Pattern, because that is what decides
+    // whether the **Draw** page exists at all - and the tab that says so lives on the section bar,
+    // which is the editor's, not the panel's (2026-08-18, Owen: "how do we get to the part where
+    // we add harmony and stuff like that?", with Shape already reading Pattern and Draw greyed).
+    //
+    // refreshShape() runs on every 10 Hz tick and knew this the whole time; nothing carried it
+    // across. The tab's enabled state was written only by refreshArpBarTabs(), which runs when the
+    // line or the page changes - so setting Shape to Pattern left Draw greyed until you happened
+    // to visit another page and come back, and the way to the lane editor looked broken.
+    std::function<void()> onShapeChanged;
+
     // What a chord card dropped on this panel does, once JUCE has said where it landed. The
     // slot cards, line tabs and macro rows are each a `DragAndDropTarget` of their own and call
     // one of these; the panel owns the actions because both of them touch more than one card.
@@ -119,11 +130,12 @@ public:
     // which pad it came from, and taking the slot lets a pad's own "Send to arp A" menu row
     // (2026-08-16) reach this same method instead of growing a second copy of it.
     //
-    // `makeCurrent` is what tells those two callers apart. A **drop** aimed at the line, so the
-    // aim follows it and the panel starts editing that line. A **menu row** did not: it says
-    // "Send to arp B", which promises routing, and re-pointing the panel on the strength of it
-    // tore the user off whatever page and lane they had open, several clicks from getting back.
-    void takeChordOnLine(int line, int padSlot, bool makeCurrent = true);
+    // **It routes and does not navigate**, for both callers alike (2026-08-18). A drop used to
+    // re-point the panel at the line it landed on, which wrote nothing but made every per-line
+    // readout - STEPS, Tuplet, Shape, the rate - jump to that line's own settings under the hand
+    // that was routing a chord, and a view change reads as a data change when you are watching
+    // numbers. See the definition for the reason the aim used to follow, and why it expired.
+    void takeChordOnLine(int line, int padSlot);
 
     // **The panel itself takes a chord, anywhere on it** (2026-08-14, Owen: "need to be able to
     // drag chords to not just the main arp window"). Paging the deep view is what made this

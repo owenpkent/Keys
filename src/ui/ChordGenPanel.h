@@ -86,6 +86,7 @@ public:
     // gaps between them. See resized() for the arithmetic each of these adds up.
     static juce::Point<int> contentSize();
     static juce::Point<int> minWindowSize();     // contentSize + the window's own furniture
+    static juce::Point<int> maxWindowSize();     // ...and the ceiling: see the definition
     static juce::Point<int> defaultWindowSize(); // where it opens the first time
 
 private:
@@ -115,7 +116,13 @@ private:
     // `modes::get(mode).emotion` - "Bluesy, Relaxed, Rock" for Mixolydian - which is a claim
     // about how a mode feels, in a window whose whole job is to let you hear chords and decide
     // that for yourself. `modes::get().emotion` is untouched and still used elsewhere.
-    juce::Label title, pageLabel;
+    juce::Label title;
+    // Page tabs, in the header (2026-08-18, Owen: "when you open the generator, we need to be
+    // able to toggle between pages at the top"). This was a read-only "Page 2 of 4" label: it
+    // said which page a committed card would land on and gave you no way to change it, so
+    // choosing where to put a chord meant leaving the window for the Pads bar and coming back.
+    // Bound to `padPage`, the same parameter those four buttons drive, so the two agree.
+    std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
     juce::TextButton closeButton { "Close" };
 
     juce::ComboBox rootBox, modeBox;
@@ -141,6 +148,19 @@ private:
     // Unlocked / Clear Page they were until 2026-08-01, because the word Page is exactly what
     // stopped being true: none of them touches a pad any more.
     juce::TextButton fillButton, regenButton, clearButton;
+    // Commit the whole tray in one click (2026-08-18, Owen: "when you click on fill, I want a new
+    // button to send all to pads or something like that or fill empty spots to send a bunch of
+    // them to the main app"). The tray had exactly one route to a pad per card - a drag, or Send
+    // to first empty pad on its own menu - so filling a page meant sixteen gestures. It writes
+    // only empty pads, like every other generative action in Keys, and each card it places leaves
+    // its cell, so what stays behind is exactly what would not fit.
+    juce::TextButton toPadsButton;
+    // Commit the whole tray in one click (2026-08-18, Owen: "when you click on fill, I want a new
+    // button to send all to pads or something like that or fill empty spots to send a bunch of
+    // them to the main app"). The tray already had exactly one route to a pad per card - a drag,
+    // or Send to first empty pad on its own menu - so filling a page meant sixteen gestures.
+    // It writes only empty pads, like every other generative action in Keys, and each card it
+    // places leaves its cell, so what stays behind is what would not fit.
 
     // The audition tray. Owned here rather than by ChordGenMenu, and that is consistent with the
     // rest of this class rather than an exception to it: a tray card is not state, so throwing
@@ -236,7 +256,19 @@ private:
     // The tick boxes. Each is 34 px wide and the full height of its cell, because the mouse-only
     // floor applies to a check box exactly as it does to a button, and a tick parked in a 14 px
     // caption strip would be a target you cannot hit.
-    std::array<juce::ToggleButton, 6> useBoxes;
+    // **The six gates are word chips, not check marks** (2026-08-18, Owen, asked which of three
+    // faults the check marks had: "all"). They were bare `juce::ToggleButton`s, identical to the
+    // four inversion ticks beside them - which are *values*, not gates - so the fixed row read as
+    // five boxes in a row with two meanings and one look. They also sat at the left edge of
+    // whatever cell they gated, landing at a different x on every row, and six cryptic boxes on
+    // one page is a lot to ask anyone to remember the meaning of.
+    //
+    // One change answers all three. A chip reading **SET** or **ROLL** cannot be mistaken for a
+    // tick, says what it does without a tooltip, and reads as a column because every one of them
+    // is the same shape and width wherever it sits. The parameters and their ids are untouched:
+    // a TextButton in toggle mode takes the same ButtonAttachment a ToggleButton did.
+    std::array<juce::TextButton, 6> useBoxes;
+    void refreshGateChips();
     std::array<std::unique_ptr<ButtonAtt>, 6> useAtts;
     std::unique_ptr<ButtonAtt> planingDiatonicAtt;
     std::unique_ptr<ButtonAtt> inv0Att, inv1Att, inv2Att, inv3Att;

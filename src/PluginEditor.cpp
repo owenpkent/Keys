@@ -343,7 +343,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
               "ever takes and the ring is how far under that it can fall, so every chord "
               "strums at its own speed instead of sounding stamped out. Closed is a fixed "
               "rake; at zero the chord lands all at once.");
-    wireRange(humanKnob, humanHead, "Humanize", "humanizeVelMin", "humanizeVelMax", 1.0, 127.0, "",
+    wireRange(humanKnob, humanHead, "Humanize", "humanizeVelMin", "humanizeVelMax", 0.0, 127.0, "",
               humanizeVelAtt,
               "Velocity. The knob is the hardest a note ever lands and the ring is how far "
               "under that it can fall, so a part stops sounding typed in. Closed is one fixed "
@@ -599,9 +599,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
     };
     genCombo(genRootBox, "Generator key",
-             "The key the chord generator writes in. Separate from the Root that drives Scale "
-             "Lock; also on a pad's right-click menu.",
+             "The key the chord generator writes in. Setting it also moves the Root that drives "
+             "Scale Lock, so the keybed greys to the key you are generating in.",
              okstudio::scales::noteNames(), "genRoot", genRootAtt);
+    genCombo(genModeBox, "Generator mode",
+             "The mode the chord generator writes in. Setting it also moves the Scale that "
+             "drives Scale Lock, wherever the two lists have the same scale.",
+             modes::names(), "genMode", genModeAtt);
     // Mode and Scale Compliance sat here beside it until 2026-08-02 (Owen: "remove the scale
     // and percentage and letter b from pads header"). Both are still in the Generator window,
     // which holds every setting the generator has, so nothing became unreachable; the Key
@@ -854,7 +858,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
     // followAim false: this is the menu row, which routes a chord and must not navigate.
     chordPads.onSendToArpLine = [this](int slot, int line)
-    { sendPadToArpLine(slot, line, /*followAim*/ false); };
+    { sendPadToArpLine(slot, line); };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
@@ -1119,29 +1123,31 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
     }
 }
 
-// Through the panel when it is open, the same path a drop on a macro card takes - which is what
-// moves the aim to this line without moving the view. A / B are power switches now and stay on
-// the bar with the section folded, so the fallback below is reachable in earnest: it is what a
-// drop, or the pad menu's "Send to arp A", does while the arp panel does not exist.
+// Through the panel when it is open, the same path a drop on a macro card takes. A / B are power
+// switches now and stay on the bar with the section folded, so the fallback below is reachable in
+// earnest: it is what a drop, or the pad menu's "Send to arp A", does while the arp panel does
+// not exist.
 //
-// `followAim` separates the two callers. A **drop** on a line's tab or macro card aimed at that
-// line, so the aim moves with it. The pad menu's **Send to arp A / B** did not: that row promises
-// to route a chord, and taking the panel to the other line on the strength of it threw away the
-// page and lane the user had open - several clicks to get back, on a surface with one mouse.
-void KeysEditor::sendPadToArpLine(int padSlot, int line, bool followAim)
+// **Nothing that routes a chord moves the panel** (2026-08-18, Owen: "the number of steps
+// changes, straight vs triplet etc, when you drag a chord onto a new arpeggiator"). Nothing was
+// written: dropping on B took the panel to B, and STEPS, Tuplet, Shape and the rate then read B's
+// own settings instead of A's, which looks exactly like the drop having changed them.
+//
+// `followAim` used to separate a drop from the pad menu's Send to arp rows, and its whole
+// justification was that a drop aimed at a line so "the next card click should follow the same
+// aim". That justification has been stale since 2026-08-02, when a card click stopped feeding a
+// line at all - there is no next click for the aim to serve. So both callers now pass false and
+// the flag is gone: routing a chord routes a chord, and the way to *look* at a line is its tab or
+// its Details button. See ArpPanel::takeChordOnLine.
+void KeysEditor::sendPadToArpLine(int padSlot, int line)
 {
     if (arpPanel != nullptr)
     {
-        arpPanel->takeChordOnLine(line, padSlot, followAim);
+        arpPanel->takeChordOnLine(line, padSlot);
         return;
     }
 
     processor.holdArpChordFromPad(padSlot, line);
-    if (followAim)
-    {
-        processor.setArpCurrentLine(line);
-        refreshArpBarTabs();
-    }
 }
 
 ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)
@@ -1295,6 +1301,8 @@ void KeysEditor::refreshArpPanel()
     // has to say so. This is the panel's half - a chord dropped on a macro card lands here.
     arpPanel->onEditLineChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onPageChanged = [this] { refreshArpBarTabs(); };
+    // Draw greys outside Pattern shape, so the bar has to hear about a shape change too.
+    arpPanel->onShapeChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -1424,6 +1432,10 @@ void KeysEditor::showSettingsMenu()
     // piles up behind you. See LayoutState::dragWhileSustain, which kept the field name.
     menu.addItem(2002, "Sustained drag leaves a trail", true, processor.layout.dragWhileSustain);
     menu.addItem(2003, "Sustained notes propose chords", true, processor.layout.sustainProposesChords);
+    // Ticked, a pad sounds for as long as you hold it; unticked - the default - the press is
+    // silent and the release fires the chord for 800 ms. See LayoutState::padHoldToPlay for why
+    // the quiet press is the default, and ChordPads' own note for what each mode costs.
+    menu.addItem(2004, "Chord pads play while held", true, processor.layout.padHoldToPlay);
     menu.addSeparator();
 
     // Greyed rather than missing when there is nothing to check: Keys Host never builds
@@ -1452,6 +1464,11 @@ void KeysEditor::showSettingsMenu()
                 break;
             case 2003:
                 e->processor.layout.sustainProposesChords = ! e->processor.layout.sustainProposesChords;
+                break;
+            case 2004:
+                // Nothing to repaint or rebuild: the flag is read at the moment a press or a
+                // release is handled, so the next click already obeys it.
+                e->processor.layout.padHoldToPlay = ! e->processor.layout.padHoldToPlay;
                 break;
             case 3001:
                 e->checkForUpdatesNow();
@@ -1890,7 +1907,7 @@ void KeysEditor::setChordGenWindowOpen(bool open)
         chordGenWindow = std::make_unique<DetachedWindow>(
             "Keys Chord Generator", lnf, *chordGenPanel, processor.layout.chordGenBounds,
             ChordGenPanel::minWindowSize(), ChordGenPanel::defaultWindowSize(),
-            close, [this] { rememberChordGenBounds(); });
+            close, [this] { rememberChordGenBounds(); }, ChordGenPanel::maxWindowSize());
         chordGenPanel->sendLookAndFeelChange(); // built before it was ever parented
     }
     else
@@ -2814,6 +2831,12 @@ void KeysEditor::resized()
         // one height. What the bar spends, at its floor and above, is worked out in
         // minWidthForView().
         bar.removeFromRight(10);
+        // Mode then Key, right to left, so they read Key-then-Mode left to right the way the
+        // generator window's own top row does. Mode is the wide one: "Mixolydian" and
+        // "Phrygian Dominant" are what has to fit, and a ComboBox ellipsises rather than
+        // complaining (the Voices lesson, 2026-08-02).
+        genModeBox.setBounds(bar.removeFromRight(124).withSizeKeepingCentre(122, 24));
+        bar.removeFromRight(4);
         genRootBox.setBounds(bar.removeFromRight(58).withSizeKeepingCentre(56, 24));
         // The page buttons ride on the Pads bar, where they used to sit in a row of their
         // own under the strip. One click still reaches any page, and the section keeps its
