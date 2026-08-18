@@ -5,17 +5,24 @@ Third-party PDFs for the hardware and plugins Keys' design borrows from. **They 
 this file is for: it is the manifest, with a working download URL for every one of them.
 
 They lived loose in the repo root until 2026-08-17. Nineteen files and about 265 MB is a folder,
-not a root.
+not a root. Twenty since 2026-08-18, when the Scaler 3 guide joined them.
 
-**Read the relevant one before designing a feature, not after.** Three times now a manual has been
+**Read the relevant one before designing a feature, not after.** Four times now a manual has been
 cheaper than the rebuild it would have prevented: the Serum guide corrected a built `RangeKnob`
 satellite, the Cthulhu manual corrected a randomness feature that had shipped as a global knob,
-and the Acid V manual corrected the assumption that a 303 grid could not fit the arp panel.
+the Acid V manual corrected the assumption that a 303 grid could not fit the arp panel, and the
+Scaler 3 guide caught that "Mood" names two unrelated controls in that product - a 41-word browse
+tag, and a bright/dark/neutral knob Keys already has finer as its Brightness slider.
+
+**The Scaler 3 entry is the argument for the rule.** Its vocabulary was available as two CSVs and
+the library was designed from those alone; the manual, fetched afterwards, corrected the design
+twice. A word list tells you *what* a product tags with and never *how many things it calls by the
+same name*.
 
 Two documents sit on top of these:
 
 - **`../docs/REFERENCES.md`** - what Keys **took** from a manual, and what it deliberately did
-  not. Eight manuals are in it.
+  not. Nine manuals are in it.
 - **`../docs/SEQUENCER_LANDSCAPE.md`** - the map of sequencer archetypes, from the eleven added on
   2026-08-17. Nothing has been taken from those yet, which is why they are not in the other file.
   Move an entry across the day something ships from it.
@@ -34,6 +41,7 @@ Two documents sit on top of these:
 | `matrixbrute_Manual_2_0_3_EN.pdf` | Arturia MatrixBrute | 73 | Nothing yet. Ties and per-step slide are both still on the table | [v2.0.1](https://downloads.arturia.net/products/matrixbrute/manual/MatrixBrute_Manual_2_0_1_EN.pdf) |
 | `Numerology4Manual.pdf` | Five12 Numerology 4 | 251 | The skip-versus-mute distinction, and the guard that a sequence's first and last steps cannot be skipped | [five12.com](https://files.five12.com/Numerology4Manual.pdf) |
 | `Acid-V-Manual.pdf` | Arturia Acid V | 105 | The source of `../docs/ACID_DESIGN.md`. Proposed, unbuilt | [v1.0.0](https://downloads.arturia.net/products/acid-v/manual/acid-v_Manual_1_0_0_EN.pdf) |
+| `Scaler-3_User_Guide.pdf` | Scaler Music Scaler 3 | 113 | The chord library's two tagging vocabularies, and the definition of a chord set. Corrected the axis count, and caught that "Mood" names two unrelated controls | [downloads.scalermusic.com](https://downloads.scalermusic.com/Scaler-3_User_Guide.pdf) |
 
 ## Surveyed (`../docs/SEQUENCER_LANDSCAPE.md`)
 
@@ -73,7 +81,9 @@ Added 2026-08-17. Nothing taken yet; the fourth column is the archetype each one
   [the web manual](https://www.ableton.com/en/live-manual/12/launching-clips/).
 - **Scaler 2's manual ships inside the plugin** and is not downloadable, so it is not here.
   Anything attributed to it in `../docs/SEQUENCER_LANDSCAPE.md` came from published behaviour and
-  should be checked against the real manual before it is built on.
+  should be checked against the real manual before it is built on. **Scaler 3's is a plain
+  download** and is here (2026-08-18); Plugin Boutique's product page also serves it, and the
+  vendor's own link above is the one that worked without an account.
 - **Filenames are as downloaded, and inconsistently so** (`stochas_av.pdf`,
   `Subharmonicon_Manual AMZ.pdf`, `matrixbrute_Manual_2_0_3_EN.pdf`). They are deliberately not
   renamed: `../docs/REFERENCES.md` heads each section with the exact filename, `../CLAUDE.md` and
