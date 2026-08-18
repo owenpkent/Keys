@@ -888,7 +888,19 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   `arpVelTrim`, bipolar and unchanged, but the ring is `arpHumanVel` **directly**, not a span of
   VEL's own value the way H.TIME's ring still reads `arpHumanizeSpan`. VEL can sit anywhere from
   -100 to 100 and the ring reaches straight down from wherever that is, which the bipolar case
-  `RangeKnob` already handled - nothing in `RangeKnob.h` changed. `arpHumanVelSpan`, H.VEL's own
+  `RangeKnob` already handled. **One thing in `RangeKnob.h` did have to change, and it is the
+  lesson of the merge**: the span's ceiling *and* its drag sensitivity were both taken from the
+  **face's** range, which is correct for every ring that is a span of its own knob (H.TIME: face
+  and ring both 0..100) and wrong for the first ring that is not. VEL's face is -100..100 and its
+  ring is 0..100, so the drag was calibrated to 200 units against a parameter that stops at 100 -
+  the top half of the satellite's travel wrote nothing, and the arc it drew fought `refresh()`,
+  which reads the clamped parameter back at 10 Hz. `RangeKnob::setSpanMax` gives the span a
+  ceiling of its own, defaulting to the face's travel so nothing that already worked moved; both
+  range knobs set it from **their own ring parameter's range**, so H.TIME lands on exactly the
+  number the default gave it and the rule lives in one place instead of as a special case on one
+  knob. The standing form of it: **a ring that carries a parameter of its own owes that
+  parameter's range to the knob**, or half the gesture is inert with nothing on screen to say so.
+  `arpHumanVelSpan`, H.VEL's own
   former ring, would otherwise be dead weight on an absent control, so every write the new ring
   makes pins it to 100: the draw was already uniform between the floor and the knob at that
   default, and pinning it is what keeps that true with one fewer number on screen. The lamp is

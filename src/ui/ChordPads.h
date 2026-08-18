@@ -62,8 +62,7 @@ namespace keys
 // parented into, which is what makes the machinery survive the Pads section being popped out
 // into a window of its own.
 class ChordPads : public juce::Component,
-                  public juce::DragAndDropTarget,
-                  private juce::Timer
+                  public juce::DragAndDropTarget
 {
 public:
     explicit ChordPads(KeysProcessor&);
@@ -223,15 +222,15 @@ private:
     // not do. Sustain and Latch still decide what "release" means, since endAudition goes
     // through releaseChordPad / releaseLiveChord exactly as the old mouse-up did.
     //
-    // `auditionMs` (800, borrowed from ChordGenMenu's own preview) went with that change.
-    // **The generator's tray keeps its fixed 800 ms** and that is not an inconsistency: a tray
-    // card is a candidate you are sampling, where a length that does not depend on your hand is
-    // the point, and a pad is an instrument you are playing.
+    // `auditionMs` (800, borrowed from ChordGenMenu's own preview) went with that change, and
+    // so did the juce::Timer it needed: with the release owning the note-off, nothing was left
+    // to schedule, and a base class no path can start is weight this component was carrying for
+    // a feature it no longer has. **The generator's tray keeps its fixed 800 ms** and that is
+    // not an inconsistency: a tray card is a candidate you are sampling, where a length that
+    // does not depend on your hand is the point, and a pad is an instrument you are playing.
     //
-    // Nothing starts the timer any more. It is kept because endAudition() is called from a dozen
-    // paths and stopTimer() on an idle timer is free, so the choke point stays one function
-    // rather than two shapes of it.
-    void timerCallback() override;
+    // endAudition() stays exactly what it was - the one choke point every path ends a sounding
+    // card through - minus the stopTimer() that had nothing to stop.
     void endAudition();
 
     // The cell a drag - anyone's, from either window - is currently offering a chord to, or -1.

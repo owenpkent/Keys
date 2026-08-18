@@ -1497,6 +1497,18 @@ void KeysEditor::checkForUpdatesNow()
                     "Check for updates",
                     e->processor.getName() + " is up to date (v" + juce::String(KEYS_VERSION) + ").");
                 break;
+            case okstudio::updater::CheckResult::notReady:
+                // A newer version is tagged and its installer is not uploaded yet - the release
+                // API answered perfectly, so this must not read as a connection problem. It is
+                // its own result in the kit for exactly this sentence's sake. The version is
+                // deliberately not named: `notReady` carries no UpdateInfo, because the kit
+                // keeps "UpdateInfo is meaningful only when the result is found" true rather
+                // than handing back a half-filled one nothing may act on.
+                juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                    "Check for updates",
+                    "A newer version has been announced, but its installer is not published "
+                    "yet. Try again shortly.");
+                break;
             case okstudio::updater::CheckResult::failed:
                 juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                     "Check for updates",

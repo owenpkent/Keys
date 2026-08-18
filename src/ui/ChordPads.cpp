@@ -100,8 +100,8 @@ ChordPads::ChordPads(KeysProcessor& p) : processor(p)
     okstudio::ui::makeMouseOnly(*this);
 }
 
-// See the header. ~Timer stops the timer, but stopping the timer is not releasing the chord -
-// the note-ons are the processor's and would simply stay on, reachable only by All Off.
+// See the header. A section can fold, or its window close, mid-press - and the note-ons are the
+// processor's, so without this they would simply stay on, reachable only by All Off.
 ChordPads::~ChordPads()
 {
     endAudition();
@@ -922,11 +922,10 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     repaint();
 }
 
-// Stop an audition still sounding from an earlier click, if there is one. Safe to call at any
-// time and on any path - it is how a click, a drag and the timer all end the same state.
+// Let go of whatever this strip is currently sounding, if anything. Safe to call at any time
+// and on any path - it is how a release, a drag and every interruption end the same state.
 void ChordPads::endAudition()
 {
-    stopTimer();
     if (playingLive)
     {
         processor.releaseLiveChord(); // Sustain holds it, exactly as the old mouse-up did
@@ -937,12 +936,6 @@ void ChordPads::endAudition()
         processor.releaseChordPad(playing);
         playing = -1;
     }
-}
-
-void ChordPads::timerCallback()
-{
-    endAudition(); // which stops this timer
-    repaint();
 }
 
 void ChordPads::mouseDrag(const juce::MouseEvent& e)

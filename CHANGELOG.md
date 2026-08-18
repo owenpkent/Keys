@@ -5,6 +5,38 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: half of the arp VEL knob's outer ring did nothing
+
+Caught in review of the merge that folded Humanize Velocity into VEL's ring. `RangeKnob` took
+both the span's ceiling and its drag sensitivity from the **face's** range, which is right for
+every ring that is a span of its own knob - H.TIME, where face and ring are both "how late", both
+0..100. VEL is the first ring that is not: its face is a bipolar trim, -100..100, and its ring is
+Humanize Velocity, 0..100.
+
+So the drag was calibrated to 200 units while the parameter it wrote stopped at 100. The ring hit
+its real maximum after about half the satellite's travel, and past that point the arc kept growing
+under the hand while the card's own 10 Hz refresh read the clamped parameter back and yanked it
+down again - a control whose top half did nothing but stutter.
+
+`RangeKnob::setSpanMax` is the fix, and it is the general one rather than a special case: the span
+now has a ceiling of its own, defaulting to the face's travel so nothing that already worked
+changed. Both range knobs set it from their own ring parameter's range, so H.TIME lands on exactly
+the number the default already gave it and the two cannot drift apart.
+
+### Fixed: "check for updates" blamed your connection for a release still uploading
+
+*Check for updates* had three ways to fail and one sentence for all of them: *"Could not reach the
+update server."* One of the three is not a failure at all - a strictly newer version is tagged and
+only its installer has not finished uploading, which is what the minutes after a release look like
+from here. That is the case it is most likely to hit, and the case where telling somebody to check
+a working connection is most useless.
+
+`CheckResult::notReady` is its own outcome in the kit now
+([okstudio-juce-kit#9](https://github.com/owenpkent/okstudio-juce-kit/pull/9)), and Keys says what
+is actually true: the version has been announced, its installer is not published yet, try again
+shortly. A genuine network or API failure still reads as one.
+
+
 ### Fixed: the tempo followed the DAW only while the transport was rolling
 
 Owen: *"and bpm isn't syncing with daw."* A DAW's tempo is its tempo stopped or rolling - Ableton

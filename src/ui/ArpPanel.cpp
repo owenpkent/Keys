@@ -1371,6 +1371,14 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
 
                 const auto velId = id(KeysProcessor::apHumanVel);
                 const auto spanId = id(KeysProcessor::apHumanVelSpan);
+                // **The ring's own range, not the face's** (see RangeKnob::setSpanMax). VEL's
+                // face is a bipolar trim, -100..100, so the default would calibrate the drag
+                // to 200 units while arpHumanVel stops at 100: the top half of the satellite's
+                // travel wrote nothing, and refresh() below read the clamped value back at
+                // 10 Hz and yanked the arc down under a hand still moving up. Taken from the
+                // parameter rather than written as 100 so the two cannot drift apart.
+                const auto velRange = processor.apvts.getParameterRange(velId);
+                rk.setSpanMax((double) (velRange.end - velRange.start));
                 // A lamp, unlike H.TIME's ring: VEL keeps a level even with Humanize off (its
                 // knob at zero means "as played", not "silent" and not "no wander"), so there
                 // is no zero position that already means off the way there is for a plain
@@ -1439,6 +1447,12 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                 { return juce::String((int) lo) + "-" + juce::String((int) hi); };
 
                 const auto spanId = id(KeysProcessor::apHumanizeSpan);
+                // Set for the same reason as VEL's above, and here it lands on exactly the
+                // number the default already produced: face and ring are both 0..100, so this
+                // is a no-op that keeps the rule stated in one place rather than a special case
+                // living on one of the two range knobs.
+                const auto humanRange = processor.apvts.getParameterRange(spanId);
+                rk.setSpanMax((double) (humanRange.end - humanRange.start));
                 // By hand, with the gesture brackets an attachment would have given it: the ring
                 // is not a Slider, so there is nothing for a SliderAttachment to bind to. The
                 // same shape Shape and the rate steppers use a few hundred lines up.
