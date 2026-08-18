@@ -684,7 +684,7 @@ chord it replaces. Locked pads are never overwritten, same as the algorithmic so
 
 ## Chord library
 
-348 named progressions you can ask for by **how they feel**, **what they sound like** and
+355 named progressions you can ask for by **how they feel**, **what they sound like** and
 **what they do**. Two ways in, and they are one thing rather than two: pick a mood in either and
 the other follows.
 

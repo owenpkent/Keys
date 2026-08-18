@@ -185,8 +185,13 @@ def main():
     print("COMMON IN THE CORPUS, ABSENT FROM KEYS  (4-chord windows, top 30)")
     print("=" * 78)
     known = set(by_shape)
+    # `s[0] == 0` used to be here to mean "starts on the tonic". It was correct while a shape was
+    # a tuple of ints and silently wrong the moment quality went in and each element became
+    # (interval, is_minor): the comparison could never be true, so this whole section reported
+    # nothing missing - a filter that had quietly become "print an empty list". Shapes are relative
+    # to their own first chord by construction, so the check was redundant anyway.
     missing = [(c, s) for s, c in window_counts.items()
-               if len(s) == 4 and s not in known and s[0] == 0]
+               if len(s) == 4 and s not in known]
     missing.sort(reverse=True)
     for c, s in missing[:30]:
         spelled = " ".join(f"{iv}{'m' if mn else ''}" for iv, mn in s)

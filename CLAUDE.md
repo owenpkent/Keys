@@ -175,7 +175,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   progressions that no user could ever look at - the Markov source shreds them into bigrams and
   throws the sequences away, so asking for "Nostalgic" returned a statistical blur of the
   nostalgic progressions rather than the progressions. `ChordSources.h` held seven named ones with
-  no tags at all. `ChordLibrary.h` is the table that joins them up: **348 rows**, sixty of them
+  no tags at all. `ChordLibrary.h` is the table that joins them up: **355 rows**, sixty of them
   folded in from `MarkovData.h` (the other 28 of the 88 were already there under names of their
   own). They stay in `MarkovData.h` too - the Markov source still wants its transition table - so
   that fold is a **copy, not a move**.
@@ -234,7 +234,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   able to drop or rename one. The cost, and it is real: a pick does not survive reopening the
   session, exactly as a Markov mood does not.
   **The window is paged, not scrolled** - twelve rows and a `<` `>` pair, the pad strip's own
-  shape. 348 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at: a
+  shape. 355 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at: a
   scrollbar thumb is a small target that has to be *dragged*, and a wheel is not a gesture Keys may
   require. A row is a chord card that happens to hold several chords - the whole row is the Hear
   button, a second click on the walking row stops it, and two buttons at its right end send it to

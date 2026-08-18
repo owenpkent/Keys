@@ -503,7 +503,7 @@ void ChordLibraryPanel::refreshMatches()
         // the list is a reordering with no stated cause, which is indistinguishable from a bug.
         count = juce::String(n) + " could follow " + seed->name;
     else if (n == (int) chordlib::table().size())
-        count = juce::String(n) + " progressions"; // "348 of 348" is a sentence saying nothing
+        count = juce::String(n) + " progressions"; // "355 of 355" is a sentence saying nothing
     else
         count = juce::String(n) + (n == 1 ? " progression" : " progressions") + " of "
                 + juce::String(chordlib::table().size());
@@ -567,7 +567,7 @@ void ChordLibraryPanel::timerCallback()
     // What the pads end on changes from four other surfaces - a drop, a Fill, an undo, a page
     // flip - and none of them knows this window exists. Polled for the same reason the filters
     // are, and cached so a tick that changed nothing costs one string compare rather than a
-    // re-filter of 348 rows.
+    // re-filter of 355 rows.
     //
     // Without this, **Follows stayed greyed after the pads gained a progression**: the seed is
     // worked out in `refreshMatches`, which only ran when a picker moved. It looked like the

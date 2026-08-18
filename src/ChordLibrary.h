@@ -785,6 +785,32 @@ namespace keys::chordlib
               { "Haunting", "Tender", "Sombre" }, { "Cinematic", "Ballads", "Theatre" } },
 
             // ==========================================================================
+            // Found by measuring the table against Chordonomicon (2026-08-18) - the most
+            // common four-chord windows in 680,000 songs that had no row here. See
+            // `docs/CHORD_LIBRARY.md` §10 and `scripts/corpus/`.
+            //
+            // Most of them turned out to be **two-chord vamps written across four bars**,
+            // a shape the table already used (Mixolydian oscillation, the Lydian pairs) and
+            // had simply never written down for the commonest degrees. Which is the useful
+            // kind of gap for a corpus to find: not an exotic progression nobody thought of,
+            // but the obvious one everybody plays and nobody writes on a list.
+            // ==========================================================================
+            { "Tonic-dominant vamp (I-V-I-V)", "I V I V", Function::vamp, kIonian,
+              { "Confident", "Driving", "Happy" }, { "Country", "Gospel" } },
+            { "Tonic-plagal vamp (I-IV-I-IV)", "I IV I IV", Function::vamp, kIonian,
+              { "Calm", "Spiritual", "Mellow" }, { "Gospel", "Folk" } },
+            { "Minor tonic vamp (i-bVII-i-bVII)", "i bVII i bVII", Function::vamp, kAeolian,
+              { "Atmospheric", "Chill", "Mysterious" }, { "Downtempo", "Electronica" } },
+            { "Minor full descent (i-bVII-bVI-bIII)", "i bVII bVI bIII", Function::descent, kAeolian,
+              { "Melancholic", "Sombre", "Longing" }, { "Alternative", "Trance" } },
+            { "Home turnaround (I-vi-IV-I)", "I vi IV I", Function::turnaround, kIonian,
+              { "Nostalgic", "Calm", "Resolved" }, { "Ballads", "Country" } },
+            { "Double dominant vamp (I-V-II-V)", "I V II V", Function::loop, kIonian,
+              { "Animated", "Hopeful", "Driving" }, { "Country", "Pop" } },
+            { "Mixolydian plagal vamp (I-IV-bVII-IV)", "I IV bVII IV", Function::loop, kMixolydian,
+              { "Confident", "Mellow", "Driving" }, { "Rock", "Blues" } },
+
+            // ==========================================================================
             // Folded in from `MarkovData.h` (2026-08-18), where they had been mood-tagged
             // since the day that corpus was written and unreachable by anyone ever since:
             // the Markov source shreds them into bigrams and throws the sequences away.

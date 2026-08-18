@@ -4,7 +4,7 @@ Proposed 2026-08-18 (Owen: "collections or books of chords and progressions, thi
 together ... an outstanding library that makes it easy to compose, maybe organized by emotion or
 something. Scaler, the other VST has done a great job of this").
 
-**Built the same day, all of it.** `src/ChordLibrary.h` holds **348 tagged progressions**;
+**Built the same day, all of it.** `src/ChordLibrary.h` holds **355 tagged progressions**;
 **Library** is appended to the generator's Source list; `ChordLibraryPanel` is the browsable window
 off a Library chip on the Pads bar, with a star per row; a pad remembers which progression it is a
 step of and the strip brackets a run; and **Follows** answers §7's question - a progression that
@@ -264,7 +264,7 @@ the order it is worth doing.
 
 - ~~**The browsable window.**~~ Built: `src/ui/ChordLibraryPanel.h`, opened by a **Library** chip
   on the Pads bar beside Generator. **Paged, not scrolled** - twelve rows and a `<` `>` pair, the
-  shape the pad strip already uses, because 348 rows is a scroll and a scroll is the gesture the
+  shape the pad strip already uses, because 355 rows is a scroll and a scroll is the gesture the
   mouse-only contract is worst at: a scrollbar thumb is a small target that has to be dragged, and
   a wheel is not a gesture Keys may require. A row is a chord card that holds several chords: the
   whole row is the Hear button, a second click on the walking row stops it, and two buttons at its
@@ -369,11 +369,28 @@ is this row".
 far more often than a twelve-chord one in any corpus. The ranking is useful *within* a length, not
 across lengths.
 
-**Eleven of 348 rows never occur at all**, and they are the long jazz and blues forms - the twelve-
-bar blues, minor blues, the Autumn Leaves turn, the Bossa minor cycle. That is not evidence they are
-wrong. It is evidence that an exact twelve-chord window is rare in a corpus of user-entered chord
-sheets, which spell repeats and turnarounds inconsistently. **Nothing was deleted on this basis**,
-and nothing should be.
+**Eight of 355 rows never occur at all**, and every one of them is seven chords or longer - the
+twelve-bar blues and its minor and jazz variants, the Autumn Leaves turn, the Bossa minor cycle, the
+passamezzo antico. That is not evidence they are wrong. It is evidence that an exact twelve-chord
+window is rare in a corpus of user-entered chord sheets, which spell repeats and turnarounds
+inconsistently - and the count *fell* from eleven to eight when the sample went from 40,000 songs to
+150,000, which is the tell: they are rare, not absent. **Nothing was deleted on this basis**, and
+nothing should be.
+
+**Seven rows were added on this basis**, which is the half that made the download worth it. The
+commonest four-chord windows in the corpus with no row here turned out to be **two-chord vamps
+written across four bars** - `I V I V`, `I IV I IV`, `i bVII i bVII` - a shape the table already used
+(the Mixolydian oscillation, the Lydian pairs) and had simply never written down for the commonest
+degrees. That is the useful kind of gap for a corpus to find: not an exotic progression nobody
+thought of, but the obvious one everybody plays and nobody puts on a list. `I IV bVII IV`,
+`i bVII bVI bIII`, `I vi IV I` and `I V II V` came from the same list.
+
+**And the analysis had a bug of exactly the kind this whole section exists to guard against.** The
+"what is missing" filter carried a `shape[0] == 0` test meaning "starts on the tonic". It was correct
+while a shape was a tuple of ints, and silently wrong the moment chord quality went in and each
+element became `(interval, is_minor)`: the comparison could never be true, so the section reported
+**nothing missing** - a filter that had quietly become "print an empty list", and which would have
+been read as "the table has no gaps".
 
 **The Section axis is now answerable.** §3 wanted Intro / Verse / Chorus / Bridge and left it
 unbuilt rather than invent it; Chordonomicon annotates it, and the script reports the commonest

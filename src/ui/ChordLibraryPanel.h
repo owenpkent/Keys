@@ -23,7 +23,7 @@ namespace keys
 // band one state rather than two that drift - set a mood here and Fill on the Pads bar obeys it.
 //
 // **Paged, not scrolled.** Twelve rows and a `<` `>` pair, exactly the shape the pad strip already
-// uses. 348 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at: a
+// uses. 355 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at: a
 // scrollbar thumb is a small target that has to be dragged, and a wheel is not a mouse gesture
 // Keys may require. A page is two clicks and every target on it is full size.
 //
@@ -111,7 +111,7 @@ private:
     std::vector<const chordlib::Entry*> matches;
     juce::String lastSignature; // the filter the matches were built for
     // What the pads ended on last tick, so "Follows" notices a drop it did not make. Cached
-    // because the alternative is re-filtering 348 rows ten times a second to learn nothing.
+    // because the alternative is re-filtering 355 rows ten times a second to learn nothing.
     juce::String lastPadsProgression;
 
     int page = 0;

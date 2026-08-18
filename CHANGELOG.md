@@ -14,7 +14,7 @@ The source that shipped first is genuinely useful, but a filter is not browsing:
 came *out* of the table and never what is *in* it. This shows you the table.
 
 **Paged, not scrolled.** Twelve rows and a `<` `>` pair, exactly the shape the pad strip already
-uses. 348 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at - a
+uses. 355 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at - a
 scrollbar thumb is a small target that has to be dragged, and a wheel is not a gesture Keys may
 require. A page is two clicks and every target on it is full size.
 

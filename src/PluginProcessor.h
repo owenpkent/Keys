@@ -707,7 +707,7 @@ public:
         bool sustainProposesChords = false;
 
         // The library rows you starred, by name (2026-08-18). Scaler's browser has this and Keys'
-        // had no answer for it at all: 348 rows, and no way to keep the six you actually use.
+        // had no answer for it at all: 355 rows, and no way to keep the six you actually use.
         // Names rather than indices, the same call `ChordPad::progression` makes and for the same
         // reason - `chordlib::table()` is free to be inserted into, and an index would take that
         // freedom away. A name that no longer matches any row is simply ignored on load, which is

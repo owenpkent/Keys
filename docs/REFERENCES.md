@@ -268,12 +268,12 @@ corpus is where its data would come from, since that one annotates structural pa
 - **Scaler's chord sets.** Progressions are not copyrightable, but a *curated list* of them can
   attract thin copyright in its selection and arrangement, and in the EU a database right can
   attach to the compiler's effort. A word list is a taxonomy; a thousand-row library is a
-  compilation. Keys' 348 rows are authored from the named canon, modal vamps, jazz turnarounds and
+  compilation. Keys' 355 rows are authored from the named canon, modal vamps, jazz turnarounds and
   film-score mediants - **written out from music-theory knowledge, not measured against a corpus**
   (see `ChordLibrary.h`'s own note, which says so at the point somebody would extend the table).
   Nothing is copied across, and that line is worth restating whenever the table grows.
 - **The count.** Scaler ships 1,000+ chord sets, a large share of them artist and genre packs whose
-  value is the name attached. 348 tagged on three axes beats a flat 1,000, and 348 is a number that
+  value is the name attached. 355 tagged on three axes beats a flat 1,000, and 355 is a number that
   can be verified by ear and by theory one row at a time - which a scraped 5,000 cannot, and which
   is the whole reason `tests/ChordLibraryTests.cpp` can spellcheck the table on every build.
 - **Common vs Uncommon Progressions as a *collection*.** A crude popularity axis, and Keys already
@@ -282,7 +282,7 @@ corpus is where its data would come from, since that one annotates structural pa
 
 **On the table, and cheap:**
 
-- **Favourites** (p43, the heart button beside a chord set). Keys' library window has 348 rows and
+- **Favourites** (p43, the heart button beside a chord set). Keys' library window has 355 rows and
   no way to keep the six you actually use. It is the one thing in Scaler's browser that Keys'
   has no answer for at all, and it would need a `LayoutState` set of row names and one more
   column on the row.

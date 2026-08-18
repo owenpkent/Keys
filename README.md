@@ -57,7 +57,7 @@ flat and dim, so the shape of the window reads before you have read a caption.
 | **Right-click** a key (optional) | Toggle a hold on that one note, the Octavium accelerator. A key this keyboard is already holding lets go, so a walk along a ringing chord takes it apart a note at a time without lifting Sustain. Any other key latches on, and a plain **left click** releases that |
 | **Knob row** | Eight rotary CC knobs, the bottom row of the Controls section, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing. The live card shows any chord Keys is holding - the keys, a pad, a chord you handed to an arp line - so any of them can be captured |
-| **Fill** / **Regen** / **Generator** / **Library** | Four chips at the right of the Pads bar. Fill writes chords to the *empty* pads and never overwrites; Regen re-rolls the pads that already have one, except the locked ones; Generator opens the rest of it in a window of its own; Library opens 348 named progressions you browse by mood, genre and what they do |
+| **Fill** / **Regen** / **Generator** / **Library** | Four chips at the right of the Pads bar. Fill writes chords to the *empty* pads and never overwrites; Regen re-rolls the pads that already have one, except the locked ones; Generator opens the rest of it in a window of its own; Library opens 355 named progressions you browse by mood, genre and what they do |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
@@ -91,7 +91,7 @@ extends that to the live card and the arp holds, **Strum** rakes a chord's notes
 | **Rate** | A dial in the arp's control band, with a **Sync** / **Hz** switch beside it. Sync detents through eleven tempo-synced divisions, 16 bars down to 1/64; Hz free-runs from 0.031 to 32 Hz, which is exactly the span those divisions cover at 120 bpm, and never reads the transport. The readout is the step length as a plain fraction of a bar, modifiers and all — `1/8`, `1/12` in threes, `1/10` in fives, `1/5` for a quarter in fives, `1/8.` dotted. **Dot**, **Tuplet** and **Anchor** grey out in Hz, since there is no beat left to subdivide or bar to pin to. **Tuplet** is a list — Straight, Triplet, 5-tuplet, 7-tuplet, 9-tuplet — fitting that many steps into the space the power of two below it would take, so five quintuplet 1/16s fill exactly the span four straight ones do. A pair of steppers beside the dial walks every value one at a time, so nothing here needs a drag |
 | **Quantize** | On the Arp bar, shared by both lines. Off fires a chord the instant you click it; anything else (1/16 up to 2 bars) holds the click until the next boundary, so a card can only ever land on the grid. Ableton's Quantization, for the arp. It never delays the keys you play |
 | **Hold off** | On the Arp bar. Lets go of the chord every line is holding and stops every Chain — one button on purpose, since a per-line release would leave the other one droning behind a folded bar. Greyed out when there is nothing to let go of. Clicking the lit pad restrikes the chord instead, so this is the way to stop a hold outright |
-| **Fill** / **Regen** / **Generator** / **Library** | The chord generator, at the right of the Pads bar, with **Key**, **Mode** and **Scale Compliance** as combo boxes beside them. **Generator** opens a window holding every setting it has, plus a 4x4 tray for auditioning candidate chords, with its own Fill / Regen / Clear, before they touch a pad. **Library** opens the chord library: 348 named progressions you browse by mood, genre and what they do. See below |
+| **Fill** / **Regen** / **Generator** / **Library** | The chord generator, at the right of the Pads bar, with **Key**, **Mode** and **Scale Compliance** as combo boxes beside them. **Generator** opens a window holding every setting it has, plus a 4x4 tray for auditioning candidate chords, with its own Fill / Regen / Clear, before they touch a pad. **Library** opens the chord library: 355 named progressions you browse by mood, genre and what they do. See below |
 | **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
 | **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it, so unfold from the chevron first |
 | **All Off** | Stop everything |
@@ -198,7 +198,7 @@ always-visible buttons rather than a dropdown of two:
   minor). The one source with no settings of its own - Key, Mode and Octave are enough.
 - **Planing**: slides one chord shape up or down, diatonically or (**Diatonic** off)
   chromatically, the constant-structure sound.
-- **Library**: 348 named progressions, picked by **Mood**, **Genre** and **Does what** (Loop,
+- **Library**: 355 named progressions, picked by **Mood**, **Genre** and **Does what** (Loop,
   Cadence, Turnaround, Vamp, Lift, Descent, Turn, Open). The only source that looks a sequence up
   rather than computing one. See below.
 
@@ -224,7 +224,7 @@ makes a row of cards read as a progression.
 
 ## The chord library
 
-348 named progressions, tagged three ways: **mood** (46 words, from Atmospheric to Uplifting),
+355 named progressions, tagged three ways: **mood** (46 words, from Atmospheric to Uplifting),
 **genre** (41, from 80s to World Music), and **what the progression does** - Loop, Cadence,
 Turnaround, Vamp, Lift, Descent, Turn, Open. That third axis is the one that turns browsing into
 composing: "sad" is forty candidates and no way to choose, where "sad, and it loops" and "sad, and
