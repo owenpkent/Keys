@@ -174,11 +174,19 @@ namespace keys::chordlib
 
     // ---- The table -------------------------------------------------------------------------
     //
-    // Sources, all of them theory or open data rather than another product's curated list: the
-    // named canon (Wikipedia's list of chord progressions and Open Music Theory's classical
-    // schemas), modal vamps derived per mode and curated by ear, jazz turnarounds, and the
-    // statistical ranking in Hooktheory's published Trends and the open Chordonomicon dataset,
-    // which say which progressions are worth a row and which genre and section they belong to.
+    // **Where these came from, stated plainly, because it is the first thing anyone extending the
+    // table needs to know.** They were *written out* - from the named canon that is common musical
+    // knowledge (the axis, doo-wop, ii-V-I, the Andalusian cadence, Pachelbel, rhythm changes, the
+    // twelve-bar blues and its variants, the classical schemas), from modal vamps derived per mode
+    // against `ScaleModes.h` and picked by ear, and from the loops that characterise each genre.
+    // Sixty of them are `MarkovData.h`'s, which was itself hand-authored for Keys.
+    //
+    // **No corpus was queried and no statistics were computed.** Hooktheory's Trends tool and the
+    // open Chordonomicon dataset are both real and both relevant - they are cited in
+    // `docs/CHORD_LIBRARY.md` as what a *future* pass should rank and section-tag against - but
+    // nothing here was measured against either. Which progressions are common is an authoring
+    // judgement, and it should be read as one. If a row looks wrong, it is wrong because somebody
+    // thought it was right, not because a dataset said so.
     //
     // Order is not load-bearing anywhere - nothing stores an index into this table, and the two
     // pickers filter rather than index - so entries may be inserted as well as appended. That is
@@ -264,8 +272,9 @@ namespace keys::chordlib
 
             // ==========================================================================
             // Songwriting: pop, rock, ballads, country, folk, 80s, synthwave, punk.
-            // The bulk of the table, because it is the bulk of what gets written. Ranked
-            // by Hooktheory's published Trends probabilities rather than by taste.
+            // The bulk of the table, because it is the bulk of what gets written. Ordered
+            // roughly by how often each turns up, which is an authoring judgement rather than
+            // a measurement - see the table's own note above.
             // ==========================================================================
             { "Three chords (I-IV-V)", "I IV V", Function::cadence, kIonian,
               { "Happy", "Confident", "Fun" }, { "Rock", "Folk", "Country" } },

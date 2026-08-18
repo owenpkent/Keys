@@ -188,9 +188,11 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   on Scaler's own mood list give the game away, since Inconclusive and Resolved are not emotions.
   **A word list is a taxonomy, not a compilation.** Progressions are not copyrightable; a curated
   *list* of them can attract thin copyright in its selection and arrangement. So the content is
-  authored here from the named canon, modal vamps, jazz turnarounds and film-score mediants, ranked
-  and section-tagged against Hooktheory's published Trends and the open Chordonomicon corpus.
-  **Nothing is copied from another product's curated library.**
+  authored here from the named canon, modal vamps, jazz turnarounds and film-score mediants -
+  **written out from music-theory knowledge, with no corpus queried and no statistics computed**,
+  which `ChordLibrary.h` says at the point somebody would extend the table. Sixty rows are
+  `MarkovData.h`'s, itself hand-authored for Keys. **Nothing is copied from another product's
+  curated library.**
   **Stored as roman numerals**, in the grammar `ChordMarkov.h` already parses, so one row serves
   twelve keys and the storage format is the notation the cards print in their corner. Six suffixes
   were **appended** to `suffixTable()` to make that possible (`m7b5`, `mM7`, `m6`, `madd9`, `M9`,

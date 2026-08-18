@@ -260,8 +260,8 @@ meant.
 Section roles are not metadata in Scaler either: **Scenes** are an *arrangement* container -
 *"sections that can be freely arranged, duplicated, and triggered ... building verses, choruses,
 or bridges"* - rather than a tag on a progression. So the Section idea in
-`docs/CHORD_LIBRARY.md` §7 is not borrowed from here; it comes from the Chordonomicon corpus,
-which annotates structural parts.
+`docs/CHORD_LIBRARY.md` §7 is not borrowed from here; it is unbuilt, and the open Chordonomicon
+corpus is where its data would come from, since that one annotates structural parts.
 
 **Deliberately not taken:**
 
@@ -269,9 +269,9 @@ which annotates structural parts.
   attract thin copyright in its selection and arrangement, and in the EU a database right can
   attach to the compiler's effort. A word list is a taxonomy; a thousand-row library is a
   compilation. Keys' 348 rows are authored from the named canon, modal vamps, jazz turnarounds and
-  film-score mediants, ranked and section-tagged against Hooktheory's published Trends statistics
-  and the open **Chordonomicon** dataset (666,000 songs, released as an open benchmark). Nothing is
-  copied across, and the line is worth restating whenever the table grows.
+  film-score mediants - **written out from music-theory knowledge, not measured against a corpus**
+  (see `ChordLibrary.h`'s own note, which says so at the point somebody would extend the table).
+  Nothing is copied across, and that line is worth restating whenever the table grows.
 - **The count.** Scaler ships 1,000+ chord sets, a large share of them artist and genre packs whose
   value is the name attached. 348 tagged on three axes beats a flat 1,000, and 348 is a number that
   can be verified by ear and by theory one row at a time - which a scraped 5,000 cannot, and which

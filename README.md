@@ -241,8 +241,9 @@ there ever overwrites a chord you already have.
 
 The content is the named canon (Pachelbel, the Andalusian cadence, the backdoor, rhythm changes,
 folia, the classical schemas), modal vamps per mode, jazz turnarounds, film-score chromatic
-mediants, and the loops that carry each electronic genre - ranked against published corpus
-statistics rather than taste. [docs/CHORD_LIBRARY.md](docs/CHORD_LIBRARY.md) has the design and where every row came from.
+mediants, and the loops that carry each electronic genre - all of it written out from music
+theory rather than measured off a corpus, which is a judgement call and is documented as one.
+[docs/CHORD_LIBRARY.md](docs/CHORD_LIBRARY.md) has the design and where every row came from.
 
 ## Driving it with Claude
 

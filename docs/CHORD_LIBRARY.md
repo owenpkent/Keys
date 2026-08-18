@@ -95,10 +95,10 @@ between them. **"Sad, and it loops"** and **"sad, and it ends"** are different r
 composer has one of them in mind. It is also the axis that makes the strip of twelve pads mean
 something - a Loop for the verse, a Lift into the chorus, a Turnaround back.
 
-**Section** - an optional fourth tag (Intro / Verse / Chorus / Bridge / Outro), free where the
-source names one. Chordonomicon annotates structural parts, so this comes with the statistical
-evidence rather than needing invention. It is what makes "what could follow this" answerable, and
-it is the tie into the thing Keys already has half-built (see §7).
+**Section** - an optional fourth tag (Intro / Verse / Chorus / Bridge / Outro). **Unbuilt.** The
+open **Chordonomicon** dataset annotates structural parts, so this is the one axis that could be
+derived from evidence rather than invented - which is exactly why it has not been added by hand.
+See §9.
 
 ---
 
@@ -149,10 +149,8 @@ Sourced from:
   (Prinner, Romanesca, Monte, Fonte, Ponte) that Open Music Theory sets out in a pop context.
 - **Modal vamps and cadences** per mode, which Keys can generate the skeleton of from
   `ScaleModes.h` and then have curated by hand.
-- **Statistical ranking, not statistical content.** Hooktheory's published Trends probabilities and
-  the open **Chordonomicon** dataset (666,000 songs, chord progressions with structural-part and
-  genre annotation, released as an open benchmark) say *which* progressions are worth a row and
-  *which genre and section* they belong to. They rank and tag a canon that is authored here.
+- **Authoring judgement, and it should be read as one.** Which progressions are worth a row, and
+  which genre each belongs to, was decided by whoever wrote the table. **No corpus was queried.**
 - **Film-score harmony** as its own seam, since Owen is scoring a film with this: chromatic
   mediants, planing, and the neo-Riemannian pairs that Keys' PLR source already generates but
   cannot name. The library is where a nameless PLR move becomes "that Hollywood third".
@@ -183,8 +181,8 @@ what goes after what, and Keys already has three quarters of that machinery buil
 - `ChordSuggest.h` and the **Could follow** button beside the reference card,
 - the **reference card** itself, the fixed point a tray is generated against,
 - the Markov chain, which is literally a model of what follows what,
-- and, now, `Section` tags from Chordonomicon saying which progressions are verses and which are
-  choruses.
+- and, if Section tags are ever derived from Chordonomicon, which progressions are verses and
+  which are choruses.
 
 So the library's relational layer is not new construction, it is joining those up: pick a
 progression, and **Could follow** stops meaning "a chord that could follow this chord" and starts

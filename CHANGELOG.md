@@ -68,8 +68,10 @@ already used that Scaler has no equivalent for: Haunting, Nostalgic, Rebellious,
 A word list is a taxonomy rather than a compilation. What is authored here is the *content* - the
 named canon (Pachelbel, Andalusian, backdoor, rhythm changes, folia, the classical schemas), modal
 vamps per mode, jazz turnarounds, film-score chromatic mediants, and the loops that carry each
-electronic genre - ranked and section-tagged against Hooktheory's published Trends and the open
-Chordonomicon corpus. None of it is copied from another product's curated list.
+electronic genre. **Written out from music-theory knowledge, not measured against a corpus** -
+`ChordLibrary.h` says so at the point somebody would extend the table, and sixty of the rows are
+`MarkovData.h`'s, itself hand-authored for Keys. None of it is copied from another product's
+curated list.
 
 **Stored as roman numerals**, in the grammar `ChordMarkov.h` already parses, so one row serves
 twelve keys and the storage format is the same notation the cards now print in their corner. Six
