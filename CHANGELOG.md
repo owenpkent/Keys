@@ -5,6 +5,49 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: every chord card says which degree of the key it is
+
+Owen: "I want the progression number to show up in the generator on the chord pad." A filled card
+now carries its roman numeral in the top-left corner - on the chord pads and on the generator's
+audition tray both, because those are the same card read at two moments, the chord you kept and
+the chord you are trying, and a numeral that sat differently on each would say they were different
+things.
+
+"Am" tells you what a chord *is*; "vi" tells you what it *does*. The second is what makes a row of
+cards read as a progression rather than as four unrelated names, which is the whole reason to have
+sixteen of them side by side.
+
+Top-left is the one corner a card had left: the lock dot owns the top-right and the arp line's
+letter the bottom-right. Micro caps at the note list's own size, 0.62 alpha - the numeral is
+provenance, not the chord, and the name is still what you read.
+
+`src/ChordNumerals.h` is the one implementation, moved out of `SourceViz.cpp` where it was private
+to the Progressions diagram. A copy per surface would have re-armed a trap that file has already
+paid for: the diagram drew sixteen `?` for a build because it read `numeral`, which only the Markov
+source writes, where every other source writes `degree`. Resolution order is numeral, then degree,
+then a degree derived from the chord's root against the current key.
+
+It answers **empty** rather than `?` when none of the three resolve, and the two surfaces part
+there on purpose. A card draws nothing at all: a `?` in the corner of every hand-captured pad is
+noise standing in for information, and a chord borrowed from outside the key saying nothing is
+itself the useful answer. The diagram keeps its `?`, because it draws one chip per step and an
+empty chip would read as a gap in the walk rather than as a chord whose degree is outside the key.
+
+Pads resolve against the `genRoot` / `genMode` **parameters** rather than through
+`ChordGenMenu::genRoot()`, which answers with whatever an unticked Key or Mode rolled for the last
+generation. A pad outlives that roll, and the key you are composing in is the one on the Pads bar.
+
+### Added: docs/CHORD_LIBRARY.md, the design for a browsable progression library
+
+Unbuilt; the design and its paper trail, in the shape `docs/ACID_DESIGN.md` uses. The finding that
+shapes it: Keys already ships **88 mood-tagged progressions** in `src/MarkovData.h`, and no user
+can look at one. They exist only to be shredded into Markov bigrams, so asking for "Nostalgic"
+returns a statistical blur of the nostalgic progressions rather than the progressions themselves.
+Seven more sit in `ChordSources.h` with no tags at all. The proposal joins those up on three axes -
+mood and genre from Scaler's own vocabulary, plus **function** (Loop, Cadence, Turnaround, Vamp,
+Lift, Descent, Turn, Open), which is the axis that separates "sad, and it loops" from "sad, and it
+ends" and the one Scaler does not really have.
+
 ### Fixed: half of the arp VEL knob's outer ring did nothing
 
 Caught in review of the merge that folded Humanize Velocity into VEL's ring. `RangeKnob` took

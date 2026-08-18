@@ -1,5 +1,6 @@
 #include "ChordPads.h"
 #include "../ChordGen.h"
+#include "../ChordNumerals.h"
 #include "../ChordSuggest.h"
 #include "../Chords.h"
 #include "KeysLookAndFeel.h"
@@ -431,6 +432,18 @@ void ChordPads::paint(juce::Graphics& g)
             g.setFont(skin::micro(9.0f));
             g.drawText(noteListText(pad.notes), noteLine.toNearestInt(),
                        juce::Justification::centred, true);
+
+            // The degree of the key this pad holds (2026-08-18, Owen's ask). Read against the
+            // *parameter* rather than through ChordGenMenu's genRoot/genMode, which answer with
+            // whatever an unticked Key or Mode rolled for the last generation: a pad outlives that
+            // roll, and the key you are composing in is the one on the Pads bar. So a strip of
+            // twelve reads I - V - vi - IV across the page, and a chord borrowed from outside the
+            // key simply draws nothing, which is itself the useful answer.
+            const int keyRoot = (int) processor.apvts.getRawParameterValue("genRoot")->load();
+            const int keyMode = juce::jlimit(0, modes::count() - 1,
+                                             (int) processor.apvts.getRawParameterValue("genMode")->load());
+            skin::numeralBadge(g, b, numerals::forChord(pad.numeral, pad.degree, pad.rootPc,
+                                                        keyRoot, keyMode), ink);
         }
 
         // The pad currently feeding the arp. A ring rather than the "active" fill, because

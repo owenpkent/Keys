@@ -140,6 +140,18 @@ namespace skin
 
     // A lit metal ball thumb: drop shadow, top-lit sphere, specular dot.
     void ballThumb(juce::Graphics&, juce::Point<float> centre, float radius);
+
+    // The roman numeral in a chord card's top-left corner (2026-08-18). Shared by the chord pads
+    // and the generator's tray because the two are the same card read at two moments - the chord
+    // you kept and the chord you are trying - and a numeral that sits differently on each would
+    // say they were different things. Draws nothing at all for an empty string, which is what
+    // `numerals::forChord` answers for a chord whose degree it cannot resolve.
+    //
+    // Top-left is the one corner a card has left: the lock dot owns the top-right and the arp
+    // line's letter the bottom-right. `ink` is the card's own text colour, so a lit card gets the
+    // dark-on-accent ink the rest of its text does.
+    void numeralBadge(juce::Graphics&, juce::Rectangle<float> card, const juce::String& numeral,
+                      juce::Colour ink);
 } // namespace skin
 
 class KeysLookAndFeel : public okstudio::theme::LookAndFeel

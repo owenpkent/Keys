@@ -1,5 +1,6 @@
 #include "ChordTray.h"
 #include "../ChordGen.h"
+#include "../ChordNumerals.h"
 #include "../Chords.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
@@ -268,6 +269,13 @@ void ChordTray::paint(juce::Graphics& g)
             g.setFont(skin::micro(9.0f));
             g.drawText(noteListText(c.notes), noteLine.toNearestInt(),
                        juce::Justification::centred, true);
+
+            // Which degree of the key this candidate is (2026-08-18, Owen's ask). The tray is
+            // where you compare sixteen chords at once, and "Am" tells you what it is where "vi"
+            // tells you what it *does* - the second is what makes a row of four cards read as a
+            // progression rather than as four unrelated names.
+            skin::numeralBadge(g, b, numerals::forChord(c.numeral, c.degree, c.rootPc,
+                                                        gen.genRoot(), gen.genMode()), ink);
         }
     }
 }

@@ -105,6 +105,14 @@ public:
     bool pageHasEmptyPads() const { return ! emptyPadsOnPage().empty(); }
     bool pageHasRegeneratablePads() const { return ! regeneratablePadsOnPage().empty(); }
 
+    // The key the *current* trayful was generated in, which is not always what the parameter says:
+    // an unticked Key or Mode means the generator rolled one for this generation, and every chord
+    // in the tray is in that rolled key. Public since 2026-08-18 so a tray card can label itself
+    // with the degree it actually is. The chord pads deliberately read the parameters instead - a
+    // pad outlives the roll that made it, and the key you are composing in is the one on the bar.
+    int genRoot() const;
+    int genMode() const;
+
     // The generator's items on a pad's card menu, and what to do with a choice from them.
     // ChordPads builds the menu and calls these in that order on the message thread:
     // addPadMenuItems, then handlePadMenuChoice with what was picked. The first rebuilds the
@@ -156,8 +164,6 @@ private:
     // a page flip the way every other index here does.
     std::vector<int> emptyPadsOnPage() const;
     std::vector<int> regeneratablePadsOnPage() const;
-    int genRoot() const;
-    int genMode() const;
 
     // Every source except Markov produces `chordgen::Chord`, so one call covers Algorithmic and
     // the five that arrived on 2026-08-01, and every caller that used to reach straight for

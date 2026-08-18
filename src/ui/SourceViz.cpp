@@ -1,5 +1,6 @@
 #include "SourceViz.h"
 #include "KeysLookAndFeel.h"
+#include "../ChordNumerals.h"
 #include <okstudio/Scales.h>
 #include <algorithm>
 #include <cmath>
@@ -157,55 +158,21 @@ namespace
         return "?";
     }
 
-    // The roman numeral for one scale degree, cased by the quality the current mode gives it -
-    // upper for major/augmented, lower for minor/diminished, with a small degree sign appended on
-    // diminished. Shared by Progressions' pre-generation fallback (every degree of the key) and
-    // by a real chord that only carries `degree`, never `numeral` - see progressionNumeral below.
-    // The degree sign is built from its code point rather than typed as a literal, so the file
-    // stays plain ASCII regardless of the compiler's source encoding.
+    // Both numeral helpers moved to ChordNumerals.h on 2026-08-18, when the generator's tray
+    // cards and the chord pads started showing the same numeral this diagram does. What is left
+    // here is the one thing that is this diagram's own: a "?" when nothing resolves. The shared
+    // helper answers empty in that case, because a card in a corner has no room to say "I looked
+    // and could not tell" and a "?" on every hand-captured pad is noise; a diagram drawing one
+    // chip per step has a chip to fill either way, and an empty chip would read as a gap in the
+    // walk rather than as a chord whose degree is genuinely outside the key.
     juce::String romanForDegree(int degree, int modeIdx)
     {
-        static const char* upper[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
-        static const char* lower[] = { "i", "ii", "iii", "iv", "v", "vi", "vii" };
-        const auto& qualities = modes::get(modeIdx).qualities;
-        if (degree < 0 || degree >= (int) qualities.size())
-            return {};
-        const auto q = qualities[(size_t) degree];
-        const bool major = q == modes::Quality::major || q == modes::Quality::augmented;
-        juce::String s = major ? upper[degree % 7] : lower[degree % 7];
-        if (q == modes::Quality::diminished)
-            s += juce::String::charToString((juce::juce_wchar) 0x00B0);
-        return s;
+        return numerals::forDegree(degree, modeIdx);
     }
 
-    // Progressions never sets `ChordPad::numeral` - that field is Markov-only (see the struct
-    // comment in PluginProcessor.h; ChordGenMenu::generateCandidates only ever writes it inside
-    // the Markov branch). Every other source, Progressions included, writes `degree` instead
-    // (ChordSources.h's progressions() sets it via detail::degreeOf), so that is where the roman
-    // numeral has to come from. Order: the numeral itself, if a chord somehow carries one; else
-    // the degree it was generated from; else a degree worked out from its root against the
-    // current key, for a chord that reached this diagram with neither (a hand-edited pad); "?"
-    // only when none of the three resolve - which also covers a genuinely non-diatonic root (a
-    // secondary dominant, a borrowed chord) that no degree lookup will ever answer.
     juce::String progressionNumeral(const KeysProcessor::ChordPad& c, int keyRootPc, int modeIdx)
     {
-        if (c.numeral.isNotEmpty())
-            return c.numeral;
-
-        int degree = c.degree;
-        if (degree < 0 && c.rootPc >= 0)
-        {
-            const auto& intervals = modes::get(modeIdx).intervals;
-            const int iv = ((c.rootPc - keyRootPc) % 12 + 12) % 12;
-            for (int i = 0; i < (int) intervals.size(); ++i)
-                if (intervals[(size_t) i] == iv)
-                {
-                    degree = i;
-                    break;
-                }
-        }
-
-        const auto s = romanForDegree(degree, modeIdx);
+        const auto s = numerals::forChord(c.numeral, c.degree, c.rootPc, keyRootPc, modeIdx);
         return s.isNotEmpty() ? s : juce::String("?");
     }
 } // namespace
