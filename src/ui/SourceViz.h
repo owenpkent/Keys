@@ -31,10 +31,14 @@ public:
     // All pushed in from the panel; this class asks nothing and owns nothing. Each setter is a
     // no-op below repaint() when the value hasn't actually changed, since the panel polls all
     // three from a 15 Hz timer whether or not anything moved.
-    void setSource(int sourceIndex); // 0..6, the genSource order (Algorithmic, Markov, Circle
+    void setSource(int sourceIndex); // 0..7, the genSource order (Algorithmic, Markov, Circle
                                       // of Fifths, Neo-Riemannian, Progressions, Negative
-                                      // Harmony, Planing - see ChordGenPanel::sourceButtons)
+                                      // Harmony, Planing, Library - see ChordGenPanel::sourceButtons)
     void setKey(int rootPc, int mode);
+
+    // The Library row the last generation landed on, for that source's caption. Pushed in like
+    // everything else here: this class asks nothing and owns nothing.
+    void setLibraryEntry(const juce::String&);
     void setChords(const std::vector<KeysProcessor::ChordPad>& chords); // what the tray holds
 
     // What the panel should give it. 160 px (up from 112, 2026-08-17): a 9 px micro-caps caption
@@ -46,7 +50,11 @@ public:
 private:
     void paintCircleOfFifths(juce::Graphics&, juce::Rectangle<float>) const;
     void paintNeoRiemannian(juce::Graphics&, juce::Rectangle<float>) const;
-    void paintProgressions(juce::Graphics&, juce::Rectangle<float>) const;
+    // Shared by Progressions and Library: both are "a written-down sequence, repeated", and the
+    // only thing that differs is what to call it. Passing the caption in is cheaper and safer than
+    // a second copy of the repeat-period search and the numeral strip that reads it.
+    void paintProgressions(juce::Graphics&, juce::Rectangle<float>, const char* title,
+                           const juce::String& subtitle) const;
     void paintNegativeHarmony(juce::Graphics&, juce::Rectangle<float>) const;
     void paintPlaning(juce::Graphics&, juce::Rectangle<float>) const;
     void paintAlgorithmic(juce::Graphics&, juce::Rectangle<float>) const;
@@ -56,6 +64,7 @@ private:
     int rootPc = 0;
     int mode = 0;
     std::vector<KeysProcessor::ChordPad> chords;
+    juce::String libraryEntry;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SourceViz)
 };

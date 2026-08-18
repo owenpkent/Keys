@@ -1,4 +1,5 @@
 #include "ChordGenMenu.h"
+#include "../ChordLibrary.h"
 #include "../ChordMarkov.h"
 #include "../ChordSources.h"
 #include "../ChordSuggest.h"
@@ -322,6 +323,71 @@ std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
             out = sources::planing(root, mode, oct, count,
                                    a.getRawParameterValue("genPlaningDiatonic")->load() > 0.5f, rng);
             break;
+        case 7:
+        {
+            // Library. The one source that looks a sequence up rather than computing one.
+            //
+            // A filter that matches nothing falls back to the whole table rather than returning
+            // empty. Empty would leave the tray blank with nothing on screen to say why, and the
+            // pickers only ever offer words that have rows behind them (`moodsInUse`), so the only
+            // way to get here is a *combination* nobody has written yet - "Funky" and "Classical",
+            // say - where the honest answer is "not that, but here is something". The band's
+            // readout says "no match - any progression" so the fallback is never silent.
+            auto rows = chordlib::find(libMood, libGenre, libFunction);
+            if (rows.empty())
+                rows = chordlib::find({}, {}, -1);
+
+            // **Whole progressions laid end to end, not one looped.** The first cut looped a single
+            // row to fill `count`, which `sources::progressions` does with its own templates, and
+            // it is wrong here for a reason that only showed up on screen: the library holds vamps,
+            // and rolling the two-chord "Minimal one-chord" filled all sixteen tray cards with the
+            // same Cm9. Sixteen copies of one chord is not a trayful of candidates, it is one
+            // candidate wasting fifteen cells - and the tray exists to let you compare.
+            //
+            // Laid end to end instead, a "Vamp" filter gives you eight different vamps to audition
+            // and a "12-Bar Blues" fills the tray on its own, which is the same rule producing the
+            // right answer at both extremes. A row is never cut short: the last one may overrun
+            // `count` and is trimmed, but it is the only one that can be, so every progression
+            // before it arrives whole.
+            //
+            // Shuffled rather than taken in table order, because a filtered list is an offer and
+            // walking it from the top would make Regen inert under a narrow filter.
+            int taken = 0;
+            libLastEntry.clear();
+            for (int guard = 0; ! rows.empty() && (int) out.size() < count && guard < count + 8; ++guard)
+            {
+                const size_t pick = (size_t) rng.nextInt((int) rows.size());
+                const auto* e = rows[pick];
+                // Degrees resolved against **the row's own mode**, not the session's. Every other
+                // source passes `mode` here, and it is right for them: they generate *in* that
+                // mode, so a chord that falls outside it genuinely is a borrowing. A library row
+                // arrives with a mode of its own, and a minor row read against a major session
+                // resolves nothing - the tray came back with half its cards labelled "?", which is
+                // the numeral saying "outside the key" about a progression that is perfectly
+                // in *its* key. `degree` is stored on the pad, so this is also what the strip
+                // shows later, and "i bVII bVI" is worth more there than four question marks.
+                //
+                // Nothing about the pitches moves either way: the numerals are absolute, which is
+                // exactly what `ChordLibraryTests.cpp` pins.
+                const auto chords = chordlib::chordsFor(*e, root, e->mode, oct);
+                if (chords.empty())
+                    break;
+                out.insert(out.end(), chords.begin(), chords.end());
+                if (taken == 0)
+                    libLastEntry = e->name;
+                ++taken;
+
+                // Drawn without replacement while there is anything left to draw, so a shortlist of
+                // six gives six different progressions before any of them comes round again.
+                rows.erase(rows.begin() + (long) pick);
+                if (rows.empty())
+                    rows = chordlib::find(libMood, libGenre, libFunction);
+            }
+            if (taken > 1)
+                libLastEntry << " +" << juce::String(taken - 1);
+            out.resize((size_t) juce::jlimit(0, (int) out.size(), count));
+            break;
+        }
         default:
             // Algorithmic, and the fallback for a source index this build does not know - a
             // session from a later version could carry one, and the weighted pool is the safe

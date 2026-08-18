@@ -137,17 +137,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
 
     // Second chord-generator source: Markov walks bundled progression tables instead of
     // weighting a candidate pool. Its settings only apply when the source is Markov.
-    // Seven brains now, and the five after Markov are `sources::` (2026-08-01). They are
-    // **appended**, which is what makes this safe for a session saved before them: APVTS stores a
-    // choice parameter's denormalised value, so a saved 1 is still Markov whatever the list grew
-    // to. Never reorder or insert into this list - that is what would silently reopen a session
-    // on the wrong brain, and there is no migration hook for it the way `migrateRateMode` covers
-    // the arp's clock.
+    // Eight brains now: the five after Markov are `sources::` (2026-08-01) and **Library** is
+    // `chordlib::` (2026-08-18). They are **appended**, which is what makes this safe for a
+    // session saved before them: APVTS stores a choice parameter's denormalised value, so a saved
+    // 1 is still Markov whatever the list grew to. Never reorder or insert into this list - that
+    // is what would silently reopen a session on the wrong brain, and there is no migration hook
+    // for it the way `migrateRateMode` covers the arp's clock.
+    //
+    // Library is the odd one out and worth naming as such: the other seven *compute* a chord
+    // sequence, and it looks one up. Everything downstream is the same either way, because they
+    // all hand back `chordgen::Chord`.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genSource", 1 }, "Generator Source",
                                                       juce::StringArray { "Algorithmic", "Markov",
                                                                           "Circle of Fifths", "Neo-Riemannian",
                                                                           "Progressions", "Negative Harmony",
-                                                                          "Planing" },
+                                                                          "Planing", "Library" },
                                                       0));
 
     // Per-source settings. Each is dead under every source but its own, and the window hides it

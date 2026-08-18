@@ -193,7 +193,13 @@ int SourceViz::preferredHeight() { return 160; }
 
 void SourceViz::setSource(int sourceIndex)
 {
-    sourceIndex = juce::jlimit(0, 6, sourceIndex);
+    // **Floor only.** This clamped to 6 until 2026-08-18, which is the same trap
+    // `ChordGenMenu::sourceIndex` documents and had already been fixed for: an upper clamp here
+    // has to be a literal count of the sources, so appending an eighth brain - the one growth the
+    // parameter's own comment calls safe - arrived silently drawing Planing's diagram under
+    // Library's chords, with nothing to say so. A source this class does not know falls through
+    // `paint`'s `default:` and draws an empty well, which is the honest answer.
+    sourceIndex = juce::jmax(0, sourceIndex);
     if (sourceIndex == source)
         return;
     source = sourceIndex;
@@ -208,6 +214,14 @@ void SourceViz::setKey(int newRootPc, int newMode)
         return;
     rootPc = newRootPc;
     mode = newMode;
+    repaint();
+}
+
+void SourceViz::setLibraryEntry(const juce::String& name)
+{
+    if (name == libraryEntry)
+        return;
+    libraryEntry = name;
     repaint();
 }
 
@@ -246,9 +260,17 @@ void SourceViz::paint(juce::Graphics& g)
         case 1: paintMarkov(g, area); break;
         case 2: paintCircleOfFifths(g, area); break;
         case 3: paintNeoRiemannian(g, area); break;
-        case 4: paintProgressions(g, area); break;
+        case 4: paintProgressions(g, area, "PROGRESSIONS", "THE TEMPLATE, REPEATED"); break;
         case 5: paintNegativeHarmony(g, area); break;
         case 6: paintPlaning(g, area); break;
+        // Library draws the Progressions diagram, because a library row *is* a progression and the
+        // numeral strip with its repeat bracket is exactly the right picture for one. The subtitle
+        // carries the row's own name, which is the one thing the two sources do not share.
+        case 7:
+            paintProgressions(g, area, "LIBRARY",
+                              libraryEntry.isEmpty() ? juce::String("PICK A MOOD AND FILL")
+                                                     : libraryEntry.toUpperCase());
+            break;
         default: break;
     }
 }
@@ -490,9 +512,10 @@ void SourceViz::paintNeoRiemannian(juce::Graphics& g, juce::Rectangle<float> are
 // along with it: with every numeral reading "?", every card compared equal, so the period search
 // below found period 1 immediately and drew one degenerate bracket per card. Real numerals give
 // the search real data to find the actual template length with.
-void SourceViz::paintProgressions(juce::Graphics& g, juce::Rectangle<float> area) const
+void SourceViz::paintProgressions(juce::Graphics& g, juce::Rectangle<float> area, const char* title,
+                                  const juce::String& subtitle) const
 {
-    caption(g, area, "PROGRESSIONS", "THE TEMPLATE, REPEATED");
+    caption(g, area, title, subtitle);
     auto diagram = area.withTrimmedTop(kCaptionH);
     const auto accent = skin::accentOf(*this);
     const auto steps = filledOf(chords);

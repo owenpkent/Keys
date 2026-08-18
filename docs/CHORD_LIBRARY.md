@@ -4,9 +4,13 @@ Proposed 2026-08-18 (Owen: "collections or books of chords and progressions, thi
 together ... an outstanding library that makes it easy to compose, maybe organized by emotion or
 something. Scaler, the other VST has done a great job of this").
 
-Unbuilt. This is the design and the paper trail behind it, in the shape `docs/ACID_DESIGN.md`
-uses: what exists, what the references do, what Keys should take and what it should deliberately
-not.
+**Built the same day, as far as the first half of §9's first question.** `src/ChordLibrary.h`
+holds **271 tagged progressions**; **Library** is appended to the generator's Source list; its
+band carries Mood / Genre / Does-what and a readout of what the filter matched. Still ahead: the
+browsable window, folding `MarkovData.h`'s 88 rows in, and the relational layer in §7.
+
+The design and the paper trail behind it follow, in the shape `docs/ACID_DESIGN.md` uses: what
+exists, what the references do, what Keys took and what it deliberately did not.
 
 ---
 
@@ -213,6 +217,40 @@ gap in the walk.
 Pads read the **`genRoot`/`genMode` parameters** rather than `ChordGenMenu::genRoot()`, which
 answers with whatever an unticked Key or Mode rolled for the last generation. A pad outlives that
 roll; the key you are composing in is the one on the Pads bar.
+
+---
+
+## 8b. What the built source actually does
+
+**Whole progressions laid end to end, not one looped.** The first cut looped a single row to fill
+the sixteen tray cells, which is what `sources::progressions` does with its own templates, and it
+was wrong here for a reason that only appeared on screen: the library holds *vamps*, and rolling
+the two-chord "Minimal one-chord" filled all sixteen cards with the same Cm9. Sixteen copies of one
+chord is not a trayful of candidates, it is one candidate wasting fifteen cells, and the tray
+exists so you can compare.
+
+Laid end to end, a **Vamp** filter gives you eight different vamps to audition and a **12-Bar
+Blues** fills the tray on its own - the same rule producing the right answer at both extremes. Rows
+are drawn without replacement and shuffled, so a shortlist of six yields six different progressions
+before any repeats, and Regen is never inert under a narrow filter. Only the last row may be cut
+short by the cell count; every one before it arrives whole.
+
+**A filter that matches nothing falls back to the whole table**, and says so ("no match - any
+progression"). The two word pickers only ever offer tags with rows behind them, so the only way to
+reach that state is a *combination* nobody has written yet - "Funky" and "Classical" - where the
+honest answer is "not that, but here is something" rather than a blank tray with no explanation.
+
+**Degrees resolve against the row's own mode, not the session's.** Every other source passes the
+session mode there, and it is right for them: they generate *in* that mode, so a chord outside it
+genuinely is a borrowing. A library row arrives with a mode of its own, and a minor row read
+against a major session resolves nothing - the first build came back with half the tray labelled
+`?` about a progression perfectly in *its* key. `degree` is stored on the pad, so this is what the
+strip shows afterwards too, and `i bVII bVI` is worth more there than four question marks. No
+pitch moves either way; the numerals are absolute, which the tests pin.
+
+The library's chords go through `fitVoicing`, `applyMajorMinorBias` and `applyVoiceLeading` like
+every other source's, so Notes, Inversions, Octave, Lean and Smooth Voicing all still apply. That
+is what "everything downstream is the same either way" buys.
 
 ---
 

@@ -5,6 +5,79 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Library, a source that looks a progression up instead of computing one
+
+Owen: "an outstanding library that makes it easy to compose, maybe organized by emotion or
+something. Scaler, the other VST has done a great job of this."
+
+**271 named progressions** in `src/ChordLibrary.h`, tagged on three axes, reached as an eighth
+entry on the generator's Source row. Its band is Mood / Genre / Does-what plus a readout of how
+many rows the filter matches and which one the last generation landed on.
+
+**Function is the third axis and it is the point.** Scaler tags on two, mood and genre, and "sad"
+returns forty candidates with no way to choose between them. **Loop, Cadence, Turnaround, Vamp,
+Lift, Descent, Turn, Open** is the axis that separates "sad, and it loops" from "sad, and it ends",
+and every composer has one of those two in mind rather than the other. Two words on Scaler's own
+mood list give the game away: Inconclusive and Resolved are not emotions, they are what the
+progression *does*.
+
+Mood and Genre are Scaler 3's own vocabularies, from Owen's copy of them, plus five words Keys
+already used that Scaler has no equivalent for: Haunting, Nostalgic, Rebellious, Spiritual, Tender.
+A word list is a taxonomy rather than a compilation. What is authored here is the *content* - the
+named canon (Pachelbel, Andalusian, backdoor, rhythm changes, folia, the classical schemas), modal
+vamps per mode, jazz turnarounds, film-score chromatic mediants, and the loops that carry each
+electronic genre - ranked and section-tagged against Hooktheory's published Trends and the open
+Chordonomicon corpus. None of it is copied from another product's curated list.
+
+**Stored as roman numerals**, in the grammar `ChordMarkov.h` already parses, so one row serves
+twelve keys and the storage format is the same notation the cards now print in their corner. Six
+suffixes were appended to make that possible - `m7b5`, `mM7`, `m6`, `madd9`, `M9`, `m9` - and
+half-diminished is the one whose absence was not cosmetic: it is the ii of every minor ii-V, so
+the most common cadence in the minor key could not be written down at all. Appending there is
+safe, unlike almost everywhere else in Keys, because that table is looked up by exact string and
+nothing stores an index into it. `genSource` itself is appended to, which is the usual rule.
+
+**The table validates itself on every build**, and that is not ceremony: a hand-typed numeral has
+two silent failure modes - a token that will not parse is skipped at play time so the progression
+just comes out short, and a misspelt tag is a row the picker that wanted it can never find.
+`tests/ChordLibraryTests.cpp` walks every row for both, checks each one transposes identically
+into all twelve keys, and refuses two rows that hold the same chords **and** share a genre. That
+last rule caught fourteen redundancies while the table was being written, and forced a canonical
+spelling: a plain triad is `i`, never `im`, because both parse to the same chord and a duplicate
+wearing two spellings is invisible to a string compare.
+
+Reusing one progression under two names is still correct and deliberate - the same four chords are
+how you find it from the Disco end and from the Neo Soul end - so the rule is genre overlap, not a
+flat ban.
+
+**A generation lays whole progressions end to end rather than looping one.** The first cut looped
+a single row to fill the sixteen tray cells, the way `sources::progressions` does with its own
+templates, and it was wrong here for a reason only visible on screen: the library holds vamps, and
+rolling the two-chord "Minimal one-chord" filled every card with the same Cm9. Laid end to end, a
+**Vamp** filter gives eight different vamps to compare and a **12-Bar Blues** fills the tray on its
+own - the same rule right at both ends. Rows are drawn shuffled and without replacement, so Regen
+is never inert under a narrow filter.
+
+**Degrees resolve against the row's own mode, not the session's**, which is the opposite of what
+every other source wants and the right answer here: a minor row read against a major session
+resolves nothing, and the tray came back with half its cards labelled `?` about a progression
+perfectly in *its* own key. `degree` is stored on the pad, so this is what the strip shows
+afterwards too.
+
+The three picks are not parameters, the shape Markov's Mood and Start already use, and for one
+reason of their own: a choice parameter's item list is append-only forever once a session stores
+an index into it, and locking a 46-word mood vocabulary into the layout before the library has
+settled would mean never being able to drop or rename one. The cost is that a pick does not
+survive reopening the session, exactly as a Markov mood does not.
+
+### Fixed: the generator's diagram drew the wrong source for anything past Planing
+
+`SourceViz::setSource` clamped its argument to 6. That is the same trap `ChordGenMenu::sourceIndex`
+documents and had already been fixed for - an upper clamp has to be a literal count of the sources,
+so appending an eighth brain, the one growth the parameter's own comment calls safe, arrived
+silently drawing Planing's diagram under Library's chords with nothing on screen to say so. Floor
+only now; a source the diagram does not know falls through to an empty well, which is honest.
+
 ### Added: every chord card says which degree of the key it is
 
 Owen: "I want the progression number to show up in the generator on the chord pad." A filled card
@@ -37,16 +110,18 @@ Pads resolve against the `genRoot` / `genMode` **parameters** rather than throug
 `ChordGenMenu::genRoot()`, which answers with whatever an unticked Key or Mode rolled for the last
 generation. A pad outlives that roll, and the key you are composing in is the one on the Pads bar.
 
-### Added: docs/CHORD_LIBRARY.md, the design for a browsable progression library
+### Added: docs/CHORD_LIBRARY.md, the design behind the library
 
-Unbuilt; the design and its paper trail, in the shape `docs/ACID_DESIGN.md` uses. The finding that
-shapes it: Keys already ships **88 mood-tagged progressions** in `src/MarkovData.h`, and no user
-can look at one. They exist only to be shredded into Markov bigrams, so asking for "Nostalgic"
-returns a statistical blur of the nostalgic progressions rather than the progressions themselves.
-Seven more sit in `ChordSources.h` with no tags at all. The proposal joins those up on three axes -
-mood and genre from Scaler's own vocabulary, plus **function** (Loop, Cadence, Turnaround, Vamp,
-Lift, Descent, Turn, Open), which is the axis that separates "sad, and it loops" from "sad, and it
-ends" and the one Scaler does not really have.
+The design and its paper trail, in the shape `docs/ACID_DESIGN.md` uses, including the two parts
+not built yet - a browsable Library window, and the relational layer that would make **Could
+follow** mean "a progression that could follow this progression" rather than "a chord that could
+follow this chord".
+
+The finding that shapes all of it: Keys already ships **88 mood-tagged progressions** in
+`src/MarkovData.h`, and no user can look at one. They exist only to be shredded into Markov
+bigrams, so asking for "Nostalgic" returns a statistical blur of the nostalgic progressions rather
+than the progressions themselves. Seven more sit in `ChordSources.h` with no tags at all. Folding
+those 88 into the new table is the next job.
 
 ### Fixed: half of the arp VEL knob's outer ring did nothing
 

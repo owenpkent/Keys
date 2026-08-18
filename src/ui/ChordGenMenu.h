@@ -151,6 +151,27 @@ public:
     void setStartChoice(juce::String s) { start = std::move(s); }
     int chainMode() const; // which Markov corpus is up, for the Mood list that belongs to it
 
+    // The Library source's three picks, and they are not parameters either, for the same reason
+    // Mood and Start are not plus one of their own: the vocabularies are 46 moods and 41 genres,
+    // and a choice parameter's item list is **append-only forever** the moment a session stores
+    // an index into it (see genSource's own comment). Locking a 46-word list into the parameter
+    // layout before the library has settled would mean never being able to drop or rename a mood.
+    // The cost, and it is real: a library pick does not survive reopening the session, exactly as
+    // a Markov mood does not. Worth revisiting once the vocabulary stops moving.
+    //
+    // Empty string is "Any" on the two word axes - the same sentinel `markov::buildTable` uses -
+    // and -1 is "Any" on the function, which is an enum with no room for an empty value.
+    const juce::String& libraryMood() const { return libMood; }
+    const juce::String& libraryGenre() const { return libGenre; }
+    int libraryFunction() const { return libFunction; }
+    void setLibraryMood(juce::String s) { libMood = std::move(s); }
+    void setLibraryGenre(juce::String s) { libGenre = std::move(s); }
+    void setLibraryFunction(int f) { libFunction = f; }
+
+    // The entry the last Library generation actually used, for the window's diagram to name. The
+    // pick is three filters, not a row, so which row came back is a thing only generation knows.
+    const juce::String& lastLibraryEntry() const { return libLastEntry; }
+
 private:
     void timerCallback() override;
 
@@ -223,6 +244,14 @@ private:
     // progression you are generating right now, not session state, and empty means Any. They
     // live here rather than in the window's combo boxes so they outlive it being closed.
     juce::String mood, start;
+
+    // The Library source's picks, transient for the same reason and one more (see the accessors).
+    // -1 on the function is "Any"; empty is "Any" on the two word axes. `libLastEntry` is not a
+    // pick at all, it is the name of the row the last generation landed on - the window's diagram
+    // has no other way to know, since the pick is a filter and the choice among what it matched
+    // happens inside generateChords.
+    juce::String libMood, libGenre, libLastEntry;
+    int libFunction = -1;
 
     // The suggestion list the last card menu offered, and where a pick would land. Held
     // between addPadMenuItems and handlePadMenuChoice, which ChordPads calls in that order.

@@ -104,7 +104,11 @@ juce::String ChordTray::settingsSignature() const
     for (const char* id : ids)
         if (auto* v = processor.apvts.getRawParameterValue(id))
             sig << juce::String(v->load(), 3) << '|';
-    sig << gen.moodChoice() << '|' << gen.startChoice();
+    // The Library's three picks belong here for the same reason Markov's two do: they are not
+    // parameters, so the `ids` sweep above cannot see them, and a tray generated under "Sad" is
+    // just as stale after you switch to "Triumphant" as it is after you move a slider.
+    sig << gen.moodChoice() << '|' << gen.startChoice() << '|' << gen.libraryMood() << '|'
+        << gen.libraryGenre() << '|' << gen.libraryFunction();
     return sig;
 }
 

@@ -97,7 +97,13 @@ private:
     void buildControls();
     void refreshMoodItems(); // the Mood list belongs to the chain that is up
 
-    // The seven sets of controls that share row B, and the one place that decides which is on
+    // What the Library band's three filters currently match: how many rows, and which one the
+    // last generation landed on. Two answers in one line because they answer two halves of the
+    // same worry - "is my filter too narrow" and "what did I just get" - and a band with one row
+    // of controls has room for one readout.
+    void refreshLibraryResult();
+
+    // The eight sets of controls that share row B, and the one place that decides which is on
     // screen. They are laid into the *same* rect and exactly one may be visible: the bands are
     // different widths, so a hidden-but-visible one paints out past the edge of the one that is
     // up. Two of these until 2026-08-01, when the five `sources::` brains arrived; the shape did
@@ -176,7 +182,7 @@ private:
     // behind the first, which for a setting whose whole point is comparison is the wrong shape.
     // Laid out by `sourceButtons()`, and each one writes `genSource` through the same parameter
     // the Pads bar reads, so there is still exactly one source of truth.
-    std::array<juce::TextButton, 7> sourceButtons;
+    std::array<juce::TextButton, 8> sourceButtons;
     juce::Label sourceLabel;
     std::array<juce::TextButton, 2> circleDirButtons; // same treatment, same reason
     void setSourceParam(int index);
@@ -198,6 +204,15 @@ private:
     juce::Label plrPLabel, plrLLabel, plrRLabel;
     juce::ToggleButton planingDiatonicButton { "Diatonic" };
     juce::Label planingLabel;
+
+    // The Library band (2026-08-18): three filters over the named-progression table, and the row
+    // that reads back which entry the last generation actually landed on. Not attachments - the
+    // three picks live on ChordGenMenu, the shape Markov's Mood and Start already use and for the
+    // same reason plus one of their own (see `ChordGenMenu::libraryMood`'s comment). The readout
+    // is a Label rather than a fourth combo on purpose: the pick is a filter, so "which row" is an
+    // *answer*, and offering it as a control would invite you to set it and then be overruled.
+    juce::ComboBox libMoodBox, libGenreBox, libFunctionBox;
+    juce::Label libMoodLabel, libGenreLabel, libFunctionLabel, libResultLabel;
 
     // Brightness sweeps the seven diatonic modes from Lydian to Locrian, which is what "a slider
     // between major and minor" turns out to mean once you look at what is between them (Owen,
@@ -243,6 +258,11 @@ private:
 
     int lastChainMode = -1; // rebuild the Mood list when the chain mode changes
     int shownSource = -1;   // last band applied, to relayout on a source change
+    // The Library row generation last landed on, cached so the 10 Hz tick repaints the readout on
+    // a change rather than every tick. Generation happens outside this window - Fill and Regen
+    // ride the tray's header, and the Pads bar has its own pair - so polling is the only way this
+    // band learns what it got.
+    juce::String lastLibraryEntry;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenPanel)
 };
