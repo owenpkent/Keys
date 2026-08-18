@@ -154,11 +154,21 @@ void PianoKeyboard::paint(juce::Graphics& g)
     // as their own gesture.
     enum class State { normal, active, held };
     const auto external = externallySounding();
-    const auto stateOf = [this, &external](int drawn) -> State
+    // Hold Visuals During Sustain (2026-08-17, the settings menu; Octavium's own item,
+    // wired for the first time - it was never connected to anything there). On, the
+    // default and today's behaviour unconditionally before this flag existed, a pedal-held
+    // key paints exactly like a latched one. Off, a key caught *only* by the pedal - not
+    // pressed, not latched - rests visually while it keeps sounding, so the eye can tell
+    // "held by the pedal" from "down right now" even though both are true. This is paint
+    // only: `sustained` itself, and therefore what is actually sounding, is untouched.
+    const bool holdSustainVisual = processor.layout.holdVisualsOnSustain;
+    const auto stateOf = [this, &external, holdSustainVisual](int drawn) -> State
     {
-        if (pressed.count(drawn))                           return State::active;
-        if (latched.count(drawn) || sustained.count(drawn)) return State::held;
-        if (external.count(drawn) > 0)                      return State::held;
+        if (pressed.count(drawn))  return State::active;
+        if (latched.count(drawn)) return State::held;
+        if (sustained.count(drawn))
+            return holdSustainVisual ? State::held : State::normal;
+        if (external.count(drawn) > 0) return State::held;
         return State::normal;
     };
     const auto vGrad = [](juce::Colour a, juce::Colour b, float top, float bot)

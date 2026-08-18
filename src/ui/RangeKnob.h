@@ -93,10 +93,36 @@ public:
 
     void setDirection(Direction d) { direction = d; repaint(); }
 
+    // The widest the span may open, in the face's own units. **Defaults to the face's own
+    // full travel**, which is the right answer whenever the ring is a span *of the face's
+    // value* - Keys' H.TIME, where knob and ring are both "how late, in the same unit", so
+    // the ring can in principle reach all the way down the face's travel.
+    //
+    // It is the wrong answer the moment the ring is an independent quantity with a range of
+    // its own, and Keys has one: the arp macro card's VEL knob is a bipolar trim (-100..100,
+    // 200 of travel) whose ring is Humanize Velocity (0..100). Left on the default, the drag
+    // was calibrated to 200 while the parameter it wrote stopped at 100 - so the top half of
+    // the satellite's travel did nothing, and the arc drawn from it fought the consumer's own
+    // refresh, which reads the clamped parameter back ten times a second. Set this from the
+    // ring's parameter and both halves of the gesture line up again.
+    //
+    // Non-positive means "follow the face", which is how a consumer asks for the default back.
+    void setSpanMax(double maxSpan)
+    {
+        spanMaxOverride = maxSpan;
+        setSpan(span); // re-clamp: narrowing this under the current span has to bite now
+    }
+    // What the span is actually clamped and calibrated against, the override resolved.
+    double spanMax() const
+    {
+        return spanMaxOverride > 0.0 ? spanMaxOverride
+                                     : juce::jmax(0.0, knob.getMaximum() - knob.getMinimum());
+    }
+
     // How far the range reaches back from the face's value, in the face's own units.
     void setSpan(double v)
     {
-        const auto clamped = juce::jlimit(0.0, knob.getMaximum() - knob.getMinimum(), v);
+        const auto clamped = juce::jlimit(0.0, spanMax(), v);
         if (std::abs(clamped - span) < 1.0e-9)
             return;
         span = clamped;
@@ -381,11 +407,15 @@ private:
     {
         if (! dragging)
             return;
-        const auto full = knob.getMaximum() - knob.getMinimum();
+        // The span's own maximum, not the face's - see setSpanMax. They are the same number
+        // for a ring that spans its own knob and different for one that carries a parameter of
+        // its own, and using the face's for both the rate and the clamp is what left half of
+        // VEL's ring inert.
+        const auto full = spanMax();
         if (full <= 0.0)
             return;
         // Up is wider, and the same 300 px of travel per full sweep okstudio::RotaryKnob asks
-        // for, so the ring and the face move at the same rate under the same hand.
+        // for, so the ring and the face each cross their own range under the same hand.
         const double wanted = juce::jlimit(0.0, full,
                                            dragStartSpan
                                                + (double) (dragStartY - (float) e.getScreenPosition().y)
@@ -416,6 +446,8 @@ private:
     juce::Point<float> satCentre;
     float satSize = 10.0f;
     double span = 0.0;
+    // <= 0 means "follow the face's own travel"; see setSpanMax for the case that needs it.
+    double spanMaxOverride = -1.0;
     Direction direction = Direction::below;
     int ring = 8;
     int readout = 15;

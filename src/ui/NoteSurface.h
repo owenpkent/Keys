@@ -69,8 +69,32 @@ public:
     void setPolyphony(int cap); // 0 = unlimited, else steal oldest beyond `cap` voices
     void panic();               // stop everything
 
+    // Let go of everything this surface is *holding* - latched toggles and pedal captures -
+    // and nothing else. Deliberately not panic(): it leaves a key currently under the mouse
+    // alone, and it does not fire the blanket allNotesOff, which would kill the very chord the
+    // caller is about to play.
+    //
+    // This is the keybed's half of Exclusive (2026-08-16, Owen: "sustained or latched notes
+    // aren't cleared when pad played"). `stopAllChordPads` chokes every chord source the
+    // *processor* owns, and `latched` / `sustained` are the one it cannot: they live here, on
+    // the message thread, and the processor only ever saw the note-ons they produced. So the
+    // choke has to call outward, through KeysProcessor::releaseKeybedHolds.
+    void releaseHolds();
+
     // The MIDI notes currently sounding (post resolution), sorted, for chord capture.
     std::vector<int> soundingOutputNotes() const;
+
+    // The notes this surface is *offering as a chord*: what the live card names and what an
+    // "Edit on keyboard" pad is written from. Not the same question as what is sounding
+    // (2026-08-16, Owen: "sustain shouldn't propose chords").
+    //
+    // With `includeSustained` false, a key held **only** by the pedal is left out - it still
+    // sounds, it just stops counting as part of a chord you are proposing. The split matters
+    // because this is a mouse-only instrument: Latch is how you *build* a chord one click at a
+    // time, and Sustain is how you *play* one, so a pedal full of passing notes was quietly
+    // rewriting the card and any pad being edited. A key that is also pressed or latched still
+    // counts, because then something other than the pedal is holding it.
+    std::vector<int> proposedChordNotes(bool includeSustained) const;
 
     // Chord-pad recall: latch the drawn keys that produce these output notes, so a
     // stored chord comes back onto the surface for editing (Octavium's drag-to-edit).

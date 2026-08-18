@@ -178,6 +178,38 @@ void NoteSurface::setPolyphony(int cap)
     refresh(); // lowering the cap steals oldest voices immediately
 }
 
+std::vector<int> NoteSurface::proposedChordNotes(bool includeSustained) const
+{
+    if (includeSustained)
+        return soundingOutputNotes();
+
+    std::vector<int> out;
+    for (const auto& kv : sounding)
+    {
+        const int drawn = kv.first;
+        // Only the pedal is holding this one, so it sounds but does not propose. Anything
+        // pressed or latched still counts, whether or not the pedal also caught it.
+        if (sustained.count(drawn) > 0 && pressed.count(drawn) == 0 && latched.count(drawn) == 0)
+            continue;
+        out.push_back(kv.second);
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+void NoteSurface::releaseHolds()
+{
+    if (latched.empty() && sustained.empty())
+        return;
+    latched.clear();
+    sustained.clear();
+    // `pressed` is untouched on purpose: a key under the mouse right now is a gesture in
+    // progress, not something the surface is holding for you. refresh() diffs the union and
+    // emits exactly the note-offs the two cleared sets were responsible for.
+    refresh();
+}
+
 void NoteSurface::panic()
 {
     pressed.clear();
@@ -387,7 +419,14 @@ void NoteSurface::mouseDrag(const juce::MouseEvent& e)
         // Glide: monophonic, the previous key releases as the next sounds. With the
         // pedal down the note you glide off is caught and keeps ringing, so a sustained
         // run leaves a trail (matching Octavium, where every note sounds until sustain off).
-        if (sustain)
+        //
+        // That trail is a *setting* since 2026-08-16 (`Sustained drag leaves a trail`, on the
+        // settings menu, default on so nothing about today changed). Owen asked for Octavium's
+        // "Drag while sustain" and the honest answer is that Keys already glides unconditionally
+        // - always has - so the only thing left for a switch to decide is whether the run piles
+        // up behind you or stays monophonic. A menu item named for the gliding would have been a
+        // label describing something it cannot turn off.
+        if (sustain && processor.layout.dragWhileSustain)
             sustained.insert(dragDrawn);
         pressed.erase(dragDrawn);
         // Gliding back onto a key the pedal is holding strikes it again, exactly as

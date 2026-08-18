@@ -255,10 +255,61 @@ sounding and a drag can't land on the wrong pad. Sessions carry a `padsPerPage` 
 nowhere to go and is dropped, where the widening the re-base was written for never lost one.
 Build a chord on the
 keyboard (Sustain or right-click), drag the live card onto a pad to `setChordPad` the notes
-(named by `keys::chords::detect`), then play it beat-pad style: mouse-down calls
-`pressChordPad` (fire, honouring the `chordExclusive` choke) and mouse-up calls
-`releaseChordPad` (stop, unless Sustain is holding it — the editor releases held pad
-chords when the pedal lifts). Dropping a pad on the live card runs the other
+(named by `keys::chords::detect`), then play it beat-pad style:
+**What fills the live card is every chord source, not just the keybed** (2026-08-16). It read
+`NoteSurface::soundingOutputNotes()` plus `KeysProcessor::inputNotes()`, and the first of those
+answers only for keys clicked on the *surface itself* - so a chord fired from a pad, or held
+into an arp line, went straight through `KeysProcessor::noteOn`, lit the keybed (which reads
+`isNoteSounding`) and left the card empty. Two views of one chord disagreeing, and only the card
+is draggable, so `ChordPads::sourceIsDraggable` refused a gesture the user could see a reason
+for. `KeysProcessor::heldChordNotes()` is now merged in as well: it is the **read half of
+`stopAllChordPads`**, and that symmetry is the definition - what Exclusive can choke as "a
+chord" is what the card can show as one. The pads (`chordPadOn`), the live card's own gesture
+(`liveChordOn`), and each line's `arpHeldNotes`, the last of those ungated by `arpLineOn`
+because a line that is off still takes chords in. Deliberately not `isNoteSounding()`, which
+counts the arp's *output* and would rewrite the current chord as whichever step the arp is on -
+the distinction `keybedLit()` already draws for the keybed lights. Also not the generator's
+800 ms audition, which keeps its notes in `ChordGenMenu` and is a monitor rather than a hold.
+Sustain leaving those vectors populated is correct rather than a leak: the chord really is
+still ringing, and that is the mouse-only route to capturing a chord built one click at a time.
+**One chord, never the union.** It shipped as a union of every source for a few hours and was
+wrong on the plainest reading of its own name. `lastChordSource` holds the last tag to *fire* -
+written where a chord starts and never where one is released, since a source going quiet does not
+make an older one newer - and `soundingForTag()` maps a tag back to its notes, so `heldChordNotes()`
+returns the most recent source while it still sounds and otherwise scans for anything still
+holding one. `KeysEditor::timerCallback` repeats the same choice one level up, between that answer
+and the keybed, on which of the two last *changed*; the loser is used when the winner is empty, so
+releasing the keys over a sustained pad shows the pad instead of blanking the card.
+**Pads also choke pads unconditionally now**: `pressChordPad` stops every pad, not just the one
+being re-pressed, and `chordExclusive` decides only whether it reaches the *other* sources (the
+live card and the arp holds). Different instruments are worth stacking; two pads were not.
+
+**Exclusive reaches the keybed's own holds too** (2026-08-16, Owen: "sustained or latched notes
+aren't cleared when pad played"). `latched` and `sustained` live in `NoteSurface`, on the
+message thread, and the processor cannot reach them directly, so `stopAllChordPads()` used to
+choke every chord source it owns and leave a pedalled or latched key on the keybed ringing
+straight through a pad's chord. `KeysProcessor::releaseKeybedHolds` is a `std::function<void()>`
+the editor supplies, the one hook the processor calls outward through for the one chord source
+it does not own; it must be cleared in the editor's destructor, since it captures the editor and
+the processor outlives it. `pressLiveChord` passes `includeKeybed = false`: the chord it chokes
+*is* what the keybed is holding, so releasing the keybed there would unlatch the keys in the same
+breath as firing them.
+
+**A pad is hold-to-play** (2026-08-16, Owen: "when you click a pad cord, it should only play it
+for the amount of time that you're holding it, not a fixed value"). Pressing calls
+`pressChordPad` (fire, honouring the `chordExclusive` choke) and releasing calls
+`releaseChordPad` (stop, unless Sustain is holding it: the editor releases held pad
+chords when the pedal lifts). This reverses the 2026-08-02 change that made a card silent on
+press and auditioned it for a fixed `auditionMs` (800) on release, and the reason that change
+existed is worth keeping: it was never really about the noise a press made, it was that the
+press branch also handed the card to a running arp line and cleared `dragSource`, so a card
+could not be dragged in the one mode where dragging it onto a line is the point. That branch is
+gone outright now (a click never feeds a line), so sounding on press costs nothing this time.
+`ChordPads::mouseDrag` calls `endAudition()` before it starts carrying the card, so what a drag
+still costs is a blurt for the roughly six pixels it takes to register as a drag rather than a
+click; waiting out that threshold before sounding would put a lag on every note, the worse
+trade. **The generator's own audition tray keeps its fixed `auditionMs`** on purpose: a tray
+card is a candidate you are sampling, and a pad is an instrument you are playing. Dropping a pad on the live card runs the other
 direction: `onRecall` hands its notes to the active note surface, which latches the
 drawn keys that produce them (`recallOutputNotes`), so a stored chord comes back for
 editing. Playback reuses `noteOn`, so Humanize colours each tone,
@@ -268,6 +319,25 @@ note-ons into a strum: the two ends are a band, and each chord draws one spread 
 all rake at exactly the same speed. Detection (`Chords.h`) rotates a pitch-class set
 over 12 candidate roots and scores each against a template library — root mandatory,
 3rd and 5th omittable — so it is unit-testable with no UI.
+
+**Copy chord / Paste chord and Save chord as MIDI** join the card menu (2026-08-17, Owen: "need
+to be able to copy paste chords"). The clipboard (`ChordPads::clipboard`, an
+`std::optional<KeysProcessor::ChordPad>`) is UI-only, never the session tree: it needs no
+migration and simply outlives a page flip, which is most of what it is for, since the four
+pages are twelve pads apart, further than a drag reaches. `locked` is stripped at copy time
+rather than checked at paste time: a lock protects the *slot* a chord sits in, not the chord
+passing through it, and carrying the flag forward would silently lock whatever pad it later
+landed on. Paste goes through the same choke a drop does, `clearChordPad` then `setChordPad`
+inside one `UndoGesture`, so a pad left ringing by Sustain or feeding an arp line gives its old
+notes up before the pasted chord lands rather than stranding them. **Save chord as MIDI** writes
+one bar of the pad's notes (on together at tick zero, off together a bar later), at
+`baseVelocity01()`, the same level `pressChordPad` already plays that pad at, into
+`KeysProcessor::takeFolder()` and reveals the file in Explorer, because Ableton's own clipboard
+is internal to Live and will not accept a paste from the Windows one: a dropped `.mid` file is
+the only route a chord built here has into a Live clip, and a menu row cannot start a drag
+itself. It is its own small writer (`oneBarChordMidiFile`) rather than a call into
+`KeysProcessor::buildTakeMidiFile`, which plays back a *recorded performance* from
+`capturedTake` and has no note list in it to hand a chord through.
 
 A pad fires as one gesture, so there is no "oldest" voice within it: `pressChordPad`
 honours the Voices cap by dropping its highest notes and keeping the lowest, which is
@@ -456,7 +526,8 @@ The **macro view (All)** is the third choice on the bar - **All** is the one nav
 left there, and the only one that still hides with the section fold, since it is the only one
 still pointing at a panel that a fold takes off screen. It replaces the band and the step
 editor with one boxed card per line, side by side, each with a detented rate knob, its shape,
-eight knobs (Oct, Gate, Chance, Swing, Offset, Vel, H.Time, H.Vel) and, since the same pass, a
+seven knobs (Oct, Gate, Chance, Swing, Offset, Vel, H.Time - H.Vel folded into Vel's own ring
+2026-08-17, `docs/ARP_DESIGN.md` has the mechanism) and, since the same pass, a
 **Details** button beside Anchor - the card's own On toggle is gone the same way the bar's
 separate chip is, and an off line scrims the whole card body instead (`paintOverChildren`,
 skipping every control's `setEnabled` so a chord can still be dropped on it and a rate still
@@ -701,7 +772,23 @@ coming back:
   `consumed`, which suppresses the ordinary "drag off the strip clears the pad" behaviour for a
   pad and leaves a tray candidate in its cell, so reaching for the reference box can never
   delete the chord you were trying to keep. Left-click auditions it
-  the same as a tray card. Beside it, **Similar** and **Could follow** call
+  the same as a tray card.
+  **It is a drag *source* as well from 2026-08-16** (Owen: "I'm not able to drag the currently
+  held chord into the chord pad"). It had been drop-only, on the reading that **Similar** and
+  **Could follow** were route enough to the pads - but those two fill the *tray*, and neither
+  puts the reference chord itself anywhere, so the one card in the window that visibly held a
+  chord was the one card that could not give it up. Dragging it off commits it to a pad, the
+  same gesture and the same 6 px threshold `ChordTray::mouseDrag` uses. One difference, and it
+  is the card's whole reason for existing: it **copies**. The reference is the tray's fixed
+  point, so it keeps its chord however many pads it fills.
+  That is `chorddrag::Payload::From::refCard`, a kind of its own rather than a reuse of
+  `trayCell`. The two are identical to every target except on `consumed` - and `consumed` is
+  exactly what would have emptied the box the first time you dragged out of it, which is the
+  opposite of a fixed point. `ChordPads::dropCellFor` groups `refCard` with `trayCell` for the
+  locked-pad refusal (both replace a pad's chord outright); `ChordPads::itemDropped` sets
+  `consumed` only for `trayCell`. The card refuses its own kind in
+  `isInterestedInDragSource`, since it has nowhere to land but where it already is, and the
+  arp's targets take `padSlot` alone and so refuse it too, unchanged. Beside it, **Similar** and **Could follow** call
   `ChordGenMenu::similarTo` / `couldFollow` with the reference chord as seed and write a fresh
   trayful (`similarTo` keeps the root and varies the colour; `couldFollow` reuses
   `suggest::all`, the same table the pad card menu's own "Next: could follow" offers, rather
@@ -729,14 +816,34 @@ coming back:
 - **`SourceViz` draws a read-only diagram of the current source** under the button row
   that picks it (2026-08-01, Owen: "a visualization for the generation source so people
   understand what it's doing"), and highlights the actual walk that produced whatever is
-  in the tray on top of a static figure of the shape - a circle-of-fifths wheel;
-  the Neo-Riemannian P/L/R triangle with the transform sequence as chips; roman-numeral
-  strips for Progressions and Markov; a mirror-axis clock for Negative Harmony;
-  sliding note-stacks for Planing; degree columns for Algorithmic. It takes no input,
+  in the tray on top of a static figure of the shape. It takes no input,
   writes no parameter and generates nothing - `setInterceptsMouseClicks(false, false)` in
-  the constructor, same as every other click-through diagram in Keys - and its
-  `preferredHeight()` is 112 px. Fed from the panel's 15 Hz timer, since everything it
-  draws (source, key, the tray's contents) can move without the class being told.
+  the constructor, same as every other click-through diagram in Keys. Fed from the panel's
+  15 Hz timer, since everything it draws (source, key, the tray's contents) can move without
+  the class being told.
+  **Rebuilt 2026-08-16** (Owen: "reexamine the graphic visuals on the chord generator. They
+  don't make any sense"), and the diagnosis is worth keeping because it is a layout failure
+  that reads as seven separate ones. Each paint branch gave the *diagram* a square the height
+  of the 112 px box - ~80 px - and spent the remaining ~1500 px on a chip row restating the
+  chord names already on the sixteen tray cards a few hundred pixels below. Informative half
+  tiny, redundant half enormous. That geometry is what produced the two hard failures: the two
+  wheels computed `radius = jmax(20, wheelBox.getHeight()*0.5 - 16)` = **24 px** and then drew
+  twelve labels at `radius + 10`, which is ~17 px of arc for text needing ~18, so adjacent
+  labels overlapped; and the Neo-Riemannian triad was clipped by its own frame while its chips
+  read `P P P P L L L L` with no chord names attached.
+  The fix deleted every chip row, raised `preferredHeight()` to **160**, and gave each source
+  the full width plus a right-aligned one-line legend beside its caption. The two wheel sources
+  anchor the wheel left and use the freed width for a pill-and-arrow chain in the same visual
+  language as Markov and Neo-Riemannian - **the arrow carries the relationship**, which is the
+  whole distinction from the deleted chip rows: signed step distance round the circle for
+  Circle of Fifths (`-1` a fifth flat-ward, `-2` a leap), `root → mirror` pairs for Negative.
+  One trap worth recording: **Progressions must not read `ChordPad::numeral`**, which only the
+  Markov branch of `generateCandidates()` ever writes - every other source leaves it empty and
+  sets `degree` instead. Reading it directly drew sixteen `?`, and because every numeral then
+  compared equal the repeat-period search found period 1 and drew one degenerate bracket per
+  card. `progressionNumeral()` resolves numeral → `degree` → `degree` re-derived from `rootPc`
+  against the key, casing each by the mode's own per-degree quality from `ScaleModes.h` (which
+  is the reason that file exists rather than the kit's scale table), and only then `?`.
 - **A tray card's right-click menu** is a new entry on the closed owner-directed list in
   `CLAUDE.md` (Owen, 2026-08-01: "when you right click on a chord in there, I want you to have
   a whole bunch of options about trying to find similar ones or what might come next"):
@@ -1026,16 +1133,27 @@ compatibility: JUCE derives a VST3 parameter's id by hashing its string id, so s
 existing automation follow that id rather than the position, and all a position still decides
 is the order a host's generic list comes out in. `chordStrumMax` inserts mid-list regardless.
 `bpm` is the tempo anything timed in beats
-runs at when there is no transport to follow, which is every
-moment in the standalone and every stopped transport in a DAW, or whenever `bpmSync` is off; a
-host that is *playing* still wins while `bpmSync` is on (the default, and exactly what Keys did
-before the parameter existed), and the arp in Hz follows neither one. `bpm` replaced the arp's
+runs at when there is no host tempo to follow at all - in practice the standalone, which has no
+playhead to ask - or whenever `bpmSync` is off; a host that reports a tempo wins while `bpmSync`
+is on (the default), and the arp in Hz follows neither one. `bpm` replaced the arp's
 last-known-host-tempo fallback, which nothing in the standalone could ever reach and nobody
 anywhere could change; `bpmSync` is the opt-out from the host tempo that `bpm` alone never had.
 It is threaded into `ArpEngine::Params::followHost` and `KeysProcessor::advanceChainClock`
 (the progression chain reads the same escape hatch), and `migrateBpmSync` backfills a session
 saved before it to the default, the same shape `migrateRateMode` uses for the rate's own two
 appended parameters above.
+
+**A host that is *playing* only had to win until 2026-08-16** (Owen: "bpm isn't syncing with
+daw"). Both call sites used to gate the tempo itself on `clock.playing`, on top of `bpmSync`
+being on - so a host's own tempo, set up and sitting still before the transport ever rolled,
+was ignored, and Keys held its own `bpm` for exactly as long as you were setting up, which is
+when you look at it and notice the disagreement. `clock.playing` came back out of both tests;
+what still reads it is the *position* each of them advances alongside the tempo (`ppq`), because
+a position genuinely means nothing while the transport is stopped, only the tempo does not.
+`ArpEngine::HostClock` gained its own `hasBpm` flag for the tempo half of this rather than a
+`bpm > 0` test on the struct's existing field: `HostClock::bpm` defaults to **120, not 0**, so a
+`> 0` test would have read that default as a real host answer and, in the standalone especially,
+quietly stopped following the `bpm` parameter it was supposed to fall back to.
 
 A growing set is **registered but no longer read**, kept only so a session (and any host
 automation) saved with them loads without error: `surface`, `uiLayout`, `padChannel`,
@@ -1054,8 +1172,19 @@ exposing them to automation would only add ways to break a session. They live in
 Pitch wheels, knob positions, and the Markov Mood and
 Start pickers are transient performance controls with no parameters (they don't
 persist); Pitch glides back to centre over ~160 ms on release, and the wheels and
-knobs move by relative drag only (no click-jump), Octavium's deliberate feel. The
-editor binds controls
+knobs move by relative drag only (no click-jump), Octavium's deliberate feel.
+
+The settings menu (2026-08-17, reached from the gear on the Controls bar) is four more
+`LayoutState` fields for the same reason: `holdVisualsOnSustain`, `dragWhileSustain` and
+`sustainProposesChords` decide how the keybed paints and what the live card reads, never a
+note, and `uiScalePercent` persists a chosen zoom level that nothing yet reads back into the
+window (it was built and left unwired rather than shipped half-working: see CLAUDE.md). All
+four are absent-means-default on load, the same shape every other `LayoutState` flag already
+uses. `NoteSurface::proposedChordNotes(sustainProposesChords)` is the one function the live
+card and the keyboard-edit link now call instead of `soundingOutputNotes()`, so a note held
+only by the pedal stops rewriting the proposed chord when the flag is off (the default).
+
+The editor binds controls
 with attachments — except the two two-handle range sliders (velocity, strum), which take
 no attachment (two values each) and are synced to their pair of params by hand.
 A 30 Hz timer pushes derived

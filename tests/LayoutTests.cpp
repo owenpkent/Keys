@@ -154,24 +154,49 @@ public:
             expectEquals(found, 12, "all twelve lane tabs were laid out");
         }
 
-        beginTest("the panel is one height in every view and page");
+        beginTest("the panel is exactly as tall as the view showing");
         {
-            // The whole point of paging: Details used to grow the window by 372 px and All
-            // shrank it back. preferredHeight feeds the editor's idealHeight, so a constant
-            // here is what stops the window moving.
+            // This asserted the *opposite* until 2026-08-16 ("the panel is one height in every
+            // view and page"), and the reversal was Owen's call: "fix arp", after "there's some
+            // deadspace I want to remove at bottom". Paging solved the *size* problem on
+            // 2026-08-14 - the un-paged deep view was 612 px against the macro view's 240, so
+            // Details grew the window by 372 - and a shared constant then solved the *movement*.
+            // What the constant cost was invisible: it was a max over five sums, so every view
+            // under the tallest carried the difference as dead panel, 174 px of it on Slots.
+            //
+            // So the contract is now the other one, and it is worth a test because the failure
+            // mode is silent either way: nothing on screen says a panel is reserving room it
+            // never draws into.
             Host h;
             ArpPanel panel { h.processor };
             panel.setMacroView(true);
             const int macroH = panel.preferredHeight();
 
             panel.setMacroView(false);
+            std::map<ArpPanel::Page, int> pageH;
             for (const auto page : { ArpPanel::Page::setup, ArpPanel::Page::slots,
                                      ArpPanel::Page::steps })
             {
                 panel.setPage(page);
-                expectEquals(panel.preferredHeight(), macroH,
-                             "page " + juce::String((int) page) + " is the same height as the macro view");
+                pageH[page] = panel.preferredHeight();
+                expect(panel.preferredHeight() > 0,
+                       "page " + juce::String((int) page) + " has a height");
             }
+
+            // Slots is the short one - twelve cards and an action row, no band and no lane grid -
+            // so it is the page that proves nothing is padding itself out to the tallest.
+            expect(pageH[ArpPanel::Page::slots] < pageH[ArpPanel::Page::setup],
+                   "the Slots page is shorter than Setup rather than padded up to it ("
+                       + juce::String(pageH[ArpPanel::Page::slots]) + " vs "
+                       + juce::String(pageH[ArpPanel::Page::setup]) + ")");
+            expect(pageH[ArpPanel::Page::slots] < macroH,
+                   "the Slots page is shorter than the macro view too");
+
+            // Steps has nothing to draw outside Pattern shape, so it falls back to Setup's
+            // height rather than reserving the lane grid's - the one place a page's height
+            // depends on something other than which page it is.
+            expectEquals(pageH[ArpPanel::Page::steps], pageH[ArpPanel::Page::setup],
+                         "outside Pattern shape, Steps falls back to Setup's height");
         }
 
         beginTest("opening the panel repairs lanes that disagree about length");

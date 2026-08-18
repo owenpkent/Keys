@@ -176,7 +176,7 @@ bar.
 | Control | Type | What it does |
 |---------|------|--------------|
 | **Tempo** | number, `<` `>` steppers | 40–240 (Ableton style: drag the number up or down, or click the steppers). The tempo anything timed in beats runs at - today that is the arpeggiator alone - when there is no transport to follow, or when **Sync** (below) is off. Its own caption, **BPM**, sits to its left. On the *Controls bar*, so it stays reachable with that section folded. |
-| **Sync** | toggle | Tempo Sync (`bpmSync`, default on). On: a host that is *playing* always wins, matching Keys' behaviour before this toggle existed. Off: the arp and the progression chain stay on the Tempo field above even while the host rolls, the escape hatch for someone who wants Keys' own clock regardless of the DAW's transport. While Sync is on and a host tempo is actually live, the Tempo field shows the host's own number and greys out - the field and its `<` `>` steppers cannot change anything in that state. No effect in the standalone, which has no host transport to defer to, and no effect on the arp rate while it is in Hz, which never reads a transport at all. On the *Controls bar*, beside Tempo. |
+| **Sync** | toggle | Tempo Sync (`bpmSync`, default on). On: a host that reports a tempo always wins, whether or not its transport is rolling. (Until 2026-08-16 that also required the transport to be *playing* - Owen: "bpm isn't syncing with daw" - which meant a DAW sitting stopped at its own tempo disagreed with Keys for exactly as long as you were setting up.) Off: the arp and the progression chain stay on the Tempo field above even while the host rolls, the escape hatch for someone who wants Keys' own clock regardless of the DAW's transport. While Sync is on and a host tempo is actually live, the Tempo field shows the host's own number and greys out - the field and its `<` `>` steppers cannot change anything in that state. No effect in the standalone, which has no host transport to defer to, and no effect on the arp rate while it is in Hz, which never reads a transport at all. On the *Controls bar*, beside Tempo. |
 | **Root** | dropdown | Tonic used by Scale Lock (C … B). On the *Controls bar*. |
 | **Scale** | dropdown | Scale used by Scale Lock (Major, Natural/Harmonic/Melodic Minor, the modes, pentatonics, Blues, Whole Tone, Chromatic). On the *Controls bar*. |
 | **Scale Lock** | toggle | On: each played note snaps to the nearest note in (Root, Scale); out-of-scale keys are dimmed so you see the shape. You cannot play a wrong note. Its on-screen text is just "Lock" (the bar has no room for both words); the accessible name stays "Scale Lock". On the *Controls bar*. |
@@ -185,6 +185,7 @@ bar.
 | **Instrument** | chip → menu | Keys Host only (2026-08-02, Owen: "the load instrument section with all that should go in the controls submenu"): Load instrument…, Show/Hide instrument GUI, and Eject, with the loaded instrument's name as the chip's own caption. Invisible in plain Keys, which never wires it up - the chip and its gap simply aren't reserved. The one *elastic* control on this bar: it gets whatever width the tempo group and the Root…MIDI Ch group leave over. |
 | **Strum** | range knob, in the *pads strip* | Spread a chord's notes instead of playing them together, over a time drawn from a 0–200 ms band — so repeated stabs do not all rake at the same speed. The knob is the longest it ever takes, the ring reaches back from it, and the **lamp** beside it switches strum off and on (off is simply zero: the chord lands all at once). Applies to chord pads and the live chord card. |
 | **Dir** | `<` `>` by the caption | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. The caption reads the live one — `STRUM UP`, `STRUM DOWN`, `STRUM RAND` — and the arrows wrap. |
+| **Settings** | gear → menu | Immediately left of Theme, plugin-level like the swatch so it never hides with the Controls fold (2026-08-17, Owen: "we need a settings icon and menu. populate menu"). Four groups: **Hold visuals during sustain** (default on, and today's behaviour either way - off makes a key held only by the pedal rest visually while it keeps sounding, a paint-only difference); **Sustained drag leaves a trail** (default on, also today's behaviour - whether a glide made with the pedal down piles up every key it crosses or stays monophonic; the name is not Octavium's "Drag While Sustain", since Keys' drag has always glided and that toggle would have promised something no switch here can do); **Sustained notes propose chords** (default **off** - see the Chord pads section below); and **Check for updates** / **User guide** / **About**. |
 | **Theme** | swatch | Colours this instance (Cyan, Amber, Lime, Violet, Magenta, Orange, Rose, Ice), so you can tell it from Keys on your other tracks. Per instance, saved with the session. Sits on the *Controls bar*, so it stays reachable with that section folded. |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
@@ -197,7 +198,7 @@ button"):
 |---------|------|--------------|
 | **Size** | dropdown | 25 / 49 / 61 / 73 / 76 / 88 keys. The keyboard re-lays out immediately. |
 | **Octave** | `<` value `>` | Transpose the whole keyboard, -5..+5 octaves, reading "+2" / "0" / "-3". Click the arrows only - no slider, no scroll: a bar control is 24 px tall, and the arrows on a slider styled this way would stack to 12 px each, under the mouse-only floor. |
-| **Exclusive** | toggle | Playing a chord pad chokes the previously-playing pad, so only one pad chord sounds at a time. |
+| **Exclusive** | toggle | Whether playing a chord pad also chokes the **other** chord sources - the live card's own gesture, the chord held into each arp line, and the keybed's own latched or sustained notes (2026-08-16, Owen: "sustained or latched notes aren't cleared when pad played" - a pedalled or latched key used to keep ringing straight through a pad's chord). Pad-chokes-pad is unconditional and no longer needs this (2026-08-16); what is left here is the cross-instrument question, which is the one worth a switch. |
 | **Sustain** | toggle | On: notes keep sounding after you release the mouse, like a sustain pedal. With the pedal down a glide leaves a trail, and clicking a key that is already ringing **strikes it again** — the pedal never turns a key into a switch. Turn Sustain off (or click All Off) to release everything. |
 | **Latch** | toggle | On: clicking a key holds it, clicking it again releases it. This is the one to use to build a chord note by note, or to take one apart. Turning Latch off releases everything it was holding. |
 | **All Off** | button | Panic. Stops every note on every channel, and drops anything a strum still had queued. |
@@ -249,14 +250,42 @@ keyboard on each, and it went on 2026-07-31 once the note list fit under the nam
 
 1. **Build a chord.** Turn **Latch** on (or **Sustain**, or right-click) and click the notes you want.
    The card names the chord it hears (for example `Cm7`).
+   **The card shows any chord Keys is holding, not only one you played on the keys**
+   (2026-08-16, Owen: "I'm not able to drag the currently held chord into the chord pad"). A pad
+   you are holding, a chord you dropped on an arp line, notes arriving on the MIDI input: all of
+   them fill it, so all of them can be dragged onto a pad. It used to watch the keybed and the
+   MIDI input alone, which meant a chord fired from a pad lit the keys up and left the card
+   reading *hold a chord* - and an empty card cannot be dragged, so there was nothing to pick up.
+   What it deliberately does **not** follow is the arp's *output*: that is one note at a time,
+   and the card would chase the arpeggio instead of naming the chord feeding it. It shows **one**
+   chord - the last one you started that is still sounding - rather than everything ringing at
+   once, which would be a pile with no name and nothing to drag.
+   **Whether a note held only by the Sustain pedal counts toward that chord is a setting**
+   (Settings gear → **Sustained notes propose chords**, default **off**, 2026-08-16, Owen:
+   "sustain shouldn't propose chords ... should be a menu option"). With a single mouse you build
+   a chord one click at a time, and there are two ways to make a click stick, Latch and Sustain;
+   reading them the same way meant the pedal's own passing notes kept rewriting the live card
+   and any pad you had open for editing. Off, **Latch builds a chord and Sustain plays one** - a
+   pedalled note still sounds, it just is not proposed as part of what you would capture. Turn
+   it on for the older reading back.
 2. **Hear it as a chord.** Press and hold the card. Holding a chord sounds the keys you
    are holding; the card fires them as one chord, so you hear it strummed, humanized and
    capped by Voices — the way a pad plays it. Release to stop.
 3. **Capture it.** Drag the card onto a pad. The pad stores that chord, auto-labelled.
-   (A drag beats the press, so capturing never leaves a note ringing.)
-4. **Play it, beat-pad style.** Press and hold a filled pad to sound its chord; release
-   to stop. Turn **Sustain** on to keep it ringing after you let go, and **Exclusive** on
-   so a new pad chokes the previous chord.
+   (The chord sounds for the roughly six pixels it takes to register as a drag, then stops -
+   the drag silences the press before it starts carrying the card, so capturing never leaves
+   a note ringing.)
+4. **Play it, beat-pad style.** Press a filled pad to sound its chord, for as long as you
+   hold it (2026-08-16, Owen: "when you click a pad cord, it should only play it for the
+   amount of time that you're holding it, not a fixed value") - a stab is short and a lean is
+   long. Turn **Sustain** on to keep it ringing after you let go. **A new pad always
+   chokes the previous pad**, Sustain or not (2026-08-16, Owen: "when you click a pad it
+   should clear other presses") - the strip is one voice, a palette you pick from, and
+   stacking two pads only ever made a pile with no name. **Exclusive** decides whether a pad
+   also chokes the *other* sources: the live card's own gesture, the chord held into each
+   arp line, and any note the keybed itself is still holding through Sustain or Latch
+   (2026-08-16, Owen: "sustained or latched notes aren't cleared when pad played"). Those are
+   different instruments, so stacking them is worth having.
 5. **Rearrange, clear, or recall.** Drag a pad onto another to move it, drag a pad off
    the rows to empty it, or drag a pad onto the live card to bring its notes back onto
    the keyboard (held) for editing — capture in reverse. **A locked pad can still be moved
@@ -285,7 +314,7 @@ work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ### A pad's card menu
 
-Right-click any pad. Everything that can act on that card is here: eleven rows in three groups,
+Right-click any pad. Everything that can act on that card is here: fourteen rows in three groups,
 separated by rules.
 
 | Item | What it does |
@@ -293,6 +322,8 @@ separated by rules.
 | **Edit on keyboard** / **Done editing** | Step 7 above |
 | **Clear pad** | Empty this one card. Greyed on an empty or locked pad |
 | **Lock** / **Unlock** | Keep this chord through a Regen. **This is the only way to set a lock.** A locked card shows a small dot in its top-right corner, so the state is readable without opening the menu; the dot is a marking and not a button |
+| **Copy chord** / **Paste chord** | (2026-08-17, Owen: "need to be able to copy paste chords") Copy reads this card's chord, notes and all, into a clipboard that lives on the strip itself, not the session - it outlives a page flip, which is the point, since the four pages sit twelve pads apart, further than a drag reaches. Paste writes it onto this pad through the same clear-then-set a drop uses, so a pad left ringing by Sustain or feeding an arp line gives its old notes up first. Paste greys on an empty clipboard or a locked pad, the same refusal Clear pad makes |
+| **Save chord as MIDI** | Writes one bar of this pad's chord to a `.mid` file in `Documents/OK Studio/Keys Takes` and reveals it in Explorer, selected, ready to drag onto an Ableton track. Ableton's own clipboard will not accept a paste from the Windows clipboard, so a dropped file is the only way a chord built here reaches a Live clip - and a menu row cannot start a drag itself, so this is the closest one click gets |
 | **Octave down** / **Octave up** | Move the whole chord an octave. Greyed when a note would fall off the ends of the keyboard (it never wraps one round to the other end), and while this card is the one linked to the keyboard for editing |
 | **Next voicing** | The same chord arranged differently: root position, first inversion, second, (third, on a four-note chord), then a spread with the root left in the bass, then round to root again. The item says which one the card is in now. Greyed while the card is linked to the keyboard, like Octave |
 | **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
@@ -324,7 +355,9 @@ press until it ran off the keyboard.
 **The menu is kept short on purpose.** It hangs off a pad near the bottom of the window and
 every row is 34 px measured *upwards* from there, so a long menu runs off the top of the
 screen and turns into one you have to scroll by hovering, which is unusable with one mouse.
-Eleven rows and two rules, about 408 px, is the budget today. That is why the four **Next**
+Fourteen rows and two rules, about 510 px, is the budget today (up from eleven rows and 408 px,
+2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the first group). That is
+why the four **Next**
 families sit behind one row, and it is why the generator's settings are not on this menu at all:
 they were, for a few hours, and they took it to 23 rows and about 820 px. Send to arp A and B
 were spent as two rows rather than one **Send to arp line** submenu because Owen asked for them
@@ -380,7 +413,13 @@ card and card menu), and two items on a pad's card menu**:
   touch (Owen, 2026-08-01: "so when you regenerate everything, it doesn't erase your reference
   chord"). Drag a **tray card** onto it, or a **pad from the main window** - dropping a pad
   here *copies* it rather than clearing the pad, which is the one thing that makes dragging a
-  chord to the reference box safe to try. Left-click auditions it, same as a tray card. Beside
+  chord to the reference box safe to try. Left-click auditions it, same as a tray card, and
+  **dragging it off commits it to a pad** (2026-08-16, Owen: "I'm not able to drag the currently
+  held chord into the chord pad"). It was drop-only before that, so the one card in the window
+  that visibly held a chord was the one card that could not give it up - Similar and Could
+  follow fill the *tray*, and neither of them puts the reference chord itself anywhere. Dragging
+  it out **copies**: the reference keeps its chord however many pads you fill from it, which is
+  the whole point of a fixed point. Beside
   it: **Similar** (same root, a different colour - a seventh, a ninth, a sus, an inversion, the
   parallel major or minor) and **Could follow** (the same four families "Next: could follow"
   offers on a pad) each fill the tray from that one seed, and **Clear** empties the reference
@@ -510,12 +549,37 @@ every saved session on a different brain.
 
 **A diagram under the Source buttons** (`SourceViz`, 2026-08-01, Owen: "a visualization for
 the generation source so people understand what it's doing") draws the shape the current
-source walks - a circle-of-fifths wheel, the Neo-Riemannian P/L/R triangle with the actual
-transform sequence as chips, roman-numeral strips for Progressions and Markov, a mirror-axis
-clock for Negative Harmony, sliding note-stacks for Planing, degree columns for Algorithmic -
-and highlights the walk that produced whatever is currently in the tray. It is a picture and
-nothing else: click-through, takes no input, writes nothing, and it draws its static figure
-even with an empty tray, so it explains the source before you have generated anything.
+source walks, and highlights the walk that produced whatever is currently in the tray. It is a
+picture and nothing else: click-through, takes no input, writes nothing, and it draws its
+static figure even with an empty tray, so it explains the source before you have generated
+anything.
+
+**Rebuilt 2026-08-16** (Owen: "reexamine the graphic visuals on the chord generator. They don't
+make any sense"). It was a 112 px strip in which the *diagram* got a square the height of the
+box - about 80 px wide - and the remaining ~1500 px went on a row of chips restating the chord
+names already printed on the sixteen tray cards below. The informative half was tiny and the
+redundant half was enormous, which is backwards, and it forced two hard failures: the wheels
+came out at a **24 px radius** carrying twelve labels, so `F C G` and `A# D# G# C#` overlapped
+into a smudge, and the Neo-Riemannian triad was clipped by its own frame while its chips read
+`P P P P L L L L` with no chord names, so you could not tell what turned into what.
+
+The chip rows are gone, the strip is 160 px, the diagram gets the width, and **every source
+carries a one-line legend** saying what you are looking at - which is most of what "they don't
+make any sense" was:
+
+| Source | What the picture shows | Legend |
+|--------|------------------------|--------|
+| **Algorithmic** | A bar per scale degree over a baseline, each with the count of tray chords that landed on it | HOW MANY CHORDS LANDED ON EACH DEGREE |
+| **Markov** | The chain as arrow-linked nodes, roman numeral over the chord it produced | WHERE THE CHAIN WENT |
+| **Circle of 5ths** | The wheel at the left with the key lit and the diatonic notes marked; to its right the walk as root pills, **the arrow between them carrying the signed step distance** round the circle (`-1` one fifth flat-ward, `-2` a leap) | THE WALK ROUND THE WHEEL |
+| **Neo-Riemannian** | `C —P→ Cm —L→ G#`: the chords, with the transform on the connector | P PARALLEL · L LEADING-TONE · R RELATIVE |
+| **Progressions** | Roman numerals, not chord names (the tray has the names), with a bracket spanning each repetition of the template | THE TEMPLATE, REPEATED |
+| **Negative** | The chromatic clock with the mirror axis drawn and labelled, and `root → mirror` pill pairs beside it | EACH ROOT MIRRORED THROUGH THE AXIS |
+| **Planing** | A pitch gutter with note names at the octave lines, each chord a connected vertical spine, so the constant shape sliding is what you see | THE SAME SHAPE SLID UP AND DOWN |
+
+The step distances and the transform letters are the point of the rewrite: they are relationships
+between chords, which is exactly what the tray of chord names cannot tell you, where the old chip
+rows were bare names with `>` between them.
 
 #### Always-visible settings
 
@@ -667,12 +731,11 @@ holds:
 | **Chance** | how often a step fires at all. Thin one line out and the other shows through |
 | **Swing** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
 | **Offset** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
-| **Vel** | how loud that line plays, bipolar around "as played": centre is unchanged, right boosts, left cuts, hard left mutes exactly. Squared rather than linear, so the fader's change is even across its travel instead of crammed into the last few degrees |
+| **Vel** | how loud that line plays, bipolar around "as played": centre is unchanged, right boosts, left cuts, hard left mutes exactly. Squared rather than linear, so the fader's change is even across its travel instead of crammed into the last few degrees. A **range knob** since 2026-08-17 (Owen, looking at the card: "I only want one velocity knob, and I want this humanize section to be the outer ring"): the face is that level, unchanged, and the ring is Humanize Velocity's own amount - how far under that level a hit can randomly fall - not a span of Vel's own value the way H.Time's ring is. The readout reads `-50 ~40` (the level, then how far it can fall short), deliberately not H.Time's `lo-hi`, because there face and ring are the same unit and here they are not. The **lamp** switches Humanize Velocity on and off, remembering the amount while it's off - Vel's own zero already means "as played" and cannot double as an off switch the way H.Time's zero means "no wander" |
 | **H.Time** | nudges each hit a little late, at random. At 0 the line is dead on the grid. A **range knob**: the knob is the most it ever nudges, and the ring around it is how far under that a hit can fall. Drag the little dial at its top left — or anywhere on the ring — to open and close it. Wide open it draws from nothing, which is what this did before it had a ring; closed it is a fixed nudge with no randomness left. Turn the knob and the whole range moves with it |
-| **H.Vel** | shaves each hit's velocity, at random - independent of Vel and of H.Time, so level and humanize no longer fight over one knob. A **range knob** like H.Time: knob for the most, ring for how far under it. Closed is a fixed cut, wide open is a draw from nothing |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
 
-Eight knobs, a rate with its three modifiers, a shape, Dot/Tuplet/Anchor and Details: every
+Seven knobs, not eight since Vel absorbed H.Vel's own knob on 2026-08-17, a rate with its three modifiers, a shape, Dot/Tuplet/Anchor and Details: every
 setting a regular arpeggiator has, both lines deep, on one screen. Latch, **Play** and Chain
 still exist per line, just not on this card - Latch and Play live on that line's own Details
 view (the band), Chain on its action row under the twelve slots. The card's own On switch is
@@ -789,8 +852,17 @@ entry, and so is generating a whole page.
 ### The three pages of a line (2026-08-14)
 
 A line's deep view is three pages, picked on the ARP bar beside **All**. It used to be every
-block at once, which made the window jump 372 px whenever you opened it; each page fits inside
-one fixed panel height now, so the window does not move between views at all.
+block at once, which made the window jump 372 px whenever you opened it. Paging is what fixed
+that: the blocks come apart at Draw 298 / Play 208 / Cards 124, so the tallest page is eighteen
+px over the macro view rather than 372 over it.
+
+**The panel is exactly as tall as the page showing** (2026-08-16, Owen: "there's some deadspace
+I want to remove at bottom", then "fix arp"). Every view shared one height for two days, which
+stopped the window moving at all but made each view carry the difference from the tallest as
+dead panel: 58 px under the macro view's two line cards, and **174 px** under the Cards page.
+So the window moves again, and the honest figures are 58 px on All ↔ Details and up to 174 px
+between pages. That is not the 372 px fold jump returning - it is a window that fits what is
+in it.
 
 | Page | What is on it |
 |------|----------------|

@@ -596,10 +596,14 @@ void ChordRefCard::setDropHighlight(bool on)
 // The reference takes chords from either window. It refuses the live card because that one is
 // what you are holding on the keyboard rather than a chord you have decided to keep, which is
 // the same refusal the strip's own drag made when it offered only filled pads to the outside.
+// It refuses its own chord for the duller reason: since 2026-08-17 this card is a drag source
+// too, and a card that lit up to accept what it is already holding would be promising a change
+// it cannot make.
 bool ChordRefCard::isInterestedInDragSource(const SourceDetails& details)
 {
     auto* p = chorddrag::chordBeingDragged(details);
-    return p != nullptr && p->from != chorddrag::Payload::From::liveCard;
+    using From = chorddrag::Payload::From;
+    return p != nullptr && p->from != From::liveCard && p->from != From::refCard;
 }
 
 void ChordRefCard::itemDragEnter(const SourceDetails&) { setDropHighlight(true); }
@@ -626,20 +630,76 @@ void ChordRefCard::itemDropped(const SourceDetails& details)
 void ChordRefCard::mouseEnter(const juce::MouseEvent&) { hovered = true; repaint(); }
 void ChordRefCard::mouseExit(const juce::MouseEvent&) { hovered = false; repaint(); }
 
-void ChordRefCard::mouseDown(const juce::MouseEvent&)
+void ChordRefCard::mouseDown(const juce::MouseEvent& e)
 {
     if (! hasChord())
         return;
     // Left click auditions, exactly as a tray card does, and there is no right-click path here
     // at all: the three things you can do to a reference chord are buttons beside it.
+    downPos = e.position; // ...and where it landed, so mouseDrag can tell this from a commit
+    dragging = false;
     pressed = true;
     gen.auditionChord(held.notes);
     repaint();
 }
 
+void ChordRefCard::mouseDrag(const juce::MouseEvent& e)
+{
+    if (! hasChord() || dragging)
+        return;
+
+    if (e.position.getDistanceFrom(downPos) > 6.0f)
+    {
+        // A press that becomes a drag is a commit, not an audition - the same handover the tray
+        // makes, and the reason the press is allowed to sound at all is that letting go without
+        // moving is still the commonest thing you do to this card.
+        gen.stopAudition();
+        beginDrag(e);
+    }
+}
+
+// The tray's own beginDrag with one word changed. Kept as a second copy rather than hoisted:
+// they share four lines of JUCE boilerplate and disagree about the only thing that matters
+// (which cell is being carried, and whether it survives), so a shared helper would take both
+// answers as parameters and save nothing.
+void ChordRefCard::beginDrag(const juce::MouseEvent& e)
+{
+    auto* container = juce::DragAndDropContainer::findParentDragContainerFor(this);
+    if (container == nullptr)
+    {
+        jassertfalse; // ChordGenPanel is meant to be one, exactly as it is for the tray
+        return;
+    }
+
+    const auto box = getLocalBounds();
+    const auto ghost = createComponentSnapshot(box, true, 2.0f).convertedToFormat(juce::Image::ARGB);
+    const auto grab = box.getTopLeft() - downPos.roundToInt(); // JUCE negates this into the image
+
+    inFlight = new chorddrag::Payload(chorddrag::Payload::From::refCard, -1, held);
+    dragging = true;
+    repaint();
+
+    container->startDragging(juce::var(inFlight.get()), this, juce::ScaledImage(ghost, 2.0),
+                             /*allowDraggingToExternalWindows*/ true, &grab, &e.source);
+}
+
 void ChordRefCard::mouseUp(const juce::MouseEvent&)
 {
     pressed = false;
+    if (dragging)
+    {
+        // Nothing to undo whichever way it went: this card is a copy source, so a drop that
+        // nobody took is simply a drag that did not happen. The payload still has to be let go
+        // of a turn later rather than here - see whenDragSettles for why mouseUp is too early
+        // to know anything, and ChordPads::mouseUp for the case where the answer matters.
+        chorddrag::whenDragSettles(*this, inFlight,
+                                   [](ChordRefCard& card, const chorddrag::Payload&)
+                                   {
+                                       card.inFlight = nullptr;
+                                       card.repaint();
+                                   });
+        dragging = false;
+    }
     repaint(); // the 800 ms timer owns the release, so letting go is not a note-off
 }
 

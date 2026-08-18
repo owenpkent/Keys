@@ -33,7 +33,13 @@ struct Payload : public juce::ReferenceCountedObject
     {
         trayCell, // a candidate in the generator's audition tray, in its own window
         padSlot,  // a card on the pad strip, by *absolute* slot so a page flip cannot move it
-        liveCard  // the live "current chord" card at the left of the strip
+        liveCard, // the live "current chord" card at the left of the strip
+        // The generator's reference box (2026-08-17). A kind of its own rather than trayCell,
+        // because the two differ on the one question a target has to answer about them:
+        // committing a tray candidate empties its cell (`consumed`), and the reference is a
+        // *fixed point* that keeps its chord however many pads it fills. Reusing trayCell would
+        // have emptied the box on the first drop out of it, which is the opposite of what it is.
+        refCard
     };
 
     Payload(From f, int i, KeysProcessor::ChordPad c)

@@ -5,6 +5,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <array>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -171,7 +172,40 @@ public:
     // Every chord source at once: the pads, the live card and the chord held into each arp
     // line. `includeArpHolds` false leaves the lines alone and stops only the pads and the live
     // card - see holdArpChordNow, the one caller that passes it, and the reason it exists.
-    void stopAllChordPads(bool includeArpHolds = true);
+    void stopAllChordPads(bool includeArpHolds = true, bool includeKeybed = true);
+
+    // Set by the editor: let go of whatever the on-screen keybed is *holding* - its latched
+    // toggles and its pedal captures. Those two sets live in NoteSurface on the message thread
+    // and the processor only ever saw the note-ons they produced, so "choke every chord source"
+    // has to call outward for this one (2026-08-16, Owen: "sustained or latched notes aren't
+    // cleared when pad played" - Exclusive was lit and the latched keys carried straight on
+    // under the pad chord). Null in a headless instance, and **the editor must clear it in its
+    // destructor**: it captures the editor, which the processor outlives.
+    std::function<void()> releaseKeybedHolds;
+
+    // Every chord Keys is holding right now, as one sorted set: the pads, the live card's own
+    // gesture, and the chord handed to each arp line. Deliberately the same source list
+    // stopAllChordPads stops, and that symmetry is the definition - what Exclusive can choke as
+    // "a chord" is exactly what the live card can show as one.
+    //
+    // Deliberately NOT the merged sounding set (isNoteSounding). That counts the arp's *output*,
+    // which is one note at a time, so folding it in would rewrite "the current chord" as
+    // whichever step the arp happens to be on - the same distinction keybedLit() draws for the
+    // keybed lights. The chord held *into* a line is the chord; what the line makes of it is not.
+    //
+    // Added 2026-08-17 (Owen: "I'm not able to drag the currently held chord into the chord
+    // pad"). The live card had been fed from the keybed surface and the MIDI input alone, so a
+    // chord sounding from a pad or held into an arp line lit the keys up and left the card
+    // reading "hold a chord" - and an empty card fails ChordPads::sourceIsDraggable, so there
+    // was nothing to pick up. The keys lighting and the card filling now answer to the same
+    // question.
+    //
+    // **One chord, not the union.** It returns the last source to *start*, while that one is
+    // still sounding, and falls back to any other source still holding one. Owen, the day it
+    // shipped as a union: "the currently held chord should disappear when you play a new chord
+    // pad" - with Sustain down or Exclusive off, a union names the pile of every pad you have
+    // touched rather than the chord you just played, which is not what the card is called.
+    std::vector<int> heldChordNotes() const;
 
     // The live card's chord: whatever the keyboard is holding, fired as one gesture so it
     // is heard strummed and humanized the way a pad plays it, rather than as the sum of
@@ -608,6 +642,54 @@ public:
         // 1/16 run is not what you want to be looking at.
         bool arpLights = true;
 
+        // The settings menu (2026-08-17, Owen: "we need a settings icon and menu. populate
+        // menu."), reached from the gear on the Controls bar. Three fields, none of them a
+        // parameter for the same reason arpLights is not: nothing here changes a note.
+        //
+        // UI scale, Octavium's Zoom submenu ported over (same eight presets). Persisted so a
+        // choice survives a reopen; the editor does not yet resize or transform itself to
+        // match it - see KeysEditor::showSettingsMenu for why that half is deliberately not
+        // built alongside the menu, rather than guessed at against this window's own
+        // extensively-documented, pixel-exact resize floor.
+        int  uiScalePercent = 100;
+
+        // Hold Visuals During Sustain: on by default, because on **is** today's behaviour and
+        // has been since before this flag existed - a key the pedal is holding paints in the
+        // held colour, same as latched. Off is Octavium's own menu item, wired for the first
+        // time (it read `self.keyboard.visual_hold_on_sustain` there but nothing ever wrote
+        // it): a sustained-only key rests visually while it keeps sounding, so the eye can
+        // separate "the pedal is holding this" from "this is down right now" even though both
+        // are true. A note that is also pressed or latched is unaffected - see
+        // PianoKeyboard::paint's stateOf.
+        bool holdVisualsOnSustain = true;
+
+        // Whether a glide made with the pedal down leaves every key it crossed ringing.
+        // **Default true, which is exactly what Keys has always done** - see the trail branch
+        // in NoteSurface::mouseDrag.
+        //
+        // This started life as Octavium's "Drag While Sustain" and the name did not survive
+        // contact. Octavium describes that option as letting a click-drag glide across the keys
+        // at all, and Keys' drag has *always* glided, unconditionally, on every build - so a
+        // switch by that name would either do nothing or take gliding away, and neither is what
+        // the label promises. The one thing genuinely left to decide is whether the run piles up
+        // behind you or stays monophonic, so the setting is named for that instead. Default true
+        // and the gate reads `sustain && this`, so no session that opens after the update plays
+        // differently than it did before it.
+        bool dragWhileSustain = true;
+
+        // Whether a key held **only** by the pedal counts as part of the chord the keybed is
+        // offering - what the live card names, and what an "Edit on keyboard" pad is written
+        // from. **Default false** (2026-08-16, Owen: "sustain shouldn't propose chords ...
+        // should be a menu option"). It still sounds either way; this is only about proposing.
+        //
+        // The default is the interesting half. Keys is played with one mouse, so a chord has to
+        // be built one click at a time, and there are two ways to make a click stick: Latch and
+        // Sustain. Reading them the same way meant the pedal's passing notes kept rewriting the
+        // card and any pad being edited. Splitting them gives each a job - **Latch builds a
+        // chord, Sustain plays one** - and the menu item is there for anyone who wants the old
+        // reading back. See NoteSurface::proposedChordNotes.
+        bool sustainProposesChords = false;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.
@@ -973,6 +1055,15 @@ private:
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad
+
+    // Which chord source started most recently, as one of fireChord's own tags - a pad slot,
+    // liveChordTag, or arpChordTagFor(line). Written where a chord is *fired*, never where one
+    // is released: a source going quiet does not make an older one newer, and heldChordNotes()
+    // falls back by scanning rather than by rewriting this. `noSource` until the first chord.
+    static constexpr int noSource = std::numeric_limits<int>::min();
+    int lastChordSource = noSource;
+    // The notes a tag still has sounding, or nullptr when the tag names no chord source.
+    const std::vector<int>* soundingForTag(int tag) const;
 
     // Declared last so it tears down first: it binds an ephemeral loopback MCP server
     // (src/mcp/KeysMcp.h) letting Claude Code or any local MCP client drive Keys

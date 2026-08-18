@@ -4,6 +4,7 @@
 #include "ChordDrag.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace keys
@@ -16,9 +17,10 @@ namespace keys
 //   * Click a filled pad to play/stop its chord (Exclusive makes a new pad choke the old).
 //   * Drag a pad onto another to move it, or off the row to clear it.
 //   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad to the
-//     piano; every latch change writes back live), Clear pad, Lock, Octave down/up, Next
-//     voicing, New chord, what could follow this one, and Send to arp slot. Part of the
-//     owner-directed right-click exception in CLAUDE.md.
+//     piano; every latch change writes back live), Clear pad, Lock, Copy chord, Paste chord,
+//     Save chord as MIDI, Octave down/up, Next voicing, New chord, what could follow this
+//     one, and Send to arp slot. Part of the owner-directed right-click exception in
+//     CLAUDE.md.
 //
 // The card surface itself is *entirely* play, drag and feed-the-arp: there is no corner that
 // means something else. A lock chip sat in the top-right for a few hours on 2026-07-30 and
@@ -26,7 +28,8 @@ namespace keys
 // a target, and Lock is set from the card menu alone. The generator's own settings left this
 // menu at the same time and live in a window of their own (ChordGenPanel).
 //
-// Sixteen pads per page, two rows of eight, and every card reads the same way: the chord's
+// Twelve pads per page, two rows of six (it was sixteen until 2026-08-03, when the two columns
+// that freed up took Strum and Humanize), and every card reads the same way: the chord's
 // name, and under it the notes a press of it plays, with octave numbers. The live card at the
 // left says the same about what is under your hand.
 //
@@ -39,31 +42,37 @@ namespace keys
 // The pad definitions and playback live in the processor, so they persist with the session
 // and keep sounding independent of the editor. This is just the view/controller.
 //
-// **A card sounds on release, never on press** (2026-08-02, Owen: "the chord shouldn't play
-// right away when you click it. You should be able to drag it"). Every gesture that starts on a
-// card - play it, hand it to an arp line, drag it onto a pad, an arp slot or an arp row - now
-// begins with a completely silent mouseDown, and mouseUp is where it is decided which of them
-// this one was. Pressing to play and releasing to stop was the older, more instrument-like
-// reading, and it cost too much: starting a drag blurted the chord every time, and with an arp
-// line switched on the press *consumed* the click and cleared `dragSource`, so a card could not
-// be dragged at all in the one mode where dragging it onto a line is the whole point.
+// **A card sounds for as long as you hold it** (2026-08-16, Owen: "when you click a pad cord, it
+// should only play it for the amount of time that you're holding it, not a fixed value"). The
+// press fires the chord, the release lets it go, and Sustain and Latch still decide what "let go"
+// means. A pad is an instrument, and a fixed-length blip is a preview of one.
+//
+// This is the second answer here, and the first is worth keeping written down. From 2026-08-02 a
+// card was silent on press and auditioned for 800 ms on release (Owen then: "the chord shouldn't
+// play right away when you click it. You should be able to drag it"). **The problem that fixed
+// was never the noise**: the press branch also handed the card to a running arp line and cleared
+// `dragSource`, so a card could not be dragged in the one mode where dragging it onto a line is
+// the point. That branch is gone - a click no longer feeds a line at all - so press-to-play costs
+// nothing this time. What it does still cost is a blurt when a gesture turns out to be a drag,
+// for however long it takes to travel six pixels; mouseDrag silences it there. Waiting for the
+// drag threshold before sounding would put a lag on every note, which is the worse trade.
 //
 // **Every drag on this strip is stock JUCE drag-and-drop** (2026-08-02), including the ones that
 // leave the window. See ChordDrag.h: the container is the section holder this component is
 // parented into, which is what makes the machinery survive the Pads section being popped out
 // into a window of its own.
 class ChordPads : public juce::Component,
-                  public juce::DragAndDropTarget,
-                  private juce::Timer
+                  public juce::DragAndDropTarget
 {
 public:
     explicit ChordPads(KeysProcessor&);
-    // An audition sounds for 800 ms with the button already up, so unlike the press-and-hold
-    // it replaced there is a window in which this component can be destroyed - the window
-    // closed, the section folded - while a chord it started is still ringing. The processor
-    // outlives the editor and keeps playing, and nothing would be left owning those notes:
-    // one note-on per sounding pitch, released by the last owner, and the last owner has to
-    // still be here to do it. This is that owner leaving properly.
+    // A chord this strip started can outlive the strip: the section folds, or its window is
+    // closed, while a pad is still held or ringing under Sustain. The processor outlives the
+    // editor and keeps playing, and nothing would be left owning those notes - one note-on per
+    // sounding pitch, released by the last owner, and the last owner has to still be here to do
+    // it. This is that owner leaving properly. (It mattered for the 800 ms audition too, which
+    // could be sounding with the button already up; hold-to-play narrowed the window without
+    // closing it, since a fold can land mid-press.)
     ~ChordPads() override;
 
     void paint(juce::Graphics&) override;
@@ -97,8 +106,9 @@ public:
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
     // The rest of the card menu's id space, recorded here rather than at the two call sites so
-    // the ranges can be seen to be disjoint. The fixed rows are 1..6; these two are the ranges
-    // that grow, and both grow with a count that lives on KeysProcessor:
+    // the ranges can be seen to be disjoint. The fixed rows are 1..9 (1..6 were here first; 7
+    // Copy chord, 8 Paste chord and 9 Save chord as MIDI joined 2026-08-17); these two are the
+    // ranges that grow, and both grow with a count that lives on KeysProcessor:
     //
     //   * `arpSlotIdBase` + 0..numArpPatterns-1  - Send to arp slot's submenu;
     //   * `arpLineIdBase` + 0..uiArpLines-1      - Send to arp A / B;
@@ -188,6 +198,10 @@ private:
     // room for three more targets.
     void shiftPadOctave(int slot, int semitones);
     void nextPadVoicing(int slot);
+    // "Save chord as MIDI": writes one bar of this pad's chord into KeysProcessor::takeFolder()
+    // and reveals it in Explorer. See the definition for why it does not reuse
+    // KeysProcessor::buildTakeMidiFile.
+    void saveChordAsMidi(int slot);
     // and what both go through, so a chord that is sounding or held into the arp moves with
     // its card instead of being stranded. See the definition.
     void rewritePadChord(int slot, const std::vector<int>& notes);
@@ -201,14 +215,22 @@ private:
     std::vector<int> currentNotes;
     juce::String currentName;
 
-    // A click sounds the chord for a fixed length and then lets it go, because the button is
-    // already up by the time the note starts and there is no second event coming to end it.
-    // 800 ms is the generator's own audition length (ChordGenMenu), so hearing a chord is the
-    // same gesture and the same duration wherever you do it. Sustain and Latch still apply:
-    // this calls releaseChordPad, exactly as the old mouse-up did, and they decide what that
-    // means. Clicking anything else cuts a running audition short first.
-    static constexpr int auditionMs = 800;
-    void timerCallback() override;
+    // **A card sounds for exactly as long as you hold it** (2026-08-16, Owen: "when you click a
+    // pad cord, it should only play it for the amount of time that you're holding it, not a
+    // fixed value"). The press fires it and the release lets it go, so a stab is short and a
+    // lean is long - which is most of what a pad is for, and what a fixed 800 ms preview could
+    // not do. Sustain and Latch still decide what "release" means, since endAudition goes
+    // through releaseChordPad / releaseLiveChord exactly as the old mouse-up did.
+    //
+    // `auditionMs` (800, borrowed from ChordGenMenu's own preview) went with that change, and
+    // so did the juce::Timer it needed: with the release owning the note-off, nothing was left
+    // to schedule, and a base class no path can start is weight this component was carrying for
+    // a feature it no longer has. **The generator's tray keeps its fixed 800 ms** and that is
+    // not an inconsistency: a tray card is a candidate you are sampling, where a length that
+    // does not depend on your hand is the point, and a pad is an instrument you are playing.
+    //
+    // endAudition() stays exactly what it was - the one choke point every path ends a sounding
+    // card through - minus the stopTimer() that had nothing to stop.
     void endAudition();
 
     // The cell a drag - anyone's, from either window - is currently offering a chord to, or -1.
@@ -224,6 +246,16 @@ private:
     // The chord this strip currently has in the air, so the answer the targets write on it can
     // be read once the drop has been delivered. Null except during one of this strip's own drags.
     chorddrag::Payload::Ptr inFlight;
+
+    // Copy chord / Paste chord (2026-08-17, Owen: "need to be able to copy paste chords").
+    // UI-only and deliberately not in the session tree or the processor: it holds exactly what
+    // the last Copy put there, needs no migration, and outlives a page flip, which is the whole
+    // point - the clipboard is what lets a chord travel between pages 12 apart, which a drag
+    // cannot do (a drag never survives the page changing under it). `locked` is stripped at
+    // copy time, not read at paste time: a lock protects the *slot* a chord is sitting in from
+    // being overwritten, and copying it into the clipboard would silently lock whatever pad it
+    // later landed on, which has nothing to do with why that pad might be locked.
+    std::optional<KeysProcessor::ChordPad> clipboard;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordPads)
 };

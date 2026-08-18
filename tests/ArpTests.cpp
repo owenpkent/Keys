@@ -1537,6 +1537,7 @@ public:
             sp.fallbackBpm = 90.0;
             auto hostRolling = clock;
             hostRolling.bpm = 150.0;
+            hostRolling.hasBpm = true; // "a valid bpm" is exactly what this flag says
             const auto on = onsetsOf(sp, hostRolling, block, 4, steady);
             // 1/16 at 150 bpm: 0.25 beat * 60/150 s = 0.1 s = 4800 samples at 48 kHz, so five
             // onsets land inside 4 * 6000 = 24000 samples (0, 4800, ..., 19200).
@@ -1554,6 +1555,7 @@ public:
             sp.fallbackBpm = 90.0;
             auto hostRolling = clock;
             hostRolling.bpm = 150.0;
+            hostRolling.hasBpm = true; // a real host tempo, so followHost is the only thing refusing it
             const auto on = onsetsOf(sp, hostRolling, block, 4, steady);
             // 1/16 at 90 bpm: 0.25 beat * 60/90 s = 1/6 s = 8000 samples, so three onsets land
             // inside 4 * 6000 = 24000 samples (0, 8000, 16000).
@@ -1563,10 +1565,15 @@ public:
                                           "sync off steps at fallbackBpm even though the host is rolling");
         }
 
-        beginTest("followHost on, transport stopped: fallbackBpm runs the clock");
+        beginTest("followHost on, transport stopped: the host's tempo still wins");
         {
-            // The "on" in followHost only ever means "let the host in when it is actually
-            // there to ask" - a stopped transport has nothing to override with, on or off.
+            // **This asserted the opposite until 2026-08-16** - "a stopped transport reads
+            // fallbackBpm whatever followHost says" - and Owen caught it from the outside:
+            // "bpm isn't syncing with daw". A DAW's tempo is its tempo stopped or rolling;
+            // Ableton reads 120 with everything parked. Gating the *tempo* on the transport
+            // meant Keys disagreed with Live for exactly as long as you were setting up.
+            // The *position* still needs a rolling transport (the anchored branch, pinned
+            // above); only the tempo was over-gated.
             auto sp = p;
             sp.anchored = false;
             sp.followHost = true;
@@ -1574,13 +1581,36 @@ public:
             ArpEngine::HostClock stoppedHost;
             stoppedHost.playing = false;
             stoppedHost.hasPpq = false;
-            stoppedHost.bpm = 150.0; // stale; must not leak in while stopped
+            stoppedHost.bpm = 150.0;
+            stoppedHost.hasBpm = true; // the host answered, it just is not rolling
             const auto on = onsetsOf(sp, stoppedHost, block, 4, steady);
+            // 1/16 at the host's 150 bpm: 4800 samples, so five onsets inside 24000.
+            expectEquals((int) on.size(), 5);
+            for (int i = 1; i < (int) on.size(); ++i)
+                expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 4800, 2,
+                                          "a stopped host that reports a tempo still sets the clock");
+        }
+
+        beginTest("followHost on, no host tempo at all: fallbackBpm runs the clock");
+        {
+            // The standalone, where there is no playhead to ask. This is what `hasBpm` exists
+            // for and why it could not be a `bpm > 0` test: HostClock::bpm defaults to **120**,
+            // not 0, so reading that default as an answer would pin the standalone at 120 and
+            // make its own BPM control do nothing - silently, and only outside a DAW.
+            auto sp = p;
+            sp.anchored = false;
+            sp.followHost = true;
+            sp.fallbackBpm = 100.0;
+            ArpEngine::HostClock noHost; // bpm left at its 120 default, hasBpm false
+            noHost.playing = false;
+            noHost.hasPpq = false;
+            const auto on = onsetsOf(sp, noHost, block, 4, steady);
             expectEquals((int) on.size(), 4);
-            // 1/16 at 100 bpm: 0.25 beat * 60/100 s = 0.15 s = 7200 samples.
+            // 1/16 at 100 bpm: 0.25 beat * 60/100 s = 0.15 s = 7200 samples - fallbackBpm, and
+            // pointedly not the 120 sitting in HostClock's default.
             for (int i = 1; i < (int) on.size(); ++i)
                 expectWithinAbsoluteError(on[(size_t) i] - on[(size_t) (i - 1)], 7200, 2,
-                                          "a stopped transport reads fallbackBpm whatever followHost says");
+                                          "with no host tempo the BPM control runs the clock");
         }
 
         beginTest("Hz mode is deaf to followHost, exactly as it is to fallbackBpm and the host bpm");

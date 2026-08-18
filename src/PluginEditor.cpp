@@ -768,6 +768,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     themeButton.onClick = [this] { showThemeMenu(); };
     addAndMakeVisible(themeButton);
 
+    // The settings gear, immediately left of the theme swatch - both are plugin-level
+    // rather than section-level, which is why they sit together and neither hides with a
+    // fold. Empty button text: GearButton::paintButton draws the icon itself.
+    gearButton.setTitle("Settings");
+    gearButton.setTooltip("UI scale, sustain visuals and drag, updates, the guide and about.");
+    gearButton.onClick = [this] { showSettingsMenu(); };
+    addAndMakeVisible(gearButton);
+
     // The Instrument chip (2026-08-02, Owen: "the load instrument section with all that
     // should go in the controls submenu"). Hidden until a host supplies
     // onBuildInstrumentMenu; plain Keys never does. refreshInstrumentChip() owns the visible
@@ -814,6 +822,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Dropping a pad on the live card latches its notes back onto the keyboard for
     // editing (Octavium's drag-to-edit).
     chordPads.onRecall = [this](const std::vector<int>& notes) { keyboard.recallOutputNotes(notes); };
+    // The keybed's half of Exclusive. stopAllChordPads() chokes every chord source the processor
+    // owns; `latched` and `sustained` live in NoteSurface and are the one it cannot reach, so it
+    // calls back out here. Cleared in the destructor - the processor outlives this editor.
+    processor.releaseKeybedHolds = [this] { keyboard.releaseHolds(); };
 
     // Right-click "Edit on keyboard": the pad's notes latch onto the piano and every
     // latch change writes straight back to the pad, name re-detected live.
@@ -899,6 +911,9 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 KeysEditor::~KeysEditor()
 {
     stopTimer();
+    // First, and before any child dies: this captures `this` and the processor outlives us, so a
+    // pad pressed from MCP after the window closed would call into a destroyed editor.
+    processor.releaseKeybedHolds = nullptr;
     // Before anything else: each detached window's content is a holder that is a member of
     // this editor. Tear the windows down while those are still live objects.
     for (int i = 0; i < numSections; ++i)
@@ -1346,6 +1361,175 @@ void KeysEditor::applyAccent(int index)
     repaint();
 }
 
+void KeysEditor::GearButton::paintButton(juce::Graphics& g, bool highlighted, bool down)
+{
+    // The ordinary chip chrome first - raised fill, hover and down shading, the toggle glow
+    // this button never asks for - exactly what every other button on this bar gets from
+    // KeysLookAndFeel. Empty button text, so the base class's own drawButtonText draws
+    // nothing; only the gear itself is hand-drawn, on top.
+    juce::TextButton::paintButton(g, highlighted, down);
+
+    const auto centre = getLocalBounds().toFloat().getCentre();
+    const float bodyR = juce::jmin(getWidth(), getHeight()) * 0.24f; // the ring's own radius
+    const float holeR = bodyR * 0.48f;                               // the punched centre
+    const float toothLen = bodyR * 0.45f;
+    const float toothW = bodyR * 0.62f;
+    constexpr int teeth = 8;
+
+    // One Path: eight teeth (rounded rects, rotated evenly round the origin) plus the ring
+    // as two concentric circles, all still centred on (0,0). Even-odd winding turns the two
+    // circles into an annulus - a hole, not a second disc - without needing to know or match
+    // whatever colour is behind the button, which fillAll-ing a background-toned dot over the
+    // middle would have had to.
+    juce::Path gear;
+    for (int i = 0; i < teeth; ++i)
+    {
+        juce::Path tooth;
+        tooth.addRoundedRectangle(-toothW * 0.5f, -(bodyR + toothLen), toothW, toothLen, toothW * 0.3f);
+        gear.addPath(tooth, juce::AffineTransform::rotation(
+            (float) i * juce::MathConstants<float>::twoPi / (float) teeth));
+    }
+    gear.addEllipse(-bodyR, -bodyR, bodyR * 2.0f, bodyR * 2.0f);
+    gear.addEllipse(-holeR, -holeR, holeR * 2.0f, holeR * 2.0f);
+    gear.setUsingNonZeroWinding(false);
+    gear.applyTransform(juce::AffineTransform::translation(centre.x, centre.y));
+
+    g.setColour(skin::text.withAlpha(down ? 1.0f : (highlighted ? 0.95f : 0.82f)));
+    g.fillPath(gear);
+}
+
+void KeysEditor::showSettingsMenu()
+{
+    // **UI scale is deliberately not here yet.** It was built as a submenu of Octavium's eight
+    // Zoom presets, radio-ticked, writing `layout.uiScalePercent` - and nothing on screen moved,
+    // because making it move means wrapping every child of this editor in one scaled content
+    // component and re-deriving minWidthForView() / idealHeight() / KeysHostEditor's own window
+    // fitting through the transform. That is a real change to the pixel-exact machinery this
+    // file's comments warn about repeatedly, and it is not a submenu's worth of work.
+    //
+    // A picker that ticks 150% and changes nothing is worse than an absent one, especially here:
+    // on a mouse-only surface a control that does not answer is a control you stop trusting, and
+    // this menu is new enough to have no credit to spend. The parameter still round-trips in
+    // LayoutState so the follow-up has somewhere to land.
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&lnf);
+
+    // Both read processor.layout directly and are written back the same way, below - neither
+    // is a parameter, the same reason arpLightsButton is not an APVTS attachment either.
+    menu.addItem(2001, "Hold visuals during sustain", true, processor.layout.holdVisualsOnSustain);
+    // Named for what it decides, not for Octavium's label. Octavium's "Drag While Sustain" is
+    // about whether a click-drag glides across the keys at all, and Keys' drag has always
+    // glided - so a switch by that name would either do nothing or take gliding away, and the
+    // label promises neither. What is actually left to choose is whether the sustained run
+    // piles up behind you. See LayoutState::dragWhileSustain, which kept the field name.
+    menu.addItem(2002, "Sustained drag leaves a trail", true, processor.layout.dragWhileSustain);
+    menu.addItem(2003, "Sustained notes propose chords", true, processor.layout.sustainProposesChords);
+    menu.addSeparator();
+
+    // Greyed rather than missing when there is nothing to check: Keys Host never builds
+    // updaterConfig (see the constructor - it is a different product, its own release
+    // channel still to come), so releasesRepo reads empty there and only there.
+    menu.addItem(3001, "Check for updates", updaterConfig.releasesRepo.isNotEmpty());
+    menu.addItem(3002, "User guide");
+    menu.addItem(3003, "About " + processor.getName());
+
+    juce::Component::SafePointer<KeysEditor> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&gearButton),
+                       [safe](int result)
+    {
+        auto* e = safe.getComponent();
+        if (e == nullptr || result == 0)
+            return;
+
+        switch (result)
+        {
+            case 2001:
+                e->processor.layout.holdVisualsOnSustain = ! e->processor.layout.holdVisualsOnSustain;
+                e->keyboard.repaint(); // the sets did not move; only what they mean visually did
+                break;
+            case 2002:
+                e->processor.layout.dragWhileSustain = ! e->processor.layout.dragWhileSustain;
+                break;
+            case 2003:
+                e->processor.layout.sustainProposesChords = ! e->processor.layout.sustainProposesChords;
+                break;
+            case 3001:
+                e->checkForUpdatesNow();
+                break;
+            case 3002:
+                // The one URL the repo already carries for itself (CHANGELOG.md's own compare
+                // link, installer\keys.iss's AppPublisherURL): blob-linking straight to
+                // CONTROLS.md is GitHub's own way of "publishing" a repo doc, and a nicer
+                // landing than the bare repo root.
+                juce::URL("https://github.com/owenpkent/Keys/blob/main/docs/CONTROLS.md")
+                    .launchInDefaultBrowser();
+                break;
+            case 3003:
+                e->showAboutDialog();
+                break;
+            default:
+                break;
+        }
+    });
+}
+
+void KeysEditor::checkForUpdatesNow()
+{
+    if (updaterConfig.releasesRepo.isEmpty())
+        return; // the menu item is greyed for exactly this case; a defensive no-op here too
+
+    juce::Component::SafePointer<KeysEditor> safe(this);
+    okstudio::updater::checkNowAsync(updaterConfig,
+        [safe](okstudio::updater::CheckResult result, okstudio::updater::UpdateInfo info)
+    {
+        auto* e = safe.getComponent();
+        if (e == nullptr)
+            return;
+        switch (result)
+        {
+            case okstudio::updater::CheckResult::found:
+                e->showUpdate(info); // the same path the automatic check takes; shows the button too
+                juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                    "Check for updates", "Update found: v" + info.version + " is ready to install.");
+                break;
+            case okstudio::updater::CheckResult::upToDate:
+                juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                    "Check for updates",
+                    e->processor.getName() + " is up to date (v" + juce::String(KEYS_VERSION) + ").");
+                break;
+            case okstudio::updater::CheckResult::notReady:
+                // A newer version is tagged and its installer is not uploaded yet - the release
+                // API answered perfectly, so this must not read as a connection problem. It is
+                // its own result in the kit for exactly this sentence's sake. The version is
+                // deliberately not named: `notReady` carries no UpdateInfo, because the kit
+                // keeps "UpdateInfo is meaningful only when the result is found" true rather
+                // than handing back a half-filled one nothing may act on.
+                juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                    "Check for updates",
+                    "A newer version has been announced, but its installer is not published "
+                    "yet. Try again shortly.");
+                break;
+            case okstudio::updater::CheckResult::failed:
+                juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Check for updates",
+                    "Could not reach the update server. Check the connection and try again.");
+                break;
+        }
+    });
+}
+
+void KeysEditor::showAboutDialog()
+{
+    // Product name and version both read live rather than written out a second time here:
+    // getName() is "Keys" or "Keys Host" by virtual dispatch (KeysHostProcessor overrides
+    // it), and KEYS_VERSION is the exact macro updaterConfig.currentVersion is built from.
+    const juce::String text = processor.getName() + "\nVersion " + juce::String(KEYS_VERSION)
+        + "\n\nPart of the OK Studio line: Undertow (bass), Beatform (drums), Keys (the played "
+          "keyboard).";
+    juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+        "About " + processor.getName(), text);
+}
+
 void KeysEditor::syncSectionControls()
 {
     const auto& lay = processor.layout;
@@ -1528,7 +1712,17 @@ int KeysEditor::minWidthForView() const
     // between rather than a third one invented for this.
     //
     // 1400 (checked, not assumed): plenty of slack either way, same as it always was here.
-    return 1280;
+    //
+    // 1320 now (2026-08-17, the settings gear): the gear is reserved out of the bar in the
+    // same right-to-left block as Detach and Theme, before anything below it measures what
+    // is left - "reserve the fixed-size control first, always" applies to a *new* fixed
+    // control exactly as it does to an existing one. It costs the bar 34 px for the button
+    // plus the 6 px gap that now separates it from Theme: 40 px added to the offset term
+    // above (359 -> 399), so the zero-margin floor is 60 + 660 + 176 + 399 = 1295. Same
+    // margin as before rather than the bare minimum, for the same reason: 1320 leaves the
+    // chip 25 px above its floor on the update-button day, exactly as 1280 left it 25 px
+    // above on the day before the gear existed.
+    return 1320;
 }
 
 void KeysEditor::applyLayout()
@@ -2240,7 +2434,9 @@ void KeysEditor::timerCallback()
         }
         else
         {
-            const auto now = keyboard.soundingOutputNotes();
+            // proposedChordNotes, not soundingOutputNotes: with the pedal down, passing notes
+            // were being written straight into the pad you were editing.
+            const auto now = keyboard.proposedChordNotes(processor.layout.sustainProposesChords);
             if (now != lastEditNotes)
             {
                 lastEditNotes = now;
@@ -2285,11 +2481,45 @@ void KeysEditor::timerCallback()
     // live card names it and can be captured to a pad, which is the whole point of watching
     // the input at all. Merged rather than replaced, so a hand on each keyboard still reads
     // as one chord.
-    auto chord = keyboard.soundingOutputNotes();
+    // What the keyboard is holding: the keybed surface, plus anything arriving on the MIDI
+    // input, merged rather than replaced so a hand on each keyboard still reads as one chord.
+    auto played = keyboard.proposedChordNotes(processor.layout.sustainProposesChords);
     for (int n : processor.inputNotes())
-        if (std::find(chord.begin(), chord.end(), n) == chord.end())
-            chord.push_back(n);
-    std::sort(chord.begin(), chord.end());
+        if (std::find(played.begin(), played.end(), n) == played.end())
+            played.push_back(n);
+    std::sort(played.begin(), played.end());
+
+    // ...and what any *other* chord source is holding (2026-08-16, Owen: "I'm not able to drag
+    // the currently held chord into the chord pad"). The keybed surface answers only for keys
+    // clicked on it, so a chord fired from a pad or held into an arp line lit the keys and left
+    // this card empty - and an empty card is not draggable, which is what he ran into.
+    //
+    // Not included: the generator window's 800 ms audition, which fires through noteOn with its
+    // own bookkeeping in ChordGenMenu. It is a monitor rather than something you are holding,
+    // and a tray card is already one drag from a pad, which is the better route anyway.
+    auto held = processor.heldChordNotes();
+
+    // **The two are not merged; the more recent one wins** (Owen, same day: "the currently held
+    // chord should disappear when you play a new chord pad"). Merging made the card name the
+    // pile of everything ringing at once - keys you are still holding plus the pad you just hit
+    // - which is neither chord and is not draggable as either. heldChordNotes() already picks
+    // one source among the pads and lines; this picks between that answer and the keybed, and
+    // the tie-break is which of them last *changed*, because that is what "currently" means.
+    //
+    // Whichever is preferred, an empty answer falls through to the other rather than blanking
+    // the card: letting go of the keys over a sustained pad should show the pad, not nothing.
+    if (played != lastPlayedChord)
+    {
+        lastPlayedChord = played;
+        preferHeldChord = false;
+    }
+    if (held != lastHeldChord)
+    {
+        lastHeldChord = held;
+        preferHeldChord = true;
+    }
+    const auto& chord = preferHeldChord ? (held.empty() ? played : held)
+                                        : (played.empty() ? held : played);
     chordPads.setCurrentChord(chord);
     chordPads.repaint();
 }
@@ -2335,6 +2565,13 @@ void KeysEditor::resized()
         auto bar = layoutDetachRow(secControls, controlsBar.contentArea(), true);
         bar.removeFromRight(6);
         themeButton.setBounds(bar.removeFromRight(112).reduced(2, 0));
+        bar.removeFromRight(6);
+        // The gear, immediately left of the swatch. 34 px square - CLAUDE.md's own mouse-only
+        // floor, exactly - rather than the 26 px pill height every other control on this bar
+        // gets from contentArea()'s own 4 px top/bottom inset: an icon-only target this small
+        // needs every pixel the floor asks for, so it is bounded off controlsBar's own full
+        // height instead of off `bar`, flush with the bar's top and bottom edges.
+        gearButton.setBounds(bar.removeFromRight(34).withY(controlsBar.getY()).withHeight(SectionBar::height));
         bar.removeFromRight(6);
         if (updateButton.isVisible())
             updateButton.setBounds(bar.removeFromRight(170).reduced(0, 1));
