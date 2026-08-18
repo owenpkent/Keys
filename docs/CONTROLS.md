@@ -723,9 +723,15 @@ The **Library** chip on the Pads bar opens the library itself: the same three pi
 progressions under them, **twelve to a page** with `<` `>` at the bottom. Each row shows:
 
 - its **name**, with what it does under it;
-- the progression in **roman numerals as written** - `i bVII bVI V` rather than `Cm Bb Ab G`,
-  because the numerals are what say *what the progression is* whatever key you are in;
+- the progression as **one column per chord**: the roman numeral it is written as, over the chord
+  it comes out as in your key. `i` over `Cm`, `bVII` over `A#`. The numeral says what the
+  progression *is* whatever key you are in; the chord says what you will actually hear. They are
+  stacked because they only answer each other while they line up;
 - its **mood and genre** tags.
+
+A name drops its own numerals when the columns beside it already show them, so the row reads
+"Axis" rather than "Axis (I-V-vi-IV)". A parenthetical that says something else - "i-iv-v (natural
+minor)" - is kept, because that is the only qualifier the name has.
 
 **Click a row to hear it.** The whole row is the button, and it plays the progression through, one
 chord at a time. That is the thing the tray cannot do: ii-V-I and ii-V-vi start identically, so one

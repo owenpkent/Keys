@@ -32,7 +32,12 @@ namespace
     constexpr int kFollowsW = 100; // and "Follows" beside it
     constexpr int kMoodW = 160, kGenreW = 170, kFuncW = 150, kCountW = 240;
     constexpr int kTitleW = 150, kCloseW = 90;
-    constexpr int kRowBtnW = 86;   // "To tray" / "To pads", side by side at a row's right end
+    // "Tray" / "Pads", side by side at a row's right end. 66, not the 86 they had while they read
+    // "To tray" and "To pads": twenty-four buttons repeating the same two phrases down the window
+    // is a lot of text saying one thing, and in a column the preposition carries nothing the
+    // position does not. The accessible name keeps the whole phrase - a screen reader has no
+    // column to read them in. Well clear of the 34 px floor either way.
+    constexpr int kRowBtnW = 66;
     constexpr int kNameW = 250;    // the name column; the numeral strip takes what is left
     constexpr int kTagW = 190;     // mood and genre, micro caps under the buttons' left edge
     constexpr int kPageBtnW = 44;
@@ -45,14 +50,109 @@ namespace
         l.setColour(juce::Label::textColourId, skin::textDim);
     }
 
-    // The row's second line: every numeral of the progression, spaced. This is the *stored* form,
-    // printed as written rather than resolved into a key - which is the point of a library view.
-    // "i bVII bVI V" says what the Andalusian cadence is in a way "Cm Bb Ab G" only says if you
-    // already knew the key.
-    juce::String numeralStrip(const chordlib::Entry& e)
+    // How wide a string actually draws, measured through a GlyphArrangement.
+    //
+    // **Not `Font::getStringWidthFloat`**, which is what this used for one build and which
+    // under-measured every numeral: the columns came out sized to the *chord* underneath, so
+    // "iim7" drew as "iim", "V7" as "V" and a bare "V" as nothing at all - a table quietly
+    // deleting the last character of half its content. It is also deprecated in JUCE 8, and the
+    // deprecation names this as the replacement.
+    float textWidth(const juce::Font& font, const juce::String& text)
     {
-        auto s = juce::String(e.numerals);
-        return s.replace(" ", "   ");
+        if (text.isEmpty())
+            return 0.0f;
+        juce::GlyphArrangement ga;
+        ga.addLineOfText(font, text, 0.0f, 0.0f);
+        return ga.getBoundingBox(0, -1, true).getWidth();
+    }
+
+    // Each chord of the progression as **one column**: the numeral it is written as over the chord
+    // it comes out as in the current key. `i` over `Cm`, `bVII` over `A#`.
+    //
+    // Drawn as columns rather than as two independent strings, which is what they were for one
+    // build. The two lines use different fonts at different sizes, so "I  V  vi  IV" over
+    // "C  G  Am  F" drifted apart along the row and by the fourth chord the pairing was something
+    // you had to work out rather than see. A column is the whole point of showing both: the
+    // numeral says what the progression *is* and the chord says what you will hear, and they only
+    // answer each other while they are stacked.
+    //
+    // Truncates with an ellipsis column when the row runs out of width - a twelve-bar blues has
+    // twelve of these - rather than shrinking the type or spilling into the tags.
+    void paintChordColumns(juce::Graphics& g, juce::Rectangle<float> area, const chordlib::Entry& e,
+                           int rootPc, juce::Colour numeralInk, juce::Colour chordInk)
+    {
+        const auto tokens = juce::StringArray::fromTokens(juce::String(e.numerals), " ", "");
+        const auto realised = chordlib::chordsFor(e, rootPc, e.mode, 4);
+
+        const auto numeralFont = skin::ui(13.0f);
+        const auto chordFont = skin::micro(9.0f);
+        constexpr float gutter = 10.0f;
+
+        auto top = area;
+        const auto bottom = top.removeFromBottom(13.0f);
+        float x = area.getX();
+
+        for (int i = 0; i < tokens.size(); ++i)
+        {
+            const auto numeral = tokens[i];
+            const auto chord = i < (int) realised.size() ? chords::detect(realised[(size_t) i].notes)
+                                                         : juce::String();
+            // Two px of slack on top of the measurement: a glyph box is the ink, and a cell sized
+            // to the ink exactly will clip the last stroke of an italic or a descender.
+            const float w = juce::jmax(textWidth(numeralFont, numeral),
+                                       textWidth(chordFont, chord)) + 2.0f;
+
+            // No room for this column: stop, and say so rather than spilling into the tags.
+            if (x + w > area.getRight())
+            {
+                g.setColour(numeralInk.withAlpha(0.5f));
+                g.setFont(numeralFont);
+                g.drawText(juce::String::charToString((juce::juce_wchar) 0x2026),
+                           juce::Rectangle<float>(x, top.getY(), 14.0f, top.getHeight()).toNearestInt(),
+                           juce::Justification::bottomLeft, false);
+                return;
+            }
+
+            g.setColour(numeralInk);
+            g.setFont(numeralFont);
+            g.drawText(numeral, juce::Rectangle<float>(x, top.getY(), w, top.getHeight()).toNearestInt(),
+                       juce::Justification::bottomLeft, false);
+
+            g.setColour(chordInk);
+            g.setFont(chordFont);
+            g.drawText(chord, juce::Rectangle<float>(x, bottom.getY(), w, bottom.getHeight()).toNearestInt(),
+                       juce::Justification::topLeft, false);
+
+            x += w + gutter;
+        }
+    }
+
+    // The name with its trailing numerals dropped, **and only when the parenthetical is exactly
+    // the numerals** the row already prints in its own column.
+    //
+    // Most names carry them - "Axis (I-V-vi-IV)", "Andalusian cadence (i-bVII-bVI-V)" - because
+    // they were written for a *combo box*, where the name is the only thing on screen and the
+    // numerals had nowhere else to be. In a table with a numeral column and a realised-chord
+    // column under it, a third copy in the title is noise, and it is what pushed the longest names
+    // past the column and into an ellipsis.
+    //
+    // The test is exact rather than "drop any trailing bracket", because plenty of parentheticals
+    // are not numerals and carry the only qualifier the name has: "i-iv-v (natural minor)",
+    // "Autumn-leaves turn (major to relative minor)", "Truck driver's gear change (I-V-I up a
+    // tone)". Dropping those would leave two rows reading the same thing.
+    //
+    // Display only. `Entry::name` is the identity - what a favourite is kept under and what a pad
+    // stores in `progression` - and none of that moves.
+    juce::String displayName(const chordlib::Entry& e)
+    {
+        const juce::String name(e.name);
+        if (! name.endsWithChar(')'))
+            return name;
+        const int open = name.lastIndexOfChar('(');
+        if (open <= 0)
+            return name;
+        const auto inside = name.substring(open + 1, name.length() - 1).replaceCharacter('-', ' ');
+        return inside == juce::String(e.numerals) ? name.substring(0, open).trim() : name;
     }
 
     // The tags, mood first. Truncated by the drawText rather than by hand: the column is fixed and
@@ -251,7 +351,7 @@ void ChordLibraryPanel::buildControls()
     for (int i = 0; i < rowsPerPage; ++i)
     {
         auto& t = trayButtons[(size_t) i];
-        t.setButtonText("To tray");
+        t.setButtonText("Tray");
         t.setTitle("Send progression " + juce::String(i + 1) + " to the tray");
         t.setTooltip("Fill the generator's audition tray with this progression, so you can hear "
                      "each chord and drag the ones you want onto a pad.");
@@ -269,7 +369,7 @@ void ChordLibraryPanel::buildControls()
         addAndMakeVisible(t);
 
         auto& d = padsButtons[(size_t) i];
-        d.setButtonText("To pads");
+        d.setButtonText("Pads");
         d.setTitle("Send progression " + juce::String(i + 1) + " to the pads");
         d.setTooltip("Write this progression into the empty pads on the current page. Pads that "
                      "already carry a chord are never overwritten.");
@@ -402,6 +502,8 @@ void ChordLibraryPanel::refreshMatches()
         // Naming what it is following is the whole of what makes this mode readable. Without it
         // the list is a reordering with no stated cause, which is indistinguishable from a bug.
         count = juce::String(n) + " could follow " + seed->name;
+    else if (n == (int) chordlib::table().size())
+        count = juce::String(n) + " progressions"; // "348 of 348" is a sentence saying nothing
     else
         count = juce::String(n) + (n == 1 ? " progression" : " progressions") + " of "
                 + juce::String(chordlib::table().size());
@@ -634,15 +736,18 @@ void ChordLibraryPanel::paint(juce::Graphics& g)
         const auto funcLine = nameTop.removeFromBottom(13.0f);
         g.setColour(ink);
         g.setFont(skin::uiSemi(13.5f));
-        g.drawText(e->name, nameTop.toNearestInt(), juce::Justification::bottomLeft, true);
+        g.drawText(displayName(*e), nameTop.toNearestInt(), juce::Justification::bottomLeft, true);
         g.setColour(lit ? inkOnAccent.withAlpha(0.8f) : accent.base);
         g.setFont(skin::micro(9.0f));
         g.drawText(juce::String(chordlib::functionName(e->function)).toUpperCase(),
                    funcLine.toNearestInt(), juce::Justification::topLeft, false);
 
-        g.setColour(ink.withAlpha(lit ? 0.9f : 0.85f));
-        g.setFont(skin::ui(13.0f));
-        g.drawText(numeralStrip(*e), r.toNearestInt(), juce::Justification::centredLeft, true);
+        // Numerals over the chords they come out as, on the same two lines the name and its
+        // function use - so the eye tracks straight across the row instead of stepping over a
+        // strip that was vertically centred against two that were not.
+        paintChordColumns(g, r, *e,
+                          (int) processor.apvts.getRawParameterValue("genRoot")->load(),
+                          ink.withAlpha(lit ? 0.9f : 0.85f), dim);
 
         g.setColour(dim);
         g.setFont(skin::micro(9.0f));
