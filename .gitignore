@@ -24,3 +24,11 @@ __pycache__/
 # URL for every one of them. Anything worth keeping out of a manual belongs in docs/ as our
 # own prose.
 *.pdf
+
+# Corpora and MIDI packs used for analysis. Large, third-party, and licensed per-source
+# (datasets/README.md is the manifest). Never redistributed with Keys.
+datasets/*.csv
+datasets/*.parquet
+datasets/*.pkl
+datasets/*.zip
+datasets/*.jsonl

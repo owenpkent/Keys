@@ -319,6 +319,78 @@ two chords are both major, or at voice leading between them - all of which a mus
 Root motion is most of the signal and costs no chord parsing; the rest is available if the
 suggestions ever feel wrong.
 
+---
+
+## 10. Measured against the corpora (2026-08-18, Owen: "download relevant datasets")
+
+The table was **authored**, and §5 says so. This section is what happened when the data was
+actually fetched and the table checked against it. Scripts in `scripts/corpus/`, sources and
+licences in `datasets/README.md`.
+
+### The trap, first, because it is the one that could do damage
+
+**Two roman-numeral conventions, and they disagree exactly where it matters.** Keys uses a fixed
+**major-scale** degree table for every mode, so natural minor's flat degrees are spelled `bIII`,
+`bVI`, `bVII`. Ludovic Drolez's MIT pack spells a minor progression against the **minor** scale, so
+its `III`, `VI` and `VII` are already flat and written unadorned.
+
+The pack's `i VII VI V` and Keys' `i bVII bVI V` are **the same progression** - the Andalusian
+cadence - written two ways. Comparing the collections without translating first reported an overlap
+of 19 out of 138, which is nonsense for two collections that are both mostly canon; translated it
+is 25, and every minor row lines up.
+
+**The dangerous direction is the other one.** Paste a pack row into `ChordLibrary.h` verbatim and it
+parses perfectly and plays the wrong chords - and `ChordLibraryTests.cpp` cannot catch it, because a
+well-formed numeral is all it can check for. This is the same hazard `MarkovData.h`'s header spends
+a paragraph on, arriving from a new direction.
+
+### What the MIT pack corroborates
+
+25 of Keys' rows are independently present in ldrolez's collection, and they are the canonical ones:
+Pachelbel, doo-wop, ragtime, all four axis rotations, the Andalusian cadence, the minor axis, the
+Celtic modal pair. That is real corroboration - two people writing down the canon separately and
+landing on the same rows. 113 pack progressions are **not** in Keys and are a legitimate expansion
+source, MIT-licensed and safe for anything.
+
+### What Chordonomicon says
+
+680,000 songs with chord progressions and structural-part annotation. Sampled rather than scanned
+whole (a full pass in pure Python is tens of minutes and a ranking does not change between 150,000
+songs and 680,000; the script says how many it read).
+
+**What is actually measured: root motion and major/minor.** Nothing finer. The corpus writes `Amin`,
+`C`, `Fs7`; Keys' `iim7`, `iim9` and `iim7b5` all reduce to "minor on the second degree" here.
+Quality had to be included at all because without it every two-chord row a fifth apart collapsed
+onto one shape and reported an identical count - a number about the *interval*, presented as though
+it were about the progression. Read the ranking as "how common is this shape", never as "how common
+is this row".
+
+**Short rows dominate, and that is arithmetic rather than musicology.** A two-chord window occurs
+far more often than a twelve-chord one in any corpus. The ranking is useful *within* a length, not
+across lengths.
+
+**Eleven of 348 rows never occur at all**, and they are the long jazz and blues forms - the twelve-
+bar blues, minor blues, the Autumn Leaves turn, the Bossa minor cycle. That is not evidence they are
+wrong. It is evidence that an exact twelve-chord window is rare in a corpus of user-entered chord
+sheets, which spell repeats and turnarounds inconsistently. **Nothing was deleted on this basis**,
+and nothing should be.
+
+**The Section axis is now answerable.** §3 wanted Intro / Verse / Chorus / Bridge and left it
+unbuilt rather than invent it; Chordonomicon annotates it, and the script reports the commonest
+section per row. It is a genuine finding that the Lydian pairs (`I-II`, `IM7-IIM7`) read *chorus*
+while the Mixolydian and Dorian vamps read *verse*. **Still unbuilt** - a fourth tag is a schema
+change and an axis on the pickers, and it wants a decision rather than a commit.
+
+### The licence line, which is the reason `datasets/README.md` exists
+
+**Chordonomicon is CC-BY-NC-4.0.** Owen's call, 2026-08-18: Keys is personal use, which that
+licence permits squarely. The CSV is gitignored, so Keys never redistributes it. **If Keys ever
+ships commercially, anything derived from it has to come out or be re-derived** from the MIT pack or
+from theory. Nothing derived from it is in the table today - the corpus has been used to *check* the
+table, not to write it, and that distinction is the whole point of this section.
+
+---
+
 ### Known thin spots in the table
 
 `Loop` has 99 rows and `Open` has 10, `Turnaround` 12. That is partly honest - loops are what gets
