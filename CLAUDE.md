@@ -91,13 +91,19 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   locked chords. `ScaleModes.h` is deliberately *not* the kit's scale table: that one
   answers "is this note in the scale", generation also needs a quality per degree.
   All of it (plus `ChordSuggest.h`) is UI-free so it unit-tests.
-  **Seven brains, not two** (2026-08-01). `ChordSources.h` adds circle of fifths, Neo-Riemannian
-  PLR, progression templates, negative harmony and planing to the weighted pool and
-  `ChordMarkov.h`, and **voice leading** as a post-pass over whatever any of them produced
-  (`genSmooth`, a percentage in the window's top row, not a source of its own; it changes only
-  which octave a note sits in, never which notes). `ChordGenMenu::generateChords()` is the one
-  dispatcher for all but Markov, which keeps its three paths because its chords carry a numeral
-  ChordGen has no field for and its per-pad regenerate steps the chain from the left neighbour.
+  **Eight brains, not two** (seven on 2026-08-01, Library on 2026-08-18). `ChordSources.h` adds
+  circle of fifths, Neo-Riemannian PLR, progression templates, negative harmony and planing to the
+  weighted pool and `ChordMarkov.h`; `ChordLibrary.h` adds **Library**. Plus **voice leading** as a
+  post-pass over whatever any of them produced (`genSmooth`, a percentage in the window's top row,
+  not a source of its own; it changes only which octave a note sits in, never which notes).
+  `ChordGenMenu::generateChords()` is the one dispatcher for all but Markov, which keeps its three
+  paths because its chords carry a numeral ChordGen has no field for and its per-pad regenerate
+  steps the chain from the left neighbour.
+  **Library is the odd one out and worth naming as such: the other seven *compute* a chord
+  sequence and it looks one up.** Everything downstream is identical either way, because they all
+  hand back `chordgen::Chord` - so a library row goes through `fitVoicing`, `applyMajorMinorBias`
+  and `applyVoiceLeading` exactly as a generated one does. See the **chord library** bullet below
+  and `docs/CHORD_LIBRARY.md`.
   **Never reorder or insert into the `genSource` choice list.** Appending is safe and is why
   sessions saved before this still open on the right brain: APVTS stores a choice parameter's
   plain index, not a normalised fraction. Reordering would silently move every saved session's
@@ -159,6 +165,105 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   search found period 1 and drew one degenerate bracket per card, so a *display* bug produced what
   looked like a *logic* bug one component away. `progressionNumeral()` resolves numeral →
   `degree` → `degree` re-derived from `rootPc`, cased by the mode's per-degree quality, `?` last.
+- **The chord library is a table you look things up in, and its own window** (2026-08-18, Owen:
+  "collections or books of chords and progressions, things that go well together ... an outstanding
+  library that makes it easy to compose, maybe organized by emotion or something. Scaler, the other
+  VST has done a great job of this"). Full design and paper trail in `docs/CHORD_LIBRARY.md`; the
+  load-bearing parts:
+  **Keys already had two progression libraries that did not know about each other**, and that is
+  the finding the whole feature came out of. `MarkovData.h` holds 88 hand-authored, **mood-tagged**
+  progressions that no user could ever look at - the Markov source shreds them into bigrams and
+  throws the sequences away, so asking for "Nostalgic" returned a statistical blur of the
+  nostalgic progressions rather than the progressions. `ChordSources.h` held seven named ones with
+  no tags at all. `ChordLibrary.h` is the table that joins them up: **348 rows**, sixty of them
+  folded in from `MarkovData.h` (the other 28 of the 88 were already there under names of their
+  own). They stay in `MarkovData.h` too - the Markov source still wants its transition table - so
+  that fold is a **copy, not a move**.
+  **Three axes, and the third one is the point.** Mood and Genre are Scaler 3's own vocabularies
+  (Owen's copy of the two CSVs is at `E:\Ableton\Scaler 3 Moods and Genres\`), plus five words Keys
+  already used that Scaler has no equivalent for: Haunting, Nostalgic, Rebellious, Spiritual,
+  Tender. **Function** - Loop, Cadence, Turnaround, Vamp, Lift, Descent, Turn, Open - is the axis
+  Scaler does not really have and the one that turns browsing into composing: "sad" is forty
+  candidates, where "sad and it loops" and "sad and it ends" are two different requests. Two words
+  on Scaler's own mood list give the game away, since Inconclusive and Resolved are not emotions.
+  **A word list is a taxonomy, not a compilation.** Progressions are not copyrightable; a curated
+  *list* of them can attract thin copyright in its selection and arrangement. So the content is
+  authored here from the named canon, modal vamps, jazz turnarounds and film-score mediants, ranked
+  and section-tagged against Hooktheory's published Trends and the open Chordonomicon corpus.
+  **Nothing is copied from another product's curated library.**
+  **Stored as roman numerals**, in the grammar `ChordMarkov.h` already parses, so one row serves
+  twelve keys and the storage format is the notation the cards print in their corner. Six suffixes
+  were **appended** to `suffixTable()` to make that possible (`m7b5`, `mM7`, `m6`, `madd9`, `M9`,
+  `m9`); half-diminished is the one whose absence was not cosmetic, being the ii of every minor
+  ii-V. Appending there is safe *unlike almost everywhere else in Keys*, because that table is
+  looked up by exact string and nothing stores an index into it - which is precisely the opposite
+  of `genSource`, the lane indices and `chordgen::types()`.
+  **One spelling per chord**: a plain triad is `i`, never `im`; `bii`, never `bIIm`. Both parse to
+  the same chord, and two rows holding one progression under two spellings are invisible to the
+  duplicate check that is the only thing standing between this table and the same four chords
+  appearing three times in one filtered list.
+  **The table validates itself on every build**, and that is not ceremony. A hand-typed numeral has
+  two silent failure modes: a token that will not parse is *skipped* at play time so the
+  progression merely comes out short, and a misspelt tag is a row the picker that wanted it can
+  never find. Neither shows a symptom on screen. `tests/ChordLibraryTests.cpp` walks every row for
+  both, checks each transposes identically into all twelve keys, and **refuses two rows that hold
+  the same chords and also share a genre**. That last rule caught fourteen redundancies while the
+  table was being written and forced the canonical spelling above. Reusing one progression under
+  two names is *correct* - the same four chords are how you find it from the Disco end and the Neo
+  Soul end - so the rule is genre overlap rather than a flat ban.
+  **`chordsFor` takes the mode to label degrees against as a parameter**, and `ChordGenMenu` passes
+  **the entry's own** rather than the session's. Every other source wants the session's, and is
+  right to: they generate *in* that mode, so a chord outside it genuinely is a borrowing. A minor
+  row read against a major session resolves nothing, and the tray came back with half its cards
+  labelled `?` about a progression perfectly in its own key. `degree` is stored on the pad, so this
+  is what the strip shows afterwards too.
+  **A generation lays whole progressions end to end rather than looping one.** The first cut looped
+  a single row the way `sources::progressions` does with its templates, and it was wrong here for a
+  reason only visible on screen: the library holds vamps, and rolling the two-chord "Minimal
+  one-chord" filled all sixteen tray cards with the same Cm9. End to end, a **Vamp** filter gives
+  eight vamps to compare and a **12-Bar Blues** fills the tray on its own. Rows are drawn shuffled
+  and without replacement, so Regen is never inert under a narrow filter.
+  **Two surfaces, and they are one state.** The **Library** entry on the generator's Source row
+  (its band is Mood / Genre / Does-what plus a readout), and **`ChordLibraryPanel`**, a window of
+  its own off a **Library** chip on the Pads bar. The three picks live on `ChordGenMenu`, not the
+  APVTS - the shape Markov's Mood and Start already use, plus one reason of their own: a choice
+  parameter's item list is append-only forever once a session stores an index into it, and locking
+  a 46-word mood vocabulary into the layout before the library has settled would mean never being
+  able to drop or rename one. The cost, and it is real: a pick does not survive reopening the
+  session, exactly as a Markov mood does not.
+  **The window is paged, not scrolled** - twelve rows and a `<` `>` pair, the pad strip's own
+  shape. 348 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at: a
+  scrollbar thumb is a small target that has to be *dragged*, and a wheel is not a gesture Keys may
+  require. A row is a chord card that happens to hold several chords - the whole row is the Hear
+  button, a second click on the walking row stops it, and two buttons at its right end send it to
+  the generator's tray or straight onto the page's empty pads through the same
+  `sendChordToFirstEmptyPad` every generation uses, so **nothing overwrites a chord you already
+  have**, as one undo entry for the whole progression. **To tray greys when the generator window is
+  shut** rather than opening it behind your back.
+  **`ChordGenMenu::auditionProgression` walks a progression one chord at a time**, 550 ms each with
+  the last given the full 800 ms a single chord gets, so a cadence is heard *arriving* rather than
+  stopping. It lives on the brain for the reason every audition does - it calls `noteOn` with no
+  pad behind it and the brain outlives every window - and it shares the one timer, with the queue
+  saying which kind of tick this is. A second timer would be a second thing able to leave a note on.
+  **`lastLibraryEntry` means "the row the tray is holding"**, not "the row the last generation
+  used". It said the latter for about an hour and the To-tray push made that reading wrong on
+  screen straight away: the tray held Bird changes and the diagram was still captioned Folia.
+- **Every filled chord card carries its roman numeral in the top-left corner** (2026-08-18, Owen:
+  "I want the progression number to show up in the generator on the chord pad") - the chord pads
+  and the generator's audition tray both, because those are the same card read at two moments.
+  "Am" says what a chord *is*; "vi" says what it *does*, and the second is what makes a row of
+  cards read as a progression. Top-left is the one corner a card had left: the lock dot owns the
+  top-right and the arp line's letter the bottom-right.
+  **`src/ChordNumerals.h` is the one implementation**, moved out of `SourceViz.cpp` where it was
+  private to the Progressions diagram. A copy per surface would have re-armed a trap that file has
+  already paid for: the diagram drew sixteen `?` for a whole build because it read `numeral`, which
+  only Markov writes, where every other source writes `degree`.
+  **It answers empty rather than `?` when nothing resolves, and the surfaces part there.** A card
+  draws nothing - a `?` in the corner of every hand-captured pad is noise standing in for
+  information - while the diagram keeps its `?`, because it draws one chip per step and an empty
+  chip would read as a gap in the walk. Pads resolve against the `genRoot` / `genMode` **parameters**
+  rather than `ChordGenMenu::genRoot()`, which answers with whatever an unticked Key or Mode rolled
+  for the last generation: a pad outlives that roll.
 - **Two arpeggiator lines, A and B** (2026-08-02, Owen: "I only wanna view two arpeggiators in
   this window, and I wanna be able to drag a chord from below to each one"). Everything in the
   bullet below still describes the machinery; what changed is the count, and it lives in one
@@ -1106,20 +1211,28 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   silent* and one that merely overlapped sound like a single note. An audition is a monitor, not
   a performance. Unconditional rather than only-on-collision, because which pitches overlap is
   invisible and a Hear-this button that works or does not depending on that is the same bug
-  quieter. The cost, accepted: auditioning stops a deliberately sustained chord and the arp hold. **The generator is a brain plus three surfaces,
+  quieter. The cost, accepted: auditioning stops a deliberately sustained chord and the arp hold. **The generator is a brain plus four surfaces,
   and it owns none of them**: `ChordGenMenu` is a plain value member the editor holds for its
-  whole life, and it is reached from (1) three 24 px chips at the right end of the Pads *bar* -
-  Fill, Regen and **Generator**, which opens the window - plus the **Key** combo beside them
+  whole life, and it is reached from (1) four 24 px chips at the right end of the Pads *bar* -
+  Fill, Regen, **Generator** and **Library**, the last two opening a window each - plus the
+  **Key** combo beside them
   (an APVTS attachment, so bar and window are one state; Mode and Scale Compliance sat there
   too until 2026-08-02, when Owen had them off the bar and left them to the window);
   (2) **its own window** (`ChordGenPanel`, 2026-07-30, Owen's call), which holds every setting,
   the Markov chain controls, and Fill / Regen / **Clear page**; (3) two items on a pad's card
-  menu, New chord and Next, through `addPadMenuItems` / `handlePadMenuChoice`. **The window is a
+  menu, New chord and Next, through `addPadMenuItems` / `handlePadMenuChoice`; (4) the
+  **library's** window (`ChordLibraryPanel`, 2026-08-18), which shares the brain's three library
+  picks and reaches back into the generator's tray. **The window is a
   view, never the owner** - it is built when it opens and destroyed when it closes, so the
   per-card menu items cannot come and go with it, which is the exact bug that made
   `ChordGenMenu` a plain member. It is not a `Section`: it never docks, so it has no bar, fold
   or caption, but it reuses `DetachedWindow` and keeps its frame in `LayoutState`
-  (`chordGen` / `chordGenBounds`) like every detached section. Its minimum size is derived from
+  (`chordGen` / `chordGenBounds`) like every detached section. **The library's window is the
+  same shape line for line** (`chordLib` / `chordLibBounds`,
+  `KeysEditor::setChordLibWindowOpen`): two windows rather than a mode inside one, because they
+  answer different questions and you want both at once - the generator is "make me something",
+  the library is "show me what there is", and browsing the second while a trayful sits in the
+  first is the workflow the whole feature is for. Its minimum size is derived from
   the layout (`ChordGenPanel::contentSize`), not chosen. **The card menu has a budget and it is
   rows**: it is anchored to a pad near the bottom of a 699 px window at a 34 px item height, so
   it grows *upwards* off the screen, and JUCE answers a too-tall menu by splitting it into
@@ -1148,7 +1261,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   protects a chord from *generation*, never from the user. Anything
   that wants to show a chord card should use the pads, not build a second grid. Controls that
   belong to a section but must cost no height ride its bar: it is 34 px that already exists.
-  Fill, Regen, Generator and the three combos beside them stay live with the Pads section
+  Fill, Regen, Generator, Library and the combo beside them stay live with the Pads section
   folded, for the same reason arp On does - the other route to the generator is a right-click
   on a card, and the cards fold away with the strip. See `docs/ARP_DESIGN.md`.
 - **Every section detaches, and the machinery is generic.** `KeysEditor::sections` is a
@@ -1181,7 +1294,7 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   arp's A / B switches, All Off, Light keys, Hold off and Launch Quantize; the Controls bar's
   tempo, Root, Scale, Lock, Voices, CH and, in Keys Host, the Instrument chip (2026-08-02: a
   settings band you have folded away is exactly when you still want to change key); the Pads
-  bar's Fill / Regen / Generator and its Key combo (Humanize and its velocity range were on
+  bar's Fill / Regen / Generator / Library and its Key combo (Humanize and its velocity range were on
   this list until 2026-08-03, when they became a range knob in the strip itself); the
   Keyboard bar's Size, Octave, Exclusive / Sustain / Latch / All Off - plus the theme swatch,
   which belongs to the plugin rather than to any one section. Open and folded bars are painted

@@ -244,7 +244,12 @@ and the playing area. They let you keep a palette of chords a single click away,
 candidate chords you can click to hear, but a candidate belongs to no page and is thrown away
 when the window closes, so what you keep is still whatever a pad holds. Every card, filled or live, shows its chord's name with the
 notes underneath in octave numbers (for example "C3  E3  G3"), so you can read what a pad
-or the live card holds without pressing it. That used to need a bigger card: **Big**, on the
+or the live card holds without pressing it. **A filled card also carries its roman numeral in
+the top-left corner** (2026-08-18) - `I`, `vi`, `ii`, `vii°` - measured against the **Key** combo
+on the Pads bar. "Am" tells you what a chord *is*; "vi" tells you what it *does*, which is what
+lets a row of cards read as a progression rather than as six unrelated names. The corner is empty
+for a chord that sits outside the key, which is itself the useful answer, and for a chord Keys
+cannot place. The generator's audition tray carries the same numeral for the same reason. That used to need a bigger card: **Big**, on the
 Pads bar, swapped the two rows of eight for four rows of four with a full card and a mini
 keyboard on each, and it went on 2026-07-31 once the note list fit under the name here too.
 
@@ -365,8 +370,8 @@ by name, and a submenu costs a hover to save 68 px the menu can still afford.
 
 ## Chord generator
 
-The generator is **three chips, one combo box, a window (with its own tray, reference
-card and card menu), and two items on a pad's card menu**:
+The generator is **four chips, one combo box, two windows (the generator's, with its own tray,
+reference card and card menu; and the library's), and two items on a pad's card menu**:
 
 - **Fill** and **Regen**, at the right-hand end of the **Pads bar**. **Fill is the safe one**:
   it writes a chord to the *empty* pads and never touches one that already has a chord, so you
@@ -383,6 +388,9 @@ card and card menu), and two items on a pad's card menu**:
   never part of the session). Being a window rather than part of the plugin, it can sit
   anywhere on the desk and be sized to suit, and it remembers where you left it and whether it
   was open.
+- **Library**, the chip left of it, opens the **chord library** - see its own section below. Same
+  behaviour in every respect: click again to bring it to the front, close it either way, and it
+  remembers where you left it and whether it was open. The two are meant to be up together.
 - **The tray's own header row carries Fill, Regen and Clear**, and none of them writes a pad
   any more (changed 2026-08-01, Owen: "when you click on regenerate unlocked, I don't want it
   to regenerate the ones in the host window, only in the card generator window"). They act on
@@ -669,6 +677,68 @@ to right by asking for one chord at a time. It only ever writes to an empty pad,
 
 **New chord** on a Markov pad steps the chain again from the pad to its left, avoiding the
 chord it replaces. Locked pads are never overwritten, same as the algorithmic source.
+
+## Chord library
+
+348 named progressions you can ask for by **how they feel**, **what they sound like** and
+**what they do**. Two ways in, and they are one thing rather than two: pick a mood in either and
+the other follows.
+
+### The Library source, in the generator's window
+
+**Library** is the eighth entry on the **Source** row. Every other source *computes* a chord
+sequence; this one looks one up. Its band is three pickers:
+
+- **Mood** - Animated, Atmospheric, Beautiful, Calm, Chill, ... through to Uplifting. 46 words,
+  and the picker only ever offers the ones that have progressions behind them.
+- **Genre** - 80s, Alternative, Ballads, Blues, Bossa, ... through to World Music.
+- **Does what** - **Loop** (repeats forever, no strong landing), **Cadence** (arrives and stays
+  arrived), **Turnaround** (ends a section by handing back to its start), **Vamp** (two or three
+  chords, static, usually modal), **Lift** (raises energy into the next section), **Descent**
+  (steps down - a lament bass, a line cliche), **Turn** (changes key or colour mid-phrase),
+  **Open** (deliberately unresolved).
+
+Any of the three set to **Any** leaves that axis open. The line beside them says how many
+progressions match and which one the tray is currently holding.
+
+**Does what is the picker worth learning.** "Sad" gets you forty candidates and no way to choose
+between them; "sad, and it loops" and "sad, and it ends" are different requests, and you almost
+always have one of the two in mind.
+
+**Fill and Regen then work as they always do**, and lay *whole progressions end to end* rather
+than repeating one - so a **Vamp** filter fills the tray with eight different vamps to compare,
+while **12-Bar Blues** fills it on its own. Changing a picker generates nothing, exactly like
+every other setting; Fill and Regen generate.
+
+If a combination matches nothing - "Funky" and "Classical", say - the line says so and generation
+falls back to the whole table rather than handing you an empty tray with no explanation.
+
+### The Library window
+
+The **Library** chip on the Pads bar opens the library itself: the same three pickers, and the
+progressions under them, **twelve to a page** with `<` `>` at the bottom. Each row shows:
+
+- its **name**, with what it does under it;
+- the progression in **roman numerals as written** - `i bVII bVI V` rather than `Cm Bb Ab G`,
+  because the numerals are what say *what the progression is* whatever key you are in;
+- its **mood and genre** tags.
+
+**Click a row to hear it.** The whole row is the button, and it plays the progression through, one
+chord at a time. That is the thing the tray cannot do: ii-V-I and ii-V-vi start identically, so one
+chord of a progression tells you almost nothing. **Click the row again to stop it** - the way out
+is the same target that started it.
+
+Two buttons at the right of each row place it:
+
+- **To tray** fills the generator's audition tray with the progression, one chord a card, so you
+  can hear each on its own and drag the ones you want onto a pad. It greys when the generator's
+  window is shut, because that is where the tray lives - open it and the button comes alive.
+- **To pads** writes the progression straight into the **empty** pads on the current page. It never
+  overwrites a chord you already have, and it greys when the page is full. The whole progression is
+  one **Undo**, not one per chord.
+
+The window remembers where you left it and whether it was open, and it is happiest sitting beside
+the generator's: the generator is "make me something", the library is "show me what there is".
 
 ## Arpeggiator
 

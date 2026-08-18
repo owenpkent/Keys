@@ -1,10 +1,14 @@
 # Reference manuals
 
-Eight manuals feed this file. They are not decoration: eight features in Keys were built
-from a specific page of one of them, and at least twice a manual **corrected a guess** that had
-already been coded and looked right on screen. This file records what each one contributes, what
-Keys took, and what it deliberately did not - so the next person does not re-derive a decision
-that was already made, or re-invent one that was already rejected.
+Eight manuals and one word list feed this file. They are not decoration: nine features in Keys
+were built from a specific page of one of them, and **three times now a reference has corrected a
+guess** that had already been coded and looked right on screen. This file records what each one
+contributes, what Keys took, and what it deliberately did not - so the next person does not
+re-derive a decision that was already made, or re-invent one that was already rejected.
+
+The last entry, Scaler 3, is not a manual at all: it is two CSVs off Owen's disk. It is here
+because the contract of this file is *what Keys took from a reference*, and a taxonomy is as much
+a reference as a chapter is.
 
 **Eleven more PDFs are in `manuals/` and are not in this file.** They arrived 2026-08-17 and
 are surveyed in `docs/SEQUENCER_LANDSCAPE.md` instead, because this file's contract is what Keys
@@ -200,6 +204,51 @@ not have). `docs/ACID_DESIGN.md` is the spec that came out of it; the short vers
 - Not taken: the sequence browser (Keys has twelve slots), MIDI-file export by drag, the
   hover-reveal dice (a discovery problem on a mouse-only surface), and right-click to remove a
   note (left-click-to-clear does it, and the right-click exception list stays closed).
+
+## Scaler 3 (no manual - two CSVs from Owen's install, 2026-08-18)
+
+The one entry here that is not a PDF, and worth keeping anyway. Owen pointed at
+`E:\Ableton\Scaler 3 Moods and Genres\`, which holds Scaler's tagging vocabulary as two files:
+**41 moods** and **40 genres**. That is the whole reference - a word list, not a manual and not a
+library of content.
+
+**Taken:**
+
+- **Both vocabularies, near-verbatim**, as `chordlib::moods()` and `chordlib::genres()` (their
+  "Uplifiting" typo fixed). A producer who owns both products reads one set of words.
+- **The five words Keys keeps that Scaler has no equivalent for** - Haunting, Nostalgic,
+  Rebellious, Spiritual, Tender - which `MarkovData.h` had been tagging with since it was written.
+  They are added rather than mapped onto near neighbours: longing is wanting something, nostalgia
+  is having had it, and folding one into the other loses a distinction the original author drew.
+- **"Cinematic" moves axis.** Keys had it as a mood; on Scaler's list, and now on Keys', it is a
+  genre. That is the correction, and it is right: cinematic is a place the music is going, not a
+  feeling it has.
+
+**Corrected a guess:** the design started from a search-results guess that Scaler tagged on mood
+alone. The CSVs settled it in one look - two axes - and, more usefully, showed where the two-axis
+scheme strains. **Inconclusive** and **Resolved** are on the *mood* list and are not emotions;
+they are what the progression *does*. That is the tell that made Keys' third axis, **Function**
+(Loop, Cadence, Turnaround, Vamp, Lift, Descent, Turn, Open), and Function is the difference
+between "sad" returning forty candidates and "sad, and it loops" returning the four you meant.
+
+**Deliberately not taken:**
+
+- **Scaler's chord sets.** Progressions are not copyrightable, but a *curated list* of them can
+  attract thin copyright in its selection and arrangement, and in the EU a database right can
+  attach to the compiler's effort. A word list is a taxonomy; a thousand-row library is a
+  compilation. Keys' 348 rows are authored from the named canon, modal vamps, jazz turnarounds and
+  film-score mediants, ranked and section-tagged against Hooktheory's published Trends statistics
+  and the open **Chordonomicon** dataset (666,000 songs, released as an open benchmark). Nothing
+  is copied across, and the line is worth restating whenever the table grows.
+- **The count.** Scaler ships 1,000+ chord sets, a large share of them artist and genre packs
+  whose value is the name attached. 348 tagged on three axes beats a flat 1,000, and 348 is a
+  number that can be verified by ear and by theory one row at a time - which a scraped 5,000
+  cannot, and which is the whole reason `tests/ChordLibraryTests.cpp` can spellcheck the table on
+  every build.
+
+See `docs/CHORD_LIBRARY.md` for the design this fed.
+
+---
 
 ---
 
