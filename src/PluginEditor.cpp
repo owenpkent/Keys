@@ -2372,23 +2372,26 @@ void KeysEditor::timerCallback()
         lastChannel = ch;
     }
 
-    // Only the timing spread greys out with Humanize now. The velocity range is the
-    // velocity control whether Humanize is on or off (it plays the band's midpoint when
-    // off), so disabling it would grey out the only way to set how hard Keys plays.
-    const bool hum = apvts.getRawParameterValue("humanize")->load() > 0.5f;
-
     // Keep the two-handle velocity range synced to its params and show the numbers. With
     // Humanize off the two ends are one value as far as playing goes, so read out the
-    // midpoint rather than a range that is not being spread over. No "VELOCITY" prefix since
-    // Both ranges are knobs now (2026-08-03). Their *face* is on an attachment and needs
-    // nothing here; the **span** is not, so it is pushed in each tick - the same read-back the
-    // arp's two Humanize knobs need, and for the same reason: a session load, a host lane or
-    // an MCP client moves the low end and nothing else would tell the ring. setSpan no-ops
-    // when the value is unchanged, so this never fights an open drag.
+    // midpoint rather than a range that is not being spread over. Both ranges are knobs since
+    // 2026-08-03, so neither carries a "VELOCITY" prefix any more. Their *face* is on an
+    // attachment and needs nothing here; the **span** is not, so it is pushed in each tick -
+    // the same read-back the arp's two Humanize knobs need, and for the same reason: a session
+    // load, a host lane or an MCP client moves the low end and nothing else would tell the
+    // ring. setSpan no-ops when the value is unchanged, so this never fights an open drag.
     //
     // Sorted, because the pair can arrive the wrong way round from host automation and a
-    // negative span is not a thing to draw. Humanize's greying is unchanged: only the timing
-    // spread greys out, since the velocity range is the velocity control either way.
+    // negative span is not a thing to draw.
+    //
+    // **Nothing greys on Humanize any more, here or anywhere.** Both this comment and a
+    // `const bool hum` above it described a greying pass that went when Humanize's tick box
+    // became the knob's own lamp (2026-08-03) - the variable had been unread ever since, warning
+    // on every build, and the comment outlived it saying the timing spread still greys out. The
+    // reasoning worth keeping is why the velocity range was never the thing to disable: it is
+    // the velocity control whether Humanize is on or off, since it plays the band's midpoint
+    // when off, so grey it and there is no way left to set how hard Keys plays. humanKnob.isOn /
+    // setOn is the on/off now.
     const auto spanOf = [&apvts](const char* loId, const char* hiId)
     {
         const auto a = apvts.getRawParameterValue(loId)->load();
