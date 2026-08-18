@@ -27,6 +27,9 @@ namespace
     constexpr int kFooterH = 34;
     constexpr int kAfterRows = 8;
 
+    constexpr int kStarW = 34; // the mouse-only floor: a star is a target exactly as a button is
+    constexpr int kFavW = 130;     // the "Starred only" toggle beside the three pickers
+    constexpr int kFollowsW = 100; // and "Follows" beside it
     constexpr int kMoodW = 160, kGenreW = 170, kFuncW = 150, kCountW = 240;
     constexpr int kTitleW = 150, kCloseW = 90;
     constexpr int kRowBtnW = 86;   // "To tray" / "To pads", side by side at a row's right end
@@ -72,8 +75,8 @@ namespace
 
 juce::Point<int> ChordLibraryPanel::contentSize()
 {
-    const int w = juce::jmax(kMoodW + kGenreW + kFuncW + kCountW + 3 * kGap,
-                             kNameW + kTagW + 2 * kRowBtnW + 4 * kGap + 220, // 220: the numeral strip
+    const int w = juce::jmax(kMoodW + kGenreW + kFuncW + kFavW + kFollowsW + kCountW + 5 * kGap,
+                             kStarW + kNameW + kTagW + 2 * kRowBtnW + 4 * kGap + 220, // 220: strip
                              kTitleW + kCloseW + kGap);
     const int h = kHeaderH + kAfterHeader + kFilterRowH + kAfterFilters
                   + rowsPerPage * kRowH + (rowsPerPage - 1) * kRowGap + kAfterRows + kFooterH;
@@ -196,6 +199,37 @@ void ChordLibraryPanel::buildControls()
     for (auto* c : { &moodBox, &genreBox, &functionBox })
         addAndMakeVisible(*c);
 
+    // A toggle rather than a fourth combo. "Starred only" is a yes/no about the list you already
+    // have, where the three beside it are picks *within* it - and a combo reading "All / Starred"
+    // would be one more thing to open and read for a question with two answers.
+    favouritesButton.setButtonText("Starred only");
+    favouritesButton.setTitle("Show starred progressions only");
+    favouritesButton.setTooltip("Show only the progressions you have starred. The star is at the "
+                                "left of each row.");
+    favouritesButton.setClickingTogglesState(true);
+    favouritesButton.onClick = [this] { page = 0; refreshMatches(); };
+    addAndMakeVisible(favouritesButton);
+
+    // **Follows** is the relational layer, and it is a *mode* rather than a fourth filter because
+    // it answers a different question: the three pickers ask "what is there", this asks "what
+    // comes after what I already have". While it is on, the three are ignored and the list is
+    // `chordlib::couldFollow` on the last progression the pads hold, best first.
+    //
+    // It points at the pads rather than at a row you select here, because that is where the
+    // question actually comes from: you have just laid a progression down and want the next one.
+    // Nothing to aim, nothing to remember - if the strip ends in a cadence, this offers what goes
+    // after a cadence. It greys when no pad carries a progression, which is honest: there is
+    // nothing for it to follow.
+    followsButton.setButtonText("Follows");
+    followsButton.setTitle("Show progressions that could follow the pads");
+    followsButton.setTooltip("Show the progressions that could come after the last one on your "
+                             "pads, best first. Structure decides which are eligible - what "
+                             "follows a cadence is not what follows a turnaround - and how well "
+                             "the last chord joins onto the first orders them.");
+    followsButton.setClickingTogglesState(true);
+    followsButton.onClick = [this] { page = 0; refreshMatches(); };
+    addAndMakeVisible(followsButton);
+
     countLabel.setFont(skin::ui(12.0f));
     countLabel.setColour(juce::Label::textColourId, skin::textDim);
     countLabel.setJustificationType(juce::Justification::centredLeft);
@@ -262,6 +296,7 @@ std::vector<KeysProcessor::ChordPad> ChordLibraryPanel::padsFor(const chordlib::
     const int oct = juce::jlimit(0, 8, (int) processor.apvts.getRawParameterValue("genOctave")->load());
 
     std::vector<KeysProcessor::ChordPad> out;
+    int step = 0;
     for (const auto& c : chordlib::chordsFor(e, root, e.mode, oct))
     {
         KeysProcessor::ChordPad pad;
@@ -270,9 +305,51 @@ std::vector<KeysProcessor::ChordPad> ChordLibraryPanel::padsFor(const chordlib::
         pad.rootPc = c.rootPc;
         pad.type = c.type;
         pad.degree = c.degree;
+        // Stamped here rather than at the placing end, because this is the one function that
+        // knows both the row and the position within it. A pad carries it from now on: the strip
+        // draws a bracket under consecutive steps, and it is what lets "could follow" ask about a
+        // progression rather than about a chord.
+        pad.progression = e.name;
+        pad.progressionStep = step++;
         out.push_back(pad);
     }
     return out;
+}
+
+// The library row the pads end on, scanning the current page backwards. Backwards because the
+// question is "what comes next", so the *last* progression laid down is the one being followed -
+// and a page holding three of them in a row wants the third, not the first.
+//
+// The current page only. A progression on page 2 is not what page 1 ends on, and reaching across
+// pages would make the answer depend on something you cannot see.
+juce::String ChordLibraryPanel::lastProgressionOnPads() const
+{
+    const int offset = processor.padPageOffset();
+    for (int v = KeysProcessor::padsPerPage - 1; v >= 0; --v)
+    {
+        const auto& pad = processor.chordPad(offset + v);
+        if (! pad.notes.empty() && pad.progression.isNotEmpty())
+            return pad.progression;
+    }
+    return {};
+}
+
+bool ChordLibraryPanel::isFavourite(const chordlib::Entry& e) const
+{
+    return processor.layout.libraryFavourites.contains(e.name);
+}
+
+void ChordLibraryPanel::toggleFavourite(const chordlib::Entry& e)
+{
+    auto& favs = processor.layout.libraryFavourites;
+    if (const int i = favs.indexOf(e.name); i >= 0)
+        favs.remove(i);
+    else
+        favs.add(e.name);
+
+    // Un-starring the last row while the filter is showing favourites only would otherwise leave
+    // you on an empty page with the way back three clicks away, so the list is re-run either way.
+    refreshMatches();
 }
 
 int ChordLibraryPanel::numPages() const
@@ -290,14 +367,47 @@ void ChordLibraryPanel::refreshMatches()
 {
     lastSignature = gen.libraryMood() + "|" + gen.libraryGenre() + "|"
                     + juce::String(gen.libraryFunction());
-    matches = chordlib::find(gen.libraryMood(), gen.libraryGenre(), gen.libraryFunction());
+    // What the pads end on, if anything. Scanned every refresh rather than cached: the pads change
+    // from four other surfaces and none of them knows this window exists.
+    const auto* seed = chordlib::byName(lastProgressionOnPads());
+    followsButton.setEnabled(seed != nullptr);
+    const bool following = followsButton.getToggleState() && seed != nullptr;
+
+    if (following)
+        matches = chordlib::couldFollow(*seed, false, (int) chordlib::table().size());
+    else
+        matches = chordlib::find(gen.libraryMood(), gen.libraryGenre(), gen.libraryFunction());
+
+    // Starred-only narrows what the three pickers matched rather than replacing it, so a star and
+    // a mood together mean "the sad ones I kept" rather than one silently cancelling the other.
+    if (favouritesButton.getToggleState())
+    {
+        const auto& favs = processor.layout.libraryFavourites;
+        std::vector<const chordlib::Entry*> kept;
+        for (const auto* e : matches)
+            if (favs.contains(e->name))
+                kept.push_back(e);
+        matches = std::move(kept);
+    }
     page = juce::jlimit(0, numPages() - 1, page);
 
     const int n = (int) matches.size();
-    countLabel.setText(n == 0 ? juce::String("nothing matches - widen a filter")
-                              : juce::String(n) + (n == 1 ? " progression" : " progressions")
-                                    + " of " + juce::String(chordlib::table().size()),
-                       juce::dontSendNotification);
+    const int stars = processor.layout.libraryFavourites.size();
+    juce::String count;
+    if (n == 0)
+        count = favouritesButton.getToggleState() && stars == 0
+                    ? juce::String("nothing starred yet - the star is at the left of a row")
+                    : juce::String("nothing matches - widen a filter");
+    else if (following)
+        // Naming what it is following is the whole of what makes this mode readable. Without it
+        // the list is a reordering with no stated cause, which is indistinguishable from a bug.
+        count = juce::String(n) + " could follow " + seed->name;
+    else
+        count = juce::String(n) + (n == 1 ? " progression" : " progressions") + " of "
+                + juce::String(chordlib::table().size());
+    if (stars > 0)
+        count << "   |   " << juce::String(stars) << " starred";
+    countLabel.setText(count, juce::dontSendNotification);
     refreshRowButtons();
     repaint();
 }
@@ -352,6 +462,21 @@ void ChordLibraryPanel::timerCallback()
 
     refreshRowButtons(); // the two greys track another window's state too
 
+    // What the pads end on changes from four other surfaces - a drop, a Fill, an undo, a page
+    // flip - and none of them knows this window exists. Polled for the same reason the filters
+    // are, and cached so a tick that changed nothing costs one string compare rather than a
+    // re-filter of 348 rows.
+    //
+    // Without this, **Follows stayed greyed after the pads gained a progression**: the seed is
+    // worked out in `refreshMatches`, which only ran when a picker moved. It looked like the
+    // feature not working, which is what a control that is right about a stale fact always looks
+    // like.
+    if (const auto onPads = lastProgressionOnPads(); onPads != lastPadsProgression)
+    {
+        lastPadsProgression = onPads;
+        refreshMatches();
+    }
+
     // The lit row goes out when the walk ends. Nothing tells this window when that happens - the
     // audition is on a timer inside ChordGenMenu - so it asks.
     if (playing >= 0 && ! gen.auditioningProgression())
@@ -370,6 +495,14 @@ juce::Rectangle<float> ChordLibraryPanel::rowBounds(int indexOnPage) const
     return juce::Rectangle<float>((float) area.getX(),
                                   (float) area.getY() + (float) indexOnPage * (h + (float) kRowGap),
                                   (float) area.getWidth(), h);
+}
+
+// The star's own cell, reserved out of the row's left end before anything else takes a cut - the
+// standing rule here, and it matters more than usual because the elastic thing beside it is the
+// numeral strip, which will happily eat a fixed cell if asked to leave room for one.
+juce::Rectangle<float> ChordLibraryPanel::starBounds(int indexOnPage) const
+{
+    return rowBounds(indexOnPage).withWidth((float) kStarW + 8.0f).reduced(4.0f, 6.0f);
 }
 
 int ChordLibraryPanel::rowAt(juce::Point<float> pos) const
@@ -408,6 +541,16 @@ void ChordLibraryPanel::mouseDown(const juce::MouseEvent& e)
     const auto* entry = i >= 0 ? entryAt(i) : nullptr;
     if (entry == nullptr)
         return;
+
+    // The star is tested before the row, because it sits *inside* the row's rectangle rather than
+    // on top of it as a child Component. It is painted rather than built as a button for the same
+    // reason the lock dot on a chord card is: twelve more Components to lay out, hide and re-title
+    // on every page turn, for a two-state mark. Its cell is the mouse-only 34 px all the same.
+    if (starBounds(i).contains(e.position))
+    {
+        toggleFavourite(*entry);
+        return;
+    }
 
     // A second click on the row that is already walking stops it, so the way out of a
     // twelve-chord blues is the same target that started it rather than a hunt for a Stop button.
@@ -461,7 +604,24 @@ void ChordLibraryPanel::paint(juce::Graphics& g)
         const auto ink = lit ? inkOnAccent : skin::text;
         const auto dim = lit ? inkOnAccent.withAlpha(0.75f) : skin::textDim;
 
+        // The star, and its cell out of the row's left end before anything else takes a cut.
+        {
+            const auto star = starBounds(i);
+            const bool on = isFavourite(*e);
+            const bool hot = (i == hovered) && star.contains(getMouseXYRelative().toFloat());
+            g.setColour(on ? (lit ? inkOnAccent : accent.base)
+                           : (lit ? inkOnAccent.withAlpha(hot ? 0.6f : 0.25f)
+                                  : skin::textFaint.withAlpha(hot ? 1.0f : 0.5f)));
+            g.setFont(skin::uiSemi(15.0f));
+            // A filled star for kept, a hollow one for not. Two glyphs rather than one glyph at two
+            // alphas: an unstarred row still has to say "you can star this", and a dim star says it
+            // where a very dim one just looks like a rendering fault.
+            g.drawText(juce::String::charToString((juce::juce_wchar) (on ? 0x2605 : 0x2606)),
+                       star.toNearestInt(), juce::Justification::centred, false);
+        }
+
         auto r = b.reduced(8.0f, 4.0f);
+        r = r.withTrimmedLeft((float) kStarW);
         r.removeFromRight((float) (2 * kRowBtnW + kGap + kGap)); // the two buttons' cell
         const auto tags = r.removeFromRight((float) kTagW);
         const auto name = r.removeFromLeft((float) kNameW);
@@ -496,8 +656,10 @@ void ChordLibraryPanel::paint(juce::Graphics& g)
         auto area = rowBounds(0).withBottom(rowBounds(rowsPerPage - 1).getBottom());
         g.setColour(skin::textFaint);
         g.setFont(skin::ui(14.0f));
-        g.drawText("No progression carries all three of those. Widen a filter.", area.toNearestInt(),
-                   juce::Justification::centred, true);
+        g.drawText(favouritesButton.getToggleState()
+                       ? "Nothing starred here. The star sits at the left of every row."
+                       : "No progression carries all three of those. Widen a filter.",
+                   area.toNearestInt(), juce::Justification::centred, true);
     }
 }
 
@@ -524,6 +686,17 @@ void ChordLibraryPanel::resized()
         cell(kMoodW, moodLabel, moodBox);
         cell(kGenreW, genreLabel, genreBox);
         cell(kFuncW, functionLabel, functionBox);
+        {
+            // Reserved before the count takes the remainder: the count is the elastic one here.
+            auto favCell = row.removeFromLeft(kFavW);
+            favCell.removeFromTop(14); // no caption of its own - the button says what it is
+            favouritesButton.setBounds(favCell);
+            row.removeFromLeft(kGap);
+            auto followCell = row.removeFromLeft(kFollowsW);
+            followCell.removeFromTop(14);
+            followsButton.setBounds(followCell);
+            row.removeFromLeft(kGap);
+        }
         row.removeFromTop(14); // no caption over the count: it is a sentence, not a value
         countLabel.setBounds(row);
     }

@@ -78,6 +78,13 @@ private:
     const chordlib::Entry* entryAt(int indexOnPage) const;
     std::vector<KeysProcessor::ChordPad> padsFor(const chordlib::Entry&) const;
 
+    // The star at a row's left end. Kept by *name* in `LayoutState::libraryFavourites`, and per
+    // session rather than globally, which is the honest weakness - see that field's own note.
+    juce::String lastProgressionOnPads() const; // what the current page ends on, or empty
+    bool isFavourite(const chordlib::Entry&) const;
+    void toggleFavourite(const chordlib::Entry&);
+    juce::Rectangle<float> starBounds(int indexOnPage) const;
+
     KeysProcessor& processor;
     ChordGenMenu& gen;
 
@@ -86,6 +93,11 @@ private:
 
     juce::ComboBox moodBox, genreBox, functionBox;
     juce::Label moodLabel, genreLabel, functionLabel;
+    juce::TextButton favouritesButton; // "Starred only", narrowing whatever the three matched
+    // "Follows": a mode rather than a filter, because it answers a different question - not
+    // "what is there" but "what comes after what I already have". See its own note where it is
+    // built, and `chordlib::couldFollow`, which is the half that does the thinking.
+    juce::TextButton followsButton;
 
     juce::TextButton prevPage { "<" }, nextPage { ">" };
     juce::Label pageLabel;
@@ -98,6 +110,9 @@ private:
     // window many times over). Re-run whenever a filter changes, never per paint.
     std::vector<const chordlib::Entry*> matches;
     juce::String lastSignature; // the filter the matches were built for
+    // What the pads ended on last tick, so "Follows" notices a drop it did not make. Cached
+    // because the alternative is re-filtering 348 rows ten times a second to learn nothing.
+    juce::String lastPadsProgression;
 
     int page = 0;
     int hovered = -1;

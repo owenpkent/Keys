@@ -181,6 +181,70 @@ namespace
                     expect(! keys::chordlib::find({}, g, -1).empty(), "genre in use with no rows: " + g);
             }
 
+            beginTest("couldFollow gates on structure and orders by the join");
+            {
+                using keys::chordlib::Function;
+                for (const auto& from : keys::chordlib::table())
+                {
+                    const auto after = keys::chordlib::couldFollow(from, false, 8);
+                    for (const auto* e : after)
+                    {
+                        expect(e != &from, juce::String(from.name) + " could follow itself");
+
+                        // The function gate is a gate, not a weight: a row that does not belong
+                        // after this one must not appear at all, however well its first chord
+                        // joins on. That is the line between a suggestion list and a shuffle.
+                        bool allowed = false;
+                        for (const auto f : keys::chordlib::functionsAfter(from.function))
+                            if (f == e->function) { allowed = true; break; }
+                        expect(allowed, juce::String(e->name) + " is not a legal move after "
+                                            + from.name);
+                    }
+                }
+            }
+
+            beginTest("nothing follows an Open with another Open");
+            {
+                // The one asymmetry in the grammar worth pinning by hand, because it is the one a
+                // careless edit would flatten: an Open has asked a question, so what follows it
+                // answers. Two Opens in a row is a section that never lands.
+                for (const auto f : keys::chordlib::functionsAfter(keys::chordlib::Function::open))
+                    expect(f != keys::chordlib::Function::open, "an Open may follow an Open");
+
+                // And every function has somewhere to go, or a progression of that kind is a dead
+                // end and "Follows" silently answers nothing after it.
+                for (int i = 0; i < (int) keys::chordlib::Function::count; ++i)
+                    expect(! keys::chordlib::functionsAfter((keys::chordlib::Function) i).empty(),
+                           juce::String(keys::chordlib::functionName((keys::chordlib::Function) i))
+                               + " leads nowhere");
+            }
+
+            beginTest("the join scores a falling fifth above a repeat");
+            {
+                // The ranking that orders the list. Pinned by construction rather than by picking
+                // rows out of the table, so it keeps testing the rule when the table moves.
+                const keys::chordlib::Entry endsOnV { "t1", "I V", keys::chordlib::Function::open,
+                                                      keys::chordlib::kIonian, { "Calm" }, { "Pop" } };
+                const keys::chordlib::Entry startsOnI { "t2", "I IV", keys::chordlib::Function::loop,
+                                                        keys::chordlib::kIonian, { "Calm" }, { "Pop" } };
+                const keys::chordlib::Entry startsOnV { "t3", "V IV", keys::chordlib::Function::loop,
+                                                        keys::chordlib::kIonian, { "Calm" }, { "Pop" } };
+                // V -> I is up a fourth, the falling-fifth resolution; V -> V is a repeat.
+                expect(keys::chordlib::joinScore(endsOnV, startsOnI)
+                           > keys::chordlib::joinScore(endsOnV, startsOnV),
+                       "a resolution did not beat standing still");
+            }
+
+            beginTest("byName finds a row and refuses a name that is not one");
+            {
+                // What a pad's stored `progression` uses to find its way home. Empty in must be
+                // null out, because most pads carry exactly that.
+                const auto& first = keys::chordlib::table().front();
+                expect(keys::chordlib::byName(first.name) == &first);
+                expect(keys::chordlib::byName({}) == nullptr);
+                expect(keys::chordlib::byName("not a progression") == nullptr);
+            }
+
             beginTest("the six appended numeral suffixes resolve to the right types");
             {
                 // ChordLibrary.h needed a numeral for every type in chordgen::types() and the

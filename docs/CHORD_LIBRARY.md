@@ -4,10 +4,11 @@ Proposed 2026-08-18 (Owen: "collections or books of chords and progressions, thi
 together ... an outstanding library that makes it easy to compose, maybe organized by emotion or
 something. Scaler, the other VST has done a great job of this").
 
-**Built the same day, as far as the first half of §9's first question.** `src/ChordLibrary.h`
-holds **271 tagged progressions**; **Library** is appended to the generator's Source list; its
-band carries Mood / Genre / Does-what and a readout of what the filter matched. Still ahead: the
-browsable window, folding `MarkovData.h`'s 88 rows in, and the relational layer in §7.
+**Built the same day, all of it.** `src/ChordLibrary.h` holds **348 tagged progressions**;
+**Library** is appended to the generator's Source list; `ChordLibraryPanel` is the browsable window
+off a Library chip on the Pads bar, with a star per row; a pad remembers which progression it is a
+step of and the strip brackets a run; and **Follows** answers §7's question - a progression that
+could follow a progression. §9 has what is left.
 
 The design and the paper trail behind it follow, in the shape `docs/ACID_DESIGN.md` uses: what
 exists, what the references do, what Keys took and what it deliberately did not.
@@ -261,7 +262,7 @@ three-axis library** rather than mood alone or a retag of the existing 88, and *
 the generator source first, the browsable window after. The source is built; the rest is below, in
 the order it is worth doing.
 
-**Both are now built.** What is left is (3) and (4) below.
+**All four are now built.** What is left is at the bottom of this section.
 
 - ~~**The browsable window.**~~ Built: `src/ui/ChordLibraryPanel.h`, opened by a **Library** chip
   on the Pads bar beside Generator. **Paged, not scrolled** - twelve rows and a `<` `>` pair, the
@@ -274,12 +275,51 @@ the order it is worth doing.
   the table already carried under a name of its own. They stay in `MarkovData.h` too - the Markov
   source still wants its bigrams - so it is a copy, not a move.
 
-3. **Does a progression keep its identity after it lands?** A pad remembers `degree` and `numeral`
-   but not "you came from the Andalusian cadence, chord 3 of 4". A `progressionId` + `step` on
-   `ChordPad` would let the strip draw the bracket the Progressions diagram already draws - and
-   would be the first field added to that struct since Markov's numeral.
-4. **The relational layer** in §7: **Could follow** meaning "a progression that could follow this
-   progression". It needs (3) to know what you are standing on.
+- ~~**Does a progression keep its identity after it lands?**~~ Built: `ChordPad::progression` (the
+  row's **name**, not an index - `chordlib::table()` is explicitly free to be inserted into, and an
+  index would quietly take that freedom away) and `progressionStep`. The strip draws a hairline
+  bracket under a run of adjacent pads that share a row in step order, with the row's name under
+  it. **A run is broken by a row change, a step that does not follow, and a row break** - pads wrap
+  from the sixth to the seventh, so 5 and 6 are adjacent by index and nowhere near each other on
+  screen. A run of one draws nothing: that is a chord that remembers where it came from, not a
+  progression on the strip.
+- ~~**The relational layer.**~~ Built as **`chordlib::couldFollow`** and the **Follows** toggle in
+  the library window. Two signals, because "could follow" is two questions:
+  **structure** decides which rows are *eligible* (`functionsAfter` - what follows a cadence is not
+  what follows a turnaround, and nothing follows an Open with another Open), and the **harmonic
+  join** orders them (the last chord of one against the first of the next: a falling fifth scores
+  highest, a repeat lowest without being disqualified, since two progressions on the tonic do
+  follow each other - it is just the dullest answer). Staying in the mode is worth about a rank;
+  a shared mood nudges. **Function is a gate rather than a weight** on purpose: a row that does not
+  belong after this one is not a weak answer, it is the wrong one, and letting it in on a good join
+  is how a suggestion list stops meaning anything.
+  **It points at the pads, not at a row you select.** That is where the question comes from - you
+  have laid a progression down and want the next one - so there is nothing to aim and nothing to
+  remember. It scans the current page backwards (the *last* progression is the one being followed)
+  and greys when no pad carries one.
+
+### Also built
+
+- **Favourites**, the one thing Scaler's browser had that Keys had no answer for (its manual, p43).
+  A star at each row's left end, a **Starred only** toggle that narrows whatever the three pickers
+  matched rather than replacing it. Kept **by name** in `LayoutState::libraryFavourites`, which is
+  the same call `ChordPad::progression` makes and for the same reason.
+  **Per session, which is the honest weakness.** Scaler's favourites are global; a star you set in
+  one project is gone in the next. Keys has no global store for anything - the settings gear's
+  three switches are in `LayoutState` too - so a global one would be new machinery for one feature.
+  Worth revisiting the day a second preference wants to outlive a project.
+  The star is *painted*, not a `TextButton`, the same call the lock dot on a chord card makes:
+  twelve more Components to lay out, hide and re-title on every page turn, for a two-state mark.
+  Its cell is the mouse-only 34 px all the same, reserved out of the row before anything else.
+
+### Still open
+
+**Favourites should probably be global**, per the note above.
+
+**The join score is root motion only.** It does not look at shared pitch classes, at whether the
+two chords are both major, or at voice leading between them - all of which a musician would weigh.
+Root motion is most of the signal and costs no chord parsing; the rest is available if the
+suggestions ever feel wrong.
 
 ### Known thin spots in the table
 

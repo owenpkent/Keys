@@ -244,8 +244,12 @@ and the playing area. They let you keep a palette of chords a single click away,
 candidate chords you can click to hear, but a candidate belongs to no page and is thrown away
 when the window closes, so what you keep is still whatever a pad holds. Every card, filled or live, shows its chord's name with the
 notes underneath in octave numbers (for example "C3  E3  G3"), so you can read what a pad
-or the live card holds without pressing it. **A filled card also carries its roman numeral in
-the top-left corner** (2026-08-18) - `I`, `vi`, `ii`, `vii°` - measured against the **Key** combo
+or the live card holds without pressing it. **A pad that came from the chord library also says
+which progression it is part of**: the library's name sits along the top of the run's first card,
+and a hairline bracket runs under the pads that belong to it, so four minor chords in a row read as
+the Andalusian cadence rather than as four minor chords. A run of one draws no bracket - that is a
+chord that remembers where it came from, not a progression on the strip. **A filled card also
+carries its roman numeral in the top-left corner** (2026-08-18) - `I`, `vi`, `ii`, `vii°` - measured against the **Key** combo
 on the Pads bar. "Am" tells you what a chord *is*; "vi" tells you what it *does*, which is what
 lets a row of cards read as a progression rather than as six unrelated names. The corner is empty
 for a chord that sits outside the key, which is itself the useful answer, and for a chord Keys
@@ -727,6 +731,21 @@ progressions under them, **twelve to a page** with `<` `>` at the bottom. Each r
 chord at a time. That is the thing the tray cannot do: ii-V-I and ii-V-vi start identically, so one
 chord of a progression tells you almost nothing. **Click the row again to stop it** - the way out
 is the same target that started it.
+
+**The star at the left of a row keeps it.** **Starred only**, beside the three pickers, then shows
+just those - and it narrows whatever the pickers matched rather than replacing it, so a star and a
+mood together mean "the sad ones I kept". Stars are saved with the project, which is worth knowing:
+they do not follow you into the next song.
+
+**Follows** is the other toggle, and it answers a different question: not "what is there" but
+"what comes after what I already have". Turn it on and the list becomes the progressions that could
+follow the last one on your pads, best first. It greys until a pad carries one.
+
+Two things decide the order, because "could follow" is two questions. **What the progressions do**
+decides which are even eligible - what follows a cadence is not what follows a turnaround, and
+nothing follows an Open with another Open. **How the last chord joins onto the first** orders what
+is left: a falling fifth is the strongest move in music and comes top, standing on the same chord
+comes last. Staying in the same mode is worth about a place; sharing a mood nudges.
 
 Two buttons at the right of each row place it:
 

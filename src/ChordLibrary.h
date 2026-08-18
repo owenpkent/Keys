@@ -2,6 +2,7 @@
 
 #include "ChordMarkov.h"
 #include <juce_core/juce_core.h>
+#include <algorithm>
 #include <vector>
 
 // The chord library: named progressions you can ask for by how they feel, what they sound like,
@@ -1080,6 +1081,176 @@ namespace keys::chordlib
             out.push_back(c);
         }
         return out;
+    }
+
+    // ---- What could follow what ----------------------------------------------------------
+    //
+    // The relational layer, and the thing a library of progressions can do that a library of
+    // chords cannot: given one progression, which others make sense after it.
+    //
+    // **Two signals, because "could follow" is two questions.** A progression has to follow
+    // *structurally* - a Cadence has landed, so what comes next starts something - and it has to
+    // follow *harmonically*, since the last chord of one and the first of the next are adjacent in
+    // time whatever the labels say. Either alone gives bad answers: function alone will happily
+    // hand you a Lift in a key three fifths away, and harmony alone will follow a cadence with
+    // another cadence because the roots happen to line up.
+
+    // Which functions read as a sensible next move after each one. This is a grammar of song
+    // form, not of harmony, and it is deliberately generous: it says what *could* follow, and the
+    // harmonic half narrows it. The asymmetries are the content - a Cadence has arrived, so what
+    // follows it opens something new, where a Turnaround has explicitly handed back and what
+    // follows it is where you came from.
+    inline std::vector<Function> functionsAfter(Function f)
+    {
+        switch (f)
+        {
+            case Function::loop:       return { Function::lift, Function::turnaround,
+                                                Function::cadence, Function::turn };
+            case Function::lift:       return { Function::loop, Function::cadence,
+                                                Function::turnaround };
+            case Function::cadence:    return { Function::loop, Function::vamp, Function::turn };
+            case Function::turnaround: return { Function::loop, Function::vamp, Function::lift };
+            case Function::vamp:       return { Function::lift, Function::turn, Function::loop };
+            case Function::descent:    return { Function::cadence, Function::loop, Function::open };
+            case Function::turn:       return { Function::loop, Function::cadence, Function::vamp };
+            // An Open has asked a question, so what follows it answers: something that lands, or
+            // something that gets on with it. Never another Open.
+            case Function::open:       return { Function::cadence, Function::loop, Function::lift };
+            default:                   return {};
+        }
+    }
+
+    // How well `b` joins onto `a`, from the last chord of one to the first of the other, higher is
+    // better. Root motion only: the numerals are absolute, so a semitone distance is all that is
+    // needed and it costs no parsing of the chords themselves.
+    //
+    // The ranking is the ordinary one. A falling fifth is the strongest move in tonal music and
+    // scores highest; a step either way is next; a third is a colour change and still good; the
+    // tritone is the weakest thing that is not a repeat. **Landing on the same root scores
+    // lowest without being disqualified**, because two progressions that both sit on the tonic do
+    // follow each other - that is a whole genre - it is just the least *interesting* answer, and
+    // it should not crowd out the others.
+    inline int joinScore(const Entry& a, const Entry& b)
+    {
+        const auto endOf = juce::StringArray::fromTokens(juce::String(a.numerals), " ", "");
+        const auto startOf = juce::StringArray::fromTokens(juce::String(b.numerals), " ", "");
+        if (endOf.isEmpty() || startOf.isEmpty())
+            return 0;
+        const auto last = markov::detail::parseNumeralToken(endOf[endOf.size() - 1], 0);
+        const auto first = markov::detail::parseNumeralToken(startOf[0], 0);
+        if (! last.valid || ! first.valid)
+            return 0;
+
+        switch (((first.rootPc - last.rootPc) % 12 + 12) % 12)
+        {
+            case 5:  return 10; // up a fourth - the falling-fifth resolution
+            case 7:  return 8;  // up a fifth
+            case 2:
+            case 10: return 7;  // a step either way
+            case 3:
+            case 4:
+            case 8:
+            case 9:  return 6;  // a third either way - a colour change
+            case 1:
+            case 11: return 5;  // a semitone
+            case 6:  return 3;  // the tritone
+            default: return 1;  // same root: it follows, it is just the dullest answer
+        }
+    }
+
+    // Progressions that could follow `from`, best first. `sameModeOnly` keeps the answers in the
+    // mode the caller is already in, which is the difference between a suggestion and a modulation.
+    //
+    // `from` itself is never in the answer: "what could follow this" asking you to play it again
+    // is the one reply that cannot help.
+    inline std::vector<const Entry*> couldFollow(const Entry& from, bool sameModeOnly = false,
+                                                 int limit = 16)
+    {
+        const auto wanted = functionsAfter(from.function);
+
+        std::vector<std::pair<int, const Entry*>> scored;
+        for (const auto& e : table())
+        {
+            if (&e == &from || juce::String(e.name) == from.name)
+                continue;
+            if (sameModeOnly && e.mode != from.mode)
+                continue;
+
+            // Function is a gate rather than a score: a progression that does not belong after
+            // this one is not a weak answer, it is the wrong answer, and letting it in on a good
+            // harmonic join is how a list of suggestions stops meaning anything.
+            bool functionOk = false;
+            for (const auto f : wanted)
+                if (f == e.function) { functionOk = true; break; }
+            if (! functionOk)
+                continue;
+
+            int score = joinScore(from, e);
+            if (e.mode == from.mode)
+                score += 3; // staying in the mode is worth about a rank
+
+            // Sharing a mood carries the *feel* across a section change, which is usually what you
+            // want and never what you must have - so it nudges rather than gates.
+            for (const auto* m : from.moods)
+                for (const auto* n : e.moods)
+                    if (juce::String(m) == n) { score += 1; break; }
+
+            scored.push_back({ score, &e });
+        }
+
+        // Stable by construction: equal scores keep table order, so the answer to a given question
+        // is the same every time it is asked. A shuffled "best" list is one you cannot learn.
+        std::stable_sort(scored.begin(), scored.end(),
+                         [](const auto& a, const auto& b) { return a.first > b.first; });
+
+        std::vector<const Entry*> out;
+        for (const auto& [score, e] : scored)
+        {
+            if ((int) out.size() >= limit)
+                break;
+            juce::ignoreUnused(score);
+            out.push_back(e);
+        }
+        return out;
+    }
+
+    // The numeral one step of a named row is written as, straight out of the table - `bVII`, not a
+    // degree index. Empty when the name or the step does not resolve.
+    //
+    // **This exists because a stored degree does not survive a change of mode.** A pad carries
+    // `degree`, an index into whatever mode it was generated in, and the strip draws its numeral
+    // against whatever mode the session is in now. For every other source those are the same mode
+    // and the index is fine. A library row is generated against its *own* mode (see `chordsFor`'s
+    // note on why), so an Andalusian cadence dropped into a C major session had its i, bVII, bVI, V
+    // read back as I, vii, vi, V - four wrong numerals under a bracket correctly naming the
+    // progression they came from, which is worse than no numeral at all.
+    //
+    // A row and a step name the chord exactly and need no mode, so a pad that has them should use
+    // this and never the degree. `ChordPads` does.
+    inline juce::String numeralAt(const juce::String& name, int step)
+    {
+        if (name.isEmpty() || step < 0)
+            return {};
+        for (const auto& e : table())
+        {
+            if (name != e.name)
+                continue;
+            const auto tokens = juce::StringArray::fromTokens(juce::String(e.numerals), " ", "");
+            return step < tokens.size() ? tokens[step] : juce::String();
+        }
+        return {};
+    }
+
+    // The row of a given name, or null. The one lookup by name, for a `ChordPad::progression` to
+    // find its way back to the row it came from.
+    inline const Entry* byName(const juce::String& name)
+    {
+        if (name.isEmpty())
+            return nullptr;
+        for (const auto& e : table())
+            if (name == e.name)
+                return &e;
+        return nullptr;
     }
 
     // Every token of every row parses, which is the one thing a table of hand-typed numerals
