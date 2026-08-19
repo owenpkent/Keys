@@ -52,4 +52,9 @@ corpora that had only been read *about*, which is corrected in `../docs/CHORD_LI
   corroboration of the canonical ones (Pachelbel, doo-wop, ragtime, the axis rotations, the
   Andalusian cadence, the minor axis). 113 pack progressions are not in Keys and are a legitimate
   expansion source.
-- **Chordonomicon: see `../docs/CHORD_LIBRARY.md`** for what was measured and what came of it.
+- **Chordonomicon: see `../docs/CHORD_LIBRARY.md` §10** for what was measured and what came of it -
+  seven rows added, eight rows found rare rather than wrong, and a Section axis now answerable.
+- **The mood tags: checked, §11.** Chordonomicon's Spotify ids join to audio-feature dumps carrying
+  valence and energy, which puts every progression on Russell's circumplex. The control (minor
+  should read sadder than major) passes at +0.018, and that number is the yardstick: it is roughly
+  the most a purely harmonic fact moves an *audio* valence measure. Nothing was retagged.

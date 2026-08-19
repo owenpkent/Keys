@@ -408,6 +408,86 @@ table, not to write it, and that distinction is the whole point of this section.
 
 ---
 
+
+---
+
+## 11. Can the mood tags be validated? (2026-08-18, Owen: "how can we validate emotions?")
+
+Partly, and the limits are more useful than the result. `scripts/corpus/validate_moods.py`.
+
+### The join
+
+Chordonomicon carries a **`spotify_song_id` on 73%** of its songs. Spotify's audio-feature dumps
+carry **valence** (0..1, "musical positiveness") and **energy** per track id. Join them and every
+progression in the corpus gains a measured position on the two axes music psychology actually uses -
+Russell's circumplex, valence against arousal. Then take the mean valence of the songs that play
+each of Keys' rows, and ask whether the rows tagged Melancholic really do sit below the ones tagged
+Lighthearted.
+
+### The control, which is the part that matters
+
+**Minor should read sadder than major.** That is about the most replicated finding in music
+psychology, so it is the one result the pipeline has to reproduce before anything else it says can
+be believed.
+
+| | valence | n (song-row pairs) |
+|---|---|---|
+| rows in a major mode | **0.454** | 57,953 |
+| rows in a minor mode | **0.436** | 32,535 |
+| gap | **+0.018** | |
+
+It passes, in the right direction. **And it failed first, which is the useful part.** The first
+version split rows by counting how many of their chords were minor - the obvious test, and wrong,
+because a minor key is full of *major* triads: bIII, bVI and bVII all are. The Andalusian cadence,
+`i bVII bVI V`, counts three major against one minor and landed on the **major** side of a test
+meant to identify it as minor. With that split the control reported minor as *happier* than major
+and the whole run was noise. What makes a progression minor is its tonic, and `Entry::mode` is the
+field that already says so.
+
+**0.018 is therefore the yardstick.** It is roughly the most that a purely *harmonic* fact moves
+Spotify's valence, which is computed from audio. Any effect much smaller than that is nothing.
+
+### The result
+
+The ordering is sensible. Highest valence: **Lighthearted** (0.478), Tender, Rebellious, Playful,
+Smooth. Lowest: **Longing** (0.424), Haunting, Sad, Melancholic, Dark, Intense. Energy runs the
+other way, with Rebellious (0.645), Ominous, Suspenseful and Dark at the top and Reflective, Tender
+and Romantic at the bottom. Nothing is upside down.
+
+**But the mood spread is 0.054, three times the harmonic ceiling of 0.018.** A mood tag cannot move
+valence more than major-versus-minor does *by harmony*, so most of that spread is **not harmony**.
+It is genre and production riding along: the Rebellious rows are punk, the Smooth rows are jazz, and
+those genres sound different for reasons that have nothing to do with which chords are in them.
+
+So the honest verdict: **the tags are directionally right, and the measurement mostly reflects the
+company a progression keeps rather than the progression itself.**
+
+### What cannot be validated this way, ever
+
+- **Valence and arousal are two numbers; the vocabulary is 46 words.** Haunting and Eerie, Dreamy
+  and Atmospheric, Solemn and Sombre land in the same place on both axes. No amount of this data
+  separates them. That is not a flaw in the data - a categorical vocabulary is *strictly richer*
+  than a 2-D model, which is exactly why it is a vocabulary and not two sliders.
+- **Spotify's valence is an audio measure.** Timbre, tempo, vocals and mastering all move it. A
+  despairing lyric over major chords reads high-valence. The join says "songs using this progression
+  tend to sound positive", never "this progression is positive".
+- **The sample is small.** 2,841 songs joined out of 200,000 read, because the BSD-licensed
+  114k-track feature set barely overlaps Chordonomicon's ids. A larger dump would tighten the
+  estimates; it would not change the shape of the answer, because the ceiling is set by what
+  valence measures, not by how many rows are behind it.
+
+### What would be better, if this is ever worth more effort
+
+**EMOPIA** is the right-shaped dataset for this question and was not used here: ~1,000 pop piano
+clips as **MIDI**, labelled by humans with Russell's four quadrants. Chords can be extracted from
+the MIDI directly, so the emotion label attaches to the *music* rather than to a production. It is
+small, which is the trade: 1,000 human-labelled clips against 2,841 machine-scored songs.
+
+Nothing here changed a tag. The tags remain an authoring judgement - §5 - and this section is a
+check on them, which is a different thing and is the only claim being made.
+
+---
+
 ### Known thin spots in the table
 
 `Loop` has 99 rows and `Open` has 10, `Turnaround` 12. That is partly honest - loops are what gets
