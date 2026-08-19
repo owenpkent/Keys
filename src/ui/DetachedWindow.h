@@ -35,7 +35,7 @@ public:
     DetachedWindow(const juce::String& title, juce::LookAndFeel& lnf, juce::Component& holder,
                    juce::Rectangle<int> startBounds, juce::Point<int> minSize,
                    juce::Point<int> defaultSize, std::function<void()> onCloseButton,
-                   std::function<void()> onMoved)
+                   std::function<void()> onMoved, juce::Point<int> maxSize = { 4000, 1600 })
         : juce::DocumentWindow(title, skin::bgBot, juce::DocumentWindow::closeButton, false),
           closeHandler(std::move(onCloseButton)), movedHandler(std::move(onMoved))
     {
@@ -46,13 +46,21 @@ public:
         setResizable(true, true);
 
         // Below the minimum the controls stop being clickable, which for a one-mouse player is
-        // the same as broken.
-        setResizeLimits(minSize.x, minSize.y, 4000, 1600);
+        // the same as broken. Above the *maximum*, where a caller sets one, the window is simply
+        // bigger than anything in it can use: the default 4000x1600 is "no ceiling", which is
+        // what every section holder wants, and the chord generator passes its own (2026-08-18,
+        // Owen: "window still too big").
+        setResizeLimits(minSize.x, minSize.y, juce::jmax(minSize.x, maxSize.x),
+                        juce::jmax(minSize.y, maxSize.y));
 
+        // Clamped both ways, so a session saved before the ceiling existed opens at a size the
+        // content can actually fill rather than reopening the complaint.
         if (startBounds.getWidth() >= minSize.x && startBounds.getHeight() >= minSize.y)
-            setBounds(startBounds);
+            setBounds(startBounds.withWidth(juce::jmin(startBounds.getWidth(), maxSize.x))
+                                 .withHeight(juce::jmin(startBounds.getHeight(), maxSize.y)));
         else
-            centreWithSize(defaultSize.x, defaultSize.y);
+            centreWithSize(juce::jmin(defaultSize.x, maxSize.x),
+                           juce::jmin(defaultSize.y, maxSize.y));
 
         setVisible(true);
         addToDesktop();

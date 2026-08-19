@@ -406,19 +406,24 @@ void ArpPanel::takeChordOnSlot(int slot, const chorddrag::Payload& p)
 }
 
 // A chord card dropped on a line - its tab, or its whole row in the macro view - goes straight
-// into that line, and the line becomes the current one: you aimed at it, so the next card click
-// should follow the same aim. The view does not move with it (`leaveMacroView` false); in the
-// macro view you dropped onto the line itself, and being thrown into that line's deep controls
-// is not what the gesture asked for.
+// into that line, and **that is all it does** (2026-08-18, Owen: "the number of steps changes,
+// straight vs triplet etc, when you drag a chord onto a new arpeggiator").
 //
-// `makeCurrent` false is the pad menu's "Send to arp A / B", which is routing and not aiming -
-// see the header. Either way the chord lands, because that is the first line and it is
-// unconditional; all the flag decides is whether the panel goes and looks at the line.
-void ArpPanel::takeChordOnLine(int line, int padSlot, bool makeCurrent)
+// It used to call setEditLine as well, so the panel followed the drop. Nothing was written by
+// that - no drop path touches a pattern, a rate or a tuplet - but in a line's deep view every
+// readout is per line, so STEPS, Tuplet, Shape and the rate all jumped to the dropped-on line's
+// own settings the instant the card landed. A view change and a data change look identical when
+// you are watching the numbers, and this one arrived under the hand that was routing a chord.
+//
+// The reason it moved the aim is worth recording, because it had one and it expired: you aimed
+// at that line, so "the next card click should follow the same aim". A card click stopped feeding
+// a line on 2026-08-02, so there is no next click left for the aim to serve, and the pad menu's
+// Send to arp rows had already been given the opposite behaviour for exactly the complaint above.
+// One rule now, for every route a chord takes into a line: routing is not navigating. Looking at
+// a line is its tab, or its macro card's Details button.
+void ArpPanel::takeChordOnLine(int line, int padSlot)
 {
     processor.holdArpChordFromPad(padSlot, line);
-    if (makeCurrent)
-        setEditLine(line, /*leaveMacroView*/ false);
 }
 
 // The panel as a whole is a drop target for a chord card. It hands the chord to the line the
@@ -797,6 +802,19 @@ void ArpPanel::refreshShape()
         // lastPatternMode is already written and the recursion stops on this branch.
         if (! pattern && currentPage() == Page::steps)
             setPage(Page::setup);
+        // The **Draw** tab greys outside Pattern shape and it lives on the section bar, which is
+        // the editor's and not this panel's - so the crossing has to be carried across
+        // (2026-08-18, Owen: "how do we get to the part where we add harmony and stuff like
+        // that?", with Shape already reading Pattern and Draw greyed). refreshShape() knew this
+        // on every 10 Hz tick; the tab's enabled state was written only when the *line* or the
+        // *page* changed, so setting Shape to Pattern left Draw greyed until you visited another
+        // page and came back, and the one route to the lane editor looked broken.
+        //
+        // Here rather than beside the notify above, because this branch is already exactly once
+        // per crossing, and `lastPatternMode` starting at -1 makes the first call report - which
+        // is what opens a session saved in Pattern shape with Draw already live.
+        if (onShapeChanged)
+            onShapeChanged();
         resized();
         repaint();
     }
@@ -1187,11 +1205,15 @@ namespace
         // was a separate velocity knob. I only want one velocity knob, and I want this
         // humanize section to be the outer ring") - see the RangeKnob wiring in the
         // constructor for how the ring reaches arpHumanVel instead of a span of VEL itself.
-        { KeysProcessor::apVelTrim, "VEL",
-          "This line's level, as velocity: centre plays the notes as they came, right pushes "
-          "them louder, left quieter, and full left is silence. The way to balance two lines "
-          "without playing one of them softer. The ring is how far under that level a hit can "
-          "wander - Humanize Velocity, folded in here rather than living as its own knob." },
+        // Absolute MIDI velocity since 2026-08-18 (Owen, on the readout reading "-31 ~20":
+        // "still wrong"). It was apVelTrim, a bipolar *percentage* trim on the velocity that
+        // arrived - percentages on a control called VEL, beside a pads knob that had just become
+        // an absolute 0-127 band. One quantity, one unit, one number you can read.
+        { KeysProcessor::apVelLevel, "VEL",
+          "This line's velocity, 0-127. The knob is the hardest a hit ever lands and the ring is "
+          "how far under that it can fall, so the two read as one band - the same as the pads' "
+          "own Humanize knob. At 0 the line is silent. The way to balance two lines against each "
+          "other without playing one of them softer." },
         // HUMAN split into its halves on 2026-08-02 (Owen: "maybe we could split it up into
         // two knobs"), so timing and dynamics randomize independently. H.VEL, the velocity
         // half, moved onto VEL's own ring above; only the timing half is still its own knob.
@@ -1348,26 +1370,20 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                 // merge (the parameter's own default), and pinning it is what keeps that true
                 // with one fewer number on screen. The engine reads both parameters exactly
                 // as it always did; only the card stops exposing the span as its own control.
-                rk.setTooltip("This line's level, as velocity, and how far it can wander under "
-                              "that: the knob is the level, the ring is Humanize Velocity - how "
-                              "much a hit can fall short of it, by a different amount every "
-                              "time. Click the little dial at the top left to switch Humanize "
-                              "Velocity on or off; drag it, or anywhere on the ring, to set how "
-                              "far it reaches.");
-                rk.setSpanTooltip("Drag up and down to set how far this line's velocity can "
-                                  "wander under its level, or click to switch Humanize "
-                                  "Velocity on or off.");
-                // **Not the lo-hi readout H.TIME uses, and the difference is not cosmetic.**
-                // There the face and the ring are the same quantity in the same unit (milliseconds
-                // late), so naming both ends of the band is the honest reading. Here they are two
-                // different quantities: the face is this line's level as a velocity trim, and the
-                // ring is Humanize Velocity, a percentage of shave. The inherited lo-hi rendered
-                // a trim of -50 with a wander of 40 as **"-90--50"** - unreadable at a glance (two
-                // minus signs running together), and worse, a plausible lie: it names a trim range
-                // the line never visits, since the engine shaves a *proportion* rather than
-                // subtracting trim. Level first, then how far it can fall short of it.
-                rk.textFromRange = [](double lo, double hi)
-                { return juce::String((int) hi) + " ~" + juce::String((int) (hi - lo)); };
+                rk.setTooltip("This line's velocity band, 0-127: the knob is the hardest a hit "
+                              "ever lands and the ring is how far under that it can fall, by a "
+                              "different amount every time. Click the little dial at the top "
+                              "left to switch Humanize Velocity on or off; drag it, or anywhere "
+                              "on the ring, to set how far it reaches.");
+                rk.setSpanTooltip("Drag up and down to set how far under its level a hit can "
+                                  "fall, in velocity, or click to switch Humanize Velocity on "
+                                  "or off.");
+                // **The plain lo-hi readout, same as every other range knob** (2026-08-18). It
+                // read "level ~reach" while the face was a bipolar trim and the ring a percentage
+                // of shave: two different quantities in two different units, which no two-number
+                // format can honestly join, and which produced things like "-31 ~20" - numbers
+                // that look like velocities and are not. Both ends are MIDI velocity now, so the
+                // band names itself and the default format is the right one.
 
                 const auto velId = id(KeysProcessor::apHumanVel);
                 const auto spanId = id(KeysProcessor::apHumanVelSpan);
@@ -1377,12 +1393,15 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                 // travel wrote nothing, and refresh() below read the clamped value back at
                 // 10 Hz and yanked the arc down under a hand still moving up. Taken from the
                 // parameter rather than written as 100 so the two cannot drift apart.
+                // Both are 0..127 now, so this lands on the face's own travel anyway - it stays
+                // read from the ring's parameter because that is the rule (see setSpanMax), not
+                // because the two happen to differ today.
                 const auto velRange = processor.apvts.getParameterRange(velId);
                 rk.setSpanMax((double) (velRange.end - velRange.start));
-                // A lamp, unlike H.TIME's ring: VEL keeps a level even with Humanize off (its
-                // knob at zero means "as played", not "silent" and not "no wander"), so there
-                // is no zero position that already means off the way there is for a plain
-                // Humanize knob. isOn/setOn give the lamp that job instead (2026-08-17, Owen:
+                // A lamp, unlike H.TIME's ring: VEL keeps a level even with Humanize off, and
+                // its knob at zero means *silent* rather than "no wander" - so no position of
+                // the face can double as Humanize Velocity's own off switch the way a plain
+                // Humanize knob's zero does. isOn/setOn give the lamp that job instead (2026-08-17, Owen:
                 // "whether humanize velocity is on at all"); off parks the amount at zero and
                 // remembers what it was, the same shape ChordPads' Strum lamp uses.
                 rk.isOn = [this, velId]

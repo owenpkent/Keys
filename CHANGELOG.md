@@ -5,6 +5,305 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: review pass on the pad/arp routing round
+
+Six things the review caught, all of them in code this round touched.
+
+**Changing a line's MIDI channel could hang a note for the rest of the session.** The
+channel-change flush emitted its note-offs straight into the outgoing buffer, past `ArpMerge`.
+Every note-on that line played had been counted by those refcounts, so closing them anywhere else
+left `held[ch][note]` stuck above zero, and a count that never returns to 0 suppresses the *real*
+note-off of every later hit on that pitch. It merges through `arpMerged` like every other path
+now. The flush emits at sample 0 and a `MidiBuffer` keeps its events in sample order, so those
+note-offs still close ahead of whatever the block goes on to play.
+
+**The oldest sessions came back at the wrong loudness.** `migrateVelLevel` read the line's old
+VelTrim out of the *saved* tree, but `migrateVelTrim` runs immediately before it and, for a session
+old enough to predate VelTrim as well, synthesises that trim from the session's Volume and writes
+it to the live parameter, never back into the tree. So exactly the sessions the chain exists for
+fell through to the "as played" default. It reads the live parameter now, which answers both cases.
+
+**A session load overwrote its own Root and Scale.** `replaceState` pushes genRoot and genMode
+through the parameter listener like any other write, which raised the Key/Mode mirror and had the
+next heartbeat write them over the Root and Scale that same session had just restored. Root and
+Scale are still ordinary parameters you can set on the Controls bar after picking a generator key,
+so a saved keybed setting was lost on every load, plus two gesture-less parameter writes at the
+host about 20 ms in. The mirror is for the user turning Key or Mode, and it stays that.
+
+**The arp bar's Draw tab relied on an accident.** `ArpPanel`'s constructor calls `refreshShape()`,
+where `lastPatternMode` starting at -1 was supposed to report the initial shape and open a session
+saved in Pattern shape with Draw already live. The constructor runs before `onShapeChanged` is
+assigned, so that report went into a null `std::function` every time; it worked only because
+`syncSectionControls()` happens to call `refreshArpBarTabs()` afterwards. Reported explicitly now.
+
+**Two answers to one question on the generator's Send all to pads.** The button greyed off the
+brain's own scan of the page while the commit it guards goes through `onSendToFirstEmpty`. Both
+routed to the same hook now, so they cannot disagree.
+
+**Removed:** the dead `velTrim` engine field and its per-block atomic load per line, an orphaned
+duplicate comment block in `ChordGenPanel.h`, and the stale `followAim` documentation on
+`sendPadToArpLine`, whose parameter this round deleted. `minWidthForView()`'s Pads-bar arithmetic
+was re-measured: it had itemised a Compliance chip and a Mode combo that left the bar on
+2026-08-02 while never accounting for the 124 px Mode combo that came back. The real total is 752,
+not 858, and the floor never moved.
+
+
+### Fixed: with the generator open, a chord could not be dragged into the arpeggiator
+
+JUCE resolves a cross-window drop through `Desktop::findComponentAt`, which walks its own list of
+desktop windows from the top and **returns from the first one whose bounds contain the point** - it
+never falls through to a lower window when the one it picked has nothing interested there. That
+list is kept in order by `Component::toFront` and by a window peer reporting its own activation.
+
+The generator window calls `toFront` when it opens, so it goes to the top of that list. The plugin
+editor never reports the same thing: it is a *child* window inside the host's, so clicking it
+raises it on screen without any peer activation JUCE hears about, and the list keeps the generator
+on top for good. The generator window is nearly full screen, so every drop aimed at the
+arpeggiator landed inside its bounds, was resolved against it, found nothing interested, and
+vanished.
+
+Starting a drag from the pad strip now reports that window as the front one, which is simply true:
+the press that began the drag was in it. Dragging the other way - a tray candidate onto a pad - was
+never affected and is unchanged, because the generator is a real top-level window whose activation
+JUCE does hear.
+
+### Fixed: the greyed keys answered a different question than the one you were asking
+
+There were two independent key settings. The Controls bar's **Root + Scale** drive Scale Lock and
+the keybed greying; the generator's **Key + Mode** are its own, because the kit's scale table
+answers "is this note in the scale" and carries no per-degree chord qualities to generate from.
+Both read as "the key", so setting the generator to C Mixolydian left the keybed greying whatever
+Scale happened to say - accurate, and about something else.
+
+The generator drives the keyboard now: changing its Key or Mode moves Root and Scale with it, so
+the keybed greys to the key you are generating in. One-way on purpose - every generator mode has a
+kit scale, but Whole Tone and Chromatic are scales the generator cannot express, so picking one of
+those on the Controls bar leaves the generator where it is rather than snapping it somewhere
+arbitrary. The two lists are matched by name, not index, since they live in different repositories
+and either can grow.
+
+### Added: Mode on the Pads bar, page tabs and "Send all to pads" in the generator
+
+**Mode** is back beside Key on the Pads bar, where it sat until 2026-08-02: a key without its mode
+is half a key, and this is the pair you reach for between fills.
+
+The generator's header had a read-only "Page 2 of 4" label - it told you where a committed card
+would land and gave you no way to change it, so choosing a page meant leaving the window. It is
+**four page tabs** now, bound to the same parameter the Pads bar's buttons drive.
+
+**Send all to pads** joins Fill, Regen and Clear on the tray header. The tray had exactly one route
+to a pad per card - a drag, or *Send to first empty pad* on its menu - so filling a page took
+sixteen gestures. It writes only empty pads, like every other generative action, and each card it
+places leaves its cell, so what stays behind is exactly what would not fit.
+
+### Changed: the generator's constraint gates are SET / ROLL chips, not check marks
+
+Asked which of three faults the check marks had, Owen said "all", and one change answers all
+three. Six of the boxes were *gates* - ticked, generation obeys the setting beside them; unticked,
+it rolls that setting itself - and they were drawn identically to the four inversion ticks, which
+are values rather than gates. On the fixed row that read as five boxes in a row with two meanings
+and one look. They also sat hard against the left edge of whatever cell they gated, landing at a
+different x on every row, and six cryptic boxes is a lot to ask anyone to remember the meaning of.
+
+They are word chips now, reading **SET** or **ROLL**. A word cannot be mistaken for a tick, it
+says what it does without a tooltip, and every one is the same shape and width so they read as a
+column. Each gets a gap after it, so a gate stops reading as the leading edge of the control
+beside it. The parameters and their ids are untouched.
+
+### Fixed: the generator window was far taller than anything in it could use
+
+Every block in that layout has a size of its own, so a taller window bought nothing - it spread
+the same controls over more glass. There was no ceiling on it, only a floor, so a session saved
+large reopened large.
+
+The window has a maximum height now, equal to what the layout actually adds up to, and it clamps
+a saved size on the way in rather than waiting for you to drag it back. Nothing absorbs slack any
+more either: the tray was the elastic block until 2026-08-18, the diagram was for one build after
+that, and the diagram was the worse of the two - the bar chart grew to the height of a hand while
+the window stayed enormous.
+
+### Changed: the audition tray is twelve cards, not sixteen
+
+It was four by four from the day it was built, and the pad strip went from sixteen slots a page to
+twelve on 2026-08-03 without this following. So Fill generated four candidates that could never be
+committed, and *Send all to pads* left exactly four behind however empty the page was - arithmetic
+nobody should have to do.
+
+Three rows of four rather than the strip's own two rows of six: the cards carry a note list under
+the name, and at six across the layout's floor gives each one 100 px, which will not hold
+"G#3 C4 C#4 E4 F4". Same count, same commit, one row less height.
+
+### Fixed: the generator's tray ate every spare pixel
+
+The tray took whatever height was left over, so on any window taller than the layout's floor the
+sixteen disposable cards grew to twice the height a name over a note list needs, while the settings
+above stayed at their minimum. Cards are capped at the height the pad strip draws, and the slack
+goes to the source diagram instead, which is the one thing in that window that reads better bigger.
+
+### Changed: the arp's VEL is MIDI velocity, 0-127
+
+It was a bipolar percentage *trim* on whatever velocity arrived, centred on "as played", so its
+readout showed things like `-31 ~20` - numbers that look like velocities and are not - on a
+control called VEL, next to a pads knob that had just become an absolute 0-127 band. Two velocity
+controls in two units is one too many.
+
+VEL is now the velocity outright: the knob is the hardest a hit ever lands, the ring is how far
+under that it can fall in the same units, and the readout names the band. 0 mutes the line,
+exactly as full-left trim did. The Velocity lane, the ramp and Drift still shape it exactly as
+before - only the base moved, from the incoming chord to the knob.
+
+What it costs is "as played", a line following the velocity of the chord fed to it. With one
+mouse that was already a constant: every chord Keys fires leaves at the pads' own Humanize
+velocity.
+
+Fixed alongside it: the 0.05 audibility floor is gone from this path. It existed because a *trim*
+had to be able to reach silence past a floor protecting programmed dynamics; a level is the
+velocity itself, so a band drawn low is meant to be quiet. The clamp still stops at one MIDI step,
+since zero would be a note-off in disguise.
+
+**Parameter layout.** `arpVelLevel` is appended per line and `arpHumanVel` widens to 0-127;
+`arpVelTrim` stays registered and is read by nothing. `migrateVelLevel` converts a saved session
+through the trim's own squared curve against 76 - the midpoint of the pads' default Humanize band,
+which is the velocity every chord Keys fires actually left at - so a session that never touched VEL
+opens playing exactly as loud as it did. A host automation lane for VEL or Humanize Velocity does
+not survive the change of units.
+
+### Fixed: two arp lines sharing a pitch cut each other short
+
+Within one line the engine has always been careful: each hit closes whatever it lands on top of
+immediately before its own note-on, so a repeated note re-attacks cleanly. Across two lines there
+was no such rule - each line's output went straight into the outgoing stream, so two lines on one
+channel sharing a pitch sent **two note-ons for it, and whichever line released first ended it for
+both**. The other line's note was cut short and its own note-off arrived later as a stray. The
+lines are usually fed related chords, so shared pitches are the common case, and it read as random
+dropouts rather than as a fault.
+
+The lines' outputs are now merged in time order and folded under one rule: one note-on per
+sounding pitch, released by the last line holding it, and a line striking a pitch another one
+already holds re-strikes it - a note-off at the same sample offset immediately before the note-on,
+which is exactly the tie rule the engine already uses inside one line. No doubling, no cut-short
+notes, and every attack you drew still sounds.
+
+Giving a line its own **Channel** is still the other answer and is untouched: the same pitch on two
+channels is two notes to the instrument downstream, and they never interact.
+
+The rule lives beside the engine as `ArpMerge` rather than inside the processor, so it is driven
+directly by four new tests - the overlap, the non-overlap, the two-channel case, and the panic that
+would otherwise strand a count and hang a note.
+
+### Fixed: the Draw page stayed greyed after setting Shape to Pattern
+
+Draw is the lane editor - Harmony, Velocity, Gate, Ratchet and the rest - and it greys outside
+Pattern shape, because a plain shape has no lanes to draw. The tab's enabled state was written
+only when the *line* or the *page* changed, so choosing Pattern left Draw greyed until you
+happened to visit another page and come back. The panel knew on every 10 Hz tick; nothing carried
+it across to the section bar, where the tab lives.
+
+The panel already detects that crossing exactly once (it is what sends you back to Play when you
+leave Pattern with Draw up), so the notification goes there. A session saved in Pattern shape now
+opens with Draw already live, too.
+
+### Fixed: two arpeggiator lines could not be brought into phase without a transport
+
+Launch Quantize aligns when a *chord* lands on a line, not where that line's steps fall. What puts
+two lines on one grid is **Anchor** - and anchoring needed a rolling host transport, so with none
+(the standalone, or a DAW sitting stopped) every line fell back to a phase of its own that is
+zeroed when the line is switched on. Two lines switched on a second apart were then a second out
+of phase for good, and no setting could bring them together.
+
+The processor already keeps a beat count for exactly this shape of problem - the host's position
+while it rolls, its own count otherwise, which is what Launch Quantize measures its boundaries
+from. It is now offered to the engines as well, so there is always a grid to anchor to and every
+line reads the same one in the same block. Two anchored lines walk in lockstep with no transport
+at all, and a line joining late lands on the grid instead of starting its own.
+
+**Anchor is still the switch**: off, a line keeps its own free-running phase and drifts on
+purpose. What changes for an anchored line with no transport is that switching it on now drops it
+onto the shared grid rather than restarting the pattern at step one - which is what it has always
+done in a DAW with the transport rolling, so the standalone and the plugin finally agree.
+
+### Changed: the velocity range spans 0-127
+
+The Humanize range knob is the velocity control, and it stopped at 1 rather than at MIDI's own
+floor. It reaches 0 now. The wire never does: a note-on at velocity 0 *is* a note-off, so 0 means
+"as quiet as MIDI can say" and what leaves is velocity 1.
+
+Fixed on the way past, and audible: the emitted velocity had a floor of about 5, so the bottom of
+the band said one thing and played another. The range is taken literally now across its whole
+span.
+
+Saved sessions are unaffected - a stored velocity of 64 still means 64 - but a **host automation
+lane** for Velocity Min or Velocity Max shifts by one unit at the bottom, since normalised 0.0
+used to mean velocity 1 and now means 0.
+
+### Fixed: dropping a chord on an arp line appeared to change its steps and tuplet
+
+Nothing was written. No drop path touches a pattern, a rate or a tuplet - what the drop also did
+was re-point the panel at the line it landed on, and in a line's deep view every readout is per
+line, so STEPS, Tuplet, Shape and the rate all jumped to that line's own settings the instant the
+card landed. A view change and a data change look identical when you are watching the numbers,
+and this one arrived under the hand that was routing a chord.
+
+Routing a chord no longer navigates to the line, for every route alike - a drop on the A / B
+switch, on a macro card, on the panel, and the pad menu's *Send to arp A / B*, which had already
+been given this behaviour for the same complaint. The way to look at a line is still its tab or
+its macro card's **Details** button.
+
+The reason a drop moved the aim is worth recording, because it had one and it expired: you aimed
+at that line, so the next card click should follow the same aim. A card click stopped feeding a
+line at all on 2026-08-02, so there was no next click left for the aim to serve.
+
+### Changed: a chord pad sounds on release, and a drag makes no sound at all
+
+Hold-to-play (2026-08-16) fired the chord on the press and let it go on the release, so a press
+that turned out to be a *drag* had already sounded. The blurt was the visible half; the damaging
+half is that firing a chord chokes the other chord sources, and with Exclusive on that reaches
+each line's held chord. Dragging a card toward arp B therefore stopped arp A before the card had
+moved, and silencing the blurt when the drag begins does not put that back - so aiming at one
+arpeggiator stopped the other, with nothing on screen to say why.
+
+The gesture is now decided on the way up. A press sounds nothing; a click sounds the chord on
+release for 800 ms, the same length the generator's tray has always used; a drag is routing and
+stays silent from beginning to end. Sustain and Latch still decide what the release means.
+
+The cost bought a tick rather than a decision: **Chord pads play while held** on the settings
+gear puts the press back, so a stab is short and a lean is long again. It is off by default,
+because in hold mode a press that turns out to be a drag has already choked the other chord
+sources - the thing this change is fixing - and turning Exclusive off alongside it is what makes
+that free.
+
+### Fixed: clicking a chord pad fed the arpeggiator
+
+A click has not been allowed to hand a chord to an arp line since 2026-08-02, and `ChordPads`
+duly stopped doing it - but the chord got there anyway, one level down. A line with **Play** on
+lifts note events out of the outgoing stream so the arp replaces them rather than doubling them,
+and a pad's chord was in that stream alongside the keys you play, indistinguishable from them.
+Play defaults to on, so an arp line switched on arpeggiated every pad you clicked.
+
+Play means the keys you play. Pads, the live chord card and the generator's audition now queue
+into a second output collector that drains *after* the lift, so no line can reach them; the
+keybed, the MIDI input and the MCP bridge are unchanged. A chord still reaches a line the way it
+always has - dragged onto its switch, its macro card or a slot, or through the pad menu's
+*Send to arp A / B*.
+
+Both queues feed the same buffer and the same instrument, so nothing else moves: same channel,
+same strum, same Humanize, and a recorded take still holds what actually left. One note-on per
+sounding pitch still holds across both, and each pitch remembers which queue opened it so the
+note-off follows it there - a release sent down the other one would strand the note in a
+listening line's engine and arpeggiate it forever.
+
+### Fixed: dragging a chord card off the strip could delete it
+
+Dropping a card where nothing accepted it cleared the pad, on the reading that off the row means
+bin it. Too much of the window is neither the strip nor a target: the section bars above and
+below the arp panel, the Controls band, the keybed, every gap between them. Dragging a card *up*
+into the arpeggiator crosses the Pads bar on the way, so a release a few pixels short of the
+panel destroyed the chord instead of routing it - and because the arp's own drop targets always
+vetoed the clear correctly, it only ever bit on a near miss and so read as random.
+
+A drag that lands on nothing is now a cancelled drag and puts the card back. Clearing a pad is
+*Clear pad* on the card's right-click menu, which is where it was already documented to live.
+
 ### Fixed: half of the arp VEL knob's outer ring did nothing
 
 Caught in review of the merge that folded Humanize Velocity into VEL's ring. `RangeKnob` took

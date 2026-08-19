@@ -273,12 +273,25 @@ slot) is the only way in, and a click just plays the pad.
 Four of those knobs are not what the first cut had (both passes 2026-08-02). **Oct** is
 `arpOctShift`, a transpose centred at zero, not `arpOctaves`, which stacks copies upward and
 has no middle; the stacking range stays on the per-line tab beside Distance, the other half of
-the same feature. **Vel** is `arpVelTrim`, bipolar around "as played" (up boosts, down cuts,
-full left mutes) and **squared** - `((100+VEL)/100)^2`, applied after the engine's 0.05
-audibility floor so a deep cut reaches MIDI velocity 1 rather than pinning at 6, and a chord
-handed to a line skips the keyboard Humanize range so the reference level holds still (all
-three 2026-08-02, Owen: "I was at negative 96, and it was still pretty loud"). It replaced
-**Vol** (`arpVolume`, cut-only, misnamed for what it touched -
+the same feature. **Vel** is `arpVelLevel`, **MIDI velocity outright**, 0-127: the top of the band this line plays
+at, whatever velocity the chord arrived with, and 0 mutes it (2026-08-18, Owen on a readout
+reading `-31 ~20`: "still wrong", having just asked for velocity ranges to span 0-127). Its ring
+is `arpHumanVel` in the same units, so the pair reads as one band the way the pads' own Humanize
+knob does.
+
+It was `arpVelTrim` until then - bipolar around "as played", **squared** (`((100+VEL)/100)^2`)
+and applied after a 0.05 audibility floor so a deep cut reached MIDI velocity 1 rather than
+pinning at 6. Two velocity controls in two units was one too many, and no two-number readout can
+honestly join a percentage trim to a percentage of a shave. The floor went with it: it existed
+because a *trim* had to reach silence past a floor protecting programmed dynamics, and a level is
+the velocity itself, so a band drawn low is meant to be quiet. The clamp still stops at one MIDI
+step, since zero is a note-off in disguise. What the change costs is a line following the velocity
+of the chord fed to it, which with one mouse was already a constant: every chord Keys fires leaves
+at the pads' own Humanize velocity. `arpVelTrim` stays registered and is read by nothing;
+`migrateVelLevel` converts a saved session through the trim's own curve against 76, the midpoint
+of the pads' default Humanize band, so a session that never touched Vel opens exactly as loud.
+
+`arpVelTrim` had itself replaced **Vol** (`arpVolume`, cut-only, misnamed for what it touched -
 the parameter survives for old sessions and `migrateVelTrim` folds it in exactly), which had
 itself taken the place of **Ramp *and* Time** together - they are one feature between them,
 and a row carrying Time with no Ramp would be a control with nothing to time. **H.Time and
@@ -1031,6 +1044,49 @@ whatever you play, which is the difference between letting go of a chord and pan
 card that is already launched calls `stopArpSlot()`. A slot card is a launcher with a lit
 state, so one control starting and stopping it is what its ring already promises; a chord
 pad is a pad, and pads re-fire.
+
+## Two lines at once (2026-08-18)
+
+Everything above describes one line's machinery. Two of them running into one instrument raise
+two questions the original design never had to answer, and both were answered badly by default.
+
+**Do their steps coincide?** Only if both are anchored, and anchoring needed a rolling host
+transport. With none - the standalone, or a DAW sitting stopped - every line fell back to
+`freePhaseBeats`, its own phase, which `restart()` zeroes when the line is switched on. Two lines
+switched on a second apart were therefore a second out of phase for good, and no setting could
+bring them together. Launch Quantize is not that setting and never was: it aligns when a *chord*
+lands on a line, not where that line's steps fall.
+
+`HostClock::hasGrid` is the answer. Keys already kept a beat count of its own - the host's
+position while it rolls, its own count otherwise - for Launch Quantize to measure its boundaries
+from; it is handed to the engines as well now, so there is always a grid and all three lines read
+the same number in the same block. **Anchor is still the switch**: off, a line keeps its own
+free-running phase and drifts on purpose. What changed for an anchored line with no transport is
+that switching it on drops it onto the shared grid rather than restarting the pattern at step one,
+which is what it has always done in a DAW with the transport rolling.
+
+**What happens when they land on the same pitch?** Nothing good, until the same day. Each line's
+output went straight into the outgoing stream, so two lines on one channel sharing a pitch sent
+two note-ons for it and **whichever released first ended it for both** - the other line's note cut
+short, its own note-off arriving later as a stray. The lines are usually fed related chords, so
+shared pitches are the common case, and it read as random dropouts rather than as a fault.
+
+`ArpMerge` (in `ArpEngine.h`, beside the engine and free of the processor so it can be driven from
+a test) folds every line's output under one rule: **one note-on per sounding pitch, released by
+the last line holding it**, and a line striking a pitch another one already holds re-strikes it -
+a note-off at the same sample offset immediately before the note-on, which is exactly the tie rule
+`fireStep` already uses inside a single line. The lines must be interleaved in time before it
+runs, which is why they merge into one buffer first: deduplicating line 0's whole buffer and then
+line 1's would read an event at sample 6000 before one at sample 0.
+
+Giving a line its own **Channel** is the other answer and is untouched: the same pitch on two
+channels is two notes to the instrument downstream, and they never interact.
+
+The counts stay honest on their own, because every path that abandons a sounding arp note emits
+its note-offs first (`flushInto` on the bypass edge and on a channel change). A panic is the
+exception - it silences the instrument directly and leaves the engines to catch up - so it clears
+them explicitly. Without that, a stale count would swallow a later note-off as "another line still
+holds it", which is a stuck note: the precise failure the counts exist to prevent.
 
 ## Mouse-only interaction (the part nobody else got right)
 

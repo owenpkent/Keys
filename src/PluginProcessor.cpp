@@ -48,8 +48,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "channel", 1 }, "MIDI Channel", channelNames(), 0));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "sustain", 1 }, "Sustain", false));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", false));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 1, 127, 64));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 1, 127, 88));
+    // **0..127, MIDI's own range** (2026-08-18, Owen: "the velocity ranges ... should go from zero
+    // to one twenty seven or one twenty eight, whatever the standard is"). The standard is 0-127,
+    // 128 values, and the floor was 1 because a note-on at velocity **0 is a note-off** - the one
+    // value MIDI will not let a sounding note carry. So the number reaches 0 here and the wire
+    // never does: noteOn clamps what it emits to velocity 1, and 0 means "as quiet as MIDI can
+    // say", not silence. Every saved session is unaffected - APVTS stores an int parameter's
+    // plain value, so 64 still reads 64 - but a host *automation* lane shifts by one unit at the
+    // bottom, since normalised 0.0 used to mean 1 and now means 0.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 0, 127, 64));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 0, 127, 88));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chordExclusive", 1 }, "Chord Exclusive", false));
     // Strum is a *range*, like the humanize velocity beside it: each chord takes a random
     // spread between the two ends, so repeated stabs do not all rake at exactly the same
@@ -440,7 +448,12 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // to randomize velocity and timing. Maybe we could split it up into two knobs"). Humanize
     // above is timing-only from the same day; a session saved before the split keeps its
     // Humanize amount as the timing half and this defaults to none.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 100, 0));
+    // 0..127 since 2026-08-18, in **MIDI velocity units**: it is how far under VelLevel a hit may
+    // fall, so the knob and its ring read as one band in one unit. Widened rather than replaced -
+    // every value a session could already hold (0..100) is still in range and 0 still means no
+    // wander, which is the default. What a *set* value means does change, since the whole knob's
+    // meaning did; a host automation lane for it rescales.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 127, 0));
     // The bipolar velocity control that replaced VOL on the macro row (Owen, same day: "it
     // should start in the middle so you can turn it up or down"). 0 plays velocities as they
     // came, +100 doubles them, -100 mutes. Volume above stays registered for old sessions,
@@ -484,6 +497,21 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // one knob instead of ten.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Drift"), 1 },
                                                    nm + " Drift", 0, 100, 0));
+
+    // **VEL as MIDI velocity** (2026-08-18, Owen on the macro card's readout reading "-31 ~20":
+    // "still wrong", having just asked for velocity ranges to span 0-127). VelTrim above was a
+    // bipolar *percentage* trim on the velocity that arrived, which put percentages on a control
+    // called VEL beside a pads knob that had just become an absolute 0-127 band.
+    //
+    // This is the band's top, in MIDI velocity; HumanVel is how far under it a hit may fall, in
+    // the same units. 0 mutes the line, exactly as VelTrim -100 did. Appended, so a session saved
+    // before it opens with VelTrim still holding its level and migrateVelLevel converting it.
+    //
+    // Default 100: loud without being pinned, and the number a hardware arpeggiator would show.
+    // A session that predates this does not take it - the migration computes a level that plays
+    // that session at the loudness it was saved at.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelLevel"), 1 },
+                                                   nm + " Velocity Level", 0, 127, 100));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -504,7 +532,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
-        "Drift"
+        "Drift", "VelLevel"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -592,13 +620,51 @@ KeysProcessor::KeysProcessor()
     heartbeat.tick = [this] { heartbeatTick(); };
     heartbeat.startTimerHz(50);
 
+    // The generator's key and mode drive the keyboard's Root and Scale, so the keybed greys to
+    // the key you are generating in (see parameterChanged). Registered after everything else
+    // exists, since the callback reaches back into apvts.
+    apvts.addParameterListener("genRoot", this);
+    apvts.addParameterListener("genMode", this);
+
     // Last thing the constructor does: everything else this processor owns already
     // exists by the time the MCP bridge can be reached from another thread.
     mcpBridge = std::make_unique<KeysMcp>(*this);
 }
 
+void KeysProcessor::parameterChanged(const juce::String&, float)
+{
+    // Which of the two moved does not matter - both are re-applied together, so one listener
+    // body covers them and a session load that changes both settles on one pass.
+    pendingGenKeyMirror.set(1);
+}
+
+void KeysProcessor::mirrorGenKeyToScale()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    if (pendingGenKeyMirror.exchange(0) == 0)
+        return;
+
+    // Written through setValueNotifyingHost so a host sees the move and any attached combo
+    // follows it, and only when it actually differs: writing an unchanged value would push a
+    // gesture-less parameter change at the host on every heartbeat this fires from.
+    const auto setChoice = [this](const char* id, int index)
+    {
+        auto* param = apvts.getParameter(id);
+        if (param == nullptr || index < 0)
+            return;
+        const float wanted = param->convertTo0to1((float) index);
+        if (std::abs(param->getValue() - wanted) > 1.0e-4f)
+            param->setValueNotifyingHost(wanted);
+    };
+
+    setChoice("root", (int) apvts.getRawParameterValue("genRoot")->load());
+    setChoice("scale", modes::kitScaleIndexFor((int) apvts.getRawParameterValue("genMode")->load()));
+}
+
 KeysProcessor::~KeysProcessor()
 {
+    apvts.removeParameterListener("genRoot", this);
+    apvts.removeParameterListener("genMode", this);
     // A take in progress is written here rather than lost. "Stopping writes the file, so a take
     // is never a thing a click can lose" is the feature's own contract, and closing the set,
     // deleting the plugin from the track or quitting the host is exactly the click that lost it:
@@ -648,7 +714,7 @@ float KeysProcessor::baseVelocity01() const
     const float a = apvts.getRawParameterValue("humanizeVelMin")->load();
     const float b = apvts.getRawParameterValue("humanizeVelMax")->load();
     const float mid = (juce::jmin(a, b) + juce::jmax(a, b)) * 0.5f;
-    return juce::jlimit(0.0f, 1.0f, (mid - 1.0f) / 126.0f);
+    return juce::jlimit(0.0f, 1.0f, mid / 127.0f); // 0..127 straight through; see the layout
 }
 
 bool KeysProcessor::chordPadActive(int i) const
@@ -889,7 +955,10 @@ std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int ta
         const double delayMs = (count > 1 && strumMs > 0.0)
                                    ? strumMs * (double) k / (double) (count - 1)
                                    : 0.0;
-        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, tag, dest); // noteOn adds Humanize per note
+        // asChord true: this is a chord, not something played on the keys, so on the track
+        // output it takes the queue a listening arp line cannot lift. It says nothing when
+        // `dest` names a line - that chord was routed to it on purpose. See noteOn.
+        scheduleNoteOn(order[(size_t) k], vel, 0, delayMs, tag, dest, /*asChord*/ true); // noteOn adds Humanize per note
     }
     return notes;
 }
@@ -916,16 +985,16 @@ void KeysProcessor::releaseLiveChord(bool force)
 }
 
 void KeysProcessor::scheduleNoteOn(int note, float vel01, int channel, double delayMs, int padSlot,
-                                   int dest)
+                                   int dest, bool asChord)
 {
     if (delayMs <= 0.0)
     {
-        noteOn(note, vel01, 0.0, channel, dest);
+        noteOn(note, vel01, 0.0, channel, dest, asChord);
         return;
     }
 
     const double at = juce::Time::getMillisecondCounterHiRes() + delayMs;
-    const DeferredNote d { note, vel01, channel, at, padSlot, dest };
+    const DeferredNote d { note, vel01, channel, at, padSlot, dest, asChord };
     // Keep sorted by due time, so timerCallback only ever inspects the front.
     deferred.insert(std::upper_bound(deferred.begin(), deferred.end(), at,
                                      [](double t, const DeferredNote& n) { return t < n.atMs; }),
@@ -976,7 +1045,7 @@ void KeysProcessor::timerCallback()
         const std::vector<DeferredNote> firing(deferred.begin(), deferred.begin() + (long) due);
         deferred.erase(deferred.begin(), deferred.begin() + (long) due);
         for (const auto& n : firing)
-            noteOn(n.note, n.vel01, 0.0, n.channel, n.dest);
+            noteOn(n.note, n.vel01, 0.0, n.channel, n.dest, n.asChord);
     }
 
     if (deferred.empty() && pendingLaunches.empty())
@@ -999,8 +1068,18 @@ juce::MidiMessageCollector& KeysProcessor::collectorFor(int dest)
     return collector;
 }
 
+// The same answer, split one finer: the track output has two queues and `asChord` picks between
+// them. A line's own input has one, so `asChord` says nothing there - a chord handed to a line is
+// meant for that line and has already been routed by `dest`.
+juce::MidiMessageCollector& KeysProcessor::chordQueueFor(int dest, bool asChord)
+{
+    if (dest == 0 && asChord)
+        return chordCollector;
+    return collectorFor(dest);
+}
+
 void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, int channelOverride,
-                           int dest)
+                           int dest, bool asChord)
 {
     if (midiNote < 0 || midiNote > 127)
         return;
@@ -1025,7 +1104,7 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
         const int b = (int) apvts.getRawParameterValue("humanizeVelMax")->load();
         const int lo = juce::jmin(a, b), hi = juce::jmax(a, b);
         const int rnd = rng.nextInt(juce::Range<int>(lo, hi + 1));
-        velocity01 = (float) (rnd - 1) / 126.0f;
+        velocity01 = (float) rnd / 127.0f;
     }
 
     // One note-on per *pitch*, not per owner. Four sources can ask for the same pitch at
@@ -1055,9 +1134,21 @@ void KeysProcessor::noteOn(int midiNote, float velocity01, double delaySeconds, 
     const bool alreadySounding = noteRefs[(size_t) dest][(size_t) midiNote].fetch_add(1) > 0;
     if (! alreadySounding)
     {
-        auto m = juce::MidiMessage::noteOn(channel, midiNote, juce::jlimit(0.04f, 1.0f, velocity01));
+        // **Never 0, and never lifted either.** A note-on at velocity 0 is a note-off, so the
+        // floor is one MIDI unit and not zero. It was 0.04 - about velocity 5 - which quietly
+        // lifted the whole bottom of the Humanize band: the control said 1 and you heard 5, and
+        // with the band now reaching 0 that lie would have covered its lowest six values. The
+        // range *is* the velocity control here, so it has to be taken literally.
+        auto m = juce::MidiMessage::noteOn(channel, midiNote,
+                                           juce::jlimit(1.0f / 127.0f, 1.0f, velocity01));
         m.setTimeStamp(when);
-        collectorFor(dest).addMessageToQueue(m);
+        // Which of dest 0's two queues this pitch is opening on, recorded before it is sent so
+        // the matching note-off can find it again. Only the note-on that actually sounds writes
+        // it: a second owner of a pitch already ringing emits nothing, so it neither needs nor
+        // gets a say in where the release goes. See chordStream.
+        if (dest == 0)
+            chordStream[(size_t) midiNote].store(asChord);
+        chordQueueFor(dest, asChord).addMessageToQueue(m);
     }
     soundingGen.fetch_add(1);
 }
@@ -1080,7 +1171,11 @@ void KeysProcessor::noteOff(int midiNote, int channelOverride, double delaySecon
     {
         auto m = juce::MidiMessage::noteOff(channel, midiNote);
         m.setTimeStamp(nowSeconds() + delaySeconds);
-        collectorFor(dest).addMessageToQueue(m);
+        // Down whichever queue the note-on went, not whichever the *releasing* source would
+        // choose. The last owner is often not the first, and a note-off that took the other
+        // queue would strand the note in a listening line's engine - see chordStream.
+        chordQueueFor(dest, dest == 0 && chordStream[(size_t) midiNote].load())
+            .addMessageToQueue(m);
     }
     soundingGen.fetch_add(1);
 }
@@ -1228,9 +1323,12 @@ void KeysProcessor::allNotesOff()
     // chord this panic is meant to end, and its engine only lets go when a note-off reaches
     // it - so a panic that skipped the line collectors would silence the output while three
     // engines carried on arpeggiating chords nothing could release.
-    for (int dest = 0; dest <= numArpLines; ++dest)
+    // dest 0 twice: the track output has two queues since 2026-08-18 and a panic that flushed
+    // only one would leave whatever the other is holding to sound on unreleased.
+    for (int pass = 0; pass <= numArpLines + 1; ++pass)
     {
-        auto& queue = collectorFor(dest);
+        const int dest = pass <= numArpLines ? pass : 0;
+        auto& queue = chordQueueFor(dest, /*asChord*/ pass > numArpLines);
         for (int ch = 1; ch <= 16; ++ch)
         {
             for (int note = 0; note < 128; ++note)
@@ -1248,6 +1346,11 @@ void KeysProcessor::allNotesOff()
     for (auto& dest : noteRefs)
         for (auto& ref : dest)
             ref.store(0);
+    for (auto& q : chordStream)
+        q.store(false); // nothing is sounding, so no pitch has a queue to go back to
+    // ...and the arp lines' shared output counts, which the audio thread clears on its next
+    // block. See ArpMerge::reset.
+    arpOutClear.store(true, std::memory_order_relaxed);
     soundingGen.fetch_add(1);
 
     // All Off clears the input lights too. Keys cannot make someone's physical keyboard let
@@ -1300,11 +1403,15 @@ void KeysProcessor::sendPitchBend(int value14)
 void KeysProcessor::prepareToPlay(double sampleRate, int)
 {
     collector.reset(sampleRate);
+    chordCollector.reset(sampleRate);
     // Every buffer the arp stage touches is sized here and never grown on the audio thread.
     // Seven of them now rather than one: three inputs, three outputs, and the keybed's notes
     // lifted out of the merged stream for the lines that listen to it.
     keyNotes.ensureSize(8192);
     streamRest.ensureSize(8192);
+    arpMerged.ensureSize(8192);
+    arpOut.reset(); // nothing is sounding across a prepare
+    arpOutClear.store(false, std::memory_order_relaxed);
     for (auto& l : lines)
     {
         l.collector.reset(sampleRate);
@@ -1343,6 +1450,13 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     // old never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-run on an internal
     // clock at the last-known tempo when the transport is stopped.
     runArpLines(midi, buffer.getNumSamples());
+
+    // Chords last, and that is the whole of "a click never feeds the arpeggiator" (2026-08-18).
+    // A pad, the live card and the generator's audition queue here instead of into `collector`,
+    // so by the time they join the outgoing stream every line has already taken its copy of what
+    // was played on the keys. They are otherwise ordinary output: same buffer, same channel, same
+    // instrument downstream, and captureBlock below still records them as part of the take.
+    chordCollector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
 
     advanceChainClock(buffer.getNumSamples());
 
@@ -1653,16 +1767,27 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
 
     // Each line's own queue first. These are the chords handed to it - by a card, a slot or a
     // chain - and they belong to that line whether or not it is also listening to the keys.
+    arpMerged.clear();
     for (auto& l : lines)
     {
         l.in.clear();
         l.collector.removeNextBlockOfMessages(l.in, numSamples);
     }
 
-    // The keybed, the live card, a pad played straight, a clip on the track: all of it arrives
-    // in the merged stream, and any line that listens gets a copy. Lifting the notes out is
-    // what makes the arp replace them rather than double them, and it is skipped entirely when
-    // nobody is listening - which is exactly the behaviour of the arp being off.
+    // The keybed and a clip on the track: what arrives in the merged stream by now is what was
+    // *played*, and any line that listens gets a copy. Lifting the notes out is what makes the
+    // arp replace them rather than double them, and it is skipped entirely when nobody is
+    // listening - which is exactly the behaviour of the arp being off.
+    //
+    // **A pad's chord is not in this stream** (2026-08-18, Owen: "as soon as you click a chord in
+    // the pad, it automatically sends it to the arpeggiator ... we only want the arpeggiator to
+    // go if you drag a chord on top of it"). It used to be, along with the live card and the
+    // generator's audition, and a line with Play on lifted all three - so clicking a pad fed the
+    // arpeggiator exactly as pressing a key did, which is the one thing a click has not been
+    // allowed to do since 2026-08-02. Play means the keys you play; a chord reaches a line by
+    // being dragged onto it, or through the pad menu's Send to arp rows, and either way it goes
+    // to that line's own queue above. Those three sources now drain from `chordCollector` in
+    // processBlock, after this runs, which is what puts them out of reach here.
     if (anyListens)
     {
         keyNotes.clear();
@@ -1718,11 +1843,19 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // ringing has to be closed on the channel it started on. Flushed and merged under the
         // *old* channel before lastChannel moves, because restamping this line's whole output
         // with the new one would send those note-offs somewhere the notes never sounded.
+        //
+        // Into `arpMerged`, never straight into `midi`: every note-on this line emitted was
+        // counted by `arpOut`, so its note-offs have to be counted back down by the same
+        // refcounts. Writing them past the merge left `held[ch][note]` stuck above zero for
+        // good, and a count that never returns to 0 suppresses the *real* note-off of every
+        // later hit on that pitch - a note hung on the instrument for the rest of the session.
+        // The flush emits at sample 0, and MidiBuffer keeps its events in sample order, so
+        // these still close ahead of anything this block goes on to play.
         if (channel != l.lastChannel)
         {
             l.engine.flushInto(l.out);
             watchArpNotes(l.out);
-            mergeArpOut(midi, l.out, l.lastChannel);
+            mergeArpOut(arpMerged, l.out, l.lastChannel);
             l.out.clear();
             l.lastChannel = channel;
         }
@@ -1774,7 +1907,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.humanVel = (int) arpParam(n, apHumanVel);
         ap.octShift = (int) arpParam(n, apOctShift);
         ap.volume = (int) arpParam(n, apVolume);
-        ap.velTrim = (int) arpParam(n, apVelTrim);
+        ap.velLevel = (int) arpParam(n, apVelLevel);
         ap.chords = &l.chordTable; // what the Chord lane calls up, this line's slots
 
         // Distance: what each repeat past the first adds. The list names intervals rather
@@ -1824,6 +1957,19 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
                     hc.hasPpq = true;
                 }
             }
+        // Every line anchors to one grid, and there is always a grid (2026-08-18). While the host
+        // rolls that is its own position, read fresh above; otherwise it is `arpBeats`, the count
+        // this processor keeps for Launch Quantize to measure from - the host's position while it
+        // has one, its own beats when it does not, which is the only clock the standalone has.
+        //
+        // Read *before* advanceChainClock adds this block to it, so it is the position at the
+        // start of the block, which is what `ppq` means to the engine. All three lines are handed
+        // the same number in the same block, which is the entire point: it is what lets two
+        // anchored lines walk in lockstep with no transport to follow. `anchored` off still opts a
+        // line out into a free-running phase of its own.
+        hc.hasGrid = true;
+        if (! (hc.playing && hc.hasPpq))
+            hc.ppq = arpBeats.load(std::memory_order_relaxed);
         // No transport to follow: run at the BPM control in the Controls section. It used to
         // be the host's last-known tempo, which was unreachable in the standalone (where
         // there is no host at all) and unchangeable everywhere.
@@ -1836,15 +1982,25 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // the pass-through left there, so two lines at two rates simply sum.
         l.engine.process(ap, hc, numSamples, l.in, l.out);
         watchArpNotes(l.out);
-        mergeArpOut(midi, l.out, channel);
+        // Into the shared buffer rather than straight out: the lines have to be interleaved in
+        // time before the overlap rule below can run over them. MidiBuffer keeps its events
+        // sorted by sample position, and equal positions stay in insertion order, so a line's
+        // note-off and a later line's note-on at the same offset settle in line order.
+        mergeArpOut(arpMerged, l.out, channel);
     }
+
+    mergeArpLines(midi);
 }
 
-// Audio thread. Counting the chain's bars belongs here because this is the only place with
-// a tempo, and outside the arpOn block because a progression is a chord player first: it
-// keeps moving whether or not anything is arpeggiating what it hands over. The *launch*
-// cannot happen here - it moves host parameters and fires notes - so this only ever raises
-// a flag for the heartbeat to act on.
+// Audio thread. The rule itself is ArpMerge, beside the engine and free of this class so it can be
+// driven from a test with two hand-built buffers; all this does is hand it the block.
+void KeysProcessor::mergeArpLines(juce::MidiBuffer& midi)
+{
+    if (arpOutClear.exchange(false, std::memory_order_relaxed))
+        arpOut.reset();
+    arpOut.merge(arpMerged, midi);
+}
+
 void KeysProcessor::advanceChainClock(int numSamples)
 {
     // Tempo and bar length are the same question whichever line is asking, so they are asked
@@ -2568,6 +2724,12 @@ int KeysProcessor::arpSlotBars(int index, int line) const
 
 void KeysProcessor::heartbeatTick()
 {
+    // The generator's key follows through to the keyboard's here rather than inside
+    // parameterChanged: that callback can arrive on the audio thread from host automation, and
+    // writing another parameter from there is not something to do mid-block. 20 ms late is
+    // invisible for a control that only greys keys.
+    mirrorGenKeyToScale();
+
     // Move the take out of the audio thread's ring while it is still being played into, so the
     // ring never has to hold a whole performance and the chip's duration is live rather than
     // arriving all at once when recording stops.
@@ -2810,12 +2972,23 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     migrateStrumRange(root);
     migrateRateMode(root);
     migrateVelTrim(root);
+    migrateVelLevel(root);
     migrateBpmSync(root);
     migrateTuplet(root);
     migrateHumanSpans(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
+
+    // **A restore is not a move, so the Key/Mode mirror must not fire off one.** replaceState
+    // pushes genRoot and genMode through parameterChanged like any other write, which raised
+    // the pending flag and had the next heartbeat mirror them onto `root` and `scale` - over
+    // the values this very session had just restored. Root and Scale are still ordinary
+    // parameters you can set on the Controls bar after choosing a generator key, so that
+    // silently threw away a saved keybed setting on every single load, and pushed two
+    // gesture-less parameter writes at the host ~20 ms in for good measure. The mirror is
+    // for the user turning the generator's Key or Mode; dropped here, it stays that.
+    pendingGenKeyMirror.set(0);
 }
 
 void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
@@ -2966,6 +3139,58 @@ void KeysProcessor::migrateVelTrim(const juce::ValueTree& root)
     }
 }
 
+void KeysProcessor::migrateVelLevel(const juce::ValueTree& root)
+{
+    // VEL became an absolute 0..127 velocity band on 2026-08-18 (see the parameter's own note).
+    // A session saved before that carries its line levels in the bipolar VelTrim and has no
+    // VelLevel at all - and, as ever, an absent parameter keeps the live instance's current value
+    // rather than resetting, so the default never lands on its own (see migrateRateMode).
+    //
+    // The repair cannot be exact the way migrateVelTrim's was, and the reason is the whole point
+    // of the change: a trim multiplied whatever velocity arrived, and a level replaces it, so the
+    // two only agree once you say what "whatever arrived" was. It is not a guess - every chord
+    // Keys fires leaves at `baseVelocity01()`, the midpoint of the pads' Humanize band, and 76 is
+    // that midpoint at its own defaults (64..88). So a session that never touched VEL lands on
+    // 76 and plays at the velocity it always did.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    constexpr double asPlayed = 76.0; // the pads' default velocity; see above
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto levelId = arpParamId(line, apVelLevel);
+        const auto trimId = arpParamId(line, apVelTrim);
+        bool sawLevel = false;
+        for (int i = 0; i < params.getNumChildren(); ++i)
+            sawLevel = sawLevel || params.getChild(i).getProperty("id").toString() == levelId;
+        if (sawLevel)
+            continue;
+
+        // **The trim is read live, not out of the tree, and the order is why.** migrateVelTrim
+        // runs immediately before this one and, for a session old enough to predate VelTrim
+        // too, *synthesises* the trim from that session's Volume and writes it to the live
+        // parameter - it never goes back into the saved tree. Scanning the tree here therefore
+        // saw no trim child on exactly the oldest sessions, fell back to the 0 default, and
+        // handed them "as played" instead of the level they were saved at, which is the one
+        // thing this chain of migrations exists to preserve. replaceState has already pushed
+        // the tree's own value into the parameter by now, so a live read answers both cases.
+        double savedTrim = 0.0; // the parameter's default: "as played"
+        if (auto* trim = apvts.getRawParameterValue(trimId))
+            savedTrim = (double) trim->load();
+
+        if (auto* param = apvts.getParameter(levelId))
+        {
+            // Through the curve VelTrim actually had: scale = ((100+trim)/100)^2, squared because
+            // hearing is logarithmic. -100 lands on 0, which is the silence that trim meant.
+            const double t = (100.0 + juce::jlimit(-100.0, 100.0, savedTrim)) / 100.0;
+            const float level = (float) juce::jlimit(0.0, 127.0, std::round(asPlayed * t * t));
+            param->setValueNotifyingHost(param->convertTo0to1(level));
+        }
+    }
+}
+
 void KeysProcessor::migrateBpmSync(const juce::ValueTree& root)
 {
     // Tempo Sync joined the tempo control on 2026-08-02: "bpmSync" decides whether a rolling
@@ -3082,6 +3307,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("holdVisualsOnSustain", layout.holdVisualsOnSustain, nullptr);
     tree.setProperty("dragWhileSustain", layout.dragWhileSustain, nullptr);
     tree.setProperty("sustainProposesChords", layout.sustainProposesChords, nullptr);
+    tree.setProperty("padHoldToPlay", layout.padHoldToPlay, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -3131,6 +3357,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.holdVisualsOnSustain = flag("holdVisualsOnSustain", true);
     layout.dragWhileSustain = flag("dragWhileSustain", true);
     layout.sustainProposesChords = flag("sustainProposesChords", false);
+    layout.padHoldToPlay = flag("padHoldToPlay", false);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

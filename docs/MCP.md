@@ -69,12 +69,16 @@ The parameters follow the same rule. Line A registers under the ids it always ha
 `arp2Direction`, and so on. Five ids are newer than the original arp and worth knowing:
 `arpKeys` (does this line arpeggiate what you play, or only the chords handed to it),
 `arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
-`arpOctaves`, which stacks copies upward), `arpVelTrim` (-100..+100, this line's level as a
-velocity trim around "as played", with a squared response so half travel sounds about half as
-loud; it replaced `arpVolume` on screen on 2026-08-02 — the old id still exists but every load
-folds it into `arpVelTrim` and resets it to 100, so scripts should write the new one), and
-`arpHumanVel` (0..100, the velocity half of Humanize; `arpHumanize` is the timing half alone
-since the same day).
+`arpOctaves`, which stacks copies upward), `arpVelLevel` (0..127, this line's velocity outright -
+the top of the band it plays at, whatever velocity the chord arrived with, and 0 mutes the line),
+and `arpHumanVel` (0..127, how far under that level a hit may fall - the velocity half of
+Humanize, in the same units; `arpHumanize` is the timing half alone since 2026-08-02).
+
+**Two retired velocity ids are still registered and read by nothing**: `arpVolume`, which
+`arpVelTrim` replaced on 2026-08-02, and `arpVelTrim` itself, which `arpVelLevel` replaced on
+2026-08-18 when Vel stopped being a bipolar percentage trim around "as played" and became MIDI
+velocity. Every load folds each into its successor. Scripts should write `arpVelLevel`; writing
+either of the old two changes nothing you can hear.
 
 **A line that is off still takes chords in.** Handing a chord to a line that is not running
 makes no sound and is not lost: the engine holds it silently, and setting that line's `On`

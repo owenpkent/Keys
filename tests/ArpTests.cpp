@@ -985,19 +985,23 @@ public:
             expect(sawLate, "something actually moved");
         }
 
-        beginTest("Humanize velocity is its own knob, and VEL trim is bipolar");
+        beginTest("Humanize velocity is its own knob, and VEL is an absolute 0-127 band");
         {
             // One Humanize drove both halves until 2026-08-02; now `humanize` is the timing
-            // nudge alone and `humanVel` the velocity shave alone, and `velTrim` is the level
-            // control centred on "as played". Each question below fails if the split leaks.
-            const auto velsWith = [&](int human, int humanVel, int trim)
+            // nudge alone and `humanVel` the velocity shave alone. `velLevel` replaced the
+            // bipolar `velTrim` on 2026-08-18 (Owen: "still wrong", on a VEL readout showing
+            // "-31 ~20" right after asking for velocity ranges to span 0-127): it is MIDI
+            // velocity outright rather than a percentage trim on the velocity that arrived, and
+            // `humanVel` is how far under it a hit may fall, in the same units. Each question
+            // below fails if the split leaks or the units drift apart again.
+            const auto velsWith = [&](int human, int humanVel, int level)
             {
                 ArpEngine e;
                 e.prepare(sr);
                 auto sp = p;
                 sp.humanize = human;
                 sp.humanVel = humanVel;
-                sp.velTrim = trim;
+                sp.velLevel = level;
                 std::vector<float> vels;
                 for (int i = 0; i < 8; ++i)
                 {
@@ -1011,41 +1015,45 @@ public:
                 return vels;
             };
 
-            const auto base = velsWith(0, 0, 0);
+            // **The knob is the velocity, whatever the chord arrived at.** chordOn() feeds every
+            // note at 0.8, and the run below plays at 100/127 regardless - which is the whole
+            // change, and the one thing "as played" used to mean that no longer applies.
+            const auto base = velsWith(0, 0, 100);
             expect(! base.empty(), "the reference run plays");
+            for (const float v : base)
+                expectWithinAbsoluteError(v, 100.0f / 127.0f, 0.012f,
+                                          "VEL 100 plays at MIDI velocity 100, not at the input's");
 
-            const auto timingOnly = velsWith(100, 0, 0);
+            const auto quiet = velsWith(0, 0, 40);
+            for (const float v : quiet)
+                expectWithinAbsoluteError(v, 40.0f / 127.0f, 0.012f, "and VEL 40 at velocity 40");
+
+            const auto timingOnly = velsWith(100, 0, 100);
             for (size_t i = 0; i < timingOnly.size() && i < base.size(); ++i)
                 expectWithinAbsoluteError(timingOnly[i], base[i], 0.005f,
                                           "full H.TIME leaves every velocity alone");
 
-            const auto velOnly = velsWith(0, 100, 0);
+            // The ring is in velocity units too: at 40 below a level of 100, every hit lands
+            // somewhere in 60..100 and never above the knob.
+            const auto ringed = velsWith(0, 40, 100);
             bool sawQuieter = false;
-            for (size_t i = 0; i < velOnly.size() && i < base.size(); ++i)
+            for (const float v : ringed)
             {
-                expect(velOnly[i] <= base[i] + 0.005f, "H.VEL only ever shaves, never louder");
-                sawQuieter = sawQuieter || velOnly[i] < base[i] - 0.005f;
+                expect(v <= 100.0f / 127.0f + 0.005f, "the ring only ever shaves, never louder");
+                expect(v >= 60.0f / 127.0f - 0.012f, "and never further than the ring reaches");
+                sawQuieter = sawQuieter || v < 100.0f / 127.0f - 0.005f;
             }
-            expect(sawQuieter, "full H.VEL actually moved something");
+            expect(sawQuieter, "a ring of 40 actually moved something");
 
-            // The trim's curve is squared - hearing is logarithmic, and the linear version
-            // spent nearly all its audible change at the very end of the travel - and it
-            // multiplies *after* the 0.05 audibility floor, so a deep cut reaches MIDI
-            // velocity 1 instead of pinning at 6 from -90 down.
-            const auto half = velsWith(0, 0, -50);
-            for (size_t i = 0; i < half.size() && i < base.size(); ++i)
-                expectWithinAbsoluteError(half[i], base[i] * 0.25f, 0.02f,
-                                          "trim at -50 plays at quarter velocity (half as loud)");
-            const auto boosted = velsWith(0, 0, 100);
-            for (size_t i = 0; i < boosted.size() && i < base.size(); ++i)
-                expectWithinAbsoluteError(boosted[i], juce::jmin(1.0f, base[i] * 4.0f), 0.02f,
-                                          "trim at +100 quadruples, into the 1.0 ceiling");
-            const auto deep = velsWith(0, 0, -96);
-            expect(! deep.empty(), "a deep cut still plays");
+            // The bottom of the band is taken literally now: no 0.05 audibility floor lifting it,
+            // because the level *is* the velocity and a band drawn low is meant to be quiet. The
+            // clamp still stops at one MIDI step, since zero would be a note-off in disguise.
+            const auto deep = velsWith(0, 0, 1);
+            expect(! deep.empty(), "a level of 1 still plays");
             for (const float v : deep)
-                expectWithinAbsoluteError(v, 1.0f / 127.0f, 0.012f,
-                                          "-96 reaches the bottom MIDI step, not the old velocity-6 pin");
-            expect(velsWith(0, 0, -100).empty(), "full-left trim is a mute, exactly as VOL 0 was");
+                expectWithinAbsoluteError(v, 1.0f / 127.0f, 0.006f,
+                                          "velocity 1 leaves as velocity 1");
+            expect(velsWith(0, 0, 0).empty(), "a level of 0 is a mute, exactly as VOL 0 was");
         }
 
         // ---------------------------------------------------------------------------------
@@ -1625,6 +1633,164 @@ public:
             const auto onB = onsetsOf(spOff, hostRolling, block, 8, steady);
             expect(onA == onB, "followHost changes nothing while the rate is in Hz");
             expectEquals((int) onA.size(), 8, "still one step per 6000-sample block at 8 Hz");
+        }
+
+        // Two anchored lines must walk the same grid even with no transport to follow
+        // (2026-08-18, Owen: "I think that the notes should be playing at the same time, but
+        // they're not"). The engine's own free-running phase is zeroed by restart(), so a line
+        // switched on later used to start counting from its own zero and stay out of phase for
+        // good; HostClock::hasGrid is the processor's answer to that, and this pins that a line
+        // joining late lands on the shared grid rather than on a grid of its own.
+        beginTest("with no transport, an anchored line joining late still lands on the shared grid");
+        {
+            ArpEngine::HostClock noTransport;   // stopped, no host position at all...
+            noTransport.playing = false;
+            noTransport.hasPpq = false;
+            noTransport.hasGrid = true;         // ...but the processor always supplies a grid
+            noTransport.bpm = 120.0;
+            noTransport.hasBpm = true;
+
+            auto ap = p;
+            ap.anchored = true;
+
+            ArpEngine early, late;
+            early.prepare(sr);
+            late.prepare(sr);
+
+            // The grid is one running beat count both lines are handed in the same block, exactly
+            // as runArpLines hands them `arpBeats`. Half a step of offset (0.125 beat) so a line
+            // counting from its own zero would be visibly off the beat rather than accidentally
+            // on it.
+            std::vector<int> earlyOnsets, lateOnsets;
+            for (int b = 0; b < 8; ++b)
+            {
+                noTransport.ppq = 0.125 + 0.25 * (double) b;
+
+                juce::MidiBuffer outE;
+                early.process(ap, noTransport, block, b == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, outE);
+                for (auto& x : collect(outE))
+                    if (x.on)
+                        earlyOnsets.push_back(b * block + x.sample);
+
+                // The late line is handed its chord four blocks in - the switch going on, or a
+                // card dropped onto it - and from then on must fire alongside the early one.
+                juce::MidiBuffer outL;
+                late.process(ap, noTransport, block, b == 4 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, outL);
+                for (auto& x : collect(outL))
+                    if (x.on)
+                        lateOnsets.push_back(b * block + x.sample);
+            }
+
+            expect(! lateOnsets.empty(), "the late line plays at all");
+            for (int onset : lateOnsets)
+                expect(std::find(earlyOnsets.begin(), earlyOnsets.end(), onset) != earlyOnsets.end(),
+                       "every onset of the late line coincides with one of the early line's");
+        }
+
+        beginTest("anchored off keeps a line's own phase, so it drifts on purpose");
+        {
+            ArpEngine::HostClock noTransport;
+            noTransport.playing = false;
+            noTransport.hasPpq = false;
+            noTransport.hasGrid = true;
+            noTransport.bpm = 120.0;
+            noTransport.hasBpm = true;
+
+            auto freeRun = p;
+            freeRun.anchored = false;
+
+            // Same shared grid, offset half a step off the beat. Free-running, the line counts
+            // from its own start instead, so its onsets land on the block boundaries the grid's
+            // own offset would have moved them off - which is the whole difference Anchor names.
+            ArpEngine e;
+            e.prepare(sr);
+            std::vector<int> onsets;
+            for (int b = 0; b < 4; ++b)
+            {
+                noTransport.ppq = 0.125 + 0.25 * (double) b;
+                juce::MidiBuffer out;
+                e.process(freeRun, noTransport, block, b == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                for (auto& x : collect(out))
+                    if (x.on)
+                        onsets.push_back(b * block + x.sample);
+            }
+            expect(! onsets.empty(), "a free-running line still plays");
+            expectEquals(onsets[0], 0, "and starts at its own zero, not at the grid's offset");
+        }
+
+        // Two lines meeting on one pitch (2026-08-18, Owen: "how does it handle when there's an
+        // overlap in a note that's being played, and how should it handle that?"). ArpMerge is the
+        // answer and lives beside the engine precisely so it can be driven like this, with two
+        // lines' events hand-built into one buffer in sample order.
+        beginTest("two lines sharing a pitch: one note-on, re-struck, released by the last line");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer in, out;
+            // Line A takes C4 at 0 and holds it past line B's whole note. B strikes the same
+            // pitch at 100 and lets go at 200 - entirely inside A's note.
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.5f), 100);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 200);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 300);
+            merge.merge(in, out);
+
+            auto ev = collect(out);
+            expectEquals((int) ev.size(), 4, "B's attack is heard, and only one note-off leaves");
+            expect(ev[0].on && ev[0].sample == 0, "A's note-on goes out as it is");
+            expect(! ev[1].on && ev[1].sample == 100, "B's attack closes the sounding note first");
+            expect(ev[2].on && ev[2].sample == 100, "...and re-strikes it at the same offset");
+            expect(! ev[3].on && ev[3].sample == 300,
+                   "the pitch ends when the LAST line lets go, not the first");
+        }
+
+        beginTest("a pitch only one line is playing passes through untouched");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer in, out;
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 100);
+            in.addEvent(juce::MidiMessage::noteOn(1, 64, 0.8f), 100); // a different pitch, no overlap
+            in.addEvent(juce::MidiMessage::noteOff(1, 64), 200);
+            merge.merge(in, out);
+            expectEquals((int) collect(out).size(), 4, "nothing added, nothing swallowed");
+        }
+
+        beginTest("the same pitch on two channels is two notes, and never collides");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer in, out;
+            // A line with a Channel of its own is the other answer to an overlap, and the two
+            // must not interfere: these are different notes to the instrument downstream.
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOn(2, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 100);
+            in.addEvent(juce::MidiMessage::noteOff(2, 60), 200);
+            merge.merge(in, out);
+            auto ev = collect(out);
+            expectEquals((int) ev.size(), 4, "no re-strike and no suppression across channels");
+            expect(ev[0].on && ev[1].on, "both attacks stand");
+            expect(! ev[2].on && ! ev[3].on, "and both releases do");
+        }
+
+        beginTest("a panic clears the counts, so the next note-off is not swallowed");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer stranded, out;
+            stranded.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            stranded.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 10); // two lines holding it
+            merge.merge(stranded, out);
+
+            // A panic silences the instrument directly and leaves the engines to catch up. Without
+            // the reset the count stays at 2, and the single note-off that eventually arrives is
+            // swallowed as "another line still holds it" - a stuck note.
+            merge.reset();
+            juce::MidiBuffer after, out2;
+            after.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            after.addEvent(juce::MidiMessage::noteOff(1, 60), 100);
+            merge.merge(after, out2);
+            auto ev = collect(out2);
+            expectEquals((int) ev.size(), 2, "a clean note pair after the panic");
+            expect(ev[0].on && ! ev[1].on, "and the note-off reaches the instrument");
         }
 
         // --- Three lines ------------------------------------------------------------------
