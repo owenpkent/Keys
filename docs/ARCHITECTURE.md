@@ -19,8 +19,16 @@ src/
 ├── MarkovData.h              # the bundled progression corpus ChordMarkov walks
 ├── ChordSources.h            # circle of fifths, Neo-Riemannian PLR, progression templates,
 │                             # negative harmony, planing, voice-leading as a post-pass
-│                             # (tests/ChordSourceTests.cpp). Wired to the UI since 2026-08-01:
-│                             # Source is seven choices now (Algorithmic, Markov and these five)
+│                             # (tests/ChordSourceTests.cpp). Wired to the UI since 2026-08-01
+├── ChordLibrary.h            # 355 named progressions tagged by mood, genre and function,
+│                             # stored as roman numerals (tests/ChordLibraryTests.cpp, which
+│                             # spellchecks the table on every build). The eighth Source, and
+│                             # the only one that looks a sequence up rather than computing it
+├── ChordNumerals.h           # the roman numeral for a chord, in one place: the numeral the
+│                             # cards print in their corner and the Progressions diagram draws.
+│                             # A *library* pad asks chordlib::numeralAt instead - `degree` is an
+│                             # index into the mode a chord was generated in, and a library row is
+│                             # generated against its own
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync.
 │                             # The processor holds *three* of these since 2026-08-01,
@@ -34,11 +42,16 @@ src/
 │   │                         # Controls section
 │   ├── CCMenu.h              # the one-click CC picker the knob row uses
 │   ├── ChordPads.{h,cpp}     # chord-pad rows + live chord card (capture / recall)
-│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain, all seven sources plus voice
-│   │                         # leading. Draws nothing; a member of the editor, so it
-│   │                         # outlives every view
+│   ├── ChordGenMenu.{h,cpp}  # the chord generator's brain, all eight sources plus voice
+│   │                         # leading, and the audition path (one chord, or a whole
+│   │                         # progression walked a chord at a time). Draws nothing; a
+│   │                         # member of the editor, so it outlives every view
 │   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
 │   │                         # when that window opens, destroyed when it closes
+│   ├── ChordLibraryPanel.{h,cpp} # the library you browse: twelve rows a page, < >, click a
+│   │                         # row to hear the progression, two buttons to place it, a star to
+│   │                         # keep it, and Follows for what could come after the pads. Its own
+│   │                         # window off the Pads bar; same view-never-owner split
 │   ├── SourceViz.{h,cpp}     # read-only diagram of the current source, under its button
 │   │                         # row in that window (2026-08-01). Click-through, no state
 │   ├── ChordTray.{h,cpp}     # 4x4 grid of candidate chords inside that window (2026-08-01),
@@ -361,7 +374,7 @@ Note count and inversions **used to be pool properties too, and are not any more
 (2026-08-01, Owen: "all of their options should have the option for how many notes and
 what inversion"). Both are facts about the *voicing* a chord arrives in rather than about
 which chord it is, so `ChordGenMenu::fitVoicing` now applies them as a post-pass over
-whatever any of the seven sources produced. `fitPads` is the same pass for the Markov
+whatever any of the eight sources produced. `fitPads` is the same pass for the Markov
 path, which arrives as pads rather than `chordgen::Chord`s.
 
 Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is
@@ -426,7 +439,45 @@ pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algo
 these five; Markov keeps its own three paths, because its chords carry a numeral these don't
 and its per-pad regeneration steps the chain from the left neighbour.
 
-Sitting over all seven is **Smooth Voicing** (`genSmooth`, renamed from "Voice Leading"
+Two folders outside `src/` belong to the library and are gitignored payload plus a manifest, the
+arrangement `manuals/` already used:
+
+```
+datasets/                     # chord corpora and audio-feature dumps, per-source licences in
+                              # datasets/README.md. Never redistributed with Keys
+scripts/corpus/               # what was actually run against them: the MIT pack comparison, the
+                              # ranking against Chordonomicon, and the mood-tag check
+```
+
+`ChordLibrary.h` added the eighth on 2026-08-18 and it is the odd one out: **Library** does not
+compute a chord sequence, it looks one up. 355 named progressions, each stored as a roman-numeral
+string in the grammar `ChordMarkov.h` already parses (so one row serves twelve keys, and the
+storage format is the notation the cards print in their corner) and tagged on three axes: mood and
+genre, which are Scaler 3's own vocabularies plus five words Keys already used, and **function** -
+Loop, Cadence, Turnaround, Vamp, Lift, Descent, Turn, Open - which is the axis that separates "sad,
+and it loops" from "sad, and it ends". A pick is three *filters*, so what comes back is a shortlist;
+generation draws from it shuffled and without replacement and lays **whole progressions end to
+end** rather than looping one, which is what makes a Vamp filter give eight vamps to compare and a
+12-Bar Blues fill the tray on its own. Degrees resolve against the row's own mode rather than the
+session's - the opposite of what every other source wants, and right here, because a minor row read
+against a major session resolves nothing and labels half the tray `?`. Everything downstream is
+unchanged, because it hands back plain `chordgen::Chord`s like the rest.
+
+The library has a **second surface**, `ChordLibraryPanel`, a window of its own off a Library chip
+on the Pads bar: twelve rows a page with `<` `>`, the whole row a Hear button that walks the
+progression a chord at a time, and two buttons per row that send it to the generator's tray or onto
+the page's empty pads. Each row also carries a **star** (`LayoutState::libraryFavourites`, kept by
+name and per session) and the window a **Follows** toggle, which replaces the three filters with
+`chordlib::couldFollow` on whatever progression the pads end with. Both surfaces share one piece of
+state on `ChordGenMenu`, so a mood picked in either is the mood Fill obeys.
+
+A pad that came from the library remembers it: `ChordPad::progression` and `progressionStep` carry
+the row's *name* and position, the strip draws a bracket under a run of them, and the numeral on
+such a pad comes from `chordlib::numeralAt` rather than from `degree` - see ChordNumerals.h's entry
+above for why. `docs/CHORD_LIBRARY.md` is the design and the paper trail, including §10 and §11 on
+what the corpora were actually measured to say and what they cannot.
+
+Sitting over all eight is **Smooth Voicing** (`genSmooth`, renamed from "Voice Leading"
 2026-08-01, Owen: "I don't understand what the voice reading does"; the parameter id
 did not move), a post-pass rather than a source of its own: each chord after the first
 has each pitch class placed in whichever octave sits closest to the previous chord,
@@ -434,7 +485,7 @@ blended by the percentage. Blending in octave counts rather than raw semitones i
 deliberate, two notes sharing a pitch class are always a whole number of octaves apart,
 so every intermediate amount still lands on the source chord's own notes; it never
 chooses which chords you get or which notes they contain, only which octave each note
-sits in. `smoothPads()` runs it over the Markov path; the other six get it inline in
+sits in. `smoothPads()` runs it over the Markov path; the other seven get it inline in
 `generateChords`.
 
 `ChordGenMenu::readsScaleSettings()` and `readsMode()` answer two different questions
@@ -762,7 +813,7 @@ coming back:
   (2026-08-01, Owen: "I don't want it to auto generate when you change a source"). The tray
   rerolled itself on any settings change for part of that day, on the reasoning that sixteen
   answers to the old Key are worth nothing once the Key has changed - right about the
-  candidates, wrong about who decides: sweeping Source to compare the seven of them threw the
+  candidates, wrong about who decides: sweeping Source to compare the eight of them threw the
   tray away six times on the way past, and a control you cannot explore without destroying
   your work is a control you stop touching. `ChordTray::settingsMovedSinceFill()` polls the
   same signature (the generator's APVTS parameters plus Mood and Start, deliberately *not* the
@@ -1054,10 +1105,10 @@ chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStr
 range, added 2026-08-01, replacing the three note-count tick boxes these numbers count
 from), `genCompliance`, `genLockInfluence`, `genSmooth` (Smooth Voicing on screen since
 2026-08-01, still `genSmooth` underneath, the parameter id did not move when the name
-did, over all seven sources), `genMajMin` (Lean, -100..100, new the same day), the six
+did, over all eight sources), `genMajMin` (Lean, -100..100, new the same day), the six
 `genUseKey` / `genUseMode` / `genUseOctave` / `genUseNotes` / `genUseInversions` /
 `genUseCompliance` toggles (new the same day, all default true), the knob row's
-`faderCC1`-`faderCC8` CC assignments, `genSource` (the seven-way choice itself), the
+`faderCC1`-`faderCC8` CC assignments, `genSource` (the eight-way choice itself), the
 Markov set `markovMode`, `markovTemp`, `markovLength`, and the five sources' own bands:
 `genCircleDir`, `genPlrP` / `genPlrL` / `genPlrR`, `genProgression`,
 `genPlaningDiatonic`. Negative Harmony has none, Key, Mode and Octave are all it reads,

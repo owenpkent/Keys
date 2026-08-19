@@ -158,6 +158,19 @@ public:
         int degree = -1;        // scale degree, so regenerating gives a new chord for the same degree
         juce::String numeral;   // Markov roman numeral ("" = not from the Markov source);
                                 // regeneration walks the chain from the previous pad's numeral
+        // Where in a *named progression* this chord came from (2026-08-18). Empty means the pad
+        // came from anywhere else - the keybed, a hand edit, any generator source but the library.
+        // The first fields added to this struct since Markov's numeral, and for a reason of the
+        // same kind: a pad knew what chord it was and not what it was *part of*, so a strip
+        // holding "the Andalusian cadence" looked identical to four unrelated minor chords.
+        //
+        // The name rather than an index into `chordlib::table()`, deliberately: that table is
+        // explicitly free to be inserted into (nothing stores an index into it, which is what
+        // makes it the one append-*and*-insert-safe table in Keys), and storing an index here
+        // would quietly take that freedom away and move every saved pad the first time a row was
+        // added in the middle.
+        juce::String progression; // the library row this chord is a step of, or empty
+        int progressionStep = -1; // 0-based position within it, or -1
     };
     // Twelve since 2026-08-03 (Owen: "reduce the pads grid to 12"), as two rows of six - the
     // two columns that freed up carry Strum and Humanize as range knobs. It was 16 (Octavium's
@@ -651,6 +664,9 @@ public:
         // here all the same because it is the same question - where did Owen leave a window,
         // and was it open - and the answer has to survive the editor closing.
         bool chordGen = false;
+        // And the same for the Library window (2026-08-18), which is the second surface onto
+        // ChordLibrary.h and is opened by its own chip on the same bar.
+        bool chordLib = false;
 
         // Which arp line the panel is editing and a chord card feeds. See arpCurrentLine().
         int  arpLine = 0;
@@ -736,6 +752,19 @@ public:
         // reading back. See NoteSurface::proposedChordNotes.
         bool sustainProposesChords = false;
 
+        // The library rows you starred, by name (2026-08-18). Scaler's browser has this and Keys'
+        // had no answer for it at all: 355 rows, and no way to keep the six you actually use.
+        // Names rather than indices, the same call `ChordPad::progression` makes and for the same
+        // reason - `chordlib::table()` is free to be inserted into, and an index would take that
+        // freedom away. A name that no longer matches any row is simply ignored on load, which is
+        // what a row being renamed or dropped should cost.
+        //
+        // **Per session, like every other preference in Keys**, which is the honest weakness here:
+        // Scaler's favourites are global, and a star you set in one project is gone in the next.
+        // Keys has no global store for anything - the settings gear's three switches are all in
+        // this struct too - so a global one would be new machinery for one feature. Worth
+        // revisiting the day a second preference wants to outlive a project.
+        juce::StringArray libraryFavourites;
         // Whether a chord pad sounds for as long as you hold it, or fires on the release for a
         // fixed 800 ms (2026-08-18, Owen: "maybe we should have a checkbox to toggle that on and
         // off so we can lean on chords when we want").
@@ -768,6 +797,7 @@ public:
         juce::Rectangle<int> padsDetachedBounds {};
         juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
         juce::Rectangle<int> chordGenBounds {};     // the generator's window
+        juce::Rectangle<int> chordLibBounds {};     // the library's window
     };
     enum class UndoScope { pads, arp };
 

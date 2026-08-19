@@ -13,7 +13,7 @@ Because it is a plugin, **your setup travels with the song**: keyboard size,
 scale-lock, octave, channel, velocity, sustain and latch, the Humanize settings, the
 both arpeggiators down to their step lanes and their twelve slots each, which sections you
 had folded away and which you had pulled out into windows of their own (down to where each
-window sat, the chord generator's included), this instance's colour, the eight knob CC
+window sat, the chord generator's and the library's included), this instance's colour, the eight knob CC
 assignments, and your captured chord pads all save into the DAW project and come back when you
 reopen it. And it drops straight onto a track, with no loopMIDI to configure.
 
@@ -57,7 +57,7 @@ flat and dim, so the shape of the window reads before you have read a caption.
 | **Right-click** a key (optional) | Toggle a hold on that one note, the Octavium accelerator. A key this keyboard is already holding lets go, so a walk along a ringing chord takes it apart a note at a time without lifting Sustain. Any other key latches on, and a plain **left click** releases that |
 | **Knob row** | Eight rotary CC knobs, the bottom row of the Controls section, each with a one-click reassign button (see Controls below) |
 | **Chord pads** | Build a chord, drag the live card onto a pad to capture it, then press the pad beat-pad style to play it (Sustain holds it). Drag a pad back onto the card to bring its notes up for editing. The live card shows any chord Keys is holding - the keys, a pad, a chord you handed to an arp line - so any of them can be captured |
-| **Fill** / **Regen** / **Generator** | Three chips at the right of the Pads bar. Fill writes chords to the *empty* pads and never overwrites; Regen re-rolls the pads that already have one, except the locked ones; Generator opens the rest of it in a window of its own |
+| **Fill** / **Regen** / **Generator** / **Library** | Four chips at the right of the Pads bar. Fill writes chords to the *empty* pads and never overwrites; Regen re-rolls the pads that already have one, except the locked ones; Generator opens the rest of it in a window of its own; Library opens 355 named progressions you browse by mood, genre and what they do |
 | **All Off** | Stop every note on every channel gently: per-note offs plus CC123, so notes end through their release envelopes instead of being choked |
 
 No gesture beyond a click, a drag, or a scroll is ever required. Sustain is an on-screen
@@ -91,8 +91,7 @@ extends that to the live card and the arp holds, **Strum** rakes a chord's notes
 | **Rate** | A dial in the arp's control band, with a **Sync** / **Hz** switch beside it. Sync detents through eleven tempo-synced divisions, 16 bars down to 1/64; Hz free-runs from 0.031 to 32 Hz, which is exactly the span those divisions cover at 120 bpm, and never reads the transport. The readout is the step length as a plain fraction of a bar, modifiers and all — `1/8`, `1/12` in threes, `1/10` in fives, `1/5` for a quarter in fives, `1/8.` dotted. **Dot**, **Tuplet** and **Anchor** grey out in Hz, since there is no beat left to subdivide or bar to pin to. **Tuplet** is a list — Straight, Triplet, 5-tuplet, 7-tuplet, 9-tuplet — fitting that many steps into the space the power of two below it would take, so five quintuplet 1/16s fill exactly the span four straight ones do. A pair of steppers beside the dial walks every value one at a time, so nothing here needs a drag |
 | **Quantize** | On the Arp bar, shared across all four lines. Off fires a chord the instant you click it; anything else (1/16 up to 2 bars) holds the click until the next boundary, so a card can only ever land on the grid. Ableton's Quantization, for the arp. It never delays the keys you play |
 | **Hold off** | On the Arp bar. Lets go of the chord every line is holding and stops every Chain - one button on purpose, since a per-line release would leave the others droning behind a folded bar. Greyed out when there is nothing to let go of. Clicking the lit pad restrikes the chord instead, so this is the way to stop a hold outright |
-| **Fill** / **Regen** / **Generator** | The chord generator, at the right of the Pads bar, with **Key** and **Mode** as combo boxes beside them. **Generator** opens a window holding every setting it has - four page tabs in its header, and a 3x4 tray for auditioning candidate chords, with its own Fill / Regen / Clear, before they touch a pad. See below |
-| **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
+| **Fill** / **Regen** / **Generator** / **Library** | The chord generator, at the right of the Pads bar, with **Key** and **Mode** as combo boxes beside them. **Generator** opens a window holding every setting it has - four page tabs in its header, and a 3x4 tray for auditioning candidate chords, with its own Fill / Regen / Clear, before they touch a pad. **Library** opens the chord library: 355 named progressions you browse by mood, genre and what they do. See below || **Theme** | Colour this instance, so you can tell it from Keys on your other tracks |
 | **Detach** | On every open section bar: puts that section in a resizable window of its own. Re-dock from inside the window, or close it. Folded sections hide it, so unfold from the chevron first |
 | **All Off** | Stop everything |
 
@@ -183,8 +182,8 @@ which **replaces** the rotation a chord arrived in rather than compounding with 
 sliders **Brightness** (a view onto Mode, sweeping the seven diatonic modes Lydian to Locrian)
 and **Lean** (nudges chords' thirds major or minor whatever the mode, 0 = neutral), six tick
 boxes that let any of Key / Mode / Octave / Notes / Inversions / Scale Compliance off the
-leash (unticked, the generator rolls that one freely), and **Source**, which since
-2026-08-01 is seven always-visible buttons rather than a dropdown of two:
+leash (unticked, the generator rolls that one freely), and **Source**, which is eight
+always-visible buttons rather than a dropdown of two:
 
 - **Algorithmic**, the weighted pool above, gated by Scale Compliance and Lock Influence.
 - **Markov**: real-progression chains per Major / Minor / Modal, with **Temperature**
@@ -192,13 +191,16 @@ leash (unticked, the generator rolls that one freely), and **Source**, which sin
 - **Circle of Fifths**: walks the circle from the tonic with a **Direction** (flat-ward or
   sharp-ward), landing on each degree's own diatonic quality where it's in the key.
 - **Neo-Riemannian**: moves the tonic triad by P, L or R, weighted by three sliders - the
-  smoothest, most key-ambiguous of the seven, since each move changes exactly one note.
+  smoothest, most key-ambiguous of the eight, since each move changes exactly one note.
 - **Progressions**: transposes a named template (ii-V-I, the axis, 12-bar blues, Andalusian,
   Royal Road, rhythm changes, Coltrane's major-third cycle, or **Random**) to your key.
 - **Negative Harmony**: mirrors the key about the tonic/dominant axis (C major becomes C
   minor). The one source with no settings of its own - Key, Mode and Octave are enough.
 - **Planing**: slides one chord shape up or down, diatonically or (**Diatonic** off)
   chromatically, the constant-structure sound.
+- **Library**: 355 named progressions, picked by **Mood**, **Genre** and **Does what** (Loop,
+  Cadence, Turnaround, Vamp, Lift, Descent, Turn, Open). The only source that looks a sequence up
+  rather than computing one. See below.
 
 Each source's own controls take the place of the pool's row when you switch to it, since a
 row of settings that means nothing to a different brain is worse than no row at all -
@@ -216,7 +218,37 @@ contains, only which octave they land in. The choices are appended to the list, 
 saved as Markov still reopens as Markov.
 
 Press any pad to hear it: its notes sit under the chord name on the card already, so there
-is nothing extra to turn on to read them while you work.
+is nothing extra to turn on to read them while you work, and its **roman numeral** sits in the
+card's top-left corner. "Am" tells you what a chord is; "vi" tells you what it does, which is what
+makes a row of cards read as a progression.
+
+## The chord library
+
+355 named progressions, tagged three ways: **mood** (46 words, from Atmospheric to Uplifting),
+**genre** (41, from 80s to World Music), and **what the progression does** - Loop, Cadence,
+Turnaround, Vamp, Lift, Descent, Turn, Open. That third axis is the one that turns browsing into
+composing: "sad" is forty candidates and no way to choose, where "sad, and it loops" and "sad, and
+it ends" are different requests and you nearly always have one of them in mind.
+
+Three ways in, sharing one set of picks. **Library** on the generator's Source row fills the tray or
+the page with whatever matches - whole progressions laid end to end, so a Vamp filter gives you
+eight vamps to compare and a 12-Bar Blues fills the tray on its own. The **Library** chip on the
+Pads bar opens the library itself: twelve rows a page with `<` `>`, each showing its name, what it
+does, the progression in roman numerals *as written*, and its tags. **Click a row to hear the whole
+progression** - the thing a single chord cannot tell you, since ii-V-I and ii-V-vi start
+identically - then send it to the generator's tray or straight onto the page's empty pads. Nothing
+there ever overwrites a chord you already have.
+
+**Star the ones you keep**, and **Follows** turns the list into the progressions that could come
+after whatever your pads already end with, best first - what follows a cadence is not what follows a
+turnaround, and the smoothest join comes top. A pad remembers which progression it is a step of, so
+the strip draws a bracket under the run and names it.
+
+The content is the named canon (Pachelbel, the Andalusian cadence, the backdoor, rhythm changes,
+folia, the classical schemas), modal vamps per mode, jazz turnarounds, film-score chromatic
+mediants, and the loops that carry each electronic genre - all of it written out from music
+theory rather than measured off a corpus, which is a judgement call and is documented as one.
+[docs/CHORD_LIBRARY.md](docs/CHORD_LIBRARY.md) has the design and where every row came from.
 
 ## Driving it with Claude
 

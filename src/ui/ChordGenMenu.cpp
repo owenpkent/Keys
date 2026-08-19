@@ -1,4 +1,5 @@
 #include "ChordGenMenu.h"
+#include "../ChordLibrary.h"
 #include "../ChordMarkov.h"
 #include "../ChordSources.h"
 #include "../ChordSuggest.h"
@@ -322,6 +323,71 @@ std::vector<chordgen::Chord> ChordGenMenu::generateChords(int count)
             out = sources::planing(root, mode, oct, count,
                                    a.getRawParameterValue("genPlaningDiatonic")->load() > 0.5f, rng);
             break;
+        case 7:
+        {
+            // Library. The one source that looks a sequence up rather than computing one.
+            //
+            // A filter that matches nothing falls back to the whole table rather than returning
+            // empty. Empty would leave the tray blank with nothing on screen to say why, and the
+            // pickers only ever offer words that have rows behind them (`moodsInUse`), so the only
+            // way to get here is a *combination* nobody has written yet - "Funky" and "Classical",
+            // say - where the honest answer is "not that, but here is something". The band's
+            // readout says "no match - any progression" so the fallback is never silent.
+            auto rows = chordlib::find(libMood, libGenre, libFunction);
+            if (rows.empty())
+                rows = chordlib::find({}, {}, -1);
+
+            // **Whole progressions laid end to end, not one looped.** The first cut looped a single
+            // row to fill `count`, which `sources::progressions` does with its own templates, and
+            // it is wrong here for a reason that only showed up on screen: the library holds vamps,
+            // and rolling the two-chord "Minimal one-chord" filled all sixteen tray cards with the
+            // same Cm9. Sixteen copies of one chord is not a trayful of candidates, it is one
+            // candidate wasting fifteen cells - and the tray exists to let you compare.
+            //
+            // Laid end to end instead, a "Vamp" filter gives you eight different vamps to audition
+            // and a "12-Bar Blues" fills the tray on its own, which is the same rule producing the
+            // right answer at both extremes. A row is never cut short: the last one may overrun
+            // `count` and is trimmed, but it is the only one that can be, so every progression
+            // before it arrives whole.
+            //
+            // Shuffled rather than taken in table order, because a filtered list is an offer and
+            // walking it from the top would make Regen inert under a narrow filter.
+            int taken = 0;
+            libLastEntry.clear();
+            for (int guard = 0; ! rows.empty() && (int) out.size() < count && guard < count + 8; ++guard)
+            {
+                const size_t pick = (size_t) rng.nextInt((int) rows.size());
+                const auto* e = rows[pick];
+                // Degrees resolved against **the row's own mode**, not the session's. Every other
+                // source passes `mode` here, and it is right for them: they generate *in* that
+                // mode, so a chord that falls outside it genuinely is a borrowing. A library row
+                // arrives with a mode of its own, and a minor row read against a major session
+                // resolves nothing - the tray came back with half its cards labelled "?", which is
+                // the numeral saying "outside the key" about a progression that is perfectly
+                // in *its* key. `degree` is stored on the pad, so this is also what the strip
+                // shows later, and "i bVII bVI" is worth more there than four question marks.
+                //
+                // Nothing about the pitches moves either way: the numerals are absolute, which is
+                // exactly what `ChordLibraryTests.cpp` pins.
+                const auto chords = chordlib::chordsFor(*e, root, e->mode, oct);
+                if (chords.empty())
+                    break;
+                out.insert(out.end(), chords.begin(), chords.end());
+                if (taken == 0)
+                    libLastEntry = e->name;
+                ++taken;
+
+                // Drawn without replacement while there is anything left to draw, so a shortlist of
+                // six gives six different progressions before any of them comes round again.
+                rows.erase(rows.begin() + (long) pick);
+                if (rows.empty())
+                    rows = chordlib::find(libMood, libGenre, libFunction);
+            }
+            if (taken > 1)
+                libLastEntry << " +" << juce::String(taken - 1);
+            out.resize((size_t) juce::jlimit(0, (int) out.size(), count));
+            break;
+        }
         default:
             // Algorithmic, and the fallback for a source index this build does not know - a
             // session from a later version could carry one, and the weighted pool is the safe
@@ -476,6 +542,8 @@ void ChordGenMenu::writeChord(int slot, const chordgen::Chord& c)
     pad.rootPc = c.rootPc;
     pad.type = c.type;
     pad.degree = c.degree;
+    pad.progression = c.progression;       // Library only; empty from every other source
+    pad.progressionStep = c.progressionStep;
     pad.locked = processor.chordPad(slot).locked;
     processor.setChordPad(slot, pad);
 }
@@ -521,11 +589,68 @@ void ChordGenMenu::stopPreview()
     for (const int n : previewNotes)
         processor.noteOff(n);
     previewNotes.clear();
+    progressionQueue.clear(); // a walk ends when anything else takes the room
+    walking = false;
+}
+
+// 550 ms a chord: fast enough that a four-chord progression is over in a little over two seconds -
+// short enough to sit through while comparing twelve of them - and slow enough that a ii-V-I still
+// sounds like a cadence rather than a chord with grace notes. Deliberately not the 800 ms a single
+// chord gets: one chord you are examining, a progression you are hearing the shape of.
+static constexpr int kProgressionStepMs = 550;
+
+void ChordGenMenu::auditionProgression(const std::vector<std::vector<int>>& chords)
+{
+    stopPreview(); // whatever was sounding gives way, including another progression
+
+    if (chords.empty())
+        return;
+
+    // Held in reverse so stepping is a pop_back. The first chord is fired here rather than waiting
+    // out a tick: a Hear button that stays silent for half a second reads as broken.
+    progressionQueue.assign(chords.rbegin(), chords.rend());
+    walking = true; // stays true through the last chord's own hold, not just the queue
+    const auto first = progressionQueue.back();
+    progressionQueue.pop_back();
+
+    // Straight to the sound path rather than through previewChord, which would call stopPreview
+    // and clear the queue this just filled.
+    processor.stopAllChordPads();
+    const float vel = processor.baseVelocity01();
+    for (const int n : first)
+        processor.noteOn(n, vel);
+    previewNotes = first;
+    startTimer(kProgressionStepMs);
 }
 
 void ChordGenMenu::timerCallback()
 {
-    stopPreview(); // the only thing on a clock here: an audition that has had its 800 ms
+    // Two things share this timer and the queue is what tells them apart: empty means the tick is
+    // the end of a single chord's 800 ms, and anything in it means the tick is the next step of a
+    // progression. One timer rather than two because only one audition may sound at a time
+    // anyway - `stopPreview` is the single place that ends either - and a second timer would be a
+    // second thing able to leave a note on.
+    if (progressionQueue.empty())
+    {
+        stopPreview(); // an audition that has had its 800 ms
+        return;
+    }
+
+    for (const int n : previewNotes)
+        processor.noteOff(n);
+    previewNotes.clear();
+
+    const auto next = progressionQueue.back();
+    progressionQueue.pop_back();
+    const float vel = processor.baseVelocity01();
+    for (const int n : next)
+        processor.noteOn(n, vel);
+    previewNotes = next;
+
+    // The last chord of a walk gets the full single-chord length, so a progression lands on its
+    // final chord rather than clipping it off at the same pace as the ones leading there. That is
+    // the difference between hearing a cadence arrive and hearing it stop.
+    startTimer(progressionQueue.empty() ? 800 : kProgressionStepMs);
 }
 
 void ChordGenMenu::regeneratePageMarkov()
@@ -645,6 +770,12 @@ std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
         pad.rootPc = c.rootPc;
         pad.type = c.type;
         pad.degree = c.degree;
+        // Empty on every source but Library, which is the only one whose chords are steps of a
+        // written-down row. Without this the Library source's pads fell back to resolving
+        // `degree` against the *session's* mode, so an Aeolian row's bVI drew as "vi" - the
+        // exact fault numeralAt was added to fix, reached by the one route that skipped it.
+        pad.progression = c.progression;
+        pad.progressionStep = c.progressionStep;
         out.push_back(std::move(pad));
     }
     return out;

@@ -1,5 +1,6 @@
 #include "ChordTray.h"
 #include "../ChordGen.h"
+#include "../ChordNumerals.h"
 #include "../Chords.h"
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
@@ -103,7 +104,11 @@ juce::String ChordTray::settingsSignature() const
     for (const char* id : ids)
         if (auto* v = processor.apvts.getRawParameterValue(id))
             sig << juce::String(v->load(), 3) << '|';
-    sig << gen.moodChoice() << '|' << gen.startChoice();
+    // The Library's three picks belong here for the same reason Markov's two do: they are not
+    // parameters, so the `ids` sweep above cannot see them, and a tray generated under "Sad" is
+    // just as stale after you switch to "Triumphant" as it is after you move a slider.
+    sig << gen.moodChoice() << '|' << gen.startChoice() << '|' << gen.libraryMood() << '|'
+        << gen.libraryGenre() << '|' << gen.libraryFunction();
     return sig;
 }
 
@@ -288,6 +293,13 @@ void ChordTray::paint(juce::Graphics& g)
             g.setFont(skin::micro(9.0f));
             g.drawText(noteListText(c.notes), noteLine.toNearestInt(),
                        juce::Justification::centred, true);
+
+            // Which degree of the key this candidate is (2026-08-18, Owen's ask). The tray is
+            // where you compare sixteen chords at once, and "Am" tells you what it is where "vi"
+            // tells you what it *does* - the second is what makes a row of four cards read as a
+            // progression rather than as four unrelated names.
+            skin::numeralBadge(g, b, numerals::forChord(c.numeral, c.degree, c.rootPc,
+                                                        gen.genRoot(), gen.genMode()), ink);
         }
     }
 }

@@ -1,0 +1,504 @@
+# The chord library
+
+Proposed 2026-08-18 (Owen: "collections or books of chords and progressions, things that go well
+together ... an outstanding library that makes it easy to compose, maybe organized by emotion or
+something. Scaler, the other VST has done a great job of this").
+
+**Built the same day, all of it.** `src/ChordLibrary.h` holds **355 tagged progressions**;
+**Library** is appended to the generator's Source list; `ChordLibraryPanel` is the browsable window
+off a Library chip on the Pads bar, with a star per row; a pad remembers which progression it is a
+step of and the strip brackets a run; and **Follows** answers §7's question - a progression that
+could follow a progression. §9 has what is left.
+
+The design and the paper trail behind it follow, in the shape `docs/ACID_DESIGN.md` uses: what
+exists, what the references do, what Keys took and what it deliberately did not.
+
+---
+
+## 1. Keys already has two progression libraries, and they do not know about each other
+
+This is the finding that shapes everything below, and it was a surprise.
+
+**`src/MarkovData.h`** holds **88 hand-authored progressions** - 30 Major, 30 Minor, 28 Modal -
+and **every one of them is already mood-tagged**, one to three tags apiece, from a vocabulary of
+22 words: Cinematic, Dark, Dramatic, Dreamy, Empowered, Excited, Haunting, Hopeful, Joyful,
+Melancholic, Mysterious, Nostalgic, Peaceful, Playful, Rebellious, Relaxed, Romantic, Spiritual,
+Suspenseful, Tender, Tense, Triumphant.
+
+And you cannot browse a single one of them. The corpus exists only to be **shredded into bigrams**:
+`ChordMarkov.h::buildTable` filters by mode and mood, counts every adjacent numeral pair, and
+throws the sequences away. Ask for "Nostalgic" and you do not get the nostalgic progressions, you
+get a statistical blur of the moves they have in common. That is a legitimate generator and it
+should stay - but it means Keys ships a curated, tagged, emotion-organised progression library
+that no user can ever look at, pick from, or hear as written.
+
+**`src/ChordSources.h::progressionLibrary()`** holds **7 named progressions** - ii-V-I, the Axis,
+12-bar blues, the Andalusian cadence, the Royal Road, rhythm-changes A, Coltrane changes - stored
+as explicit semitone-plus-type steps and played back literally. These are browsable, in the sense
+that a flat combo box of seven names is browsing. They carry **no tags at all**.
+
+So: 88 tagged sequences you cannot see, and 7 visible sequences with no tags. The library is not a
+new feature so much as the one that joins those two up and then grows the result.
+
+---
+
+## 2. What Scaler actually does, from Owen's own copy
+
+`E:\Ableton\Scaler 3 Moods and Genres\` has the vocabulary as two CSVs, which settles the
+guesswork: Scaler 3 tags on **two** axes.
+
+**41 moods:** Animated, Atmospheric, Beautiful, Calm, Chill, Confident, Contemplative, Dark,
+Dramatic, Dreamy, Driving, Eerie, Energetic, Epic, Fun, Funky, Happy, Heroic, Hopeful,
+Inconclusive, Intense, Lighthearted, Longing, Melancholic, Mellow, Mysterious, Ominous, Playful,
+Reflective, Resolved, Romantic, Sad, Serious, Smooth, Solemn, Sombre, Suspenseful, Tense, Tragic,
+Triumphant, Uplifiting *(their typo, not ours)*.
+
+**40 genres:** 80s, Alternative, Ballads, Blues, Bossa, Chillout, Cinematic, Classical, Country,
+Deep House, Disco, Downtempo, Drum & Bass, Easy Listening, EDM, Electronica, Folk, Funk, Future
+Bass, Gospel, Hip Hop, House, Jazz, Latin, Lo-fi, Minimal, Neo Soul, Pop, Progressive House,
+Progressive Rock, Punk, Reggae, RnB, Rock, Slaphouse, Synthwave, Techno, Theatre, Trance, Trap,
+World Music.
+
+Two of those 41 are worth pausing on, because they are not emotions and they are the most useful
+words on the list: **Inconclusive** and **Resolved**. That is not how the progression *feels*, it
+is what the progression *does* - whether it lands or hangs. Scaler has smuggled a structural axis
+into its mood list, which is a hint that two axes were one short.
+
+Keys' own 22 tags are close to a subset: 18 of them appear on Scaler's list verbatim or near it
+(Haunting/Eerie, Relaxed/Mellow, Peaceful/Calm). Adopting Scaler's vocabulary costs Keys almost
+nothing and buys a producer who owns both a word list they already read.
+
+---
+
+## 3. The proposal: three axes, and the third one is the point
+
+**Mood** - how it feels. Scaler's 41, minus their typo.
+
+**Genre** - what it sounds like. Scaler's 40.
+
+**Function** - *what it does*, which is the axis Scaler does not really have and the one that turns
+browsing into composing. A first vocabulary of eight:
+
+| Function | What it means | Example |
+|---|---|---|
+| **Loop** | Repeats forever, no strong landing | i-bVII-bVI-bVII |
+| **Cadence** | Arrives and stays arrived | ii-V-I |
+| **Turnaround** | Ends a section by handing back to its start | I-vi-ii-V |
+| **Vamp** | Two or three chords, modal, static | I-bVII (Mixolydian) |
+| **Lift** | Raises energy into the next section | IV-V-vi |
+| **Descent** | Steps down, a lament bass or a line cliché | i-bVII-bVI-V |
+| **Turn** | Changes key or colour mid-phrase | chromatic mediant pairs |
+| **Open** | Deliberately unresolved | ends on IV or V |
+
+Why this is the axis that earns its keep: "sad" gets you a hundred candidates and no way to choose
+between them. **"Sad, and it loops"** and **"sad, and it ends"** are different requests, and every
+composer has one of them in mind. It is also the axis that makes the strip of twelve pads mean
+something - a Loop for the verse, a Lift into the chorus, a Turnaround back.
+
+**Section** - an optional fourth tag (Intro / Verse / Chorus / Bridge / Outro). **Unbuilt.** The
+open **Chordonomicon** dataset annotates structural parts, so this is the one axis that could be
+derived from evidence rather than invented - which is exactly why it has not been added by hand.
+See §9.
+
+---
+
+## 4. Storage: numerals, not semitones
+
+Store every entry as a **roman-numeral token string**, the grammar `ChordMarkov.h` already parses
+(accidental + numeral + optional quality suffix: `i`, `bVII`, `V7`, `iim7`, `IM7`).
+
+Three reasons, in order of weight:
+
+1. **A parser already exists and is already tested.** `parseNumeralToken` handles the accidental,
+   longest-match numeral and suffix lookup, and refuses an unrecognised suffix rather than
+   silently case-falling-back - a deliberate departure from Octavium's version, logged in that
+   file. A second storage format would need a second parser.
+2. **It is key- and mode-independent by construction**, so one entry serves twelve keys, which is
+   how a library of 400 becomes a library of 4,800 without 4,800 rows.
+3. **It is what the pads now display.** As of this same day a chord card carries its numeral in the
+   corner (§8), so the library's storage format and the thing on screen are the same notation.
+   Nothing has to be translated to be read back.
+
+**The suffix table needs extending, and extending it is safe.** It currently holds ten:
+`M7 m7 dom7 7 dim7 dim aug sus2 sus4 add9`, against `chordgen::types()`'s twenty. Missing and
+wanted: `m7b5` (half-diminished - the ii of every minor ii-V, so its absence is not cosmetic),
+`6`, `m6`, `9`, `M9`, `m9`, `6/9`, `mM7`, `madd9`. It is a **lookup keyed by string**, not an
+indexed list, so appending to it cannot move anything already saved - unlike `genSource` and the
+lane indices, where append-only is a hard rule for exactly that reason.
+
+`sources::progressionLibrary()`'s seven entries become derived rather than authored: a numeral
+string with explicit suffixes says everything the semitone-plus-type pairs said. `ii-V-I` stored as
+`iim7 V7 IM7` is the same chord character the current table hard-codes, and the comment defending
+explicit types over mode-derived ones stays true, because a suffix *is* an explicit type.
+
+---
+
+## 5. Where the content comes from, and where it must not
+
+**Chord progressions are not copyrightable.** They are common musical stock; a compilation of them
+can attract thin copyright in its *selection and arrangement*, and in the EU a database right can
+attach to the compiler's effort. So the line is: **the theory and the statistics are free, another
+product's curated list is not.**
+
+Sourced from:
+
+- **The named canon**, which is theory rather than anyone's expression: the 50s progression,
+  Andalusian cadence, backdoor, bird changes, circle progression, Coltrane changes, eight-bar
+  blues, folia, ii-V-I, Montgomery-Ward bridge, omnibus, Pachelbel, passamezzo antico and moderno,
+  Axis, ragtime, rhythm changes, romanesca, 12-bar blues, V-IV-I. Plus the classical schemas
+  (Prinner, Romanesca, Monte, Fonte, Ponte) that Open Music Theory sets out in a pop context.
+- **Modal vamps and cadences** per mode, which Keys can generate the skeleton of from
+  `ScaleModes.h` and then have curated by hand.
+- **Authoring judgement, and it should be read as one.** Which progressions are worth a row, and
+  which genre each belongs to, was decided by whoever wrote the table. **No corpus was queried.**
+- **Film-score harmony** as its own seam, since Owen is scoring a film with this: chromatic
+  mediants, planing, and the neo-Riemannian pairs that Keys' PLR source already generates but
+  cannot name. The library is where a nameless PLR move becomes "that Hollywood third".
+
+Not sourced from: Scaler's chord sets, or any other product's curated library, copied across. The
+two CSVs of *vocabulary* are a different thing from a curated list of *content* - a word list is
+not a compilation - and are used here as the taxonomy only.
+
+---
+
+## 6. Size
+
+**Target ~400 entries** for the first complete cut, growing after.
+
+Scaler ships 1,000+ chord sets, but a large share of those are artist and genre packs where the
+value is the name attached. A curated 400 tagged on three axes is more useful than a flat 1,000,
+and 400 is a number that can be **verified by ear and by theory one row at a time**, which a
+scraped 5,000 cannot. The 88 already in `MarkovData.h` are the first 88, retagged onto the new
+vocabulary; nothing is thrown away.
+
+---
+
+## 7. The feature under the feature: what follows what
+
+A library organised by emotion is **browsing**. What makes it *composing* is the library knowing
+what goes after what, and Keys already has three quarters of that machinery built:
+
+- `ChordSuggest.h` and the **Could follow** button beside the reference card,
+- the **reference card** itself, the fixed point a tray is generated against,
+- the Markov chain, which is literally a model of what follows what,
+- and, if Section tags are ever derived from Chordonomicon, which progressions are verses and
+  which are choruses.
+
+So the library's relational layer is not new construction, it is joining those up: pick a
+progression, and **Could follow** stops meaning "a chord that could follow this chord" and starts
+meaning "a progression that could follow this progression". That is the thing Scaler does not do
+well, and it is worth more than the next hundred rows of content.
+
+---
+
+## 8. Built already: the numeral on the card
+
+Shipped 2026-08-18 alongside this design, because it is the library's notation showing up on the
+surface the library will fill.
+
+Every filled chord card - a pad on the strip, a candidate in the generator's tray - carries its
+roman numeral in the **top-left corner**, micro caps at the note list's own size and 0.62 alpha.
+Top-left is the one corner a card had left: the lock dot owns the top-right, the arp line's letter
+the bottom-right.
+
+`src/ChordNumerals.h` is the one implementation. It was private to `SourceViz.cpp`, and duplicating
+it per surface would have re-armed a trap that file has already paid for once: the Progressions
+diagram drew sixteen `?` for a build because it read `numeral`, which only the Markov source
+writes, where every other source writes `degree`. The resolution order is numeral, then degree,
+then a degree derived from the root against the current key.
+
+**It answers empty rather than `?` when nothing resolves**, and the surfaces differ on what to do
+with that. A card draws nothing - a `?` in the corner of every hand-captured pad is noise standing
+in for information, and a chord genuinely outside the key saying nothing is itself the answer. The
+diagram appends its own `?`, because it draws one chip per step and an empty chip would read as a
+gap in the walk.
+
+Pads read the **`genRoot`/`genMode` parameters** rather than `ChordGenMenu::genRoot()`, which
+answers with whatever an unticked Key or Mode rolled for the last generation. A pad outlives that
+roll; the key you are composing in is the one on the Pads bar.
+
+---
+
+## 8b. What the built source actually does
+
+**Whole progressions laid end to end, not one looped.** The first cut looped a single row to fill
+the sixteen tray cells, which is what `sources::progressions` does with its own templates, and it
+was wrong here for a reason that only appeared on screen: the library holds *vamps*, and rolling
+the two-chord "Minimal one-chord" filled all sixteen cards with the same Cm9. Sixteen copies of one
+chord is not a trayful of candidates, it is one candidate wasting fifteen cells, and the tray
+exists so you can compare.
+
+Laid end to end, a **Vamp** filter gives you eight different vamps to audition and a **12-Bar
+Blues** fills the tray on its own - the same rule producing the right answer at both extremes. Rows
+are drawn without replacement and shuffled, so a shortlist of six yields six different progressions
+before any repeats, and Regen is never inert under a narrow filter. Only the last row may be cut
+short by the cell count; every one before it arrives whole.
+
+**A filter that matches nothing falls back to the whole table**, and says so ("no match - any
+progression"). The two word pickers only ever offer tags with rows behind them, so the only way to
+reach that state is a *combination* nobody has written yet - "Funky" and "Classical" - where the
+honest answer is "not that, but here is something" rather than a blank tray with no explanation.
+
+**Degrees resolve against the row's own mode, not the session's.** Every other source passes the
+session mode there, and it is right for them: they generate *in* that mode, so a chord outside it
+genuinely is a borrowing. A library row arrives with a mode of its own, and a minor row read
+against a major session resolves nothing - the first build came back with half the tray labelled
+`?` about a progression perfectly in *its* key. `degree` is stored on the pad, so this is what the
+strip shows afterwards too, and `i bVII bVI` is worth more there than four question marks. No
+pitch moves either way; the numerals are absolute, which the tests pin.
+
+The library's chords go through `fitVoicing`, `applyMajorMinorBias` and `applyVoiceLeading` like
+every other source's, so Notes, Inversions, Octave, Lean and Smooth Voicing all still apply. That
+is what "everything downstream is the same either way" buys.
+
+---
+
+## 9. What is next
+
+Owen answered the two questions this section opened with, on the day it was written: **the full
+three-axis library** rather than mood alone or a retag of the existing 88, and **both** surfaces -
+the generator source first, the browsable window after. The source is built; the rest is below, in
+the order it is worth doing.
+
+**All four are now built.** What is left is at the bottom of this section.
+
+- ~~**The browsable window.**~~ Built: `src/ui/ChordLibraryPanel.h`, opened by a **Library** chip
+  on the Pads bar beside Generator. **Paged, not scrolled** - twelve rows and a `<` `>` pair, the
+  shape the pad strip already uses, because 355 rows is a scroll and a scroll is the gesture the
+  mouse-only contract is worst at: a scrollbar thumb is a small target that has to be dragged, and
+  a wheel is not a gesture Keys may require. A row is a chord card that holds several chords: the
+  whole row is the Hear button, a second click on the walking row stops it, and two buttons at its
+  right end place the progression into the generator's tray or straight onto the page's empty pads.
+- ~~**Fold `MarkovData.h`'s 88 rows in.**~~ Built: sixty of the 88 were new, twenty-eight were rows
+  the table already carried under a name of its own. They stay in `MarkovData.h` too - the Markov
+  source still wants its bigrams - so it is a copy, not a move.
+
+- ~~**Does a progression keep its identity after it lands?**~~ Built: `ChordPad::progression` (the
+  row's **name**, not an index - `chordlib::table()` is explicitly free to be inserted into, and an
+  index would quietly take that freedom away) and `progressionStep`. The strip draws a hairline
+  bracket under a run of adjacent pads that share a row in step order, with the row's name under
+  it. **A run is broken by a row change, a step that does not follow, and a row break** - pads wrap
+  from the sixth to the seventh, so 5 and 6 are adjacent by index and nowhere near each other on
+  screen. A run of one draws nothing: that is a chord that remembers where it came from, not a
+  progression on the strip.
+- ~~**The relational layer.**~~ Built as **`chordlib::couldFollow`** and the **Follows** toggle in
+  the library window. Two signals, because "could follow" is two questions:
+  **structure** decides which rows are *eligible* (`functionsAfter` - what follows a cadence is not
+  what follows a turnaround, and nothing follows an Open with another Open), and the **harmonic
+  join** orders them (the last chord of one against the first of the next: a falling fifth scores
+  highest, a repeat lowest without being disqualified, since two progressions on the tonic do
+  follow each other - it is just the dullest answer). Staying in the mode is worth about a rank;
+  a shared mood nudges. **Function is a gate rather than a weight** on purpose: a row that does not
+  belong after this one is not a weak answer, it is the wrong one, and letting it in on a good join
+  is how a suggestion list stops meaning anything.
+  **It points at the pads, not at a row you select.** That is where the question comes from - you
+  have laid a progression down and want the next one - so there is nothing to aim and nothing to
+  remember. It scans the current page backwards (the *last* progression is the one being followed)
+  and greys when no pad carries one.
+
+### Also built
+
+- **Favourites**, the one thing Scaler's browser had that Keys had no answer for (its manual, p43).
+  A star at each row's left end, a **Starred only** toggle that narrows whatever the three pickers
+  matched rather than replacing it. Kept **by name** in `LayoutState::libraryFavourites`, which is
+  the same call `ChordPad::progression` makes and for the same reason.
+  **Per session, which is the honest weakness.** Scaler's favourites are global; a star you set in
+  one project is gone in the next. Keys has no global store for anything - the settings gear's
+  three switches are in `LayoutState` too - so a global one would be new machinery for one feature.
+  Worth revisiting the day a second preference wants to outlive a project.
+  The star is *painted*, not a `TextButton`, the same call the lock dot on a chord card makes:
+  twelve more Components to lay out, hide and re-title on every page turn, for a two-state mark.
+  Its cell is the mouse-only 34 px all the same, reserved out of the row before anything else.
+
+### Still open
+
+**Favourites should probably be global**, per the note above.
+
+**The join score is root motion only.** It does not look at shared pitch classes, at whether the
+two chords are both major, or at voice leading between them - all of which a musician would weigh.
+Root motion is most of the signal and costs no chord parsing; the rest is available if the
+suggestions ever feel wrong.
+
+---
+
+## 10. Measured against the corpora (2026-08-18, Owen: "download relevant datasets")
+
+The table was **authored**, and §5 says so. This section is what happened when the data was
+actually fetched and the table checked against it. Scripts in `scripts/corpus/`, sources and
+licences in `datasets/README.md`.
+
+### The trap, first, because it is the one that could do damage
+
+**Two roman-numeral conventions, and they disagree exactly where it matters.** Keys uses a fixed
+**major-scale** degree table for every mode, so natural minor's flat degrees are spelled `bIII`,
+`bVI`, `bVII`. Ludovic Drolez's MIT pack spells a minor progression against the **minor** scale, so
+its `III`, `VI` and `VII` are already flat and written unadorned.
+
+The pack's `i VII VI V` and Keys' `i bVII bVI V` are **the same progression** - the Andalusian
+cadence - written two ways. Comparing the collections without translating first reported an overlap
+of 19 out of 138, which is nonsense for two collections that are both mostly canon; translated it
+is 25, and every minor row lines up.
+
+**The dangerous direction is the other one.** Paste a pack row into `ChordLibrary.h` verbatim and it
+parses perfectly and plays the wrong chords - and `ChordLibraryTests.cpp` cannot catch it, because a
+well-formed numeral is all it can check for. This is the same hazard `MarkovData.h`'s header spends
+a paragraph on, arriving from a new direction.
+
+### What the MIT pack corroborates
+
+25 of Keys' rows are independently present in ldrolez's collection, and they are the canonical ones:
+Pachelbel, doo-wop, ragtime, all four axis rotations, the Andalusian cadence, the minor axis, the
+Celtic modal pair. That is real corroboration - two people writing down the canon separately and
+landing on the same rows. 113 pack progressions are **not** in Keys and are a legitimate expansion
+source, MIT-licensed and safe for anything.
+
+### What Chordonomicon says
+
+680,000 songs with chord progressions and structural-part annotation. Sampled rather than scanned
+whole (a full pass in pure Python is tens of minutes and a ranking does not change between 150,000
+songs and 680,000; the script says how many it read).
+
+**What is actually measured: root motion and major/minor.** Nothing finer. The corpus writes `Amin`,
+`C`, `Fs7`; Keys' `iim7`, `iim9` and `iim7b5` all reduce to "minor on the second degree" here.
+Quality had to be included at all because without it every two-chord row a fifth apart collapsed
+onto one shape and reported an identical count - a number about the *interval*, presented as though
+it were about the progression. Read the ranking as "how common is this shape", never as "how common
+is this row".
+
+**Short rows dominate, and that is arithmetic rather than musicology.** A two-chord window occurs
+far more often than a twelve-chord one in any corpus. The ranking is useful *within* a length, not
+across lengths.
+
+**Eight of 355 rows never occur at all**, and every one of them is seven chords or longer - the
+twelve-bar blues and its minor and jazz variants, the Autumn Leaves turn, the Bossa minor cycle, the
+passamezzo antico. That is not evidence they are wrong. It is evidence that an exact twelve-chord
+window is rare in a corpus of user-entered chord sheets, which spell repeats and turnarounds
+inconsistently - and the count *fell* from eleven to eight when the sample went from 40,000 songs to
+150,000, which is the tell: they are rare, not absent. **Nothing was deleted on this basis**, and
+nothing should be.
+
+**Seven rows were added on this basis**, which is the half that made the download worth it. The
+commonest four-chord windows in the corpus with no row here turned out to be **two-chord vamps
+written across four bars** - `I V I V`, `I IV I IV`, `i bVII i bVII` - a shape the table already used
+(the Mixolydian oscillation, the Lydian pairs) and had simply never written down for the commonest
+degrees. That is the useful kind of gap for a corpus to find: not an exotic progression nobody
+thought of, but the obvious one everybody plays and nobody puts on a list. `I IV bVII IV`,
+`i bVII bVI bIII`, `I vi IV I` and `I V II V` came from the same list.
+
+**And the analysis had a bug of exactly the kind this whole section exists to guard against.** The
+"what is missing" filter carried a `shape[0] == 0` test meaning "starts on the tonic". It was correct
+while a shape was a tuple of ints, and silently wrong the moment chord quality went in and each
+element became `(interval, is_minor)`: the comparison could never be true, so the section reported
+**nothing missing** - a filter that had quietly become "print an empty list", and which would have
+been read as "the table has no gaps".
+
+**The Section axis is now answerable.** §3 wanted Intro / Verse / Chorus / Bridge and left it
+unbuilt rather than invent it; Chordonomicon annotates it, and the script reports the commonest
+section per row. It is a genuine finding that the Lydian pairs (`I-II`, `IM7-IIM7`) read *chorus*
+while the Mixolydian and Dorian vamps read *verse*. **Still unbuilt** - a fourth tag is a schema
+change and an axis on the pickers, and it wants a decision rather than a commit.
+
+### The licence line, which is the reason `datasets/README.md` exists
+
+**Chordonomicon is CC-BY-NC-4.0.** Owen's call, 2026-08-18: Keys is personal use, which that
+licence permits squarely. The CSV is gitignored, so Keys never redistributes it. **If Keys ever
+ships commercially, anything derived from it has to come out or be re-derived** from the MIT pack or
+from theory. Nothing derived from it is in the table today - the corpus has been used to *check* the
+table, not to write it, and that distinction is the whole point of this section.
+
+---
+
+
+---
+
+## 11. Can the mood tags be validated? (2026-08-18, Owen: "how can we validate emotions?")
+
+Partly, and the limits are more useful than the result. `scripts/corpus/validate_moods.py`.
+
+### The join
+
+Chordonomicon carries a **`spotify_song_id` on 73%** of its songs. Spotify's audio-feature dumps
+carry **valence** (0..1, "musical positiveness") and **energy** per track id. Join them and every
+progression in the corpus gains a measured position on the two axes music psychology actually uses -
+Russell's circumplex, valence against arousal. Then take the mean valence of the songs that play
+each of Keys' rows, and ask whether the rows tagged Melancholic really do sit below the ones tagged
+Lighthearted.
+
+### The control, which is the part that matters
+
+**Minor should read sadder than major.** That is about the most replicated finding in music
+psychology, so it is the one result the pipeline has to reproduce before anything else it says can
+be believed.
+
+| | valence | n (song-row pairs) |
+|---|---|---|
+| rows in a major mode | **0.479** | 2,703,099 |
+| rows in a minor mode | **0.451** | 1,334,629 |
+| gap | **+0.028** | |
+
+It passes, in the right direction. **And it failed first, which is the useful part.** The first
+version split rows by counting how many of their chords were minor - the obvious test, and wrong,
+because a minor key is full of *major* triads: bIII, bVI and bVII all are. The Andalusian cadence,
+`i bVII bVI V`, counts three major against one minor and landed on the **major** side of a test
+meant to identify it as minor. With that split the control reported minor as *happier* than major
+and the whole run was noise. What makes a progression minor is its tonic, and `Entry::mode` is the
+field that already says so.
+
+**0.028 is therefore the yardstick.** It is roughly the most that a purely *harmonic* fact moves
+Spotify's valence, which is computed from audio. Any effect much smaller than that is nothing.
+
+### The result
+
+The ordering is sensible, and it is the right words at both ends. Highest valence: **Lighthearted**
+(0.517), Playful, **Triumphant**, Tender, **Happy**, Spiritual, Fun. Lowest: **Longing** (0.443),
+**Sad**, **Haunting**, Dark, Eerie, Intense, Sombre, Ominous. Energy runs the other way, with
+Rebellious, Tragic, Ominous and Dark at the top and Reflective, Tender and Smooth at the bottom.
+Nothing is upside down.
+
+**But the mood spread is 0.074, more than twice the harmonic ceiling of 0.028.** A mood tag cannot
+move valence more than major-versus-minor does *by harmony*, so most of that spread is **not
+harmony**. It is genre and production riding along: the Smooth rows are jazz, the Driving rows are
+dance, and those genres sound different for reasons that have nothing to do with which chords are
+in them.
+
+So the honest verdict: **the tags are directionally right, and the measurement mostly reflects the
+company a progression keeps rather than the progression itself.**
+
+### What cannot be validated this way, ever
+
+- **Valence and arousal are two numbers; the vocabulary is 46 words.** Haunting and Eerie, Dreamy
+  and Atmospheric, Solemn and Sombre land in the same place on both axes. No amount of this data
+  separates them. That is not a flaw in the data - a categorical vocabulary is *strictly richer*
+  than a 2-D model, which is exactly why it is a vocabulary and not two sliders.
+- **Spotify's valence is an audio measure.** Timbre, tempo, vocals and mastering all move it. A
+  despairing lyric over major chords reads high-valence. The join says "songs using this progression
+  tend to sound positive", never "this progression is positive".
+- **Sample size mattered more than predicted, and that prediction is worth recording as wrong.**
+  The first run joined only 2,841 songs, because the BSD-licensed 114k-track feature set barely
+  overlaps Chordonomicon's ids, and this section originally said a larger dump "would tighten the
+  estimates; it would not change the shape of the answer". Half right. Reducing the 56-million-row
+  dump to just the ids Chordonomicon uses (`scripts/corpus/join_features.py`, 87% coverage,
+  376,400 tracks) took the join to **121,656 songs**, and the *verdict* held - but the **ordering
+  visibly improved**. `Triumphant` moved from seventh to third and `Happy` from sixteenth to fifth;
+  `Rebellious` fell from third to mid-table, where at n=236 it had been noise. The small sample had
+  the shape roughly right and several individual tags plainly wrong, which is not the same as
+  "would not change".
+
+### What would be better, if this is ever worth more effort
+
+**EMOPIA** is the right-shaped dataset for this question and was not used here: ~1,000 pop piano
+clips as **MIDI**, labelled by humans with Russell's four quadrants. Chords can be extracted from
+the MIDI directly, so the emotion label attaches to the *music* rather than to a production. It is
+small, which is the trade: 1,000 human-labelled clips against 2,841 machine-scored songs.
+
+Nothing here changed a tag. The tags remain an authoring judgement - §5 - and this section is a
+check on them, which is a different thing and is the only claim being made.
+
+---
+
+### Known thin spots in the table
+
+`Loop` has 99 rows and `Open` has 10, `Turnaround` 12. That is partly honest - loops are what gets
+written - but Open and Turnaround are thin enough that a filter on either returns nearly the same
+handful every time. Worth topping up before the browser ships, since a browser makes the imbalance
+visible in a way a random pick does not.

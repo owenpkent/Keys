@@ -1,4 +1,5 @@
 #include "ChordGenPanel.h"
+#include "../ChordLibrary.h"
 #include "../ChordMarkov.h"
 #include "../ChordSources.h" // the Progression picker's items are that table's own names
 #include "../ScaleModes.h"
@@ -43,7 +44,7 @@ namespace
     // against the wider of the two words rather than guessed.
     constexpr int kCheckW = 52;
     constexpr int kAfterCheck = 6; // ...and it is a control of its own, so it gets its own gap
-    constexpr int kSourceBtnW = 128; // seven of these plus gaps sets the window's floor width
+    constexpr int kSourceBtnW = 128; // eight of these plus gaps sets the window's floor width
 
     // The audition tray. Its rows are 54 px rather than the 34 px mouse-only floor because a
     // card carries a chord name over a note list, exactly as a pad card does, and 34 px fits one
@@ -93,6 +94,7 @@ namespace
     constexpr int kPlrW = 200;
     constexpr int kProgW = 260;
     constexpr int kPlaningW = 140;
+    constexpr int kLibMoodW = 150, kLibGenreW = 160, kLibFuncW = 140, kLibResultW = 320;
     constexpr int kFillW = 120, kRegenW = 150, kClearW = 120;
     constexpr int kToPadsW = 150; // "Send all to pads"
     constexpr int kPageBtnW = 34; // four of them, at the floor
@@ -143,8 +145,11 @@ juce::Point<int> ChordGenPanel::contentSize()
                                   + 3 * (kCheckW + kAfterCheck),
                               rowWidth({ kComplianceW, kLockInfW, kSmoothW })
                                   + kCheckW + kAfterCheck),
-                   juce::jmax(7 * kSourceBtnW + 6 * kGap,
-                              rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
+                   // Nested rather than one call: juce::jmax takes at most four arguments, and
+                   // the Library band made this list five long.
+                   juce::jmax(juce::jmax(8 * kSourceBtnW + 7 * kGap,
+                                         rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
+                                         rowWidth({ kLibMoodW, kLibGenreW, kLibFuncW, kLibResultW })),
                               rowWidth({ kPlrW, kPlrW, kPlrW }),
                               kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW, kToPadsW })));
     // No action row of its own since 2026-08-01: the three buttons ride the tray's header, which
@@ -367,7 +372,7 @@ void ChordGenPanel::buildControls()
     // session stores, so moving an entry moves every saved session's source with it.
     {
         static const char* names[] = { "Algorithmic", "Markov", "Circle of 5ths", "Neo-Riemannian",
-                                       "Progressions", "Negative", "Planing" };
+                                       "Progressions", "Negative", "Planing", "Library" };
         static const char* tips[] = {
             "Weighs a pool of candidate chords by degree and how far you let it stray from the key.",
             "Walks a table of moves taken from real progressions.",
@@ -375,7 +380,8 @@ void ChordGenPanel::buildControls()
             "Moves one note at a time, keeping the common tones. Smooth and key-ambiguous.",
             "Transposes a real progression to your key: ii-V-I, the axis, 12-bar blues and more.",
             "Mirrors the key about the axis between tonic and dominant. C major becomes C minor.",
-            "Takes one chord shape and slides it, through the scale or chromatically."
+            "Takes one chord shape and slides it, through the scale or chromatically.",
+            "Looks a named progression up by mood, genre and what it does. 355 of them."
         };
         for (int i = 0; i < (int) sourceButtons.size(); ++i)
         {
@@ -516,6 +522,80 @@ void ChordGenPanel::buildControls()
     planingDiatonicAtt = std::make_unique<ButtonAtt>(processor.apvts, "genPlaningDiatonic",
                                                      planingDiatonicButton);
 
+    // ---- The Library band -------------------------------------------------------------------
+    //
+    // Three filters, each with "Any" as item 1 so the picker's first entry always means "do not
+    // narrow on this axis" - the same convention Markov's Mood and Start already use, and the
+    // convention `chordlib::find` is written against.
+    //
+    // The two word axes offer **`moodsInUse` / `genresInUse` rather than the full vocabulary**,
+    // which is the difference between a picker that works and one that lies: the table grows
+    // unevenly by design, so a mood with no rows behind it is an item that can only ever
+    // disappoint, and there is nothing on screen that could explain the empty result.
+    styleLabel(libMoodLabel, "Mood");
+    libMoodBox.addItem("Any", 1);
+    {
+        int id = 2;
+        for (const auto& m : chordlib::moodsInUse())
+            libMoodBox.addItem(m, id++);
+    }
+    libMoodBox.setSelectedId(1, juce::dontSendNotification);
+    libMoodBox.setTitle("Library mood");
+    libMoodBox.setTooltip("How it should feel. Any leaves the mood open.");
+    libMoodBox.onChange = [this] {
+        gen.setLibraryMood(libMoodBox.getSelectedId() <= 1 ? juce::String() : libMoodBox.getText());
+        refreshLibraryResult();
+    };
+
+    styleLabel(libGenreLabel, "Genre");
+    libGenreBox.addItem("Any", 1);
+    {
+        int id = 2;
+        for (const auto& g : chordlib::genresInUse())
+            libGenreBox.addItem(g, id++);
+    }
+    libGenreBox.setSelectedId(1, juce::dontSendNotification);
+    libGenreBox.setTitle("Library genre");
+    libGenreBox.setTooltip("What it should sound like. Any leaves the genre open.");
+    libGenreBox.onChange = [this] {
+        gen.setLibraryGenre(libGenreBox.getSelectedId() <= 1 ? juce::String() : libGenreBox.getText());
+        refreshLibraryResult();
+    };
+
+    // Function is the axis Scaler does not have and the one that turns browsing into composing:
+    // "sad" is forty candidates, where "sad and it loops" and "sad and it ends" are two different
+    // requests. The tooltip carries each entry's own blurb, since eight one-word names are not
+    // self-explanatory and there is no room for a caption per item.
+    styleLabel(libFunctionLabel, "Does what");
+    libFunctionBox.addItem("Any", 1);
+    for (int f = 0; f < (int) chordlib::Function::count; ++f)
+        libFunctionBox.addItem(chordlib::functionName((chordlib::Function) f), f + 2);
+    libFunctionBox.setSelectedId(1, juce::dontSendNotification);
+    libFunctionBox.setTitle("Library function");
+    {
+        juce::String tip = "What the progression does.";
+        for (int f = 0; f < (int) chordlib::Function::count; ++f)
+            tip << "\n" << chordlib::functionName((chordlib::Function) f) << ": "
+                << chordlib::functionBlurb((chordlib::Function) f);
+        libFunctionBox.setTooltip(tip);
+    }
+    libFunctionBox.onChange = [this] {
+        gen.setLibraryFunction(libFunctionBox.getSelectedId() <= 1 ? -1
+                                                                   : libFunctionBox.getSelectedId() - 2);
+        refreshLibraryResult();
+    };
+
+    styleLabel(libResultLabel, "");
+    libResultLabel.setTitle("Library match");
+
+    // Adopt whatever the brain already holds: the window is built and destroyed every time it
+    // opens, and the three picks outlive it on purpose. Without this the boxes would come back
+    // reading "Any" while generation still filtered on your last pick, which is the exact failure
+    // Markov's Mood and Start were given this shape to avoid.
+    adoptLibraryFilters();
+    refreshLibraryResult();
+
+
     styleLabel(chainLabel, "Chain");
     chainBox.addItemList({ "Major", "Minor", "Modal" }, 1);
     chainBox.setTitle("Markov chain");
@@ -561,7 +641,7 @@ void ChordGenPanel::buildControls()
     // Parented but not shown: applySource() decides which row-B band is on screen, and the
     // constructor runs it once before this panel is ever painted. Every band except the
     // algorithmic one goes in as a child component, so nothing flashes on the first paint.
-    for (int src = 1; src <= 6; ++src)
+    for (int src = 1; src < (int) sourceButtons.size(); ++src)
         for (auto* c : bandFor(src))
             addChildComponent(*c);
     refreshMoodItems();
@@ -704,6 +784,9 @@ std::vector<juce::Component*> ChordGenPanel::bandFor(int source)
             return { &plrPLabel, &plrPSlider, &plrLLabel, &plrLSlider, &plrRLabel, &plrRSlider };
         case 4: // Progressions
             return { &progressionLabel, &progressionBox };
+        case 7: // Library
+            return { &libMoodLabel, &libMoodBox, &libGenreLabel, &libGenreBox,
+                     &libFunctionLabel, &libFunctionBox, &libResultLabel };
         case 5: // Negative Harmony: Key, Mode and Octave in row A are the whole of it
             return {};
         case 6: // Planing
@@ -728,7 +811,7 @@ std::vector<juce::Component*> ChordGenPanel::allBandControls()
     // know which band it is hiding. Built from bandFor rather than listed again, because a second
     // list of the same components is a list that goes stale the first time a band gains a control.
     std::vector<juce::Component*> all;
-    for (int s = 0; s <= 6; ++s)
+    for (int s = 0; s < (int) sourceButtons.size(); ++s)
         for (auto* c : bandFor(s))
             all.push_back(c);
     return all;
@@ -771,11 +854,52 @@ void ChordGenPanel::refreshMoodItems()
     gen.setMoodChoice(moodBox.getSelectedId() <= 1 ? juce::String() : moodBox.getText());
 }
 
+void ChordGenPanel::refreshLibraryResult()
+{
+    const int n = (int) chordlib::find(gen.libraryMood(), gen.libraryGenre(),
+                                       gen.libraryFunction()).size();
+
+    // Zero matches is the one state worth spelling out. The two word pickers only ever offer tags
+    // with rows behind them, so a narrow filter can still come back empty on a *combination*
+    // nobody has written - "Funky" and "Classical" - and generation quietly falls back to the
+    // whole table there. Saying so is the difference between a fallback and a bug: without this
+    // line, Fill would hand you something that ignored both your picks and never mention it.
+    juce::String text;
+    if (n == 0)
+        text = "no match - any progression";
+    else
+        text = juce::String(n) + (n == 1 ? " progression" : " progressions");
+
+    if (gen.lastLibraryEntry().isNotEmpty())
+        text << "   |   " << gen.lastLibraryEntry();
+
+    libResultLabel.setText(text, juce::dontSendNotification);
+}
+
 // The reverse crossing - a pad dragged out of the main window and offered to the reference - has
 // no entry point here at all now. ChordRefCard is a `DragAndDropTarget` and JUCE delivers to it
 // directly, highlight and drop and the exit that puts the highlight back out, so the three
 // screen-coordinate methods that used to live here went with the editor's plumbing that called
 // them (2026-08-02).
+
+// The three Library picks live on the brain, which outlives this window, and can also be moved
+// from the Chord Library window. One place that pulls them onto these combos, called both when
+// the window is built and whenever the polled signature changes underneath it.
+void ChordGenPanel::adoptLibraryFilters()
+{
+    for (int i = 0; i < libMoodBox.getNumItems(); ++i)
+        if (libMoodBox.getItemText(i) == gen.libraryMood())
+            libMoodBox.setSelectedId(libMoodBox.getItemId(i), juce::dontSendNotification);
+    if (gen.libraryMood().isEmpty())
+        libMoodBox.setSelectedId(1, juce::dontSendNotification); // "Any"
+    for (int i = 0; i < libGenreBox.getNumItems(); ++i)
+        if (libGenreBox.getItemText(i) == gen.libraryGenre())
+            libGenreBox.setSelectedId(libGenreBox.getItemId(i), juce::dontSendNotification);
+    if (gen.libraryGenre().isEmpty())
+        libGenreBox.setSelectedId(1, juce::dontSendNotification);
+    libFunctionBox.setSelectedId(gen.libraryFunction() >= 0 ? gen.libraryFunction() + 2 : 1,
+                                 juce::dontSendNotification);
+}
 
 void ChordGenPanel::timerCallback()
 {
@@ -817,6 +941,30 @@ void ChordGenPanel::timerCallback()
     if (gen.chainMode() != lastChainMode)
         refreshMoodItems();
 
+    // The Library readout carries the name of the row the last generation landed on, and
+    // generation happens outside this window (Fill and Regen are on the tray's header, and the
+    // Pads bar has its own pair). Polling is what catches that; the three onChange handlers cover
+    // the half that starts here.
+    if (shownSource == 7 && gen.lastLibraryEntry() != lastLibraryEntry)
+    {
+        lastLibraryEntry = gen.lastLibraryEntry();
+        refreshLibraryResult();
+    }
+
+    // The filters themselves, which this band polled for neither. ChordLibraryPanel::timerCallback
+    // watches exactly this signature and re-selects its own combos; this one watched only the
+    // entry name, so setting Mood in the *library* window left these three combos and the match
+    // count stale for ever while Fill quietly generated under the new filter. The header comment
+    // claims the two are one state rather than two that drift, and they drifted in this direction.
+    const auto sig = gen.libraryMood() + "|" + gen.libraryGenre() + "|"
+                     + juce::String(gen.libraryFunction());
+    if (sig != lastLibSignature)
+    {
+        lastLibSignature = sig;
+        adoptLibraryFilters();
+        refreshLibraryResult();
+    }
+
     // Source switch: swap which row-B band is on screen. The source is a parameter, so it can
     // move from this window's own buttons, from the host or from a session load, and this poll is
     // what catches all three.
@@ -831,6 +979,7 @@ void ChordGenPanel::timerCallback()
     viz.setKey((int) processor.apvts.getRawParameterValue("genRoot")->load(),
                (int) processor.apvts.getRawParameterValue("genMode")->load());
     viz.setChords(tray.candidates());
+    viz.setLibraryEntry(gen.lastLibraryEntry());
 
     // Say the tray is out of date; never act on it. Changing a setting generates nothing (Owen,
     // 2026-08-01), so this is the whole of what a settings change does to the tray: the caption
@@ -921,7 +1070,7 @@ void ChordGenPanel::resized()
     cell(rowA, kMajMinW, majMinLabel, majMinSlider);
     area.removeFromTop(kAfterRowA);
 
-    // The source row. Seven buttons, equal width, filling whatever the window is: at the layout's
+    // The source row. Eight buttons, equal width, filling whatever the window is: at the layout's
     // floor they are kSourceBtnW each, and a wider window spreads them rather than leaving a gap,
     // because a bigger target costs nothing and this is the row you reach for most.
     {
@@ -1039,6 +1188,18 @@ void ChordGenPanel::resized()
         auto c = row.removeFromLeft(kPlaningW);
         planingLabel.setBounds(c.removeFromTop(14));
         planingDiatonicButton.setBounds(c);
+    }
+    {
+        // The Library band. The readout takes whatever is left rather than a fixed cell, so a
+        // wider window gives it the room - it is the one thing here whose content varies in length
+        // ("271 progressions" against "Andalusian cadence (i-bVII-bVI-V)"), and the three pickers
+        // beside it are reserved first, which is the standing rule.
+        auto row = rowFull;
+        cell(row, kLibMoodW, libMoodLabel, libMoodBox);
+        cell(row, kLibGenreW, libGenreLabel, libGenreBox);
+        cell(row, kLibFuncW, libFunctionLabel, libFunctionBox);
+        row.removeFromTop(14); // no caption over the readout: it is a sentence, not a value
+        libResultLabel.setBounds(row);
     }
     area.removeFromTop(kAfterRowB);
 

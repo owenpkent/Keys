@@ -1,5 +1,7 @@
 #include "ChordPads.h"
+#include "../ChordLibrary.h"
 #include "../ChordGen.h"
+#include "../ChordNumerals.h"
 #include "../ChordSuggest.h"
 #include "../Chords.h"
 #include "KeysLookAndFeel.h"
@@ -431,6 +433,38 @@ void ChordPads::paint(juce::Graphics& g)
             g.setFont(skin::micro(9.0f));
             g.drawText(noteListText(pad.notes), noteLine.toNearestInt(),
                        juce::Justification::centred, true);
+
+            // The degree of the key this pad holds (2026-08-18, Owen's ask). Read against the
+            // *parameter* rather than through ChordGenMenu's genRoot/genMode, which answer with
+            // whatever an unticked Key or Mode rolled for the last generation: a pad outlives that
+            // roll, and the key you are composing in is the one on the Pads bar. So a strip of
+            // twelve reads I - V - vi - IV across the page, and a chord borrowed from outside the
+            // key simply draws nothing, which is itself the useful answer.
+            const int keyRoot = (int) processor.apvts.getRawParameterValue("genRoot")->load();
+            const int keyMode = juce::jlimit(0, modes::count() - 1,
+                                             (int) processor.apvts.getRawParameterValue("genMode")->load());
+            // A pad from the library asks its row directly. `degree` is an index into the mode the
+            // chord was *generated* in, and a library row is generated against its own - so an
+            // Andalusian cadence in a C major session had its i, bVII, bVI, V read back as
+            // I, vii, vi, V: four wrong numerals under a bracket correctly naming the progression
+            // they came from, which is worse than showing none. A row and a step name the chord
+            // exactly and need no mode at all.
+            auto numeral = chordlib::numeralAt(pad.progression, pad.progressionStep);
+            if (numeral.isEmpty())
+                numeral = numerals::forChord(pad.numeral, pad.degree, pad.rootPc, keyRoot, keyMode);
+            skin::numeralBadge(g, b, numeral, ink);
+
+            // The run's name, on its first pad only and beside the numeral. It cannot go under the
+            // bracket: the gap between the two rows is 6 px and this line needs eleven, and it
+            // cannot go inside the card either, where the name and the note list already are. The
+            // top strip is the one piece of a card with room, and the numeral leaves most of it.
+            if (! pad.progression.isEmpty() && pad.progressionStep == 0)
+            {
+                auto strip = b.reduced(5.0f, 4.0f).removeFromTop(10.0f).withTrimmedLeft(16.0f);
+                g.setColour((active ? inkOnAccent : skin::accentOf(*this).base).withAlpha(0.7f));
+                g.setFont(skin::micro(8.5f));
+                g.drawText(pad.progression, strip.toNearestInt(), juce::Justification::topLeft, true);
+            }
         }
 
         // The pad currently feeding the arp. A ring rather than the "active" fill, because
@@ -507,6 +541,75 @@ void ChordPads::paint(juce::Graphics& g)
 
         if (airborne)
             g.endTransparencyLayer();
+    }
+
+    // Progression brackets (2026-08-18). A run of adjacent pads that came from the same library
+    // row, in step order, gets a hairline under it with the row's name over the middle - so a
+    // strip holding the Andalusian cadence says so, where before it was four unrelated minor
+    // chords in a row.
+    //
+    // **Drawn after the pad loop, not inside it**, because a bracket belongs to a run rather than
+    // to a card: it has to know where the run ends before it can draw, and a per-pad pass would
+    // either draw twelve fragments or need the same scan done twelve times.
+    //
+    // **A run is broken by a row change, a step that does not follow, and a row break.** The last
+    // is the one worth stating: pads wrap from the sixth to the seventh in a two-row strip, so
+    // pads 5 and 6 are adjacent by index and nowhere near each other on screen, and a bracket
+    // spanning them would be a line drawn across the middle of the strip to nothing.
+    {
+        int v = 0;
+        while (v < KeysProcessor::padsPerPage)
+        {
+            const auto& first = processor.chordPad(offset + v);
+            if (first.progression.isEmpty() || first.notes.empty())
+            {
+                ++v;
+                continue;
+            }
+
+            const int rowOf = v / 6; // the strip is two rows of six
+            int end = v;
+            while (end + 1 < KeysProcessor::padsPerPage)
+            {
+                const auto& next = processor.chordPad(offset + end + 1);
+                if (next.notes.empty() || next.progression != first.progression
+                    || next.progressionStep != processor.chordPad(offset + end).progressionStep + 1
+                    || (end + 1) / 6 != rowOf)
+                    break;
+                ++end;
+            }
+
+            // A run of one is not a progression on the strip; it is a chord that happens to
+            // remember where it came from, and a bracket over it would be a label with nothing to
+            // label. The pad still carries the field, which is what "could follow" will read.
+            if (end > v)
+            {
+                const auto a = padBounds(v);
+                const auto z = padBounds(end);
+                // The bracket sits under the run's *own* row. This was
+                // `jmin(padBounds(0).getBottom(), a.getBottom())`, which is row 0's bottom for
+                // every run: a run on the second row therefore drew its bracket up in the gap
+                // under the first row, over the columns of the pads it does not belong to, and
+                // two runs one per row drew two identical brackets on the same line. The loop
+                // above already refuses to let a run cross a row, so `a` and `z` share one and
+                // either end answers for it.
+                const float y = a.getBottom() + 3.0f;
+                const auto accent = skin::accentOf(*this);
+
+                juce::Path bracket;
+                bracket.startNewSubPath(a.getX() + 2.0f, y + 4.0f);
+                bracket.lineTo(a.getX() + 2.0f, y);
+                bracket.lineTo(z.getRight() - 2.0f, y);
+                bracket.lineTo(z.getRight() - 2.0f, y + 4.0f);
+                g.setColour(accent.base.withAlpha(0.45f));
+                g.strokePath(bracket, juce::PathStrokeType(1.0f));
+
+                // No label here. It lived under the bracket for one build and the 6 px gap between
+                // the pad rows cannot hold an 11 px line, so it painted over the row below. The
+                // name is on the run's first pad instead, where the card's top strip has room.
+            }
+            v = end + 1;
+        }
     }
 
     // There is no ghost drawn here any more (2026-08-02). It used to be an 84x26 chip painted at

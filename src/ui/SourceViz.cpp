@@ -1,5 +1,6 @@
 #include "SourceViz.h"
 #include "KeysLookAndFeel.h"
+#include "../ChordNumerals.h"
 #include <okstudio/Scales.h>
 #include <algorithm>
 #include <cmath>
@@ -157,55 +158,21 @@ namespace
         return "?";
     }
 
-    // The roman numeral for one scale degree, cased by the quality the current mode gives it -
-    // upper for major/augmented, lower for minor/diminished, with a small degree sign appended on
-    // diminished. Shared by Progressions' pre-generation fallback (every degree of the key) and
-    // by a real chord that only carries `degree`, never `numeral` - see progressionNumeral below.
-    // The degree sign is built from its code point rather than typed as a literal, so the file
-    // stays plain ASCII regardless of the compiler's source encoding.
+    // Both numeral helpers moved to ChordNumerals.h on 2026-08-18, when the generator's tray
+    // cards and the chord pads started showing the same numeral this diagram does. What is left
+    // here is the one thing that is this diagram's own: a "?" when nothing resolves. The shared
+    // helper answers empty in that case, because a card in a corner has no room to say "I looked
+    // and could not tell" and a "?" on every hand-captured pad is noise; a diagram drawing one
+    // chip per step has a chip to fill either way, and an empty chip would read as a gap in the
+    // walk rather than as a chord whose degree is genuinely outside the key.
     juce::String romanForDegree(int degree, int modeIdx)
     {
-        static const char* upper[] = { "I", "II", "III", "IV", "V", "VI", "VII" };
-        static const char* lower[] = { "i", "ii", "iii", "iv", "v", "vi", "vii" };
-        const auto& qualities = modes::get(modeIdx).qualities;
-        if (degree < 0 || degree >= (int) qualities.size())
-            return {};
-        const auto q = qualities[(size_t) degree];
-        const bool major = q == modes::Quality::major || q == modes::Quality::augmented;
-        juce::String s = major ? upper[degree % 7] : lower[degree % 7];
-        if (q == modes::Quality::diminished)
-            s += juce::String::charToString((juce::juce_wchar) 0x00B0);
-        return s;
+        return numerals::forDegree(degree, modeIdx);
     }
 
-    // Progressions never sets `ChordPad::numeral` - that field is Markov-only (see the struct
-    // comment in PluginProcessor.h; ChordGenMenu::generateCandidates only ever writes it inside
-    // the Markov branch). Every other source, Progressions included, writes `degree` instead
-    // (ChordSources.h's progressions() sets it via detail::degreeOf), so that is where the roman
-    // numeral has to come from. Order: the numeral itself, if a chord somehow carries one; else
-    // the degree it was generated from; else a degree worked out from its root against the
-    // current key, for a chord that reached this diagram with neither (a hand-edited pad); "?"
-    // only when none of the three resolve - which also covers a genuinely non-diatonic root (a
-    // secondary dominant, a borrowed chord) that no degree lookup will ever answer.
     juce::String progressionNumeral(const KeysProcessor::ChordPad& c, int keyRootPc, int modeIdx)
     {
-        if (c.numeral.isNotEmpty())
-            return c.numeral;
-
-        int degree = c.degree;
-        if (degree < 0 && c.rootPc >= 0)
-        {
-            const auto& intervals = modes::get(modeIdx).intervals;
-            const int iv = ((c.rootPc - keyRootPc) % 12 + 12) % 12;
-            for (int i = 0; i < (int) intervals.size(); ++i)
-                if (intervals[(size_t) i] == iv)
-                {
-                    degree = i;
-                    break;
-                }
-        }
-
-        const auto s = romanForDegree(degree, modeIdx);
+        const auto s = numerals::forChord(c.numeral, c.degree, c.rootPc, keyRootPc, modeIdx);
         return s.isNotEmpty() ? s : juce::String("?");
     }
 } // namespace
@@ -226,7 +193,13 @@ int SourceViz::preferredHeight() { return 160; }
 
 void SourceViz::setSource(int sourceIndex)
 {
-    sourceIndex = juce::jlimit(0, 6, sourceIndex);
+    // **Floor only.** This clamped to 6 until 2026-08-18, which is the same trap
+    // `ChordGenMenu::sourceIndex` documents and had already been fixed for: an upper clamp here
+    // has to be a literal count of the sources, so appending an eighth brain - the one growth the
+    // parameter's own comment calls safe - arrived silently drawing Planing's diagram under
+    // Library's chords, with nothing to say so. A source this class does not know falls through
+    // `paint`'s `default:` and draws an empty well, which is the honest answer.
+    sourceIndex = juce::jmax(0, sourceIndex);
     if (sourceIndex == source)
         return;
     source = sourceIndex;
@@ -241,6 +214,14 @@ void SourceViz::setKey(int newRootPc, int newMode)
         return;
     rootPc = newRootPc;
     mode = newMode;
+    repaint();
+}
+
+void SourceViz::setLibraryEntry(const juce::String& name)
+{
+    if (name == libraryEntry)
+        return;
+    libraryEntry = name;
     repaint();
 }
 
@@ -279,9 +260,17 @@ void SourceViz::paint(juce::Graphics& g)
         case 1: paintMarkov(g, area); break;
         case 2: paintCircleOfFifths(g, area); break;
         case 3: paintNeoRiemannian(g, area); break;
-        case 4: paintProgressions(g, area); break;
+        case 4: paintProgressions(g, area, "PROGRESSIONS", "THE TEMPLATE, REPEATED"); break;
         case 5: paintNegativeHarmony(g, area); break;
         case 6: paintPlaning(g, area); break;
+        // Library draws the Progressions diagram, because a library row *is* a progression and the
+        // numeral strip with its repeat bracket is exactly the right picture for one. The subtitle
+        // carries the row's own name, which is the one thing the two sources do not share.
+        case 7:
+            paintProgressions(g, area, "LIBRARY",
+                              libraryEntry.isEmpty() ? juce::String("PICK A MOOD AND FILL")
+                                                     : libraryEntry.toUpperCase());
+            break;
         default: break;
     }
 }
@@ -523,9 +512,10 @@ void SourceViz::paintNeoRiemannian(juce::Graphics& g, juce::Rectangle<float> are
 // along with it: with every numeral reading "?", every card compared equal, so the period search
 // below found period 1 immediately and drew one degenerate bracket per card. Real numerals give
 // the search real data to find the actual template length with.
-void SourceViz::paintProgressions(juce::Graphics& g, juce::Rectangle<float> area) const
+void SourceViz::paintProgressions(juce::Graphics& g, juce::Rectangle<float> area, const char* title,
+                                  const juce::String& subtitle) const
 {
-    caption(g, area, "PROGRESSIONS", "THE TEMPLATE, REPEATED");
+    caption(g, area, title, subtitle);
     auto diagram = area.withTrimmedTop(kCaptionH);
     const auto accent = skin::accentOf(*this);
     const auto steps = filledOf(chords);

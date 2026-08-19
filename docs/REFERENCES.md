@@ -1,10 +1,16 @@
 # Reference manuals
 
-Eight manuals feed this file. They are not decoration: eight features in Keys were built
-from a specific page of one of them, and at least twice a manual **corrected a guess** that had
+Nine manuals feed this file. They are not decoration: nine features in Keys were built from a
+specific page of one of them, and **four times now a manual has corrected a guess** that had
 already been coded and looked right on screen. This file records what each one contributes, what
 Keys took, and what it deliberately did not - so the next person does not re-derive a decision
 that was already made, or re-invent one that was already rejected.
+
+The Scaler 3 entry arrived in two halves and is the clearest case for the rule at the bottom of
+this file. The **vocabulary** came first, as two CSVs off Owen's disk, and the library was designed
+against it. The **manual** came after and corrected two things - including one that no amount of
+staring at the CSVs would have shown, since Scaler uses the word "Mood" for two unrelated controls
+and only one of them is a tag.
 
 **Eleven more PDFs are in `manuals/` and are not in this file.** They arrived 2026-08-17 and
 are surveyed in `docs/SEQUENCER_LANDSCAPE.md` instead, because this file's contract is what Keys
@@ -258,6 +264,88 @@ not have). `docs/ACID_DESIGN.md` is the spec that came out of it; the short vers
 - Not taken: the sequence browser (Keys has twelve slots), MIDI-file export by drag, the
   hover-reveal dice (a discovery problem on a mouse-only surface), and right-click to remove a
   note (left-click-to-clear does it, and the right-click exception list stays closed).
+
+## Scaler 3 (`Scaler-3_User_Guide.pdf`, 113pp)
+
+The reference for the **chord library**, and the one product on this list that solves the same
+problem Keys' library solves: a large collection of progressions you find by how they feel.
+
+It arrived in two parts. First the **vocabulary**, which Owen had on disk at
+`E:\Ableton\Scaler 3 Moods and Genres\` as two CSVs - **41 moods** and **40 genres** - and which
+is what the library was designed against. The manual came after, and confirmed the design while
+correcting two things about it.
+
+**Taken:**
+
+- **Both vocabularies, near-verbatim**, as `chordlib::moods()` and `chordlib::genres()` (their
+  "Uplifiting" typo fixed). A producer who owns both products should read one set of words.
+- **The five words Keys keeps that Scaler has no equivalent for** - Haunting, Nostalgic,
+  Rebellious, Spiritual, Tender - which `MarkovData.h` had been tagging with since it was written.
+  Added rather than mapped onto near neighbours: longing is wanting something, nostalgia is having
+  had it, and folding one into the other loses a distinction the original author drew.
+- **"Cinematic" moves axis.** Keys had it as a mood; on Scaler's list, and now on Keys', it is a
+  genre. Cinematic is a place the music is going, not a feeling it has.
+- **The definition of the unit.** *"A chord set is a collection of chords representing a
+  progression or song saved in Scaler"* (p42). Keys' `chordlib::Entry` is the same object under
+  another name, which is why "To pads" writes several pads and not one.
+
+**Corrected a guess - three times, and the third is the useful one:**
+
+1. The design started from a search-results guess that Scaler tagged on **mood alone**. The CSVs
+   settled it in one look: two axes.
+2. The two CSVs implied moods were a chord-set filter only. The manual (p41) shows **Moods filters
+   scales as well** - *"Browse scales based on their emotion or feel"* - and defines the tag on a
+   scale as *"a descriptive label that categorizes the scale based on its tonal quality, emotion,
+   or feel"* (p48). Keys' `modes::Mode::emotion` field is the same idea and predates all of this.
+3. **Scaler uses the word "Mood" for two unrelated controls**, and only the manual shows it. On
+   the Browse page it is the 41-word tag. On the Create page's Explore it is
+   *"Adjust the mood of the genre preset to your taste by applying a bright, dark, or neutral
+   mood"* (p62) - a three-way brightness axis, not a tag at all. **Keys already has that second
+   control and has it finer**: the generator's **Brightness (Major / Minor)** slider sweeps the
+   seven diatonic modes Lydian to Locrian, which is the same axis at seven stops instead of three.
+   Worth knowing before anyone "adds Scaler's Mood knob".
+
+**What the manual confirms Scaler does *not* have, which is why Keys' third axis exists:**
+
+The Browse page's chord-set filters are **collection** (Common Progressions, Uncommon Progressions,
+Artists, Genres), **Moods**, and **Favourites** (p41-43). There is no axis for what a progression
+*does*. The tell is on Scaler's own mood list, where **Inconclusive** and **Resolved** sit among
+forty emotions while being no such thing - they are structural. That is where Keys' **Function**
+axis came from (Loop, Cadence, Turnaround, Vamp, Lift, Descent, Turn, Open), and it is the
+difference between "sad" returning forty candidates and "sad, and it loops" returning the four you
+meant.
+
+Section roles are not metadata in Scaler either: **Scenes** are an *arrangement* container -
+*"sections that can be freely arranged, duplicated, and triggered ... building verses, choruses,
+or bridges"* - rather than a tag on a progression. So the Section idea in
+`docs/CHORD_LIBRARY.md` §7 is not borrowed from here; it is unbuilt, and the open Chordonomicon
+corpus is where its data would come from, since that one annotates structural parts.
+
+**Deliberately not taken:**
+
+- **Scaler's chord sets.** Progressions are not copyrightable, but a *curated list* of them can
+  attract thin copyright in its selection and arrangement, and in the EU a database right can
+  attach to the compiler's effort. A word list is a taxonomy; a thousand-row library is a
+  compilation. Keys' 355 rows are authored from the named canon, modal vamps, jazz turnarounds and
+  film-score mediants - **written out from music-theory knowledge, not measured against a corpus**
+  (see `ChordLibrary.h`'s own note, which says so at the point somebody would extend the table).
+  Nothing is copied across, and that line is worth restating whenever the table grows.
+- **The count.** Scaler ships 1,000+ chord sets, a large share of them artist and genre packs whose
+  value is the name attached. 355 tagged on three axes beats a flat 1,000, and 355 is a number that
+  can be verified by ear and by theory one row at a time - which a scraped 5,000 cannot, and which
+  is the whole reason `tests/ChordLibraryTests.cpp` can spellcheck the table on every build.
+- **Common vs Uncommon Progressions as a *collection*.** A crude popularity axis, and Keys already
+  encodes the same information better: the table is ranked against corpus statistics on the way in,
+  so the common ones are simply the ones that are there.
+
+**On the table, and cheap:**
+
+- **Favourites** (p43, the heart button beside a chord set). Keys' library window has 355 rows and
+  no way to keep the six you actually use. It is the one thing in Scaler's browser that Keys'
+  has no answer for at all, and it would need a `LayoutState` set of row names and one more
+  column on the row.
+
+See `docs/CHORD_LIBRARY.md` for the design this fed.
 
 ---
 

@@ -38,6 +38,7 @@ set(KEYS_SOURCES
     src/ui/ChordGenMenu.cpp
     src/ui/ChordGenPanel.cpp
     src/ui/ChordTray.cpp
+    src/ui/ChordLibraryPanel.cpp
     src/ui/SourceViz.cpp
     src/ui/TakePanel.cpp
     src/ui/ArpPanel.cpp)
@@ -132,7 +133,7 @@ endif()
 enable_testing()
 add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp
                           tests/ChordSourceTests.cpp tests/StateTests.cpp tests/LayoutTests.cpp
-                          tests/TakeTests.cpp)
+                          tests/TakeTests.cpp tests/ChordLibraryTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
 # juce_audio_basics is for ArpEngine's MidiBuffer/MidiMessage; the kit does not
 # re-export it.

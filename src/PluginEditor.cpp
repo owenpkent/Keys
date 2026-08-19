@@ -618,6 +618,22 @@ KeysEditor::KeysEditor(KeysProcessor& p)
                     setChordGenWindowOpen(true);
             });
 
+    // The library's own window (2026-08-18), beside the generator's and behaving identically -
+    // click once to open, again to bring to front. A separate chip rather than a mode inside the
+    // generator window because the two answer different questions and you want them at the same
+    // time: the generator is "make me something", the library is "show me what there is", and
+    // browsing while a trayful sits beside it is the whole workflow.
+    genChip(chordLibButton, "Chord library window",
+            "Open the chord library: every named progression Keys knows, filtered by mood, genre "
+            "and what it does. Click one to hear it, then send it to the tray or the pads.",
+            [this]
+            {
+                if (chordLibWindow != nullptr)
+                    chordLibWindow->toFront(true);
+                else
+                    setChordLibWindowOpen(true);
+            });
+
     // The three settings that get changed while you are auditioning a page, on the bar beside
     // the two chips (see the member declarations for why these three, and why Compliance is the
     // one that does not take a ComboBoxAttachment). The accessible names all say "Generator" or
@@ -946,6 +962,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // it opens in front of them.
     if (lay.chordGen)
         setChordGenWindowOpen(true);
+    // And the library's, after it, so the generator sits in front of the library the way it did
+    // when the session was saved - the library is what you browse *from*.
+    if (lay.chordLib)
+        setChordLibWindowOpen(true);
 
     startTimerHz(30);
 }
@@ -972,6 +992,10 @@ KeysEditor::~KeysEditor()
     rememberChordGenBounds();
     chordGenWindow.reset();
     chordGenPanel.reset();
+    // And the library's window, identical shape.
+    rememberChordLibBounds();
+    chordLibWindow.reset();
+    chordLibPanel.reset();
     // And the take window, same order and same reason.
     takeWindow.reset();
     takePanel.reset();
@@ -1459,6 +1483,8 @@ void KeysEditor::applyAccent(int index)
             s.window->sendLookAndFeelChange();
     if (chordGenWindow != nullptr)
         chordGenWindow->sendLookAndFeelChange(); // its own tree too, sharing the same lnf
+    if (chordLibWindow != nullptr)
+        chordLibWindow->sendLookAndFeelChange();
 
     syncSectionControls();
     repaint();
@@ -1781,19 +1807,22 @@ int KeysEditor::minWidthForView() const
     // The Pads bar, as it has since 2026-07-30 - the arithmetic, at the bar's own
     // contentArea() (the window less 20 of margin, less the 92 px fold zone and the 8 px each
     // side of it):
-    //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 10,
-    //             Mode 124, 4, Key 58                                          = 538
-    //     left    four pages at 46 + 4, 10, Play 64, 14                       = 288
-    //                                                                    total = 826
-    // 1070 hands it 942, so the bar fits with 116 px of caption zone left over when the
-    // section is docked. The Play toggle (2026-08-19) is the 74 px that took the left group
-    // from 214 to 288.
+    //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 6, Library 80, 10,
+    //             Mode 124, 4, Key 58                                          = 624
+    //     left    four pages at 46 + 4, 10, Play 64, 14                        = 288
+    //                                                                    total = 912
+    // 1280 hands it 1152 and the current 1320 floor hands it 1192, so the bar sits with 280 px
+    // of caption zone left over when the section is docked.
     //
-    // Re-measured 2026-08-19. It had read 644 / 858 / 84 px, itemising a Compliance chip at 74
-    // and a Mode combo at 148 that both left this bar on 2026-08-02, while never accounting for
-    // the 124 px Mode combo that came back. Two revisions of drift in the one comment the next
-    // control added here would have been sized against - the "measure, do not assume" rule this
-    // file states, broken by this file. The floor itself never moved: Controls wants 1320.
+    // Re-measured 2026-08-19, twice over, and both halves of this line had drifted. It read
+    // 644 / 858 on one side, itemising a Compliance chip at 74 and a Mode combo at 148 that
+    // both left this bar on 2026-08-02 while never accounting for the 124 px Mode combo that
+    // came back; and 730 / 944 on the other, which carried those same two stale figures forward
+    // and concluded from them that the Library chip had pushed the bar two pixels past what a
+    // 1070 px window hands it. It had not: against the real widths the bar is 912, which fits
+    // 942 with 30 px to spare, so the Pads bar never became the binding constraint. Controls
+    // (1320) is still what sets the floor. The "measure, do not assume" rule this file states,
+    // broken by this file, in two places, in opposite directions.
     //
     // The Controls bar, measured off the running app rather than assumed (Owen's window is
     // 1072 px, essentially the old 1070 floor): at that width, after Detach 104 and Theme's
@@ -2025,6 +2054,89 @@ void KeysEditor::setChordGenWindowOpen(bool open)
     }
 
     chordGenButton.setToggleState(open, juce::dontSendNotification);
+}
+
+void KeysEditor::rememberChordLibBounds()
+{
+    if (chordLibWindow != nullptr)
+        processor.layout.chordLibBounds = chordLibWindow->getBounds();
+}
+
+// The library's window, the generator's shape line for line. Two windows rather than a mode inside
+// one because they answer different questions and you want both at once: the generator is "make me
+// something", the library is "show me what there is", and browsing the second while a trayful sits
+// in the first is the workflow the whole feature is for.
+void KeysEditor::setChordLibWindowOpen(bool open)
+{
+    processor.layout.chordLib = open;
+    if (open == (chordLibWindow != nullptr))
+        return;
+
+    if (open)
+    {
+        chordLibPanel = std::make_unique<ChordLibraryPanel>(processor, chordGen);
+        juce::Component::SafePointer<KeysEditor> safe(this);
+        const auto close = [safe]
+        {
+            juce::MessageManager::callAsync([safe]
+            {
+                if (auto* e = safe.getComponent())
+                    e->setChordLibWindowOpen(false);
+            });
+        };
+        chordLibPanel->onClose = close;
+
+        // Placing a progression is this class's job, not the panel's: it can no more name a pad
+        // slot than the generator's tray could name one from a menu item.
+        //
+        // **Only empty pads, always.** `sendChordToFirstEmptyPad` is the same call the tray's own
+        // "Send to first empty pad" makes, so a progression from the library obeys the rule every
+        // generation obeys - nothing overwrites a chord that is already there. A progression longer
+        // than the room left lands as far as it fits, which is better than refusing: the page tells
+        // you what happened, and the rest is one page flip away.
+        chordLibPanel->onSendToPads = [this](const std::vector<KeysProcessor::ChordPad>& pads)
+        {
+            const KeysProcessor::UndoGesture undoable { processor, "Library progression",
+                                                        KeysProcessor::UndoScope::pads };
+            bool any = false;
+            for (const auto& pad : pads)
+                if (chordPads.sendChordToFirstEmptyPad(pad))
+                    any = true;
+                else
+                    break; // out of room; stop rather than scattering the rest across pages
+            return any;
+        };
+        chordLibPanel->onPageHasEmptyPad = [this] { return chordPads.firstEmptyPadOnPage() >= 0; };
+
+        // The tray belongs to the generator's window, which may not be open. Rather than open it
+        // behind your back - a button that summons a window you did not ask for is a surprise -
+        // the panel greys "To tray" when there is nothing to fill, and `onTrayIsOpen` is how it
+        // knows. Opening the generator makes the button live on the panel's next tick.
+        chordLibPanel->onSendToTray = [this](const std::vector<KeysProcessor::ChordPad>& pads)
+        {
+            if (chordGenPanel == nullptr)
+                return false;
+            chordGenPanel->fillTrayWith(pads);
+            if (chordGenWindow != nullptr)
+                chordGenWindow->toFront(false); // false: the library keeps the keyboard focus
+            return true;
+        };
+        chordLibPanel->onTrayIsOpen = [this] { return chordGenPanel != nullptr; };
+
+        chordLibWindow = std::make_unique<DetachedWindow>(
+            "Keys Chord Library", lnf, *chordLibPanel, processor.layout.chordLibBounds,
+            ChordLibraryPanel::minWindowSize(), ChordLibraryPanel::defaultWindowSize(),
+            close, [this] { rememberChordLibBounds(); });
+        chordLibPanel->sendLookAndFeelChange(); // built before it was ever parented
+    }
+    else
+    {
+        rememberChordLibBounds();
+        chordLibWindow.reset(); // clears its content first, so the panel is unparented
+        chordLibPanel.reset();
+    }
+
+    chordLibButton.setToggleState(open, juce::dontSendNotification);
 }
 
 juce::Rectangle<int> KeysEditor::layoutDetachRow(SectionId id, juce::Rectangle<int> row, bool onBar)
@@ -2937,6 +3049,10 @@ void KeysEditor::resized()
         // behind them would be off the screen.
         bar.removeFromRight(6);
         chordGenButton.setBounds(bar.removeFromRight(90).withSizeKeepingCentre(88, 24));
+        // The library's window, immediately left of the generator's. The two are a pair and read
+        // as one: "make me one" and "show me what there is".
+        bar.removeFromRight(6);
+        chordLibButton.setBounds(bar.removeFromRight(80).withSizeKeepingCentre(78, 24));
         // The generator's Key, alone now. Mode, Scale Compliance and the arp target letter
         // left this bar on 2026-08-02 (Owen: "remove the scale and percentage and letter b
         // from pads header"): both combos are still in the Generator window, which holds

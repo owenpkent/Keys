@@ -100,6 +100,19 @@ namespace keys::markov
                 { "sus2", "Sus2" }, { "sus4", "Sus4" }, { "add9", "Add9" },
                 { "69", "6/9" }, { "6", "Major 6th" }, { "9", "Dominant 9th" },
                 { "M-5", "Diminished" }, { "m", "Minor" }, { "M", "Major" },
+                // Appended 2026-08-18 for ChordLibrary.h, which needs a numeral for every type in
+                // chordgen::types() and was six short. Half-diminished is the one whose absence
+                // was not cosmetic: it is the ii of every minor ii-V, so the single most common
+                // cadence in the minor key could not be written down at all.
+                //
+                // **Appending here is safe, unlike almost everywhere else in Keys.** The lookup
+                // below is `suffix == suf`, an exact string compare over the whole table, so a new
+                // row can neither shadow an existing one nor move it - where chordgen::types(),
+                // genSource and the lane indices are all append-only precisely because a saved
+                // session stores their *index*. Nothing stores an index into this table.
+                { "m7b5", "Half Diminished" }, { "mM7", "Minor Major 7th" },
+                { "m6", "Minor 6th" }, { "madd9", "Minor Add9" },
+                { "M9", "Major 9th" }, { "m9", "Minor 9th" },
             };
             return s;
         }

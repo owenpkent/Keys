@@ -570,6 +570,393 @@ vetoed the clear correctly, it only ever bit on a near miss and so read as rando
 A drag that lands on nothing is now a cancelled drag and puts the card back. Clearing a pad is
 *Clear pad* on the card's right-click menu, which is where it was already documented to live.
 
+### Fixed: review pass on the chord library round
+
+**The Library generator source produced pads with the wrong numerals.** It built chords through
+`chordlib::chordsFor` against the row's own mode, correctly, and then dropped the row name and the
+position within it on the floor - so the strip fell back to resolving `degree` against the
+*session's* mode and drew an Aeolian row's bVI as "vi", a major chord labelled minor. That is the
+exact fault `numeralAt` was added to fix, reached by the one route that skipped the stamp. The
+stamp moved into `chordsFor` itself, which is the one function that knows both the row and the
+position, so every route out of the library carries it: the library window's Tray and Pads
+buttons, and the generator's own source. A Library fill also gets a bracket and a seed for
+Follows now, which it never had.
+
+**A progression's numerals could all be off by one.** `chordsFor` skips a token it cannot parse
+and the empty entries `StringArray::fromTokens` emits for consecutive separators, while
+`numeralAt` indexed the raw token list. A row with a double space, a trailing space or a typo'd
+suffix therefore shifted every later chord's numeral by one, under a bracket correctly naming the
+progression. Both go through one `playableNumerals` now, and a test walks all 355 rows checking
+that every chord's `progressionStep` names its own numeral.
+
+**A bracket on the second pad row drew under the first.** The Y was clamped with `jmin` against
+row 0's bottom, which is always the smaller value, so a run in the lower row drew its bracket up
+in the gap under the upper one, spanning columns it has nothing to do with - and two runs, one per
+row, drew two identical brackets on the same line. The run loop already refuses to let a run cross
+a row, so either end answers for it.
+
+**Closing the library window cut off the generator's audition.** `ChordGenMenu` owns one preview
+path for both the progression walk and the tray's 800 ms single-chord audition, and the destructor
+stopped it unconditionally - so closing this window inside those 800 ms killed a sound it had
+nothing to do with. It stops only a walk now.
+
+**A progression's last chord read as finished while it was still sounding.** `auditioningProgression`
+answered off the queue, which is popped as each chord *fires*, so it went false the moment the
+final chord started. The library row went dark about 100 ms into an 800 ms chord, and clicking it
+during those 800 ms restarted the whole progression instead of stopping it. A flag that lives
+until the walk actually ends replaces the queue test.
+
+**The generator's Library band never noticed the filters moving.** `ChordLibraryPanel` polls the
+shared mood/genre/function signature and re-selects its combos; the generator band polled only the
+last entry name, so a filter set in the library window left its three combos and its match count
+stale for ever while Fill quietly generated under the new one. It polls the same signature now,
+through one `adoptLibraryFilters` shared with the window's own construction.
+
+**Every maj7 in the corpus was counted as minor.** `rest.startswith("m")` is true for `"maj7"`,
+in `rank_against_chordonomicon.py`, `validate_moods.py` and `corpus.py`'s SQL alike, so rows
+written with M7 never joined the corpus windows they match and the major/minor valence the mood
+table is gated on was computed over mislabelled data. `compare_midi_pack.py` had the sibling bug:
+it read `upper` *after* the suffix branch had already lowercased the numeral, so a minor-quality
+token could never get the minor-context flattening and landed in the "only in pack" bucket under
+the wrong spelling.
+
+Also: `couldFollow`'s shared-mood bonus could reach +4, because its `break` left only the inner
+loop - enough to outweigh the +3 for staying in the mode and to close most of the join score's own
+spread, so a tag-heavy row on a tritone could outrank a same-mode falling fifth. It is one point
+however many moods overlap. The library window's Close button was a 26 px target in a 28 px
+header, under the 34 px mouse-only floor, on the only on-screen way out of the window; the header
+is 34 like its sibling's. And `numeralAt` builds its per-row token lists once rather than scanning
+355 rows and re-tokenising on every call, which it takes per filled pad per repaint of the strip.
+
+
+### Added: a pad remembers which progression it is a step of, and the strip brackets the run
+
+`ChordPad` gains `progression` and `progressionStep` - the first fields added to that struct since
+Markov's numeral, and for a reason of the same kind: a pad knew what chord it was and not what it
+was *part of*, so a strip holding the Andalusian cadence looked identical to four unrelated minor
+chords. A run of adjacent pads sharing a library row in step order now carries a hairline bracket,
+with the row's name along the top of its first card.
+
+The row's **name**, never an index into `chordlib::table()`. That table is explicitly free to be
+inserted into - it is the one append-*and*-insert-safe table in Keys, because nothing stores an
+index into it - and an index here would quietly take that freedom away and move every saved pad the
+first time a row was added in the middle.
+
+**A run breaks on a row change, a step that does not follow, and a row break.** The last is the one
+worth stating: pads wrap from the sixth to the seventh, so 5 and 6 are adjacent by index and nowhere
+near each other on screen, and a bracket spanning them would be a line drawn across the strip to
+nothing. A run of one draws nothing at all - that is a chord that remembers where it came from, not
+a progression on the strip.
+
+**The numerals under that bracket were wrong for one build, and the fix is the interesting part.**
+`degree` is an index into the mode a chord was *generated* in, and a library row is generated
+against its own mode - so an Andalusian cadence dropped into a C major session read back as
+`I vii vi V` underneath a bracket correctly naming it. Four wrong numerals is worse than none.
+`chordlib::numeralAt` asks the row directly: a row and a step name a chord exactly and need no mode.
+
+### Added: Follows - a progression that could follow a progression
+
+The relational layer `docs/CHORD_LIBRARY.md` §7 has been promising, as `chordlib::couldFollow` and a
+toggle in the library window. **Two signals, because "could follow" is two questions.**
+
+**Structure decides which rows are eligible.** `functionsAfter` is a small grammar of song form:
+what follows a Cadence is not what follows a Turnaround, and nothing follows an Open with another
+Open. It is a **gate rather than a weight** on purpose - a row that does not belong after this one
+is not a weak answer, it is the wrong one, and letting it in on a good harmonic join is how a
+suggestion list stops meaning anything.
+
+**The harmonic join orders what is left.** The last chord of one against the first of the next: a
+falling fifth scores highest, a repeat lowest without being disqualified, since two progressions on
+the tonic do follow each other - it is just the dullest answer. Staying in the mode is worth about a
+rank; a shared mood nudges.
+
+It points at the **pads**, not at a row you select, because that is where the question comes from -
+you have laid a progression down and want the next one. It scans the current page backwards, so the
+*last* progression is the one being followed, and greys when no pad carries one.
+
+With the Andalusian cadence on the pads it answers with the Flamenco cycle, Trap Phrygian, the
+Phrygian cycle and the Phrygian dominant cycle - every one starting on the tonic, which is the V-i
+resolution, and every one Phrygian.
+
+### Added: Favourites in the library window
+
+A star at the left of every row, and **Starred only** beside the three pickers, narrowing whatever
+they matched rather than replacing it - so a star and a mood together mean "the sad ones I kept".
+The gap Scaler's own manual surfaced (p43): 355 rows and no way to keep the six you actually use.
+
+Kept **by name** in `LayoutState::libraryFavourites`, the same call `ChordPad::progression` makes and
+for the same reason. **Per session, which is the honest weakness** - Scaler's favourites are global,
+and a star set in one project is gone in the next. Keys has no global store for anything, the
+settings gear's three switches included, so a global one would be new machinery for one feature.
+
+The star is **painted, not a `TextButton`**, the same call the lock dot on a chord card makes:
+twelve more Components to lay out, hide and re-title on every page turn, for a two-state mark. Its
+cell is the mouse-only 34 px all the same, reserved out of the row before anything else.
+
+### Fixed: the library row reads as a table
+
+A UI pass, and three of the four are fixes rather than polish.
+
+**Numerals over the chords they come out as, one column per chord.** The row had a wide dead strip
+between the numerals and the tags that read as a table with a hole in it. What belongs there is the
+other half of the question: the numeral says what the progression *is* whatever key you are in, the
+chord says what you will hear. Drawn as **measured columns** rather than two strings - which they
+were for one build, and the two lines use different fonts at different sizes, so `I V vi IV` over
+`C G Am F` drifted apart along the row until the pairing was something you worked out rather than
+saw.
+
+**`Font::getStringWidthFloat` under-measures, badly.** Sizing those columns with it made every cell
+as wide as the *chord* underneath, so `iim7` drew as `iim`, `V7` as `V`, and a bare `V` as nothing
+at all - a table quietly deleting the last character of half its content. `GlyphArrangement`
+measures what actually draws, and is what JUCE 8's deprecation names as the replacement.
+
+**A name drops its own numerals when the row already shows them**, so it reads "Axis" rather than
+"Axis (I-V-vi-IV)". The names carry them because they were written for a combo box, where the name
+is the only thing on screen; in a table with two columns of the same information a third copy is
+noise, and it is what pushed the longest names into an ellipsis. The test is exact - the
+parenthetical must *be* the numerals - because plenty are not: "i-iv-v (natural minor)",
+"Autumn-leaves turn (major to relative minor)". Display only; `Entry::name` is still the identity a
+favourite and a pad store.
+
+**"To tray" / "To pads" become "Tray" / "Pads"** at 66 px. Twenty-four buttons repeating two phrases
+down the window is a lot of text saying one thing, and in a column the preposition carries nothing
+the position does not. Accessible names keep the whole phrase.
+
+### Changed: the library says where its progressions came from, and it is not what it first claimed
+
+The table's provenance was overstated in seven places. It said the rows were "ranked and
+section-tagged against Hooktheory's published Trends and the open Chordonomicon corpus". **They were
+not.** Both datasets are real and relevant, and summaries of them informed the design, but nothing
+had been downloaded, no query run and no statistic computed.
+
+What actually happened: the rows were **written out from music-theory knowledge** - the named canon,
+modal vamps derived per mode and picked by ear, jazz turnarounds, film-score mediants, and the loops
+that characterise each genre. Sixty rows are `MarkovData.h`'s, itself hand-authored for Keys.
+`ChordLibrary.h` now says so at the point somebody would add a row, which is where it matters.
+
+`docs/CHORD_LIBRARY.md` §3's **Section** tag (Intro / Verse / Chorus) is marked **unbuilt** rather
+than described as though it already had corpus data behind it. That is the one axis that genuinely
+could be derived from evidence, which is exactly the reason not to invent it by hand.
+
+### Added: the corpora, and seven rows they found missing
+
+`datasets/` and `scripts/corpus/`, with `datasets/README.md` as the manifest. Payloads are
+gitignored like `manuals/`, so a fresh clone gets the manifest and nothing else and Keys
+redistributes none of it.
+
+Two sources, and **the licences are the headline**. Ludovic Drolez's `free-midi-chords` is **MIT**
+and can feed shipped content freely; **Chordonomicon** (680,000 songs, chord progressions with
+structural-part annotation) is **CC-BY-NC-4.0**, and Owen's call is that Keys is personal use, which
+that licence permits squarely. If Keys ever ships commercially, anything derived from it has to come
+out or be re-derived from a permissive source.
+
+**The finding that could have done damage: two roman-numeral conventions.** Keys uses a fixed
+major-scale degree table for every mode, so minor's flat degrees are `bIII`, `bVI`, `bVII`. The MIT
+pack spells minor progressions against the *minor* scale, so its `III`, `VI` and `VII` are already
+flat and written unadorned. The pack's `i VII VI V` and Keys' `i bVII bVI V` are **the same
+progression**. Comparing them without translating first reported an overlap of 19 rows out of 138,
+which is nonsense for two collections that are both mostly canon; translated it is 25 and every
+minor row lines up. The dangerous direction is importing a pack row verbatim: it parses perfectly
+and plays the wrong chords, and `ChordLibraryTests.cpp` cannot catch it, because a well-formed
+numeral is all it can check for.
+
+**Seven rows added**, and they are the useful kind of gap. The commonest four-chord windows in the
+corpus with no row here turned out to be **two-chord vamps written across four bars** - `I V I V`,
+`I IV I IV`, `i bVII i bVII` - a shape the table already used and had never written down for the
+commonest degrees. Not an exotic progression nobody thought of; the obvious one everybody plays and
+nobody puts on a list.
+
+**Eight rows never occur** in the corpus, all seven chords or longer. Nothing was deleted: the count
+*fell* from eleven to eight when the sample went from 40,000 songs to 150,000, which is the tell -
+they are rare rather than absent, and an exact twelve-chord window is rare in user-entered chord
+sheets.
+
+### Added: a check on the mood tags, and a clear statement of what it can settle
+
+Chordonomicon carries a Spotify track id on 73% of its songs and the audio-feature dumps carry
+valence and energy per id, so every progression can be placed on Russell's circumplex and each row
+scored by the mean valence of the songs that play it.
+
+**The control is the part that matters, and it failed first.** Minor should read sadder than major.
+The first split counted how many of a row's chords were minor - the obvious test, and wrong, because
+a minor key is full of *major* triads: `bIII`, `bVI` and `bVII` all are, so the Andalusian cadence
+counts three major against one minor and landed on the major side of a test meant to identify it as
+minor. With that split the control said minor was *happier* and the whole run was noise. Split on
+the row's declared mode instead and it passes at **+0.018** in the right direction.
+
+That 0.018 is the yardstick, and it reframes the result: it is roughly the most a purely *harmonic*
+fact moves an **audio** valence measure. The mood ordering comes out sensible - Lighthearted, Tender
+and Playful at the top, Longing, Haunting, Sad and Melancholic at the bottom, energy running the
+other way - but its spread is 0.054, three times that ceiling. So most of the spread is **not
+harmony**; it is genre and production riding along.
+
+**Verdict, recorded rather than glossed:** the tags are directionally right, and the measurement
+mostly reflects the company a progression keeps rather than the progression itself. And some of it
+can never be settled this way - valence and arousal are two numbers where the vocabulary is 46
+words, so Haunting and Eerie will always land in the same place. **No tag was changed.**
+
+### Added: a Library window you can actually browse
+
+Owen chose both surfaces when the library was designed - the generator source first, a window
+after. This is the window, opened by a **Library** chip on the Pads bar beside Generator.
+
+The source that shipped first is genuinely useful, but a filter is not browsing: you can see what
+came *out* of the table and never what is *in* it. This shows you the table.
+
+**Paged, not scrolled.** Twelve rows and a `<` `>` pair, exactly the shape the pad strip already
+uses. 355 rows is a scroll, and a scroll is the gesture the mouse-only contract is worst at - a
+scrollbar thumb is a small target that has to be dragged, and a wheel is not a gesture Keys may
+require. A page is two clicks and every target on it is full size.
+
+**A row is a chord card that happens to hold several chords.** It shows the name, what it does, the
+progression in roman numerals as *written* rather than resolved into a key ("i bVII bVI V" says
+what the Andalusian cadence is in a way "Cm Bb Ab G" only says if you already knew the key), and
+its mood and genre tags. The whole row is the Hear button, and a second click on the row that is
+walking stops it - the way out is the same target that started it rather than a hunt for a Stop
+button.
+
+**Hearing a progression is the thing the tray could not do.** ii-V-I and ii-V-vi start identically,
+so one chord of a progression tells you almost nothing. `ChordGenMenu::auditionProgression` walks
+the chords at 550 ms each and gives the last one the full 800 ms a single chord gets, so a cadence
+is heard arriving rather than stopping. It lives on the brain rather than in the window for the
+reason every audition does: it calls noteOn with no pad behind it, and the brain outlives every
+window, so no close can strand a note. One timer serves both auditions and the queue is what tells
+a tick which kind it is - a second timer would be a second thing able to leave a note on.
+
+**Two buttons per row place it**: into the generator's tray, where each chord becomes a candidate
+you can hear and drag one at a time, or straight onto the page's empty pads. The pads route goes
+through the same `sendChordToFirstEmptyPad` every generation uses, so **nothing overwrites a chord
+you already have**, and it is one undo entry for the whole progression rather than one per chord.
+"To tray" greys when the generator window is shut rather than opening it behind your back: a button
+that summons a window you did not ask for is a surprise.
+
+**The three filters are the generator's own state**, so this window and the Library band are one
+thing rather than two that drift - pick a mood here and Fill on the Pads bar obeys it. Each window
+polls the other's changes, because neither knows the other exists and neither should have to.
+
+The Pads bar is two pixels past what the *old* 1070 floor would have handed it, and comfortably
+inside the current 1280. Noted in `minWidthForView` rather than tidied away: it means the Pads bar
+is one chip from being the binding constraint again.
+### Added: Library, a source that looks a progression up instead of computing one
+
+Owen: "an outstanding library that makes it easy to compose, maybe organized by emotion or
+something. Scaler, the other VST has done a great job of this."
+
+**271 named progressions** in `src/ChordLibrary.h`, tagged on three axes, reached as an eighth
+entry on the generator's Source row. Its band is Mood / Genre / Does-what plus a readout of how
+many rows the filter matches and which one the last generation landed on.
+
+**Function is the third axis and it is the point.** Scaler tags on two, mood and genre, and "sad"
+returns forty candidates with no way to choose between them. **Loop, Cadence, Turnaround, Vamp,
+Lift, Descent, Turn, Open** is the axis that separates "sad, and it loops" from "sad, and it ends",
+and every composer has one of those two in mind rather than the other. Two words on Scaler's own
+mood list give the game away: Inconclusive and Resolved are not emotions, they are what the
+progression *does*.
+
+Mood and Genre are Scaler 3's own vocabularies, from Owen's copy of them, plus five words Keys
+already used that Scaler has no equivalent for: Haunting, Nostalgic, Rebellious, Spiritual, Tender.
+A word list is a taxonomy rather than a compilation. What is authored here is the *content* - the
+named canon (Pachelbel, Andalusian, backdoor, rhythm changes, folia, the classical schemas), modal
+vamps per mode, jazz turnarounds, film-score chromatic mediants, and the loops that carry each
+electronic genre. **Written out from music-theory knowledge, not measured against a corpus** -
+`ChordLibrary.h` says so at the point somebody would extend the table, and sixty of the rows are
+`MarkovData.h`'s, itself hand-authored for Keys. None of it is copied from another product's
+curated list.
+
+**Stored as roman numerals**, in the grammar `ChordMarkov.h` already parses, so one row serves
+twelve keys and the storage format is the same notation the cards now print in their corner. Six
+suffixes were appended to make that possible - `m7b5`, `mM7`, `m6`, `madd9`, `M9`, `m9` - and
+half-diminished is the one whose absence was not cosmetic: it is the ii of every minor ii-V, so
+the most common cadence in the minor key could not be written down at all. Appending there is
+safe, unlike almost everywhere else in Keys, because that table is looked up by exact string and
+nothing stores an index into it. `genSource` itself is appended to, which is the usual rule.
+
+**The table validates itself on every build**, and that is not ceremony: a hand-typed numeral has
+two silent failure modes - a token that will not parse is skipped at play time so the progression
+just comes out short, and a misspelt tag is a row the picker that wanted it can never find.
+`tests/ChordLibraryTests.cpp` walks every row for both, checks each one transposes identically
+into all twelve keys, and refuses two rows that hold the same chords **and** share a genre. That
+last rule caught fourteen redundancies while the table was being written, and forced a canonical
+spelling: a plain triad is `i`, never `im`, because both parse to the same chord and a duplicate
+wearing two spellings is invisible to a string compare.
+
+Reusing one progression under two names is still correct and deliberate - the same four chords are
+how you find it from the Disco end and from the Neo Soul end - so the rule is genre overlap, not a
+flat ban.
+
+**A generation lays whole progressions end to end rather than looping one.** The first cut looped
+a single row to fill the sixteen tray cells, the way `sources::progressions` does with its own
+templates, and it was wrong here for a reason only visible on screen: the library holds vamps, and
+rolling the two-chord "Minimal one-chord" filled every card with the same Cm9. Laid end to end, a
+**Vamp** filter gives eight different vamps to compare and a **12-Bar Blues** fills the tray on its
+own - the same rule right at both ends. Rows are drawn shuffled and without replacement, so Regen
+is never inert under a narrow filter.
+
+**Degrees resolve against the row's own mode, not the session's**, which is the opposite of what
+every other source wants and the right answer here: a minor row read against a major session
+resolves nothing, and the tray came back with half its cards labelled `?` about a progression
+perfectly in *its* own key. `degree` is stored on the pad, so this is what the strip shows
+afterwards too.
+
+The three picks are not parameters, the shape Markov's Mood and Start already use, and for one
+reason of their own: a choice parameter's item list is append-only forever once a session stores
+an index into it, and locking a 46-word mood vocabulary into the layout before the library has
+settled would mean never being able to drop or rename one. The cost is that a pick does not
+survive reopening the session, exactly as a Markov mood does not.
+
+### Fixed: the generator's diagram drew the wrong source for anything past Planing
+
+`SourceViz::setSource` clamped its argument to 6. That is the same trap `ChordGenMenu::sourceIndex`
+documents and had already been fixed for - an upper clamp has to be a literal count of the sources,
+so appending an eighth brain, the one growth the parameter's own comment calls safe, arrived
+silently drawing Planing's diagram under Library's chords with nothing on screen to say so. Floor
+only now; a source the diagram does not know falls through to an empty well, which is honest.
+
+### Added: every chord card says which degree of the key it is
+
+Owen: "I want the progression number to show up in the generator on the chord pad." A filled card
+now carries its roman numeral in the top-left corner - on the chord pads and on the generator's
+audition tray both, because those are the same card read at two moments, the chord you kept and
+the chord you are trying, and a numeral that sat differently on each would say they were different
+things.
+
+"Am" tells you what a chord *is*; "vi" tells you what it *does*. The second is what makes a row of
+cards read as a progression rather than as four unrelated names, which is the whole reason to have
+sixteen of them side by side.
+
+Top-left is the one corner a card had left: the lock dot owns the top-right and the arp line's
+letter the bottom-right. Micro caps at the note list's own size, 0.62 alpha - the numeral is
+provenance, not the chord, and the name is still what you read.
+
+`src/ChordNumerals.h` is the one implementation, moved out of `SourceViz.cpp` where it was private
+to the Progressions diagram. A copy per surface would have re-armed a trap that file has already
+paid for: the diagram drew sixteen `?` for a build because it read `numeral`, which only the Markov
+source writes, where every other source writes `degree`. Resolution order is numeral, then degree,
+then a degree derived from the chord's root against the current key.
+
+It answers **empty** rather than `?` when none of the three resolve, and the two surfaces part
+there on purpose. A card draws nothing at all: a `?` in the corner of every hand-captured pad is
+noise standing in for information, and a chord borrowed from outside the key saying nothing is
+itself the useful answer. The diagram keeps its `?`, because it draws one chip per step and an
+empty chip would read as a gap in the walk rather than as a chord whose degree is outside the key.
+
+Pads resolve against the `genRoot` / `genMode` **parameters** rather than through
+`ChordGenMenu::genRoot()`, which answers with whatever an unticked Key or Mode rolled for the last
+generation. A pad outlives that roll, and the key you are composing in is the one on the Pads bar.
+
+### Added: docs/CHORD_LIBRARY.md, the design behind the library
+
+The design and its paper trail, in the shape `docs/ACID_DESIGN.md` uses, including the two parts
+not built yet - a browsable Library window, and the relational layer that would make **Could
+follow** mean "a progression that could follow this progression" rather than "a chord that could
+follow this chord".
+
+The finding that shapes all of it: Keys already ships **88 mood-tagged progressions** in
+`src/MarkovData.h`, and no user can look at one. They exist only to be shredded into Markov
+bigrams, so asking for "Nostalgic" returns a statistical blur of the nostalgic progressions rather
+than the progressions themselves. Seven more sit in `ChordSources.h` with no tags at all. Folding
+those 88 into the new table is the next job.
+
 ### Fixed: half of the arp VEL knob's outer ring did nothing
 
 Caught in review of the merge that folded Humanize Velocity into VEL's ring. `RangeKnob` took

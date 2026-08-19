@@ -145,17 +145,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
 
     // Second chord-generator source: Markov walks bundled progression tables instead of
     // weighting a candidate pool. Its settings only apply when the source is Markov.
-    // Seven brains now, and the five after Markov are `sources::` (2026-08-01). They are
-    // **appended**, which is what makes this safe for a session saved before them: APVTS stores a
-    // choice parameter's denormalised value, so a saved 1 is still Markov whatever the list grew
-    // to. Never reorder or insert into this list - that is what would silently reopen a session
-    // on the wrong brain, and there is no migration hook for it the way `migrateRateMode` covers
-    // the arp's clock.
+    // Eight brains now: the five after Markov are `sources::` (2026-08-01) and **Library** is
+    // `chordlib::` (2026-08-18). They are **appended**, which is what makes this safe for a
+    // session saved before them: APVTS stores a choice parameter's denormalised value, so a saved
+    // 1 is still Markov whatever the list grew to. Never reorder or insert into this list - that
+    // is what would silently reopen a session on the wrong brain, and there is no migration hook
+    // for it the way `migrateRateMode` covers the arp's clock.
+    //
+    // Library is the odd one out and worth naming as such: the other seven *compute* a chord
+    // sequence, and it looks one up. Everything downstream is the same either way, because they
+    // all hand back `chordgen::Chord`.
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "genSource", 1 }, "Generator Source",
                                                       juce::StringArray { "Algorithmic", "Markov",
                                                                           "Circle of Fifths", "Neo-Riemannian",
                                                                           "Progressions", "Negative Harmony",
-                                                                          "Planing" },
+                                                                          "Planing", "Library" },
                                                       0));
 
     // Per-source settings. Each is dead under every source but its own, and the window hides it
@@ -2284,6 +2288,13 @@ juce::ValueTree KeysProcessor::chordPadsToTree() const
         pad.setProperty("degree", p.degree, nullptr);
         if (p.numeral.isNotEmpty())
             pad.setProperty("numeral", p.numeral, nullptr);
+        // Written only when there is one, like `numeral` above: most pads are not part of a named
+        // progression, and a property on every pad saying so would be noise in the session file.
+        if (p.progression.isNotEmpty())
+        {
+            pad.setProperty("progression", p.progression, nullptr);
+            pad.setProperty("progressionStep", p.progressionStep, nullptr);
+        }
         pads.appendChild(pad, nullptr);
     }
     return pads;
@@ -2330,6 +2341,8 @@ void KeysProcessor::chordPadsFromTree(const juce::ValueTree& root)
         p.type = (int) pad.getProperty("type", -1);
         p.degree = (int) pad.getProperty("degree", -1);
         p.numeral = pad.getProperty("numeral").toString(); // absent in pre-Markov sessions
+        p.progression = pad.getProperty("progression").toString(); // absent in pre-library sessions
+        p.progressionStep = (int) pad.getProperty("progressionStep", -1);
         chordPads[(size_t) slot] = p;
     }
 }
@@ -3394,6 +3407,10 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("controlsDetached", layout.controlsDetached, nullptr);
     tree.setProperty("padsDetached", layout.padsDetached, nullptr);
     tree.setProperty("chordGen", layout.chordGen, nullptr);
+    tree.setProperty("chordLib", layout.chordLib, nullptr);
+    // Newline-joined rather than comma: a row name may contain a comma ("Axis, vi start") and
+    // may not contain a newline, so this is the separator that cannot collide with the data.
+    tree.setProperty("libraryFavourites", layout.libraryFavourites.joinIntoString(juce::newLine), nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
     tree.setProperty("arpPage", layout.arpPage, nullptr);
@@ -3410,6 +3427,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("controlsDetachedBounds", layout.controlsDetachedBounds.toString(), nullptr);
     tree.setProperty("padsDetachedBounds", layout.padsDetachedBounds.toString(), nullptr);
     tree.setProperty("chordGenBounds", layout.chordGenBounds.toString(), nullptr);
+    tree.setProperty("chordLibBounds", layout.chordLibBounds.toString(), nullptr);
     return tree;
 }
 
@@ -3438,6 +3456,11 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // Absent before the generator had a window of its own; shut is the right default either
     // way, since it is a settings window rather than something you play from.
     layout.chordGen = flag("chordGen", false);
+    layout.chordLib = flag("chordLib", false);
+    layout.libraryFavourites.clear();
+    if (tree.hasProperty("libraryFavourites"))
+        layout.libraryFavourites.addLines(tree.getProperty("libraryFavourites").toString());
+    layout.libraryFavourites.removeEmptyStrings();
     // Absent before there were three lines, and line A is the right answer for those: it is
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
@@ -3480,6 +3503,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     frame("controlsDetachedBounds", layout.controlsDetachedBounds);
     frame("padsDetachedBounds", layout.padsDetachedBounds);
     frame("chordGenBounds", layout.chordGenBounds);
+    frame("chordLibBounds", layout.chordLibBounds);
 }
 
 void KeysProcessor::arpLineToTree(juce::ValueTree& dest, int line) const

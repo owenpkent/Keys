@@ -304,6 +304,58 @@ public:
                                       "the saved rate came back");
         }
 
+        beginTest("a pad remembers which progression it is a step of");
+        {
+            // The two fields added on 2026-08-18, and the reason they are worth a test of their
+            // own: they are written only when a pad has them, so the load path has to answer
+            // sensibly for a pad that does not - which is every pad in every session saved before
+            // they existed.
+            Host h;
+            KeysProcessor::ChordPad pad;
+            pad.notes = { 60, 63, 67 };
+            pad.name = "Cm";
+            pad.progression = "Andalusian cadence (i-bVII-bVI-V)";
+            pad.progressionStep = 2;
+            h.processor.setChordPad(0, pad);
+
+            KeysProcessor::ChordPad plain;
+            plain.notes = { 62, 65, 69 };
+            plain.name = "Dm";
+            h.processor.setChordPad(1, plain);
+
+            juce::MemoryBlock block;
+            h.processor.getStateInformation(block);
+            h.processor.clearChordPad(0);
+            h.processor.clearChordPad(1);
+            h.processor.setStateInformation(block.getData(), (int) block.getSize());
+
+            expectEquals(h.processor.chordPad(0).progression,
+                         juce::String("Andalusian cadence (i-bVII-bVI-V)"));
+            expectEquals(h.processor.chordPad(0).progressionStep, 2);
+            // A pad that is not part of a progression must come back saying so, not saying step 0
+            // of an unnamed one - the strip's bracket scan reads both fields and a 0 there would
+            // put a bracket under chords that never belonged together.
+            expect(h.processor.chordPad(1).progression.isEmpty(), "a plain pad claimed a row");
+            expectEquals(h.processor.chordPad(1).progressionStep, -1);
+        }
+
+        beginTest("starred library rows round-trip, commas and all");
+        {
+            // Newline-joined rather than comma-joined, because a row name may contain a comma
+            // ("Axis, vi start") and may not contain a newline. This pins the separator choice:
+            // with a comma the name below would come back as two.
+            Host h;
+            h.processor.layout.libraryFavourites = { "Axis, vi start (vi-IV-I-V)", "ii-V-I" };
+            juce::MemoryBlock block;
+            h.processor.getStateInformation(block);
+            h.processor.layout.libraryFavourites.clear();
+            h.processor.setStateInformation(block.getData(), (int) block.getSize());
+
+            expectEquals(h.processor.layout.libraryFavourites.size(), 2, "a name split on a comma");
+            expect(h.processor.layout.libraryFavourites.contains("Axis, vi start (vi-IV-I-V)"));
+            expect(h.processor.layout.libraryFavourites.contains("ii-V-I"));
+        }
+
         beginTest("every UI line, switched on and listening, arpeggiates the keys");
         {
             // Processor-level, deliberately: ArpTests proves one engine works, and the bug this
@@ -334,8 +386,7 @@ public:
                 expect(ons >= 3, "line " + juce::String::charToString(
                                      (juce::juce_wchar) ('A' + line))
                                      + " played " + juce::String(ons) + " notes");
-            }
-        }
+            }        }
     }
 };
 

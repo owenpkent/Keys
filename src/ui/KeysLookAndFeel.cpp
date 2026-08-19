@@ -45,6 +45,22 @@ namespace skin
         g.fillEllipse(juce::Rectangle<float>(r * 0.9f, r * 0.55f)
                           .withCentre({ c.x - r * 0.25f, c.y - r * 0.45f }));
     }
+
+    void numeralBadge(juce::Graphics& g, juce::Rectangle<float> card, const juce::String& numeral,
+                      juce::Colour ink)
+    {
+        if (numeral.isEmpty())
+            return;
+
+        // Micro caps at the size the note list under the name already uses, so the card reads as
+        // three weights of one thing rather than as a card with a sticker on it. 0.62 alpha
+        // because the numeral is provenance, not the chord: the name is what you read.
+        g.setColour(ink.withAlpha(0.62f));
+        g.setFont(micro(9.0f));
+        g.drawText(numeral, card.reduced(5.0f, 4.0f).toNearestInt(), juce::Justification::topLeft,
+                   false);
+    }
+
     Accent accentOf(const juce::Component& c)
     {
         // JUCE already walks the LookAndFeel up the hierarchy to the editor, so a

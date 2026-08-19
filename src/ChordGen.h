@@ -266,6 +266,17 @@ namespace keys::chordgen
         int type = 0;
         std::vector<int> notes;
         int degree = -1; // scale degree this came from, or -1 if it's from outside the scale
+        // Set only by the Library source, which looks a written-down progression up rather than
+        // computing a chord: the row's name, and this chord's 0-based place in it. Every other
+        // source leaves them empty, because a chord it invented is not a step of anything.
+        //
+        // They live on the chord rather than being stamped at the placing end because the
+        // placing ends are several - the tray, a pad, the reference card - and only the source
+        // knows which row a chord came out of. `KeysProcessor::ChordPad` carries the same pair
+        // onward, which is what lets the strip draw a bracket under consecutive steps and what
+        // lets "could follow" ask about a progression rather than about a chord.
+        juce::String progression;
+        int progressionStep = -1;
     };
 
     namespace detail

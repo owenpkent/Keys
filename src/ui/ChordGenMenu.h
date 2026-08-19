@@ -100,10 +100,36 @@ public:
     void auditionChord(const std::vector<int>& notes) { previewChord(notes); }
     void stopAudition() { stopPreview(); }
 
+    // A whole progression, played through one chord at a time (2026-08-18, for the Library
+    // window). It is here rather than in that window for the same reason `previewChord` is: it
+    // calls noteOn with no pad behind it, this object outlives every window, and a window closing
+    // mid-audition must not strand a note. `stopAudition` ends it at any point, and so does an
+    // ordinary single-chord audition - one thing is sounding at a time, always.
+    //
+    // A progression is the unit the library is *about*, so hearing one chord of it tells you
+    // almost nothing: ii-V-I and ii-V-vi start identically. This is the button that answers the
+    // question the tray cannot.
+    void auditionProgression(const std::vector<std::vector<int>>& chords);
+    // **A flag, not the queue's emptiness.** The queue is popped as each chord *fires*, so it
+    // empties the moment the last chord starts - and that chord then sounds for another 800 ms
+    // with this answering false. The library window's row went dark about 100 ms in, and clicking
+    // it during those 800 ms restarted the whole progression instead of stopping it, because the
+    // "this row is the one playing" test had already stopped matching. The walk is over when the
+    // last chord is over, which is what stopPreview and the final timer tick decide.
+    bool auditioningProgression() const { return walking; }
+
     // What each of those two would find to do, for the bar and the window to grey their
     // buttons on.
     bool pageHasEmptyPads() const { return ! emptyPadsOnPage().empty(); }
     bool pageHasRegeneratablePads() const { return ! regeneratablePadsOnPage().empty(); }
+
+    // The key the *current* trayful was generated in, which is not always what the parameter says:
+    // an unticked Key or Mode means the generator rolled one for this generation, and every chord
+    // in the tray is in that rolled key. Public since 2026-08-18 so a tray card can label itself
+    // with the degree it actually is. The chord pads deliberately read the parameters instead - a
+    // pad outlives the roll that made it, and the key you are composing in is the one on the bar.
+    int genRoot() const;
+    int genMode() const;
 
     // The generator's items on a pad's card menu, and what to do with a choice from them.
     // ChordPads builds the menu and calls these in that order on the message thread:
@@ -143,6 +169,35 @@ public:
     void setStartChoice(juce::String s) { start = std::move(s); }
     int chainMode() const; // which Markov corpus is up, for the Mood list that belongs to it
 
+    // The Library source's three picks, and they are not parameters either, for the same reason
+    // Mood and Start are not plus one of their own: the vocabularies are 46 moods and 41 genres,
+    // and a choice parameter's item list is **append-only forever** the moment a session stores
+    // an index into it (see genSource's own comment). Locking a 46-word list into the parameter
+    // layout before the library has settled would mean never being able to drop or rename a mood.
+    // The cost, and it is real: a library pick does not survive reopening the session, exactly as
+    // a Markov mood does not. Worth revisiting once the vocabulary stops moving.
+    //
+    // Empty string is "Any" on the two word axes - the same sentinel `markov::buildTable` uses -
+    // and -1 is "Any" on the function, which is an enum with no room for an empty value.
+    const juce::String& libraryMood() const { return libMood; }
+    const juce::String& libraryGenre() const { return libGenre; }
+    int libraryFunction() const { return libFunction; }
+    void setLibraryMood(juce::String s) { libMood = std::move(s); }
+    void setLibraryGenre(juce::String s) { libGenre = std::move(s); }
+    void setLibraryFunction(int f) { libFunction = f; }
+
+    // **The library row the tray is currently holding**, for the generator window's diagram and
+    // readout to name. Two things write it and that is the point: a Library generation (where the
+    // pick is three filters, so which row came back is a thing only generation knows) and the
+    // Library window's "To tray", which puts one named row there on purpose.
+    //
+    // It said "the row the last *generation* used" for about an hour, and the To-tray push made
+    // that reading wrong on screen straight away: the tray held Bird changes and the diagram was
+    // still captioned Folia, because the last generation was the last thing to write it. One
+    // field, one meaning - what is in the tray.
+    const juce::String& lastLibraryEntry() const { return libLastEntry; }
+    void setLastLibraryEntry(juce::String s) { libLastEntry = std::move(s); }
+
 private:
     void timerCallback() override;
 
@@ -156,8 +211,6 @@ private:
     // a page flip the way every other index here does.
     std::vector<int> emptyPadsOnPage() const;
     std::vector<int> regeneratablePadsOnPage() const;
-    int genRoot() const;
-    int genMode() const;
 
     // Every source except Markov produces `chordgen::Chord`, so one call covers Algorithmic and
     // the five that arrived on 2026-08-01, and every caller that used to reach straight for
@@ -218,12 +271,27 @@ private:
     // live here rather than in the window's combo boxes so they outlive it being closed.
     juce::String mood, start;
 
+    // The Library source's picks, transient for the same reason and one more (see the accessors).
+    // -1 on the function is "Any"; empty is "Any" on the two word axes. `libLastEntry` is not a
+    // pick at all, it is the name of the row the last generation landed on - the window's diagram
+    // has no other way to know, since the pick is a filter and the choice among what it matched
+    // happens inside generateChords.
+    juce::String libMood, libGenre, libLastEntry;
+    int libFunction = -1;
+
     // The suggestion list the last card menu offered, and where a pick would land. Held
     // between addPadMenuItems and handlePadMenuChoice, which ChordPads calls in that order.
     std::vector<suggest::Suggestion> lastSuggestions;
     int lastSuggestTarget = -1;
 
     std::vector<int> previewNotes; // suggestion audition currently sounding
+
+    // The chords still to play of a progression audition, in reverse (the next one is the back,
+    // so stepping is a pop rather than an erase from the front). Empty means nothing is walking,
+    // which is also what `auditioningProgression` answers with and what tells `timerCallback`
+    // whether its tick is the end of an 800 ms preview or the start of the next chord.
+    std::vector<std::vector<int>> progressionQueue;
+    bool walking = false; // a progression is sounding, including its final chord
 
     int editingSlot = -1; // pad the keyboard is editing, pushed from the editor; see the setter
 
