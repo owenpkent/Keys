@@ -1478,6 +1478,15 @@ what is no longer true lives here in one place:
   thread (the server marshals it there), so tool bodies call the processor/APVTS the
   same way the UI does. The stdio bridge processes connect through is `keys-mcp.exe`
   (`KEYS_BUILD_MCP_SHIM`). See `docs/MCP.md`.
+  **The shim outlives Keys, and until 2026-08-18 it did not** - it connected once and then
+  wrote into a dead socket for ever, so every tool call after a rebuild returned *nothing* and
+  the client sat on its idle timeout. `run.py` closes and relaunches Keys on every build and the
+  server takes a **new port each time**, so this was the normal case, not an edge one. It
+  reconnects on demand now and answers every request even when there is nothing to connect to,
+  because silence is the one failure a client cannot act on. The code is the kit's
+  (`src/McpShimMain.cpp`, pinned by `tests/mcp_shim_reconnect.py`); fix it there, not here. If
+  a tool call ever hangs again, read the live port out of `%APPDATA%\OK Studio\mcp` and talk to
+  it directly - that is what tells a broken bridge from a broken plugin in one step.
 - **Ports from Octavium are not transcriptions.** Two of its generator bugs were fixed
   rather than reproduced (non-diatonic Sus2/Add9 at 100% compliance; regenerate
   dropping the note-count filter), and its right-click affordances had to be rebuilt as

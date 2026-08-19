@@ -49,6 +49,19 @@ see**.
 The Draw page is 150 px taller for it - it is now the tallest of the three pages, where Play was.
 Paging already moves the window, and this is the page the height buys something on.
 
+### Fixed: restarting Keys no longer hangs the MCP bridge
+
+Claude Code launches `keys-mcp` once per session and keeps it for hours; `run.py` closes and
+relaunches Keys on every build, and the in-plugin server takes a new OS-assigned port each time.
+The shim connected once and then wrote into a dead socket forever, so a tool call got **no
+response at all** and the client sat on its idle timeout — half an hour of looking exactly like a
+slow tool. It reconnects on demand now, and never leaves a request unanswered: with nothing to
+connect to, with a connection that dropped mid-call, or with Keys alive but wedged, the call comes
+back as a JSON-RPC error instead of as silence.
+
+The fix is in the kit (`src/McpShimMain.cpp`), so every OK Studio plugin with a shim gets it.
+`docs/MCP.md` has the detail and how to tell a broken bridge from a broken plugin.
+
 ### Added: the Note lane is an arpeggiator you draw, not a list of note numbers
 
 Cthulhu's Note graph, which is the thing that makes that graph worth having. Its manual p23: the

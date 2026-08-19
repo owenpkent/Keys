@@ -181,6 +181,39 @@ the shim connects to whichever advertised itself most recently; pass `--port=N` 
 pin it to a specific instance's port instead (read the port from that instance's
 discovery file if you need to find it).
 
+## Restarting Keys does not break the bridge (2026-08-18)
+
+**This is the one thing to know about the shim.** Claude Code launches `keys-mcp` once,
+at the start of a session, and keeps that one process for hours. `run.py` closes and
+relaunches Keys on every build, and the in-plugin server takes a **new OS-assigned port
+each time**. So the socket underneath the shim dies constantly, and the shim has to
+survive it.
+
+It does now. A tool call arriving while it is disconnected re-reads the discovery
+directory and connects to whatever is running at that moment — the reconnect costs
+milliseconds and needs no handshake, because the server is stateless per request.
+
+**Before this it hung.** The shim connected once and then wrote into a dead socket
+forever, so a tool call got *no response at all* and the client sat on its idle timeout
+— 30 minutes of looking exactly like a slow tool. If you ever see that again, it is not
+the plugin: check `%APPDATA%\OK Studio\mcp` for the live instance's port and talk to it
+directly to tell the two apart.
+
+Three more failure modes are closed with it, all of which used to be silence:
+
+- **Nothing running at all** — a call answers with a JSON-RPC error saying so, rather
+  than hanging. The shim also no longer exits when it finds no instance at startup; it
+  serves errors and connects when Keys appears, since the client only ever launches it
+  once and an exit would leave the session with no tools.
+- **A call in flight when Keys closes** — answered with an error. A write into a socket
+  whose peer has already gone can succeed, so "it sent" never meant "a reply is coming".
+- **Keys alive but wedged** — a blocked message thread answers nothing while its socket
+  stays open, so a watchdog answers after `--timeout-ms` (default 30 s). Every tool
+  handler runs on the message thread, so this is a real case, not a theoretical one.
+
+The fix is in the kit (`src/McpShimMain.cpp`), so every OK Studio plugin with a shim gets
+it; `tests/mcp_shim_reconnect.py` there pins all five cases and runs under ctest.
+
 ## Security
 
 The server only binds `127.0.0.1` and never authenticates a connection: any local
