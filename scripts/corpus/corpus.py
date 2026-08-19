@@ -23,11 +23,21 @@ scripts are kept beside this one as that check rather than as dead weight; delet
 something else can play the role.
 """
 import argparse
+import io
 import os
 import re
 import sys
 
 import duckdb
+
+# Line-buffer stdout, because every long run here is a redirected one. Sent to a file rather than a
+# terminal, Python block-buffers, so a pass that prints its progress faithfully still shows a 0-byte
+# file for its whole life and only flushes on exit. That is indistinguishable from a hang from the
+# outside, and it cost an hour of second-guessing a healthy run on 2026-08-18: sixteen print() calls
+# and not one of them visible. One line here beats flush=True on each of them, and beats remembering
+# to pass -u.
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(line_buffering=True)
 
 CHORDS = "datasets/chordonomicon_v2.csv"
 BIG = "datasets/spotify_features_huge.parquet"
