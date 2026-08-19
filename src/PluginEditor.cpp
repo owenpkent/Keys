@@ -314,7 +314,8 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         rk.setTitle(name + " range");
         rk.setTooltip(tip);
         rk.spanHandle().setTitle(name + " range handle");
-        rk.setSpanTooltip("Drag up and down to open or close the range. Closed is a fixed "
+        rk.setSpanTooltip("Drag up to open the range, down to close it - it opens both ways "
+                          "around its middle, and the wheel works too. Closed is a fixed "
                           "value; open, every chord draws a new one inside it.");
         rk.textFromRange = [unit](double a, double b)
         { return juce::String((int) a) + "-" + juce::String((int) b) + unit; };

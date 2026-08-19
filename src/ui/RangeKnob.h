@@ -286,6 +286,10 @@ public:
     void mouseDown(const juce::MouseEvent& e) override { beginSpanDrag(e); }
     void mouseDrag(const juce::MouseEvent& e) override { dragSpan(e); }
     void mouseUp(const juce::MouseEvent&) override { endSpanDrag(); }
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        wheelSpan(w);
+    }
 
 private:
     // The satellite. A component of its own so it sits above the face in z-order and takes the
@@ -317,6 +321,10 @@ private:
                 owner.setOn(! owner.isOn());
                 owner.repaint();
             }
+        }
+        void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+        {
+            owner.wheelSpan(w);
         }
         RangeKnob& owner;
         bool moved = false;
@@ -398,6 +406,7 @@ private:
         // and their local origins are nowhere near each other.
         dragStartY = (float) e.getScreenPosition().y;
         dragStartSpan = span;
+        dragStartValue = knob.getValue();
         if (onSpanDragStart)
             onSpanDragStart();
         repaint();
@@ -420,13 +429,50 @@ private:
                                            dragStartSpan
                                                + (double) (dragStartY - (float) e.getScreenPosition().y)
                                                      * (full / 300.0));
-        if (std::abs(wanted - span) < 1.0e-9)
+        applySpan(wanted, dragStartSpan, dragStartValue);
+    }
+
+    // **The halo opens the band around its centre** (2026-08-19, Owen: "it should expand in
+    // both directions. up is more"). The first cut grew the span downward from a pinned top,
+    // so the gesture read as "lower the floor" rather than "more range". The face carries
+    // half of every change the halo makes - the top rises as the floor falls - which keeps
+    // the face meaning what it always meant (the band's own end, the engines are untouched)
+    // while the gesture means what a halo suggests. The face's own drag still moves the whole
+    // band, unchanged. Both are computed from the gesture's start, not incrementally, so
+    // clamping at either end never accumulates drift.
+    void applySpan(double wantedSpan, double fromSpan, double fromValue)
+    {
+        if (std::abs(wantedSpan - span) < 1.0e-9)
             return;
-        span = wanted;
+        span = wantedSpan;
+        // sendNotificationSync, so the attachment and any onValueChanged consumer see the
+        // face and the span move as one state, in a deterministic order, inside the gesture.
+        const double half = (wantedSpan - fromSpan) * 0.5;
+        knob.setValue(fromValue + (direction == Direction::below ? half : -half),
+                      juce::sendNotificationSync);
         syncArcOrigin();
         if (onSpanChanged)
             onSpanChanged(span);
         repaint();
+    }
+
+    // The wheel on the halo or the ring margin, because a drag is a drag and the mouse has a
+    // wheel: up is more, one notch is a twentieth of the full sweep. Each event is its own
+    // bracketed gesture, the same shape a stepper click is.
+    void wheelSpan(const juce::MouseWheelDetails& wheel)
+    {
+        if (! isEnabled() || dragging)
+            return;
+        const auto full = spanMax();
+        if (full <= 0.0 || wheel.deltaY == 0.0f)
+            return;
+        const double wanted = juce::jlimit(0.0, full,
+                                           span + (wheel.deltaY > 0 ? 1.0 : -1.0) * full * 0.05);
+        if (onSpanDragStart)
+            onSpanDragStart();
+        applySpan(wanted, span, knob.getValue());
+        if (onSpanDragEnd)
+            onSpanDragEnd();
     }
 
     void endSpanDrag()
@@ -455,6 +501,10 @@ private:
     bool dragging = false;
     float dragStartY = 0.0f;
     double dragStartSpan = 0.0;
+    // The face's value when the halo drag began: applySpan writes the face as well as the
+    // span (the band opens around its centre), and both are computed from the gesture's
+    // start so a clamp at either end never accumulates drift.
+    double dragStartValue = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RangeKnob)
 };

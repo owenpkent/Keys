@@ -31,6 +31,12 @@ chance knob... and I want a mutate knob... higher values can go out of scale").
   stray onto in-scale neighbours; past 75 a growing share of the strays are chromatic, out of
   scale on purpose. LOCK holds the strays exactly as it holds the in-chord variations, so a
   wander that found a wrong-note lick can keep it.
+- **The range knobs' halo opens the band both ways.** Dragging the little dial used to grow the
+  range downward from a pinned top, which read as "lower the floor" rather than "more range";
+  it now opens the band around its centre - the top rises as the floor falls - and up is more.
+  A drag on the knob face still moves the whole band, and the mouse wheel over the halo or the
+  ring now nudges the range too. Applies to VEL and H.TIME on the arp cards and to the pads'
+  Strum and Humanize.
 
 ### Added: the step sequencer says what it is doing, and the lanes stopped being one grid each
 

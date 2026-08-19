@@ -1799,9 +1799,9 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                               "different amount every time. Click the little dial at the top "
                               "left to switch Humanize Velocity on or off; drag it, or anywhere "
                               "on the ring, to set how far it reaches.");
-                rk.setSpanTooltip("Drag up and down to set how far under its level a hit can "
-                                  "fall, in velocity, or click to switch Humanize Velocity on "
-                                  "or off.");
+                rk.setSpanTooltip("Drag up for a wider velocity band, down for a tighter one - "
+                                  "it opens both ways around its middle, and the wheel works "
+                                  "too. Click to switch Humanize Velocity on or off.");
                 // **The plain lo-hi readout, same as every other range knob** (2026-08-18). It
                 // read "level ~reach" while the face was a bipolar trim and the ring a percentage
                 // of shave: two different quantities in two different units, which no two-number
@@ -1883,7 +1883,8 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                               "drawn from nothing up to the knob, which is what this did before it "
                               "had a ring; close it and every hit gets at least that much, with the "
                               "variation on top. Turn the knob and the whole range moves with it.");
-                rk.setSpanTooltip("Drag up and down to open or close this knob's range.");
+                rk.setSpanTooltip("Drag up to open this knob's range, down to close it - it "
+                                  "opens both ways around its middle, and the wheel works too.");
                 // Both ends in one readout, in the knob's own units - a range that only shows one
                 // of its ends is the readout problem the arp rate had this morning.
                 rk.textFromRange = [](double lo, double hi)
