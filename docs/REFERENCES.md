@@ -75,11 +75,35 @@ Four-track arpeggiator. The richest per-step vocabulary of any of these, and the
   Clear, and its Random tool acts on *selected steps*. Keys built **Select**, and Roll and Reset
   narrow to the span. Copy, Paste and Clear-within-a-lane are still unbuilt, and are now cheap.
 
+**Also taken, 2026-08-18** - the step sequencer pass, and Cream is where all of it came from:
+
+- **Per-control loop points and Loop direction** (p11): *"Every step control have their own loop
+  control. This enables playing different controls independently from other controls"*, and Up /
+  Down / Up alt / Down alt beside it. Keys had per-lane *length* alone, which is polymeter without
+  phrasing - every lane started at step 0 and walked forwards, so three lanes of eight could only
+  ever be three lanes of eight in step. Built as `Lanes::loopFrom` / `loopTo` / `dir`, with the
+  window as a bar under the grid on the same cells. Kirnu's own click rule came with it (*"Loop
+  points follow mouse click... the pointer closest to the mouse is moved"*), which is already a
+  left-click-only path and is why the window needed no steppers beside it. **Not taken from it:**
+  the right-button-moves-the-far-handle half, which the closed right-click list forbids; the
+  nearer handle always is the whole rule here.
+- **The per-control on/off** (p12): *"Toggle On/Off: toggles selected pattern control on/off. When
+  control is off all it's values are ignored."* Built as `Lanes::on`; the lane returns its default
+  and the drawing is untouched. Keys had no way to take a lane out at all - Reset flattens it,
+  which sounds the same and loses the work.
+- **The tab marks** (p12): a corner mark for whether the control is on, and a second one meaning
+  *"that control has input values"*. Copied as a strike-through and a dot on each lane tab, and
+  they are the single biggest readability win of the pass: eleven of twelve lanes are invisible at
+  any moment, and until this nothing said which of them were doing anything.
+- **Copy and Paste** (p8), the last two of the tool palette. **Clear was deliberately not taken**:
+  its job is *"set values to default"* over the selection, and Keys' Reset already narrows to the
+  Select span and already means exactly that.
+
 **Not taken, and worth considering:**
-- **An enable row per lane**, not just for notes: *"First row from bottom can be used to turn
-  selected data section steps on or off. When step is off the value in step is ignored."* Keys'
-  MUTE row is the Note lane's alone. A per-lane enable would let you disable one step's Octave
-  without flattening it to 0.
+- **An enable row per *step*, per lane**, as distinct from the whole-lane switch above: *"First row
+  from bottom can be used to turn selected data section steps on or off. When step is off the value
+  in step is ignored."* Keys' MUTE row is the Note lane's alone. A per-lane version would let you
+  disable one step's Octave without flattening it to 0.
 - **Negative SHIFT** (a step played *earlier*). Keys' Late lane is 0..90, positive only, and
   `ArpEngine`'s own comment says why: an early half would need `emitHit`'s
   close-what-you-land-on rule rewritten. Kirnu proves the feature is wanted; the cost is
@@ -224,8 +248,10 @@ above**; `docs/SEQUENCER_LANDSCAPE.md` ranks a wider six from the eleven added o
 its number one (Hapax's Curve and Flip over a Select span) is a better answer than the Copy /
 Paste / Clear ranked first here.
 
-1. **Copy / Paste / Clear over a selection** (Kirnu). The three remaining tools of that palette,
-   now that Select exists to aim them.
+1. ~~**Copy / Paste / Clear over a selection** (Kirnu)~~ - Copy and Paste built 2026-08-18. Clear
+   was not, and that is the interesting half: Reset already narrows to the Select span and already
+   sets defaults, so the third tool of the palette turned out to be a control Keys had had for a
+   month under another name.
 2. **Skip, as distinct from Mute** (Numerology). A muted step still occupies its slot; a skipped
    one is passed over, so everything after it moves earlier. Keys' rhythm dividers are a global,
    regular version of it. Copy Numerology's guard if it is built: the first and last steps of a

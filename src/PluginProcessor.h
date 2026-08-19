@@ -298,7 +298,14 @@ public:
                     // what VEL on the macro card now writes. apVelTrim above stays registered so
                     // saved sessions still round-trip, and is read by nothing - migrateVelLevel
                     // folds it into this. See ArpEngine::Params::velLevel.
-                    apVelLevel, numArpParams };
+                    apVelLevel,
+                    // Appended 2026-08-18. The one randomness in Keys allowed to change which
+                    // note plays without having been drawn on that step - see ArpEngine's
+                    // `mutatedIndex` for why that is not a reversal of the Drift rule but the
+                    // other side of it. Mutate is how far it explores *inside the held chord*;
+                    // Lock is how long it keeps what it finds, the Turing Machine's own knob.
+                    // Both default to 0, which is the arp exactly as it was without them.
+                    apMutate, apMutateLock, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
@@ -549,12 +556,23 @@ public:
                 value[(size_t) l].fill(ArpEngine::laneDefaults[l]);
                 length[(size_t) l] = 8;
                 clockDiv[(size_t) l] = 0;
+                on[(size_t) l] = 1;
+                loopFrom[(size_t) l] = 0;
+                loopTo[(size_t) l] = ArpEngine::maxSteps - 1;
+                dir[(size_t) l] = ArpEngine::dirUp;
             }
         }
 
         std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> value {};
         std::array<int, ArpEngine::numLanes> length {};
         std::array<int, ArpEngine::numLanes> clockDiv {};
+        // The lane's on/off, its loop window and its direction, all 2026-08-18 and all
+        // defaulted by the constructor above to exactly what the engine did before they
+        // existed - so a slot recalled from a session that predates them plays unchanged.
+        std::array<int, ArpEngine::numLanes> on {};
+        std::array<int, ArpEngine::numLanes> loopFrom {};
+        std::array<int, ArpEngine::numLanes> loopTo {};
+        std::array<int, ArpEngine::numLanes> dir {};
 
         // What launching the slot plays, and how. The chord is a copy of a card, not a
         // reference to one: re-generating the pad page must not silently rewrite what a

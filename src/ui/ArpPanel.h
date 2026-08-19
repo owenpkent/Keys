@@ -65,6 +65,11 @@ public:
     // It is the processor's state rather than the panel's, because the Pads bar's letter chip
     // and the per-card Send to arp slot read it with this panel folded away.
     int editLine() const;
+
+    // Which lane the Draw page is showing. Public because the loop bar and the grids are
+    // handed the panel rather than an index, for the same reason `editLine` is: the tabs
+    // change it under them, and a copy taken at construction would go stale.
+    int selectedLaneIndex() const { return selectedLane; }
     // `leaveMacroView` false sets the line without changing what is on screen. A drop passes
     // false: it is routing a chord, not navigating, and in the macro view all three lines are
     // in front of you already, so there is nothing to switch to.
@@ -207,7 +212,10 @@ public:
         // separate knob, so there is one loudness control per line rather than two two cells
         // apart. H.TIME stays its own RangeKnob for the timing nudge; Ramp and Time still
         // live on the per-line tab.
-        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVel, kHTime,
+        // Eight again as of 2026-08-18: CHANCE became MUTATE and LOCK joined it. The strip was
+        // eight until H.VEL folded into VEL's ring on 2026-08-17, so this is a width the row
+        // has already carried - and the reserve-before-Shape rule below is what made that safe.
+        enum Knob { kOctShift = 0, kGate, kMutate, kLock, kSwing, kOffset, kVel, kHTime,
                     numKnobs };
 
     private:
@@ -330,6 +338,9 @@ public:
         // step < 0 = take it from x (the press); otherwise edit that step alone (the drag).
         void paintStepFromMouse(const juce::MouseEvent&, int step);
         juce::String cellText(int value) const;
+        // The pitch a Note lane index currently names, or empty for every other lane and for
+        // the values that ask the chord a question rather than counting into it.
+        juce::String noteNameFor(int value) const;
 
         KeysProcessor& processor;
         ArpPanel& owner;
@@ -342,6 +353,31 @@ public:
         int cursorValue = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LaneGrid)
+    };
+
+    // Kirnu's loop control (its manual p11), one per lane, drawn under the grid on the same
+    // cell grid so a window means the steps it is sitting over. Click or drag: "Loop points
+    // follow mouse click... the pointer closest to the mouse is moved" is Kirnu's own rule and
+    // it is already a click-only path, so this needs no steppers beside it.
+    class LoopBar : public juce::Component,
+                    public juce::SettableTooltipClient
+    {
+    public:
+        LoopBar(KeysProcessor&, const ArpPanel& owner);
+
+        void paint(juce::Graphics&) override;
+        void mouseDown(const juce::MouseEvent&) override;
+        void mouseDrag(const juce::MouseEvent&) override;
+
+    private:
+        int stepAtX(float x) const;
+        void moveNearestHandle(float x);
+
+        KeysProcessor& processor;
+        const ArpPanel& owner;
+        int grabbed = -1; // 0 = the left handle, 1 = the right, -1 = not dragging
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopBar)
     };
 
     // The note lane's mute row: one button per step, flipping that step's note value
@@ -417,9 +453,23 @@ private:
     // division used to live here, per lane, which meant six copies of both on screen at
     // once with no room left to label any of them. With one lane visible there is one
     // of each, shared, below the grid.
+    // A lane tab that reports on the lane behind it. Twelve identical buttons over eleven
+    // invisible lanes is the Draw page's oldest readability hole: whichever lane you are not
+    // looking at could be flat, could be the reason the part sounds wrong, and says nothing
+    // either way. Kirnu marks its own control tabs for exactly this (its manual p12: a corner
+    // mark for whether the control is on, and a second one meaning "this control has input
+    // values"), and both marks are copied here.
+    class LaneTab : public juce::TextButton
+    {
+    public:
+        void paintButton(juce::Graphics&, bool over, bool down) override;
+        bool laneOn = true;    // struck through when off
+        bool laneHasData = false; // a dot when the lane holds anything but its default
+    };
+
     struct LaneRow
     {
-        juce::TextButton tab;
+        LaneTab tab;
         std::unique_ptr<LaneGrid> grid;
         // Not every lane gets a tab: Mute is drawn by the MUTE row under the grid, so it has a
         // lane but nothing to click. Without this the loops below laid out and counted its
@@ -578,6 +628,33 @@ private:
     int selectedLane = (int) ArpEngine::laneNote;
     std::unique_ptr<MuteRow> muteRow;
     juce::Label muteRowLabel;
+    std::unique_ptr<LoopBar> loopBar;
+
+    // The selected lane's own shape, on the page the lane is drawn on (2026-08-18). Steps,
+    // Speed and Link used to sit in the STEPS band group on the *Play* page, so changing how
+    // long the lane you are drawing runs meant leaving the page you were drawing it on. They
+    // are per-lane controls; they belong beside the lane.
+    juce::TextButton laneOnButton { "On" };
+    juce::TextButton dirPrev { "<" }, dirNext { ">" };
+    juce::Label dirLabel, dirReadout;
+
+    // Kirnu's remaining palette tools (its manual p8: Draw / Select / Random / Copy / Paste /
+    // Clear). Keys had the first three; Select is what these three were waiting for, since
+    // each of them needs a span to aim at. The clipboard is one lane's worth of steps and
+    // lives here rather than in the processor: it is a UI convenience, not session state, and
+    // Kirnu's own rule is that "only same control steps can be copied/pasted".
+    // Copy and Paste only. Kirnu's palette has a Clear beside them ("set values to default"),
+    // and Keys' Reset already *is* that once it narrows to the Select span - a second button
+    // doing what the one next to it does is the trap this file warns about twice elsewhere.
+    juce::TextButton copyStepsButton { "Copy" }, pasteStepsButton { "Paste" };
+    std::vector<int> stepClipboard;
+    int stepClipboardLane = -1;
+    void copySteps();   // the Select span, or the whole lane when nothing is selected
+    void pasteSteps();  // tiles the clipboard across the span, so 2 steps fill 8
+    void refreshStepTools();
+    void nudgeLaneDir(int delta);
+    void toggleLaneOn();
+    void refreshLaneStrip();
 
     // The shared length / clock-division controls for whichever lane is showing.
     juce::Label stepsLabel, speedLabel, stepsReadout;

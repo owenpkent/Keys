@@ -70,10 +70,21 @@ namespace
     void writeArpPatternInto(juce::DynamicObject& obj,
                              const std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes>& values,
                              const std::array<int, ArpEngine::numLanes>& lengths,
-                             const std::array<int, ArpEngine::numLanes>& clockDivs)
+                             const std::array<int, ArpEngine::numLanes>& clockDivs,
+                             const std::array<int, ArpEngine::numLanes>& on,
+                             const std::array<int, ArpEngine::numLanes>& loopFrom,
+                             const std::array<int, ArpEngine::numLanes>& loopTo,
+                             const std::array<int, ArpEngine::numLanes>& dir)
     {
         auto* lengthsObj = new juce::DynamicObject();
         auto* clockDivsObj = new juce::DynamicObject();
+        // Appended 2026-08-18 with the lane properties themselves. A lane's shape is not one
+        // number any more, and a script that captures a pattern has to be able to put back the
+        // window and the direction it captured, not just the steps.
+        auto* onObj = new juce::DynamicObject();
+        auto* loopFromObj = new juce::DynamicObject();
+        auto* loopToObj = new juce::DynamicObject();
+        auto* dirObj = new juce::DynamicObject();
         for (int l = 0; l < ArpEngine::numLanes; ++l)
         {
             const int len = juce::jlimit(1, ArpEngine::maxSteps, lengths[(size_t) l]);
@@ -81,9 +92,20 @@ namespace
             obj.setProperty(laneNames[l], intVectorToVar(laneVals));
             lengthsObj->setProperty(laneNames[l], len);
             clockDivsObj->setProperty(laneNames[l], clockDivs[(size_t) l]);
+            onObj->setProperty(laneNames[l], on[(size_t) l] != 0);
+            // Reported clamped to the lane's own length, which is what the engine reads: loopTo
+            // defaults past the end and means "the end", and a raw 31 on an eight-step lane
+            // would read as a window nobody set.
+            loopFromObj->setProperty(laneNames[l], juce::jlimit(0, len - 1, loopFrom[(size_t) l]));
+            loopToObj->setProperty(laneNames[l], juce::jlimit(0, len - 1, loopTo[(size_t) l]));
+            dirObj->setProperty(laneNames[l], dir[(size_t) l]);
         }
         obj.setProperty("lengths", juce::var(lengthsObj));
         obj.setProperty("clockDivs", juce::var(clockDivsObj));
+        obj.setProperty("on", juce::var(onObj));
+        obj.setProperty("loopFrom", juce::var(loopFromObj));
+        obj.setProperty("loopTo", juce::var(loopToObj));
+        obj.setProperty("dir", juce::var(dirObj));
     }
 } // namespace
 
@@ -721,7 +743,8 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                 return {};
             }
             const auto& pat = processor.arpPatternSlot(slot, line);
-            writeArpPatternInto(*obj, pat.value, pat.length, pat.clockDiv);
+            writeArpPatternInto(*obj, pat.value, pat.length, pat.clockDiv,
+                                pat.on, pat.loopFrom, pat.loopTo, pat.dir);
             juce::Array<juce::var> rd;
             for (int v : pat.rhythmDivs)
                 rd.add(v);
@@ -732,14 +755,19 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
         {
             std::array<std::array<int, ArpEngine::maxSteps>, ArpEngine::numLanes> values {};
             std::array<int, ArpEngine::numLanes> lengths {}, clockDivs {};
+            std::array<int, ArpEngine::numLanes> on {}, loopFrom {}, loopTo {}, dir {};
             for (int l = 0; l < ArpEngine::numLanes; ++l)
             {
                 for (int s = 0; s < ArpEngine::maxSteps; ++s)
                     values[(size_t) l][(size_t) s] = processor.arpLine(line).lanes.value[(size_t) l][(size_t) s].load();
                 lengths[(size_t) l] = processor.arpLine(line).lanes.length[(size_t) l].load();
                 clockDivs[(size_t) l] = processor.arpLine(line).lanes.clockDiv[(size_t) l].load();
+                on[(size_t) l] = processor.arpLine(line).lanes.on[(size_t) l].load();
+                loopFrom[(size_t) l] = processor.arpLine(line).lanes.loopFrom[(size_t) l].load();
+                loopTo[(size_t) l] = processor.arpLine(line).lanes.loopTo[(size_t) l].load();
+                dir[(size_t) l] = processor.arpLine(line).lanes.dir[(size_t) l].load();
             }
-            writeArpPatternInto(*obj, values, lengths, clockDivs);
+            writeArpPatternInto(*obj, values, lengths, clockDivs, on, loopFrom, loopTo, dir);
             juce::Array<juce::var> rd;
             for (auto& a : processor.arpLine(line).rhythmDiv)
                 rd.add(a.load());
@@ -794,6 +822,14 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         { "harmony", "array", "Per-step harmony lane, chord tones above (0..7).", false },
         { "chord", "array", "Per-step chord lane: 0 = off, 1..12 = that arp slot's chord.", false },
         { "clockDivs", "object", "Optional map of lane name -> clock divider 0/1/2.", false },
+        { "on", "object", "Optional map of lane name -> true/false. Off means the lane keeps its "
+                          "drawing and the engine reads its default instead.", false },
+        { "loopFrom", "object", "Optional map of lane name -> first step of that lane's loop "
+                                "window (0-based).", false },
+        { "loopTo", "object", "Optional map of lane name -> last step of the loop window "
+                              "(0-based, inclusive). Past the lane's end means its end.", false },
+        { "dir", "object", "Optional map of lane name -> direction: 0 Up, 1 Down, 2 Up alt, "
+                           "3 Down alt (out and back, turning points played once).", false },
         { "rhythmDivs", "array", "Up to 4 rhythm dividers (1..16, 0 = off).", false },
         { "harmonyMode", "integer", "0 = chord tones (default), 1 = subharmonic.", false },
     };
@@ -818,12 +854,27 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             edits.push_back({ r.lane, std::move(vals) });
         }
 
-        std::vector<std::pair<int, int>> clockDivEdits; // lane, value
-        const juce::var clockDivsVar = args.getProperty("clockDivs", juce::var());
-        if (clockDivsVar.getDynamicObject() != nullptr)
-            for (int l = 0; l < ArpEngine::numLanes; ++l)
-                if (clockDivsVar.hasProperty(laneNames[l]))
-                    clockDivEdits.push_back({ l, juce::jlimit(0, 2, (int) clockDivsVar.getProperty(laneNames[l], 0)) });
+        // Every lane property arrives the same way: an optional map of lane name -> value. One
+        // reader for all of them, so appending the next one is a line rather than a paragraph.
+        using LaneEdits = std::vector<std::pair<int, int>>; // lane, value
+        const auto readLaneMap = [&args](const char* key, int lo, int hi)
+        {
+            LaneEdits out;
+            const juce::var v = args.getProperty(key, juce::var());
+            if (v.getDynamicObject() != nullptr)
+                for (int l = 0; l < ArpEngine::numLanes; ++l)
+                    if (v.hasProperty(laneNames[l]))
+                        out.push_back({ l, juce::jlimit(lo, hi, (int) v.getProperty(laneNames[l], 0)) });
+            return out;
+        };
+
+        const LaneEdits clockDivEdits = readLaneMap("clockDivs", 0, 2);
+        const LaneEdits onEdits = readLaneMap("on", 0, 1);
+        const LaneEdits loopFromEdits = readLaneMap("loopFrom", 0, ArpEngine::maxSteps - 1);
+        const LaneEdits loopToEdits = readLaneMap("loopTo", 0, ArpEngine::maxSteps - 1);
+        const LaneEdits dirEdits = readLaneMap("dir", 0, (int) ArpEngine::numLaneDirs - 1);
+        const int laneShapeEdits = (int) (onEdits.size() + loopFromEdits.size()
+                                          + loopToEdits.size() + dirEdits.size());
 
         std::array<int, 4> rhythmDivsEdit {};
         const bool hasRhythmDivs = args.hasProperty("rhythmDivs");
@@ -841,9 +892,11 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         const bool hasHarmonyMode = args.hasProperty("harmonyMode");
         const int harmonyModeEdit = hasHarmonyMode ? juce::jlimit(0, 1, (int) args.getProperty("harmonyMode", 0)) : 0;
 
-        if (edits.empty() && clockDivEdits.empty() && ! hasRhythmDivs && ! hasHarmonyMode)
+        if (edits.empty() && clockDivEdits.empty() && laneShapeEdits == 0
+            && ! hasRhythmDivs && ! hasHarmonyMode)
         {
-            error = "nothing to set: supply at least one lane array, clockDivs, rhythmDivs or harmonyMode";
+            error = "nothing to set: supply at least one lane array, clockDivs, on, loopFrom, "
+                    "loopTo, dir, rhythmDivs or harmonyMode";
             return {};
         }
 
@@ -868,6 +921,14 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             }
             for (const auto& cd : clockDivEdits)
                 pattern.clockDiv[(size_t) cd.first] = cd.second;
+            for (const auto& e : onEdits)
+                pattern.on[(size_t) e.first] = e.second;
+            for (const auto& e : loopFromEdits)
+                pattern.loopFrom[(size_t) e.first] = e.second;
+            for (const auto& e : loopToEdits)
+                pattern.loopTo[(size_t) e.first] = e.second;
+            for (const auto& e : dirEdits)
+                pattern.dir[(size_t) e.first] = e.second;
             if (hasRhythmDivs)
                 pattern.rhythmDivs = rhythmDivsEdit;
             if (hasHarmonyMode)
@@ -884,6 +945,14 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             }
             for (const auto& cd : clockDivEdits)
                 processor.arpLine(line).lanes.clockDiv[(size_t) cd.first].store(cd.second);
+            for (const auto& e : onEdits)
+                processor.arpLine(line).lanes.on[(size_t) e.first].store(e.second);
+            for (const auto& e : loopFromEdits)
+                processor.arpLine(line).lanes.loopFrom[(size_t) e.first].store(e.second);
+            for (const auto& e : loopToEdits)
+                processor.arpLine(line).lanes.loopTo[(size_t) e.first].store(e.second);
+            for (const auto& e : dirEdits)
+                processor.arpLine(line).lanes.dir[(size_t) e.first].store(e.second);
             if (hasRhythmDivs)
                 for (int i = 0; i < 4; ++i)
                     processor.arpLine(line).rhythmDiv[(size_t) i].store(rhythmDivsEdit[(size_t) i]);
@@ -896,6 +965,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         obj->setProperty("line", line);
         obj->setProperty("lanesSet", (int) edits.size());
         obj->setProperty("clockDivsSet", (int) clockDivEdits.size());
+        obj->setProperty("laneShapeSet", laneShapeEdits);
         return juce::var(obj);
     };
     return t;

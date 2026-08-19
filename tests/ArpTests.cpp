@@ -2477,8 +2477,196 @@ public:
                 }
             expectEquals(ons, 1, "the collapsed voice is dropped, leaving only the main note");
         }
+
+        // --- Lane on/off, loop window and direction (2026-08-18) --------------------------
+
+        beginTest("a lane switched off reads its default and keeps its drawing");
+        {
+            auto lp = p;
+            lp.usePattern = true;
+
+            ArpEngine e;
+            e.prepare(sr);
+            for (int st = 0; st < 8; ++st)
+                e.lanes.value[ArpEngine::laneOctave][(size_t) st].store(2); // two octaves up
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(lp, clock, block, chordOn({ 60 }), out);
+            auto lifted = collect(out);
+            expect(! lifted.empty() && lifted[0].note == 60 + 24, "the lane is being read");
+
+            ArpEngine e2;
+            e2.prepare(sr);
+            for (int st = 0; st < 8; ++st)
+                e2.lanes.value[ArpEngine::laneOctave][(size_t) st].store(2);
+            e2.lanes.on[ArpEngine::laneOctave].store(0);
+            juce::MidiBuffer out2;
+            clock.ppq = 0.0;
+            e2.process(lp, clock, block, chordOn({ 60 }), out2);
+            auto off = collect(out2);
+            expect(! off.empty() && off[0].note == 60, "switched off, the lane reads its default");
+            expectEquals(e2.lanes.value[ArpEngine::laneOctave][0].load(), 2,
+                         "and the drawing is still there - off is not Reset");
+        }
+
+        beginTest("laneStepIndex: the loop window, and all four directions");
+        {
+            ArpEngine::LaneShape sh;
+            sh.len = 8;
+            sh.loopFrom = 2;
+            sh.loopTo = 5; // a four-step window
+
+            const auto walk = [&sh](int dir, int n)
+            {
+                sh.dir = dir;
+                juce::String out;
+                for (int i = 0; i < n; ++i)
+                    out += juce::String(ArpEngine::laneStepIndex(i, 0, sh));
+                return out;
+            };
+            expectEquals(walk(ArpEngine::dirUp, 8), juce::String("23452345"),
+                         "Up wraps inside the window");
+            expectEquals(walk(ArpEngine::dirDown, 8), juce::String("54325432"),
+                         "Down walks it backwards");
+            // 2*span-2 = 6, and neither end is repeated: 2 3 4 5 4 3, then round again.
+            expectEquals(walk(ArpEngine::dirUpAlt, 12), juce::String("234543234543"),
+                         "Up alt bounces without doubling its turning points");
+            expectEquals(walk(ArpEngine::dirDownAlt, 12), juce::String("543234543234"),
+                         "Down alt is its mirror");
+
+            sh.dir = ArpEngine::dirUp;
+            sh.loopFrom = 3;
+            sh.loopTo = 3;
+            expectEquals(ArpEngine::laneStepIndex(7, 0, sh), 3, "a one-step window holds that step");
+            sh.loopFrom = 0;
+            sh.loopTo = ArpEngine::maxSteps - 1;
+            expectEquals(ArpEngine::laneStepIndex(9, 0, sh), 1,
+                         "the default window is the whole lane, exactly as before it existed");
+        }
+
+        // --- Mutate (2026-08-18) ---------------------------------------------------------
+
+        beginTest("Mutate at 0 changes nothing at all");
+        {
+            ArpEngine e1, e2;
+            e1.prepare(sr);
+            e2.prepare(sr);
+            auto mp = p;
+            juce::MidiBuffer o1, o2;
+            clock.ppq = 0.0;
+            e1.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), o1);
+            mp.mutate = 0;
+            mp.mutateLock = 50;
+            clock.ppq = 0.0;
+            e2.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), o2);
+            const auto a = collect(o1), b = collect(o2);
+            expectEquals((int) a.size(), (int) b.size(), "same number of events");
+            for (size_t i = 0; i < a.size() && i < b.size(); ++i)
+                expectEquals(b[i].note, a[i].note, "same notes");
+        }
+
+        beginTest("Mutate never leaves the held chord, at any amount");
+        {
+            // The whole justification for letting this touch the note at all: it moves the run
+            // to another entry of the sequence built from what is held, so every pitch it can
+            // reach is one of them. Swept, because a reach that grows with the amount is just
+            // the sort of thing that falls off the end at 100 and nowhere else.
+            for (int amt = 10; amt <= 100; amt += 10)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = amt;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 16, chordOn({ 60, 64, 67 }), out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        expect(ev.note == 60 || ev.note == 64 || ev.note == 67,
+                               "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
+                                   + ", which is not in the held chord");
+            }
+        }
+
+        beginTest("Lock at 100 repeats one variation; at 0 it keeps finding new ones");
+        {
+            const auto run = [&](int lock)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 100;
+                mp.mutateLock = lock;
+                // A drawn Note lane, not the Up shape: the shape walk carries a cursor, so its
+                // base index has period 3 over a triad and is not a function of the step at all.
+                // Fixed indices make the base periodic at the lane length and stateless, which
+                // is what these two tests are actually about.
+                mp.usePattern = true;
+                for (int st = 0; st < 8; ++st)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) st].store(1 + st % 3);
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> notes;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        notes.push_back(ev.note);
+                return notes;
+            };
+
+            const auto locked = run(100);
+            expect(locked.size() >= 16, "enough steps to compare two passes");
+            bool repeats = true;
+            for (size_t i = 8; i < locked.size(); ++i)
+                if (locked[i] != locked[i - 8])
+                    repeats = false;
+            expect(repeats, "locked, every pass of the eight-step lane plays the same notes");
+
+            const auto loose = run(0);
+            bool differs = false;
+            for (size_t i = 8; i < loose.size(); ++i)
+                if (loose[i] != loose[i - 8])
+                    differs = true;
+            expect(differs, "unlocked, a later pass is not the first one over again");
+        }
+
+        beginTest("Mutate is stateless from the playhead: a jump lands where a walk would");
+        {
+            // The same rule the rhythm dividers are pinned against. The era is derived from the
+            // step index, so the twelfth step is the twelfth step whether or not you walked to it.
+            const auto noteAt = [&](bool jump)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 80;
+                mp.mutateLock = 40;
+                mp.usePattern = true; // see the Lock test above for why the shape will not do
+                for (int st = 0; st < 8; ++st)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) st].store(1 + st % 3);
+                juce::MidiBuffer warm;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block, chordOn({ 60, 64, 67 }), warm); // hold the chord
+                if (! jump)
+                    for (int i = 1; i < 12; ++i)
+                    {
+                        juce::MidiBuffer skip;
+                        clock.ppq = 0.25 * i;
+                        e.process(mp, clock, block, {}, skip);
+                    }
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * 12;
+                e.process(mp, clock, block, {}, out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        return ev.note;
+                return -1;
+            };
+            expectEquals(noteAt(true), noteAt(false), "the same step plays the same note either way");
+        }
     }
 };
+
 
 static ArpEngineTests arpEngineTests;
 } // namespace keys::tests

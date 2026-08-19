@@ -882,6 +882,140 @@ lane's length and speed onto every lane whenever the readouts refresh, so the re
 load rather than waiting for a nudge. **This is the shape of the problem for every future lane**,
 not a one-off.
 
+## The step sequencer pass (2026-08-18)
+
+Owen, on the Draw page: *"a usability and functionality pass of the step sequencer. I wanna draw a
+lot of inspiration from [Kirnu Cream] and how you can make really interesting, melodic patterns, and
+it's very easy to understand. Right now, everything is kinda smushed together."*
+
+The page had thirteen lanes, one visible at a time, and answered neither of the two questions you
+actually have while drawing.
+
+### Where is it now: the published playhead
+
+Nothing in Keys published the arp's step position, so no grid could draw one. That is worse than it
+sounds, because with Link off - which is the entire point of per-lane lengths - **every lane is
+somewhere different**, and none of those positions is the transport's.
+
+What is published is the one number every lane's answer derives from: `ArpEngine::uiRelStep`, the
+step index relative to the last restart, which is exactly what `laneValue` indexes by.
+`laneStepIndex(rel, offset, shape)` is that function's own arithmetic lifted out and called by both
+the engine and the grids, so a playhead cannot land on a cell the engine did not read.
+
+Two details that are the design rather than the implementation:
+
+- **It is published where a step fires, not from the clock.** A boundary suppressed by a rhythm
+  divider, and a step reached with no chord held, both pass through the step loop without touching a
+  lane. A playhead driven off the clock would advance through those and point at cells nothing read.
+- **`-1` means "not running", and is not step 0.** Every lane parked on its first cell reads as a
+  stopped sequencer waiting there, which is a different and wrong statement.
+
+### What is in the eleven lanes I cannot see: the tab marks
+
+Kirnu marks its own control tabs (its manual p12): a corner mark for whether the control is on, and
+a second meaning *"that control has input values"*. Both are copied - a dot for data, a strike for
+off - and between them they are the cheapest thing in this pass and probably the most useful. The
+dot is measured **over the lane's own length**, not over all 32 cells, or every lane that had ever
+been longer than it is now would light for steps that are not played.
+
+### Loop points and direction: where the melody comes from
+
+Keys had per-lane *length* and nothing else - every lane started at step 0 and walked forwards, so
+"polymeter" meant three lanes of eight that could only ever be three lanes of eight in step. Kirnu
+gives every control its own **loop window** (p11) and its own **direction**: Up, Down, Up alt, Down
+alt. That is the feature that makes Cream sound composed rather than shuffled, because none of it is
+random: two lanes crossing the same eight steps in opposite directions never line up the same way
+twice and are still completely predictable by ear.
+
+`Lanes::loopFrom` / `loopTo` / `dir`, and the arithmetic lives in `laneStepIndex` with everything
+else:
+
+- `loopTo` **defaults past the end** (`maxSteps - 1`) and is clamped at read time. That is what makes
+  "to the end" survive a length change with nothing having to rewrite it, and it is why a lane
+  nobody has touched behaves byte for byte as it did before any of this existed.
+- The alt pair bounces with period `2 * span - 2`, so **neither turning point is played twice**. A
+  doubled step at each end is audible as a stutter and is not what a bounce means.
+- A window dragged backwards is read as the span between its ends rather than as an error: the two
+  handles are the same kind of thing.
+- It stays **stateless from the step index** - no cursor, no direction bit carried between blocks -
+  which is what lets a transport jump land on the right cell without the engine having walked there.
+
+**Link pushes the window and not the direction.** Link on means the lanes share one grid, and a
+window is part of which grid that is; a direction is how a lane *walks* the grid it shares. Sharing
+directions too would have deleted the feature for everyone who leaves Link on, which is most people.
+
+### A lane can be switched off
+
+Kirnu again (p12): *"when control is off all it's values are ignored"*. `Lanes::on`, read at the top
+of `laneValue`, which returns the lane's default and touches nothing else. Keys had no way to take a
+lane out - Reset flattens it, which sounds the same and loses the work. That is the exact trap
+Cthulhu's mute-preserves-value rule already fixed one level down, on a single step, and it had never
+been applied to the lane itself.
+
+The grid **scrims** an off lane rather than disabling it. You draw on a lane before switching it on
+at least as often as after, and a disabled component takes no mouse events at all.
+
+### What the pass deliberately did not build
+
+- **Kirnu's Clear tool.** Its job is "set values to default" over the selection, and Reset already
+  narrows to the Select span and already means that. Finishing a palette by adding a button that
+  duplicates its neighbour is not finishing it.
+- **The right-button loop handle.** Kirnu moves the far handle with the right button when the click
+  lands inside the window. The right-click list is closed; nearer handle always is the whole rule.
+- **A per-step enable row per lane.** Kirnu has one; Keys' MUTE row is still the Note lane's alone.
+  Recorded in `docs/REFERENCES.md` as the remaining not-taken.
+
+## Mutate and Lock (2026-08-18)
+
+Owen: *"I'd like to explore the chance knob being a drift instead where it explores other patterns
+and notes"*, and then *"could be multiple knobs. want notes. mutations"*.
+
+### Why this does not break the Drift rule
+
+`ArpEngine::laneDrifts` exists to say that **drift changes how a step plays, never which note it
+plays**, and that split is what lets Drift be one knob instead of ten. The fear behind it was
+specific: a machine wandering over notes nobody aimed at is noise.
+
+`mutatedIndex` meets that fear rather than accepting it. It moves the run to a **different entry of
+the sequence already built from the held chord** - so every note it can reach is a note that chord
+contains. There is no amount at which it plays something you did not put there, only a different one
+of the ones you did. The reach is in **chord entries, never semitones**, which is what makes that
+true at 100 as well as at 10; `ArpTests.cpp` sweeps the amount against the held chord to pin it.
+
+`laneRand` keeps its own claim, which is a narrower one: it is the only thing allowed to change a
+note **you drew**, because you drew it on that step. Mutate changes which note the *run* lands on.
+
+### Lock is the Turing Machine, without the register
+
+`docs/SEQUENCER_LANDSCAPE.md` ranked the shift register as the one randomness Keys lacked - *"a
+sequencer that you can steer in one direction or another"*, whose famous middle position is
+*"slipping; looping but occasionally changing notes"*. Roll rerolls once and stops, Drift wanders and
+never settles, Rand is per step: nothing in Keys wandered and then hardened.
+
+The obvious build is a ring buffer with a recycle probability. It was not built that way, because a
+register carried between blocks would be the **second** thing in this engine that is not stateless
+from the playhead, and `laneChain` is documented as the cheapest possible break of that rule rather
+than as an invitation to make more.
+
+So the variation is a **hash of (step, era)**. Lock stretches an era: at 0 every pass is its own, at
+100 there is one era and the first variation repeats for good, and in between it holds for a while
+and moves on. Same three positions the module's knob describes, and a transport jump lands on the
+variation it would have walked to, which a register cannot promise.
+
+The pass is counted over the window the Note lane actually **walks**, not its length. A four-step
+loop inside a sixteen-step lane comes round every four, and a variation that changed every sixteen
+would be heard changing in the wrong place.
+
+Two more placements that are load-bearing: Mutate applies **after** whichever route picked the note -
+a fixed index, the shape's walk, or one of Kirnu's four questions - so it works on a pattern nobody
+has drawn on yet as well as on one that is fully written; and **before** `lastPlayedIdx`, so a later
+Prev repeats what was heard rather than what was aimed at. `mutateSeed` is the line index, so two
+lines at the same setting never explore in lockstep.
+
+**Chance lost nothing** by giving up its knob. It is still a step lane, and still has its own slider
+in the Play page's PLAYBACK group - which is where a control you set once and leave belongs, as
+against the two you sit and turn.
+
 ## Scale awareness
 
 Keys already owns Root/Scale. The arp editor flags out-of-key results visually

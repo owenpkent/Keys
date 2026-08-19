@@ -74,6 +74,100 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**The step sequencer pass (2026-08-18, second round of that day).** Owen: *"a usability and
+functionality pass of the step sequencer. I wanna draw a lot of inspiration from [Kirnu Cream] and
+how you can make really interesting, melodic patterns, and it's very easy to understand. Right now,
+everything is kinda smushed together. And I'd like to explore the chance knob being a drift instead
+where it explores other patterns and notes"* - then, asked what the knob should be: *"could be
+multiple knobs. want notes. mutations"*. Everything here supersedes the older Draw-page bullets
+further down; the ones it contradicts are marked where they sit.
+
+- **The engine publishes a playhead, and `ArpEngine::laneStepIndex` is the shared arithmetic.**
+  Nothing published the step position, so no grid could draw one - and with per-lane lengths every
+  lane wraps differently, so "which step is sounding" has a different answer in each of them and
+  none of those answers is the transport's. `uiRelStep` is the index relative to the last restart
+  (`-1` when nothing is running: **no** playhead, rather than every lane parked on step 0, which
+  reads as a stopped sequencer sitting on its first step), published where a step actually *fires*
+  rather than off the clock - a suppressed divider boundary and a step the chord could not fill both
+  pass through that loop without reading a lane. `laneStepIndex` is `laneValue`'s own index maths
+  lifted out and called by both, so a grid cannot light a cell the engine did not look at. Do not
+  reimplement it UI-side; that is the whole point of it being static.
+- **Lanes grew a loop window, a direction and an on/off, and they are lane data, not parameters.**
+  `Lanes::loopFrom` / `loopTo` / `dir` / `on`, riding the `"lane"` node of the arp tree beside
+  `length` and `clockDiv`, each reading back as the old behaviour when its property is absent -
+  which is why this needed no migration at all. **`loopTo` defaults to `maxSteps - 1`, past the
+  end**, and is clamped at read: that is what makes "to the end" survive a length change without
+  anything having to rewrite it. `ArpPattern` carries all four, so slots do too, and **the four
+  pattern-copy sites are the contract** the way `syncArpChordTable`'s call sites are - miss one and
+  a slot launches a lane with somebody else's window.
+  `dirUpAlt` / `dirDownAlt` bounce with period `2*span - 2` and **do not repeat the turning
+  points**: a doubled step at each end is audible as a stutter and is not what a bounce means.
+  **Link pushes the window and not the direction** - Link on means the lanes share one grid and a
+  window is part of which grid that is, but a direction is how a lane *walks* the grid it shares,
+  and two lanes crossing the same eight steps in opposite directions is the entire point of having
+  one. Off is polymeter and is left alone, unchanged.
+- **A lane that is off keeps its drawing.** Kirnu's per-control on/off (its manual p12), and Keys
+  had no way to take a lane out before it: Reset flattens the lane, which sounds the same and loses
+  the work - the exact trap Cthulhu's mute-preserves-value rule already fixed one level down, on a
+  single step. `laneValue` returns the lane's default and touches nothing. The grid **scrims** an
+  off lane and never disables it: you draw on a lane before switching it on at least as often as
+  after, and a disabled component takes no mouse events at all (the same reason the macro card's
+  scrim exists rather than a `setEnabled(false)`).
+- **The lane tabs report on their lanes**, which is the pass's biggest readability win for its size.
+  A dot when the lane holds anything but its default **over its own length** (not over all 32 cells,
+  or every lane that had ever been longer than it is now would light), struck through when the lane
+  is off. Both are Kirnu's own marks. Eleven of twelve lanes are invisible at any moment and until
+  this nothing said which of them were doing anything.
+- **Steps, Speed and Link left the band for the Draw page.** They were in the *Play* page's STEPS
+  group, so changing how long the lane you were drawing runs meant leaving the page you were drawing
+  it on. They are per-lane controls; they belong beside the lane, in the new **lane strip**
+  (`On | STEPS - n + | SPEED | DIR < d > | Link`). The band is **two** groups now, not three, and
+  STEPS' 18 weight points went back to the two that stayed rather than being left as a gap.
+- **Copy and Paste over the Select span; Clear deliberately not.** The last of Kirnu's palette
+  (p8). Paste **tiles** - two copied steps fill eight, which is how a figure gets repeated, and it
+  is the only reading under which a short clipboard does something useful. Same lane only, as in
+  Kirnu: a Velocity lane pasted into Note would read as chord indices and play a melody nobody
+  wrote. **Clear is Reset.** Its job in Cream is "set values to default" over the selection, and
+  Keys' Reset already narrows to the Select span and already means that - a Clear beside it would be
+  a second button doing its neighbour's job. Do not "finish the palette" by adding one.
+- **The loop window is a bar under the grid, click or drag, nearer handle wins.** Kirnu's own rule
+  (*"Loop points follow mouse click... the pointer closest to the mouse is moved"*), which is
+  already a left-click-only path - so it needs no steppers beside it, unlike every other value on
+  this page. **Kirnu's right-button-moves-the-far-handle half is not taken**: the right-click list
+  is closed. The bar is laid out off the same rectangle as the grid, the rule the MUTE strip already
+  follows, or every window cell slides off the step it belongs to.
+- **The Note lane says notes.** A cell reading "3" is an index into a sorted chord nobody can see;
+  the engine publishes what those indices currently name (`uiSeq`, written in `buildSequence` - the
+  one place the sequence changes, so the lane follows a chord the moment it lands rather than at the
+  next step) and the grid writes `E3`. Falls back to the number when nothing is held or the cell is
+  under 28 px.
+- **The Draw page is 358 px, up from 298**, and is now the tallest of the three where Play used to
+  be. `contentHeight()` returns `pageHeight()`, so this moves the window only on this page - the
+  cost paging already carries, spent on the page it buys something on.
+- **MUTATE and LOCK replace CHANCE on the macro cards, and Mutate is not a reversal of the Drift
+  rule.** *"Drift changes how a step plays, never which note it plays"* still stands, and Mutate
+  meets it rather than breaking it: the fear behind that rule was a machine wandering onto notes
+  nobody aimed at, and `mutatedIndex` moves the run to a different entry of **the sequence already
+  built from the held chord**. Every note it can reach is a note that chord contains; there is no
+  setting at which it plays something you did not put there, only a different one of the ones you
+  did. The reach is in **chord entries, never semitones**, which is what makes that true at every
+  amount - `ArpTests.cpp` sweeps 10..100 against the held chord to pin it. `laneRand` is still the
+  only thing allowed to change a note you *drew*, because you drew it there.
+  **LOCK is the Turing Machine** (`docs/SEQUENCER_LANDSCAPE.md` ranked it as the one randomness Keys
+  lacked): 0 redraws every pass, 100 is one era and the first variation repeats for good. It is a
+  **hash of (step, era)**, not a shift register - a register would have been the second thing in the
+  engine that is not stateless from the playhead, and `laneChain` is documented as the cheapest
+  possible break of that rule rather than as an invitation. The pass is measured over the window the
+  Note lane actually **walks**, not its length: a four-step loop inside a sixteen-step lane comes
+  round every four, and a variation that changed every sixteen would be heard changing in the wrong
+  place. Mutate applies **after** whichever route picked the note (fixed index, shape walk, or one of
+  Kirnu's four questions) and **before** `lastPlayedIdx`, so a later Prev repeats what was heard.
+  `mutateSeed` is the line index, so two lines at the same setting never explore in lockstep.
+  **Chance lost nothing**: it is still a step lane and still has its slider in the Play page's
+  PLAYBACK group, which is where a control you set once and leave belongs. The macro knob strip is
+  **eight** again, the width it carried until H.VEL folded into VEL's ring on 2026-08-17.
+
+
 **The 2026-08-18 round, and what it supersedes.** Nine changes landed in one session; each is
 written up where it belongs below, but they contradict older bullets in this file, so the list of
 what is no longer true lives here in one place:
@@ -289,7 +383,8 @@ what is no longer true lives here in one place:
   per line, side by side under a 34 px header (2026-08-02, Owen: "parallel to each other
   instead of one on top of the other"). A card is three stacked lines - the line switch, a
   detented rate knob with its `<` `>` and Sync/Hz, and the shape with its own steppers; then
-  **seven knobs** under their own headings (Oct, Gate, Chance, Swing, Offset, Vel, H.Time -
+  **eight knobs** under their own headings (Oct, Gate, **Mutate, Lock**, Swing, Offset, Vel,
+  H.Time - Chance became those two on 2026-08-18, see the step sequencer pass above; Oct
   Oct is the *transpose*, Vel is the bipolar level, and Humanize's timing half lives in
   H.Time; all three are the 2026-08-02 entries below). **H.Vel folded into Vel's own ring on
   2026-08-17** rather than keeping a knob of its own - see the RangeKnob bullet further down.
@@ -337,8 +432,9 @@ what is no longer true lives here in one place:
   -8..+8), **Mute** (its own lane at last) and **Chain** (Stochas' condition: 0 always, 1 only
   if the step before sounded, 2 only if it did not). **A lane's index is what a saved session
   stores it under**, so appending is the only safe direction - the `genSource` rule again.
-  **Rand is the one randomness allowed to change which note plays**, because you drew it on that
-  step; Drift is a knob wandering over a part you did not aim at, so `laneDrifts` confines it to
+  **Rand is the one randomness allowed to change a note you drew**, because you drew it on that
+  step (**Mutate joined it on 2026-08-18** and is a different claim: it changes which note the *run*
+  lands on, and cannot leave the held chord - see the step sequencer pass above); Drift is a knob wandering over a part you did not aim at, so `laneDrifts` confines it to
   the lanes that decide *how* a step plays. Rand acts only on a fixed 1-8: a Note of 0 means
   "follow the shape", and randomising zero would quietly turn Up into a fixed entry.
   **Chain is the only thing in the engine that is not stateless from the playhead.** Everything
@@ -402,7 +498,9 @@ what is no longer true lives here in one place:
   lane tabs 34, grid 140, mute 46, slots 58, action row 34 - **612 px** against the macro
   view's 240, so Details grew the *window* by 372 px and All shrank it back. Paged by what you
   are doing rather than by what fits, the blocks come apart at **Draw 258 / Cards 124 /
-  Play 208**, and the tallest is eighteen over the macro view rather than 372. So the panel
+  Play 208** (**Draw is 358 from 2026-08-18** - the lane strip and the loop bar - so it, not Play,
+  is the tallest page now; see the step sequencer pass above), and the tallest is eighteen over the
+  macro view rather than 372. So the panel
   takes **one height for every view and page** and the window stops moving between them.
   **`contentHeight()` and `pageHeight()` are a pair and the split is the point**:
   `contentHeight()` returns the constant and feeds the editor's `idealHeight()`, so a fold is
@@ -1571,7 +1669,12 @@ Four things will bite otherwise:
   Draw page's own controls, all 2026-08-14: the lane tabs answer to their visible word
   (`Note`, `Octave`, `Velocity`, `Gate`, `Ratchet`, **`Chance`** - `Prob` until that day -
   `Transpose`, `Late`, `Harmony`, `Chord`, **`Rand`**, **`Chain`**), and the tools beside them
-  are `Select steps`, `Reset lane`, `Roll lane`, `Less roll` / `More roll` and `Harmony voice`.
+  are `Select steps`, `Reset lane`, `Roll lane`, `Less roll` / `More roll`, `Copy steps` /
+  `Paste steps` (2026-08-18) and `Harmony voice`. The lane strip added the same day answers to
+  `Lane on`, `Lane direction back` / `Lane direction forward` and the loop bar's own `Lane loop`,
+  which is a plain Component with no invokable pattern - drive the lane's `loopFrom` / `loopTo`
+  through the arp tree instead. **Steps, Speed and Link are on this page now**, not the Play page,
+  so a script looking for them there will not find them.
   **`Chain` collides**: the progression button on the Cards page is also called Chain, and UIA
   takes the first match - they are never on screen together, so pick the page first. Mute has a
   lane but **no tab**, so there is nothing named for it; drive `laneMute` through MCP instead.
@@ -1590,9 +1693,10 @@ Four things will bite otherwise:
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
   first-match caveat), and `Macro OCT A` / `Macro GATE A` /
-  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **seven now, not eight**:
+  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **eight again from 2026-08-18**:
   `Macro H.VEL A` retired on 2026-08-17 when Humanize Velocity folded into VEL's own ring (see
-  the RangeKnob bullet above). From 2026-08-03, H.TIME carries a *second* name for its ring,
+  the RangeKnob bullet above), and `Macro CHANCE A` was replaced the next day by `Macro MUTATE A`
+  and `Macro LOCK A`. Do not look for `Macro CHANCE A` or `Macro H.VEL A`. From 2026-08-03, H.TIME carries a *second* name for its ring,
   `Macro H.TIME range A`, and a third for the satellite, `Macro H.TIME range handle A`, since
   face, ring and handle are three controls in one cell. **VEL gained the matching pair on
   2026-08-17**, `Macro VEL range A` / `Macro VEL range handle A` - ring and handle are plain

@@ -74,6 +74,21 @@ the top of the band it plays at, whatever velocity the chord arrived with, and 0
 and `arpHumanVel` (0..127, how far under that level a hit may fall - the velocity half of
 Humanize, in the same units; `arpHumanize` is the timing half alone since 2026-08-02).
 
+Two more arrived on 2026-08-18, both defaulting to 0, which is the engine exactly as it was:
+`arpMutate` (0..100 — how far the line explores *other notes of the chord it is holding*; it can
+never reach a note that chord does not contain) and `arpMutateLock` (0..100 — how long it keeps
+what it finds: 0 redraws the variation every pass, 100 locks the first one for good). They took
+the CHANCE knob's place on the macro cards; `arpChance` itself is unchanged and still there.
+
+**A lane's shape is not a parameter and `set_params` cannot reach it.** Length, clock divider,
+on/off, loop window and direction are lane data in the arp tree — use `get_arp_pattern` and
+`set_arp_pattern`. Alongside `lengths` and `clockDivs`, those two now carry `on` (true/false),
+`loopFrom` / `loopTo` (0-based and inclusive; `loopTo` past the lane's end means its end, and is
+reported clamped to the length so a captured window reads as the window you see) and `dir`
+(0 Up, 1 Down, 2 Up alt, 3 Down alt — the alt pair goes out and back without playing the turning
+points twice). All four are optional maps of lane name to value, and all four read back as the
+old behaviour when absent, so a pattern captured by an older script still applies cleanly.
+
 **Two retired velocity ids are still registered and read by nothing**: `arpVolume`, which
 `arpVelTrim` replaced on 2026-08-02, and `arpVelTrim` itself, which `arpVelLevel` replaced on
 2026-08-18 when Vel stopped being a bipolar percentage trim around "as played" and became MIDI

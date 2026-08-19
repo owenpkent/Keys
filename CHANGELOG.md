@@ -5,6 +5,81 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the step sequencer says what it is doing, and the lanes stopped being one grid each
+
+A usability and functionality pass over the Draw page, drawn from Kirnu Cream's manual. The page
+had thirteen lanes, one of them visible at a time, and nothing on screen answered the two questions
+you actually have while drawing: **where is it now**, and **what is in the eleven lanes I cannot
+see**.
+
+- **A playhead, in the grid and in the MUTE strip.** Nothing published the arp's step position, so
+  no grid could draw one. Each lane wraps by its own length and its own clock divider, so "which
+  step is sounding" has a different answer in every lane and none of them is the transport's - with
+  Link off, which is the whole point of per-lane lengths, the page was unreadable without it. The
+  engine publishes the one index all the answers derive from, and the UI runs `laneStepIndex`, the
+  engine's own arithmetic, rather than a second copy that could drift from it.
+- **The lane tabs report on their lanes.** A dot when the lane holds anything but its default, over
+  its own length; struck through when the lane is switched off. Both are Kirnu's marks (its manual
+  p12) and they are what makes eleven hidden lanes legible without opening them.
+- **A lane can be switched off.** Kirnu's per-control on/off: "when control is off all it's values
+  are ignored". The drawing stays exactly where it is and the engine reads the lane's default. Keys
+  had no way to take a lane out - Reset flattens it, which sounds the same and loses the work, the
+  very trap Cthulhu's mute-preserves-value rule already fixed one level down on a single step.
+- **A loop window and a direction, per lane.** Kirnu's loop control (p11) and its Loop direction:
+  Up, Down, Up alt, Down alt. Keys had length alone, which is polymeter without phrasing - three
+  lanes of eight can only ever be three lanes of eight in step. The window is a bar under the grid
+  on the same cells, click or drag, and the nearer end moves; steps outside it stay editable and
+  draw dimmed. The alt pair does not repeat its turning points. With Link on the window travels with
+  the length, because that is what sharing one grid means; the **direction** deliberately does not,
+  since two lanes crossing the same steps in opposite directions is the point of having one.
+- **Steps, Speed and Link moved onto the Draw page**, into a lane strip beside the new On and Dir.
+  They were in the STEPS group of the *Play* page's band, so changing how long the lane you were
+  drawing runs meant leaving the page you were drawing it on. They are per-lane controls and they
+  belong beside the lane. The band is two groups now instead of three, and STEPS' width went back
+  to the two that stayed.
+- **Copy and Paste over the Select span**, the last of Kirnu's palette (p8) that Keys was missing.
+  Paste tiles: two copied steps fill eight, which is how a figure gets repeated. Only into the same
+  lane, as in Kirnu - a Velocity lane pasted into Note would read as chord indices. Kirnu's **Clear**
+  is not here on purpose: Keys' Reset already narrows to the span and already means "set to
+  default", so a Clear beside it would be a second button doing its neighbour's job.
+- **Note names in the Note lane.** A cell saying "3" is an index into a sorted chord nobody can see.
+  The engine publishes what the run's indices currently name, so with a chord held the lane reads
+  `E3` instead. Falls back to the number when nothing is held or the cell is too narrow.
+
+The Draw page is 150 px taller for it - it is now the tallest of the three pages, where Play was.
+Paging already moves the window, and this is the page the height buys something on.
+
+### Added: MUTATE and LOCK, a wander that stays in the chord and can be kept
+
+Two knobs on each macro card, in the cell CHANCE used to hold. Chance lost nothing by it: it is
+still a step lane and still has its own slider in the Play page's PLAYBACK group, which is where a
+control you set once and leave belongs.
+
+- **MUTATE** is how far a line explores other notes of the chord you are holding. `Drift` is barred
+  from touching which note plays, and this does not reverse that rule - it meets it. The fear behind
+  it was a machine wandering onto notes nobody aimed at, and Mutate moves the run to a different
+  entry of **the sequence already built from the held chord**, so every note it can reach is a note
+  that chord contains. There is no setting at which it plays something you did not put there, only
+  a different one of the ones you did. `laneRand` is still the only thing allowed to change a note
+  you *drew*, because you drew it there.
+- **LOCK** is how long it keeps what it finds - the Turing Machine's own control, and the one
+  randomness `docs/SEQUENCER_LANDSCAPE.md` ranked as missing. Left, a new variation every pass;
+  right, the first one found repeats for good; in between it holds an idea for a while and moves on.
+  That is what makes Mutate a composer rather than a noise source: a wander you can keep.
+
+Both are stateless from the playhead, like everything in the engine bar `laneChain`. The variation
+is a hash of the step and of which *era* the current pass falls in, not a shift register carried
+between blocks, so a transport jump lands on the variation it would have walked to.
+
+### Parameter layout
+
+`arpMutate` / `arpMutateLock` appended per line (and `arp2*`, `arp3*`), both defaulting to 0, which
+is the engine exactly as it was without them - no migration needed, and a session saved before this
+sounds identical. The lane's on/off, loop window and direction are **not** parameters: they are lane
+data, and they ride the `"lane"` node of the arp tree beside `length` and `clockDiv`, each reading
+back as the old behaviour when the property is absent.
+
+
 ### Fixed: with the generator open, a chord could not be dragged into the arpeggiator
 
 JUCE resolves a cross-window drop through `Desktop::findComponentAt`, which walks its own list of

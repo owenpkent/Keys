@@ -498,6 +498,29 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Drift"), 1 },
                                                    nm + " Drift", 0, 100, 0));
 
+    // Mutate and Lock (2026-08-18, Owen: "explore the chance knob being a drift instead where
+    // it explores other patterns and notes ... could be multiple knobs. want notes. mutations").
+    //
+    // Drift above is forbidden to touch which note plays, and that rule is not being reversed
+    // here - it is being met. The fear behind it was a machine wandering onto notes nobody
+    // aimed at, and **Mutate cannot leave the held chord**: it moves the run to a different
+    // note *of the chord you are holding*, so the worst it can do is pick a different voicing
+    // of what you already chose. `laneRand` is still the only thing allowed to change a note
+    // you drew, because you drew it there; this changes which note the *run* lands on.
+    //
+    // Lock is the Turing Machine's own control (docs/SEQUENCER_LANDSCAPE.md ranks it as the
+    // one randomness Keys lacks): at 0 the variation is redrawn every pass, at 100 the first
+    // one found repeats forever, and in between it holds for a while and then moves on. That
+    // is what makes Mutate a composer rather than a noise source - a wander you can keep.
+    //
+    // Both are stateless from the playhead, like everything here except laneChain: the
+    // variation is a hash of (step, era), not a register the engine carries between blocks,
+    // so a transport jump lands on the same variation it would have walked to.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Mutate"), 1 },
+                                                   nm + " Mutate", 0, 100, 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("MutateLock"), 1 },
+                                                   nm + " Mutate Lock", 0, 100, 0));
+
     // **VEL as MIDI velocity** (2026-08-18, Owen on the macro card's readout reading "-31 ~20":
     // "still wrong", having just asked for velocity ranges to span 0-127). VelTrim above was a
     // bipolar *percentage* trim on the velocity that arrived, which put percentages on a control
@@ -532,7 +555,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
-        "Drift", "VelLevel"
+        "Drift", "VelLevel", "Mutate", "MutateLock"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1883,6 +1906,9 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.humanizeSpan = (int) arpParam(n, apHumanizeSpan);
         ap.humanVelSpan = (int) arpParam(n, apHumanVelSpan);
         ap.drift = (int) arpParam(n, apDrift);
+        ap.mutate = (int) arpParam(n, apMutate);
+        ap.mutateLock = (int) arpParam(n, apMutateLock);
+        ap.mutateSeed = n; // so two lines at the same Mutate never explore in lockstep
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;
@@ -2258,6 +2284,10 @@ void KeysProcessor::storeActiveArpPattern(int line)
             pat.value[(size_t) l][(size_t) s] = ln.engine.lanes.value[(size_t) l][(size_t) s].load();
         pat.length[(size_t) l] = ln.engine.lanes.length[(size_t) l].load();
         pat.clockDiv[(size_t) l] = ln.engine.lanes.clockDiv[(size_t) l].load();
+        pat.on[(size_t) l] = ln.engine.lanes.on[(size_t) l].load();
+        pat.loopFrom[(size_t) l] = ln.engine.lanes.loopFrom[(size_t) l].load();
+        pat.loopTo[(size_t) l] = ln.engine.lanes.loopTo[(size_t) l].load();
+        pat.dir[(size_t) l] = ln.engine.lanes.dir[(size_t) l].load();
     }
     for (int i = 0; i < 4; ++i)
         pat.rhythmDivs[(size_t) i] = ln.engine.rhythmDiv[(size_t) i].load();
@@ -2283,6 +2313,10 @@ void KeysProcessor::recallArpPattern(int index, int line)
             ln.engine.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+        ln.engine.lanes.on[(size_t) l].store(pat.on[(size_t) l] != 0 ? 1 : 0);
+        ln.engine.lanes.loopFrom[(size_t) l].store(juce::jlimit(0, ArpEngine::maxSteps - 1, pat.loopFrom[(size_t) l]));
+        ln.engine.lanes.loopTo[(size_t) l].store(juce::jlimit(0, ArpEngine::maxSteps - 1, pat.loopTo[(size_t) l]));
+        ln.engine.lanes.dir[(size_t) l].store(juce::jlimit(0, (int) ArpEngine::numLaneDirs - 1, pat.dir[(size_t) l]));
     }
     for (int i = 0; i < 4; ++i)
         ln.engine.rhythmDiv[(size_t) i].store(juce::jlimit(0, 16, pat.rhythmDivs[(size_t) i]));
@@ -2868,6 +2902,10 @@ void KeysProcessor::setArpPatternSlot(int index, const ArpPattern& pattern, int 
             ln.engine.lanes.value[(size_t) l][(size_t) s].store(pattern.value[(size_t) l][(size_t) s]);
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pattern.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pattern.clockDiv[(size_t) l]));
+        ln.engine.lanes.on[(size_t) l].store(pattern.on[(size_t) l] != 0 ? 1 : 0);
+        ln.engine.lanes.loopFrom[(size_t) l].store(juce::jlimit(0, ArpEngine::maxSteps - 1, pattern.loopFrom[(size_t) l]));
+        ln.engine.lanes.loopTo[(size_t) l].store(juce::jlimit(0, ArpEngine::maxSteps - 1, pattern.loopTo[(size_t) l]));
+        ln.engine.lanes.dir[(size_t) l].store(juce::jlimit(0, (int) ArpEngine::numLaneDirs - 1, pattern.dir[(size_t) l]));
     }
     for (int i = 0; i < 4; ++i)
         ln.engine.rhythmDiv[(size_t) i].store(juce::jlimit(0, 16, pattern.rhythmDivs[(size_t) i]));
@@ -3408,6 +3446,13 @@ void KeysProcessor::arpLineToTree(juce::ValueTree& dest, int line) const
             lt.setProperty("values", vals.joinIntoString(","), nullptr);
             lt.setProperty("length", pat.length[(size_t) l], nullptr);
             lt.setProperty("clockDiv", pat.clockDiv[(size_t) l], nullptr);
+            // Appended 2026-08-18. Every one of these reads back as what the engine did before
+            // it existed when the property is absent, which is what lets a session written by
+            // any older build open here with no migration at all.
+            lt.setProperty("on", pat.on[(size_t) l], nullptr);
+            lt.setProperty("loopFrom", pat.loopFrom[(size_t) l], nullptr);
+            lt.setProperty("loopTo", pat.loopTo[(size_t) l], nullptr);
+            lt.setProperty("dir", pat.dir[(size_t) l], nullptr);
             pt.appendChild(lt, nullptr);
         }
         dest.appendChild(pt, nullptr);
@@ -3489,6 +3534,10 @@ void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int sa
                 pat.value[(size_t) l][(size_t) s] = vals[s].getIntValue();
             pat.length[(size_t) l] = (int) lt.getProperty("length", 8);
             pat.clockDiv[(size_t) l] = (int) lt.getProperty("clockDiv", 0);
+            pat.on[(size_t) l] = (int) lt.getProperty("on", 1);
+            pat.loopFrom[(size_t) l] = (int) lt.getProperty("loopFrom", 0);
+            pat.loopTo[(size_t) l] = (int) lt.getProperty("loopTo", ArpEngine::maxSteps - 1);
+            pat.dir[(size_t) l] = (int) lt.getProperty("dir", ArpEngine::dirUp);
         }
     }
     syncArpChordTable(line); // the Chord lane's view of the slots, after a whole session lands
@@ -3502,6 +3551,10 @@ void KeysProcessor::arpLineFromTree(const juce::ValueTree& src, int line, int sa
             ln.engine.lanes.value[(size_t) l][(size_t) s].store(pat.value[(size_t) l][(size_t) s]);
         ln.engine.lanes.length[(size_t) l].store(juce::jlimit(1, ArpEngine::maxSteps, pat.length[(size_t) l]));
         ln.engine.lanes.clockDiv[(size_t) l].store(juce::jlimit(0, 2, pat.clockDiv[(size_t) l]));
+        ln.engine.lanes.on[(size_t) l].store(pat.on[(size_t) l] != 0 ? 1 : 0);
+        ln.engine.lanes.loopFrom[(size_t) l].store(juce::jlimit(0, ArpEngine::maxSteps - 1, pat.loopFrom[(size_t) l]));
+        ln.engine.lanes.loopTo[(size_t) l].store(juce::jlimit(0, ArpEngine::maxSteps - 1, pat.loopTo[(size_t) l]));
+        ln.engine.lanes.dir[(size_t) l].store(juce::jlimit(0, (int) ArpEngine::numLaneDirs - 1, pat.dir[(size_t) l]));
     }
     for (int i = 0; i < 4; ++i)
         ln.engine.rhythmDiv[(size_t) i].store(pat.rhythmDivs[(size_t) i]);
