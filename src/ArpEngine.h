@@ -1635,7 +1635,13 @@ private:
         // Three times the base capacity: each of the line's two harmony voices can add a copy
         // of every base hit (2026-08-19). addHit drops on overflow rather than writing past
         // the end, as ever.
-        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 3];
+        // Value-initialised. Only the first `hitCount` entries are ever read, and addHit is the
+        // only writer, so the tail is dead either way - but the dedup scan below reads
+        // hits[i].note for i < hitCount, and cppcheck cannot prove those were written, so the
+        // CI gate treats it as an uninitialised read. Zeroing about 5 KB once per *fired step*
+        // is immaterial next to what the rest of fireStep does, and it costs no allocation and
+        // no lock, so the audio-thread rule is untouched. Well-defined beats provably-unread.
+        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 3] {};
         int hitCount = 0;
         const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
         // **One hit per pitch per channel per step, and that is a hard rule, not tidiness.**
