@@ -432,9 +432,9 @@ be believed.
 
 | | valence | n (song-row pairs) |
 |---|---|---|
-| rows in a major mode | **0.454** | 57,953 |
-| rows in a minor mode | **0.436** | 32,535 |
-| gap | **+0.018** | |
+| rows in a major mode | **0.479** | 2,703,099 |
+| rows in a minor mode | **0.451** | 1,334,629 |
+| gap | **+0.028** | |
 
 It passes, in the right direction. **And it failed first, which is the useful part.** The first
 version split rows by counting how many of their chords were minor - the obvious test, and wrong,
@@ -444,20 +444,22 @@ meant to identify it as minor. With that split the control reported minor as *ha
 and the whole run was noise. What makes a progression minor is its tonic, and `Entry::mode` is the
 field that already says so.
 
-**0.018 is therefore the yardstick.** It is roughly the most that a purely *harmonic* fact moves
+**0.028 is therefore the yardstick.** It is roughly the most that a purely *harmonic* fact moves
 Spotify's valence, which is computed from audio. Any effect much smaller than that is nothing.
 
 ### The result
 
-The ordering is sensible. Highest valence: **Lighthearted** (0.478), Tender, Rebellious, Playful,
-Smooth. Lowest: **Longing** (0.424), Haunting, Sad, Melancholic, Dark, Intense. Energy runs the
-other way, with Rebellious (0.645), Ominous, Suspenseful and Dark at the top and Reflective, Tender
-and Romantic at the bottom. Nothing is upside down.
+The ordering is sensible, and it is the right words at both ends. Highest valence: **Lighthearted**
+(0.517), Playful, **Triumphant**, Tender, **Happy**, Spiritual, Fun. Lowest: **Longing** (0.443),
+**Sad**, **Haunting**, Dark, Eerie, Intense, Sombre, Ominous. Energy runs the other way, with
+Rebellious, Tragic, Ominous and Dark at the top and Reflective, Tender and Smooth at the bottom.
+Nothing is upside down.
 
-**But the mood spread is 0.054, three times the harmonic ceiling of 0.018.** A mood tag cannot move
-valence more than major-versus-minor does *by harmony*, so most of that spread is **not harmony**.
-It is genre and production riding along: the Rebellious rows are punk, the Smooth rows are jazz, and
-those genres sound different for reasons that have nothing to do with which chords are in them.
+**But the mood spread is 0.074, more than twice the harmonic ceiling of 0.028.** A mood tag cannot
+move valence more than major-versus-minor does *by harmony*, so most of that spread is **not
+harmony**. It is genre and production riding along: the Smooth rows are jazz, the Driving rows are
+dance, and those genres sound different for reasons that have nothing to do with which chords are
+in them.
 
 So the honest verdict: **the tags are directionally right, and the measurement mostly reflects the
 company a progression keeps rather than the progression itself.**
@@ -471,10 +473,16 @@ company a progression keeps rather than the progression itself.**
 - **Spotify's valence is an audio measure.** Timbre, tempo, vocals and mastering all move it. A
   despairing lyric over major chords reads high-valence. The join says "songs using this progression
   tend to sound positive", never "this progression is positive".
-- **The sample is small.** 2,841 songs joined out of 200,000 read, because the BSD-licensed
-  114k-track feature set barely overlaps Chordonomicon's ids. A larger dump would tighten the
-  estimates; it would not change the shape of the answer, because the ceiling is set by what
-  valence measures, not by how many rows are behind it.
+- **Sample size mattered more than predicted, and that prediction is worth recording as wrong.**
+  The first run joined only 2,841 songs, because the BSD-licensed 114k-track feature set barely
+  overlaps Chordonomicon's ids, and this section originally said a larger dump "would tighten the
+  estimates; it would not change the shape of the answer". Half right. Reducing the 56-million-row
+  dump to just the ids Chordonomicon uses (`scripts/corpus/join_features.py`, 87% coverage,
+  376,400 tracks) took the join to **121,656 songs**, and the *verdict* held - but the **ordering
+  visibly improved**. `Triumphant` moved from seventh to third and `Happy` from sixteenth to fifth;
+  `Rebellious` fell from third to mid-table, where at n=236 it had been noise. The small sample had
+  the shape roughly right and several individual tags plainly wrong, which is not the same as
+  "would not change".
 
 ### What would be better, if this is ever worth more effort
 

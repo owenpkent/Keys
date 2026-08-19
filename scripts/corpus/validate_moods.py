@@ -40,6 +40,9 @@ import pandas as pd
 CHORDS = "datasets/chordonomicon_v2.csv"
 FEATS_BSD = "datasets/spotify_tracks_bsd.csv"
 FEATS_BIG = "datasets/spotify_features_huge.parquet"
+# What `join_features.py` leaves behind: the big dump reduced to only the ids Chordonomicon uses,
+# a few MB instead of 4 GB. Preferred when it exists, which is what makes a wide join affordable.
+FEATS_JOINED = "datasets/valence_for_chordonomicon.csv"
 LIB = "src/ChordLibrary.h"
 
 DEG = {"I": 0, "II": 2, "III": 4, "IV": 5, "V": 7, "VI": 9, "VII": 11}
@@ -91,7 +94,15 @@ def keys_rows(path):
 def load_features():
     """track id -> (valence, energy), from whichever dumps are present."""
     feats = {}
-    if os.path.exists(FEATS_BIG) and os.environ.get("SKIP_BIG") != "1":
+    if os.path.exists(FEATS_JOINED):
+        with open(FEATS_JOINED, encoding="utf-8", errors="replace", newline="") as f:
+            for row in csv.DictReader(f):
+                try:
+                    feats[row["track_id"]] = (float(row["valence"]), float(row["energy"]))
+                except (KeyError, ValueError):
+                    pass
+        print(f"  pre-joined set: {len(feats):,} tracks")
+    if not feats and os.path.exists(FEATS_BIG) and os.environ.get("SKIP_BIG") != "1":
         df = pd.read_parquet(FEATS_BIG)
         cols = {c.lower(): c for c in df.columns}
         idc = cols.get("id") or cols.get("track_id") or cols.get("spotify_id")
