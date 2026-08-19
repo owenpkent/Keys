@@ -2664,6 +2664,121 @@ public:
             };
             expectEquals(noteAt(true), noteAt(false), "the same step plays the same note either way");
         }
+
+        // --- Per-step shapes, the fingered pair, and the Reset lane (2026-08-18) ----------
+
+        beginTest("a Note lane step can name its own shape, and they share one walk");
+        {
+            // Cthulhu's Note graph, p23: the top half of the lane is arpeggiator shapes, and
+            // they "vary consecutively one step after another" - one walk, read by whichever
+            // shape the step names, not a separate walk per shape.
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.usePattern = true;
+            sp.direction = ArpEngine::Direction::up;
+            // Four steps up, then four down. One cursor, so the second half reflects the walk
+            // the first half left rather than starting over.
+            for (int st = 0; st < 4; ++st)
+                e.lanes.value[ArpEngine::laneNote][(size_t) st].store(ArpEngine::noteShapeFirst);     // up
+            for (int st = 4; st < 8; ++st)
+                e.lanes.value[ArpEngine::laneNote][(size_t) st].store(ArpEngine::noteShapeFirst + 1); // down
+
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(sp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+            std::vector<int> notes;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    notes.push_back(ev.note);
+            expect(notes.size() >= 8, "eight steps sounded");
+            // Up over a triad from cursor 0: 60 64 67 60. Then "down" reads the *same* advancing
+            // cursor mirrored, n-1-(c%n): cursor 4,5,6,7 -> 64 60 67 64. Not 67 64 60 67, which
+            // is what a walk that restarted at the shape change would give - the point of the
+            // test is that it does not restart.
+            const std::vector<int> want { 60, 64, 67, 60, 64, 60, 67, 64 };
+            for (size_t i = 0; i < want.size() && i < notes.size(); ++i)
+                expectEquals(notes[i], want[i], "step " + juce::String((int) i));
+        }
+
+        beginTest("fingered top and bottom alternate the walk with the chord's extreme");
+        {
+            const auto run = [&](ArpEngine::Direction d)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto fp = p;
+                fp.direction = d;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(fp, clock, block * 6, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> notes;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        notes.push_back(ev.note);
+                return notes;
+            };
+
+            const auto top = run(ArpEngine::Direction::fingeredTop);
+            expect(top.size() >= 6, "six steps sounded");
+            // "every 2nd note is the high note of the chord" - and the walk between them covers
+            // the notes that are *not* the high one, or the shape would repeat the top twice.
+            const std::vector<int> wantTop { 60, 67, 64, 67, 60, 67 };
+            for (size_t i = 0; i < wantTop.size() && i < top.size(); ++i)
+                expectEquals(top[i], wantTop[i], "fingered top step " + juce::String((int) i));
+
+            const auto bot = run(ArpEngine::Direction::fingeredBottom);
+            const std::vector<int> wantBot { 64, 60, 67, 60, 64, 60 };
+            for (size_t i = 0; i < wantBot.size() && i < bot.size(); ++i)
+                expectEquals(bot[i], wantBot[i], "fingered bottom step " + juce::String((int) i));
+        }
+
+        beginTest("the Reset lane restarts the walk, and does not rebase the lanes");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto rp = p;
+            rp.usePattern = true;
+            rp.direction = ArpEngine::Direction::up;
+            // A two-step reset lane against a three-note chord, so the two cannot coincide by
+            // accident: with the reset the walk can only ever reach its first two notes.
+            e.lanes.length[ArpEngine::laneReset].store(2);
+            e.lanes.value[ArpEngine::laneReset][0].store(1);
+
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(rp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+            std::vector<int> notes;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    notes.push_back(ev.note);
+            expect(notes.size() >= 8, "eight steps sounded");
+            // The reset zeroes the cursor *before* the step reads it, so the reset step itself
+            // plays the first note of the shape - which is what the manual's example describes.
+            // 67 never sounds: every other step is a restart, so the walk never gets past its
+            // second note. Without the lane this would be 60 64 67 60 64 67 60 64.
+            const std::vector<int> want { 60, 64, 60, 64, 60, 64, 60, 64 };
+            for (size_t i = 0; i < want.size() && i < notes.size(); ++i)
+                expectEquals(notes[i], want[i], "step " + juce::String((int) i));
+
+            // And the lanes kept walking: had the reset rebased them, step 2 would be the reset
+            // cell for ever and the Note lane could never reach its own step 3.
+            expectEquals(e.lanes.value[ArpEngine::laneReset][0].load(), 1, "the lane is untouched");
+        }
+
+        beginTest("every per-step shape value maps to a Direction, and no other value does");
+        {
+            for (int v = ArpEngine::noteShapeFirst; v <= ArpEngine::noteShapeLast; ++v)
+            {
+                const auto d = ArpEngine::shapeForNoteValue(v);
+                expect((int) d >= 0 && (int) d < ArpEngine::numDirections,
+                       "value " + juce::String(v) + " names a real Direction");
+            }
+            expectEquals(ArpEngine::noteShapeLast - ArpEngine::noteShapeFirst + 1, 8,
+                         "eight shapes, as in Cthulhu's Note graph");
+            expectEquals(ArpEngine::laneRange((int) ArpEngine::laneNote).hi, ArpEngine::noteShapeLast,
+                         "the Note lane's range reaches the last of them");
+        }
     }
 };
 

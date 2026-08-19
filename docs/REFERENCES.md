@@ -39,11 +39,32 @@ twelve now.
   the Note lane and destroyed whatever was there; `laneMute` fixed that the same day. Note = -1
   is still a *drawn* rest, which Cthulhu also has as a separate thing (drag below 1).
 
-**Not taken:**
+**Also taken, 2026-08-18** - and this is the round where the *Note graph itself* came over, which
+is what Owen was pointing at when he sent screenshots of these pages:
 
-- **Position Reset** (p25): alt-click a step to make the arp restart its walk there. Keys has
-  Retrigger, which is the same idea on a clock rather than on a step. A per-step version would
-  be a lane; no one has asked.
+- **Per-step shapes** (p23-24). *"The top-half of the graph is various arpeggiator patterns, which
+  act like a typical arpeggiator, where the note output varies consecutively one step after
+  another."* Eight of them - up, down, up/down, down/up, up and down, down and up, fingered bottom
+  and fingered top - appended to the Note lane above the Kirnu modes, in Cthulhu's own
+  bottom-to-top order. **This is the thing that makes the graph an arpeggiator you draw** rather
+  than a list of note numbers, and Keys had exactly one shape (the line's) before it. The "shares
+  one walk" half is taken too, and is the part that is easy to get wrong: a lane of mixed shapes
+  advances one cursor, so Up then Down comes back down the line it went up.
+- **`fingered top` / `fingered bottom`** (p24) as shapes in their own right: *"every 2nd note is
+  the high note of the chord"*. Keys' `Direction` had neither, so both were appended and the line's
+  own Shape combo gained them as well.
+- **Markers at a height, not filled bars.** Copied from the picture rather than the text, and it is
+  a real distinction: Cthulhu's Note graph draws a small block at the value's height because the
+  value is a *name*. Keys drew every lane as a bar filled up to its value, which reads a Note of 5
+  as "more than 4". Only the Note lane changed; every other lane really is a magnitude.
+- **Position Reset** (p25): *"the arpeggiator will reset on this step to play the first note of the
+  arpeggiator pattern"*. Built as `laneReset`. It restarts the **walk** and not the lanes, which
+  the manual's own example is careful about - it is about which note of the chord comes out.
+  Cthulhu reaches it by alt-clicking the Note graph; Keys' right-click list is closed and a
+  modifier is not a gesture it may require, so it is a lane - which is exactly what this file
+  predicted a per-step version would have to be.
+
+**Not taken:**
 - 128 chord slots keyed to incoming MIDI note. Keys' chord pads are a grid you click, not a
   keyboard-triggered memory - a different product decision, not an oversight.
 

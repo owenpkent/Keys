@@ -49,6 +49,47 @@ see**.
 The Draw page is 150 px taller for it - it is now the tallest of the three pages, where Play was.
 Paging already moves the window, and this is the page the height buys something on.
 
+### Added: the Note lane is an arpeggiator you draw, not a list of note numbers
+
+Cthulhu's Note graph, which is the thing that makes that graph worth having. Its manual p23: the
+top half of the lane is *"various arpeggiator patterns, which act like a typical arpeggiator, where
+the note output varies consecutively one step after another"*.
+
+- **Eight shapes live at the top of the Note lane** — up, down, up/down, down/up, up & down,
+  down & up, fingered bottom and fingered top — appended above the existing values, in Cthulhu's
+  own bottom-to-top order, so a drag up the lane meets them in the order its manual lists them.
+  Keys had exactly one shape, the line's, and a `follow` value to defer to it. Now a lane can run
+  four steps up, jump to a fixed note, and come back down, all drawn and all visible.
+- **They share one walk.** Four steps of Up followed by four of Down comes back down the line it
+  went up, rather than restarting — one cursor read by whichever shape the step names, which is
+  what Cthulhu means by "consecutively one step after another".
+- **Fingered bottom and fingered top are new shapes for the whole line too**, not only per step:
+  *"every 2nd note is the high note of the chord"*, with the walk between them covering the notes
+  that are not that extreme, so a triad comes out C–G–E–G rather than C–G–G–G. `Direction` gained
+  two entries, which is safe in that direction only — a slot stores its shape as an index and the
+  tree records what `numDirections` was when it was written.
+- **The Note lane draws markers at a height, not bars filled up to one.** A Velocity of 120 is a
+  magnitude and a column filled to 120 says so; a Note of 5 is a *name*, and a column filled to 5
+  reads as "more than 4", which is not something a chord entry can be. It is also what makes room
+  for the shape contours, which are drawn as pictures inside their own taller markers.
+- **A Reset lane**, Cthulhu's Position Reset: the step restarts the shape's walk, so it plays the
+  first note of its shape again. It restarts the *walk*, not the lanes — the manual's own example
+  is about which note of the chord comes out, and rebasing the lanes would leave the lane reading
+  its own reset cell for ever. It is a lane because Cthulhu reaches it by alt-click and Keys has no
+  modifier to spend.
+
+### Fixed: the panel kept a second copy of every lane's range
+
+`buildLaneRow` took a low and a high per lane, and those thirteen pairs were a duplicate of
+`ArpEngine::laneRange` — the table whose own comment says three tables that must agree is three
+tables that will not. It bit immediately: the engine accepted the new Note values and every grid
+still stopped at the old ceiling, so the shapes existed and could be neither drawn nor set. The
+parameters are gone and the grid reads `laneRange`.
+
+The lane tab row divided its width by a hard-coded twelve, so the Reset lane's tab was laid out
+four pixels wide — the same invisible starvation the Chain lane caused when it made twelve. It
+counts its tabs now, and the layout test caught it.
+
 ### Added: MUTATE and LOCK, a wander that stays in the chord and can be kept
 
 Two knobs on each macro card, in the cell CHANCE used to hold. Chance lost nothing by it: it is

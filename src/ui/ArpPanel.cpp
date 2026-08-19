@@ -67,6 +67,36 @@ namespace
     // publishes the step index it last read a lane by; the arithmetic that turns that into a
     // cell is the engine's own (ArpEngine::laneStepIndex), called here rather than copied, so
     // a playhead cannot light a cell the engine did not look at.
+    // Cthulhu draws each per-step shape as a little contour of dashes rather than a word (its
+    // manual p24), and that is most of why its Note graph reads at a glance: the picture of an
+    // arpeggio going up *is* the instruction. Six dashes at these heights, 0 at the bottom.
+    // The pairs that differ only in whether the extremes repeat are drawn so you can see which
+    // is which - Up-Down turns at a single apex, Up & Down sits on its apex for two dashes.
+    const float shapeGlyphs[8][6] = {
+        { 0.00f, 0.20f, 0.40f, 0.60f, 0.80f, 1.00f }, // up
+        { 1.00f, 0.80f, 0.60f, 0.40f, 0.20f, 0.00f }, // down
+        { 0.00f, 0.50f, 1.00f, 0.50f, 0.00f, 0.50f }, // up/down, extremes once
+        { 1.00f, 0.50f, 0.00f, 0.50f, 1.00f, 0.50f }, // down/up, extremes once
+        { 0.00f, 0.50f, 1.00f, 1.00f, 0.50f, 0.00f }, // up and down, extremes twice
+        { 1.00f, 0.50f, 0.00f, 0.00f, 0.50f, 1.00f }, // down and up, extremes twice
+        { 1.00f, 0.00f, 0.50f, 0.00f, 1.00f, 0.00f }, // fingered bottom
+        { 0.00f, 1.00f, 0.50f, 1.00f, 0.00f, 1.00f }, // fingered top
+    };
+
+    void drawShapeGlyph(juce::Graphics& g, juce::Rectangle<float> box, int shapeIndex)
+    {
+        const auto* h = shapeGlyphs[(size_t) juce::jlimit(0, 7, shapeIndex)];
+        const float dashW = juce::jmax(2.0f, box.getWidth() / 7.5f);
+        const float dashH = juce::jmax(1.5f, box.getHeight() * 0.16f);
+        const float travel = juce::jmax(0.0f, box.getHeight() - dashH);
+        for (int i = 0; i < 6; ++i)
+        {
+            const float x = box.getX() + (box.getWidth() - dashW) * ((float) i / 5.0f);
+            const float y = box.getBottom() - dashH - travel * h[i];
+            g.fillRect(x, y, dashW, dashH);
+        }
+    }
+
     int lanePlayhead(KeysProcessor& processor, int line, int lane)
     {
         const auto& eng = processor.arpLine(line);
@@ -196,6 +226,8 @@ juce::String ArpPanel::LaneGrid::cellText(int value) const
             case ArpEngine::noteRnd:  return "R";
             default: break;
         }
+        if (value >= ArpEngine::noteShapeFirst && value <= ArpEngine::noteShapeLast)
+            return {}; // drawn as its contour instead; see drawShapeGlyph
     }
     // Harmony and Chord are off at zero rather than centred on it, so a row of noughts would
     // read as data where it means "nothing here". The dot the note lane already uses says it
@@ -240,14 +272,45 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
 
         const auto bar = cell.reduced(1.5f);
         const float frac = hiVal > loVal ? (float) (value - loVal) / (float) (hiVal - loVal) : 0.0f;
-        const auto filled = bar.withTop(bar.getBottom() - bar.getHeight() * frac);
-        if (filled.getHeight() > 0.5f)
+
+        // **The Note lane draws a marker at a height; every other lane draws a bar up to it**
+        // (2026-08-18, from Cthulhu's Note graph). The difference is what the value *means*: a
+        // Velocity of 120 is a magnitude and a column filled to 120 says so, but a Note of 5 is
+        // a name, and a column filled to 5 reads as "more than 4" - which is not a thing a
+        // chord entry can be. It is also what makes room for the shape glyphs: eight of the
+        // values up here are pictures, and a picture on top of a full-height fill is neither.
+        const bool markerLane = (lane == ArpEngine::laneNote);
+        juce::Rectangle<float> marker;
+        const bool isShape = value >= ArpEngine::noteShapeFirst && value <= ArpEngine::noteShapeLast;
+        if (markerLane)
         {
-            g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.55f), 0.0f, filled.getY(),
-                                skin::accentOf(*this).deep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
-            g.fillRect(filled);
-            g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
-            g.fillRect(filled.getX(), filled.getY(), filled.getWidth(), 1.5f);
+            // A shape marker is taller than a note marker, because it has to hold a picture
+            // rather than a digit - Cthulhu draws the contour *inside* the block, and dashes
+            // spilling out of the top and bottom of a slab read as noise rather than as a shape.
+            const float markerH = isShape ? juce::jmax(22.0f, bar.getHeight() * 0.26f)
+                                          : juce::jmax(9.0f, bar.getHeight() * 0.12f);
+            const float travel = juce::jmax(0.0f, bar.getHeight() - markerH);
+            marker = { bar.getX(), bar.getBottom() - markerH - travel * frac, bar.getWidth(), markerH };
+            if (value > ArpEngine::noteRest)
+            {
+                g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.7f), 0.0f, marker.getY(),
+                                    skin::accentOf(*this).deep.withAlpha(0.55f), 0.0f, marker.getBottom(), false });
+                g.fillRoundedRectangle(marker, 2.0f);
+                g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
+                g.fillRect(marker.getX() + 1.0f, marker.getY(), marker.getWidth() - 2.0f, 1.5f);
+            }
+        }
+        else
+        {
+            const auto filled = bar.withTop(bar.getBottom() - bar.getHeight() * frac);
+            if (filled.getHeight() > 0.5f)
+            {
+                g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.55f), 0.0f, filled.getY(),
+                                    skin::accentOf(*this).deep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
+                g.fillRect(filled);
+                g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
+                g.fillRect(filled.getX(), filled.getY(), filled.getWidth(), 1.5f);
+            }
         }
 
         // Outside the loop window the cell is still drawn - it is still yours, and you can
@@ -260,12 +323,19 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
             g.fillRect(cell);
         }
 
-        const bool asDot = (lane == ArpEngine::laneNote && value == 0);
-        if (asDot)
+        // A shape value is drawn as its contour, inside the marker's own column rather than in
+        // the marker: the glyph needs vertical room to be a picture at all, and the marker is
+        // nine pixels tall.
+        if (markerLane && isShape)
         {
-            const float r = juce::jmin(6.0f, cell.getWidth() * 0.25f);
+            g.setColour(skin::text.withAlpha(0.95f));
+            drawShapeGlyph(g, marker.reduced(3.0f, 4.0f), value - ArpEngine::noteShapeFirst);
+        }
+        else if (lane == ArpEngine::laneNote && value == 0)
+        {
+            const float r = juce::jmin(5.0f, cell.getWidth() * 0.22f);
             g.setColour(skin::text);
-            g.fillEllipse(cell.getCentreX() - r, cell.getCentreY() - r, r * 2.0f, r * 2.0f);
+            g.fillEllipse(marker.getCentreX() - r, marker.getCentreY() - r, r * 2.0f, r * 2.0f);
         }
         else if (cell.getWidth() > 16.0f)
         {
@@ -278,7 +348,10 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
             {
                 g.setColour(lane == ArpEngine::laneNote && value == -1 ? skin::textFaint : skin::text);
                 g.setFont(skin::ui(named.isNotEmpty() ? 10.0f : 11.0f));
-                g.drawText(txt, cell.toNearestInt(), juce::Justification::centred);
+                // In the Note lane the text belongs *in* the marker, which is where the value
+                // is; everywhere else the bar is the value and the cell is where it reads.
+                g.drawText(txt, (markerLane ? marker.expanded(0.0f, 2.0f) : cell).toNearestInt(),
+                           juce::Justification::centred);
             }
         }
     }
@@ -753,14 +826,15 @@ void ArpPanel::setEditLine(int line, bool leaveMacroView)
     repaint();
 }
 
-void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::String& name, int loVal, int hiVal)
+void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::String& name)
 {
+    const auto r = ArpEngine::laneRange((int) lane);
     row.tab.setButtonText(name);
     row.tab.onClick = [this, lane] { selectLane((int) lane); };
     row.hasTab = true;
     addAndMakeVisible(row.tab);
 
-    row.grid = std::make_unique<LaneGrid>(processor, *this, lane, loVal, hiVal);
+    row.grid = std::make_unique<LaneGrid>(processor, *this, lane, r.lo, r.hi);
     addChildComponent(*row.grid); // only the selected lane's grid is ever visible
 }
 
@@ -1666,7 +1740,7 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
 
     shapeBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up", "Up & Down", "Down & Up",
                            "As Played", "Reversed", "Random", "Random Other", "Random Once",
-                           "Chord" }, 1);
+                           "Chord", "Fingered Bottom", "Fingered Top" }, 1);
     shapeBox.addItem("Pattern", ArpEngine::numDirections + 1);
     shapeBox.onChange = [this] { applyShape(); };
     shapeBox.setTitle("Macro shape " + letter);
@@ -2319,7 +2393,8 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
     // the end of this array.
     static const char* shapeNames[] = { "Up", "Down", "Up-Dn", "Dn-Up",
                                         "Up&Dn", "Dn&Up", "Played", "Rev",
-                                        "Rnd", "Rnd-O", "Rnd-1", "Chord", "Pattern" };
+                                        "Rnd", "Rnd-O", "Rnd-1", "Chord",
+                                        "Fing-B", "Fing-T", "Pattern" };
     static_assert(sizeof(shapeNames) / sizeof(shapeNames[0]) == ArpEngine::numDirections + 1,
                   "every shape needs a card label, plus Pattern");
     static const char* rateNames[] = { "16 bar", "8 bar", "4 bar", "2 bar", "1 bar",
@@ -2458,7 +2533,8 @@ void ArpPanel::buildControls()
     // so a click too many on the shape before it cannot throw the step editor open.
     shapeBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up",
                            "Up & Down", "Down & Up", "As Played", "Reversed",
-                           "Random", "Random Other", "Random Once", "Chord" }, 1);
+                           "Random", "Random Other", "Random Once", "Chord",
+                           "Fingered Bottom", "Fingered Top" }, 1);
     shapeBox.addItem("Pattern", ArpEngine::numDirections + 1);
     shapeBox.onChange = [this] { applyShapeChoice(); };
     shapeBox.setTooltip("A shape arpeggiates the held chord. \"Pattern\" opens the step editor.");
@@ -2602,34 +2678,41 @@ void ArpPanel::buildControls()
     addAndMakeVisible(retrigBox);
 
     // The ten lanes, in ArpEngine::Lane order. The original six first:
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note",
-                 ArpEngine::noteRest, ArpEngine::noteRnd);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave", -3, 3);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate", 5, 200);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet", 1, 4);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet");
     // "Chance", not "Prob" (2026-08-14). The knob on the Play page is called CHANCE and the two
     // multiply together, so one word for one idea: a lane at 60 under a knob at 100 fires six
     // times in ten. Owen asked for per-step odds to be findable, and two names for the same
     // thing in two places is most of why they were not.
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance", 0, 100);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance");
     // The 2026-07-30 four. "Prob" above shortened with them: ten tabs share the width six
     // used to, and "Probability" is the only old label that will not fit at that size.
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose", -7, 7);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late", 0, 90);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony", 0, 7);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord", 0, 12);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord");
     // Rand gets a tab; Mute deliberately does not - the MUTE row under the grid has always been
     // its editor, and a tab as well would be two ways to draw one lane.
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand", -8, 8);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneChain], ArpEngine::laneChain, "Chain", 0, 2);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChain], ArpEngine::laneChain, "Chain");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneReset], ArpEngine::laneReset, "Reset");
     laneRows[(size_t) ArpEngine::laneNote].tab.setTooltip(
-        "Which note of the held chord this step plays. X rests, a blank follows the Shape, "
-        "1-8 pick a fixed one, and P/H/L/R are Prev, Highest, Lowest and Random - those four "
-        "ask the chord a question, so they keep meaning the same thing when it changes.");
+        "Which note of the held chord this step plays. Drag up through the whole vocabulary: "
+        "X rests, a dot follows the line's Shape, 1-8 pick a fixed note, P/H/L/R are Prev, "
+        "Highest, Lowest and Random, and the eight little contours above those are shapes this "
+        "step runs on its own - up, down, up/down, down/up, up & down, down & up, and fingered "
+        "low and high. Shapes share one walk, so four steps of Up then four of Down comes back "
+        "down the line it went up rather than starting over.");
     laneRows[(size_t) ArpEngine::laneChain].tab.setTooltip(
         "Play this step only on a condition: 0 always, 1 only if the step before it sounded, "
         "2 only if it did not. Chance says maybe; this says only if.");
+    laneRows[(size_t) ArpEngine::laneReset].tab.setTooltip(
+        "Restart the shape's walk on this step, so it plays the first note of its shape again. "
+        "Cthulhu's Position Reset. It restarts the walk, not the lanes - everything else keeps "
+        "running, so a reset every other step keeps an Up shape on its first two notes.");
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);
@@ -3805,7 +3888,15 @@ void ArpPanel::resized()
     // logged twice (2026-08-01, 2026-08-02) and paid for a third time here. Height is the cheap
     // axis on this page and 34 px buys every tab its full width back: twelve now get ~99 px
     // each against a 70 px floor.
-    const int tabW = juce::jmax(70, (tabsRow.getWidth() - 11 * 4) / 12);
+    // Counted, not hard-coded (2026-08-18). This was `(width - 11*4) / 12` with the twelve
+    // written in, so appending the Reset lane laid its tab out at four pixels wide - the same
+    // invisible starvation the Chain lane caused when it made twelve, one row lower down. Any
+    // lane appended from here divides the row correctly on the day it arrives.
+    int tabCount = 0;
+    for (const auto& lr : laneRows)
+        if (lr.hasTab)
+            ++tabCount;
+    const int tabW = juce::jmax(70, (tabsRow.getWidth() - juce::jmax(0, tabCount - 1) * 4) / juce::jmax(1, tabCount));
     for (auto& lr : laneRows)
     {
         if (! lr.hasTab)

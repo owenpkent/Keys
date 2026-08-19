@@ -144,6 +144,41 @@ further down; the ones it contradicts are marked where they sit.
 - **The Draw page is 358 px, up from 298**, and is now the tallest of the three where Play used to
   be. `contentHeight()` returns `pageHeight()`, so this moves the window only on this page - the
   cost paging already carries, spent on the page it buys something on.
+- **The Note lane's top half is eight per-step shapes, and that is the pass's real headline.**
+  From Cthulhu's Note graph (its manual p23-24), which is what Owen was pointing at. Values
+  **13..20** name a `Direction` through `shapeForNoteValue`, appended above the Prev/Hi/Low/Rnd
+  modes in Cthulhu's own bottom-to-top order so a drag up the lane meets them as the manual lists
+  them. **They share one walk**: `nextDirectionIndex` gained an overload taking an explicit
+  direction and the cursor is still one cursor, which is what "varies consecutively one step after
+  another" means - four steps of Up then four of Down comes back down the line it went up. Mutate
+  applies after this, so a per-step shape and Mutate compose.
+  **`Direction` gained `fingeredBottom` and `fingeredTop`** (numDirections 12 -> 14), so the line's
+  own Shape combo has them too. Appending is the only safe direction and `shapeBase` in the arp
+  tree is what makes it safe; **all four shape-name lists must grow together** (the APVTS choice in
+  `createLayout`, both `shapeBox.addItemList` calls, and `shapeNames[]` on the slot card, whose
+  static_assert is the only thing that catches a missed one). The fingered walk covers the notes
+  that are **not** the extreme it alternates with, or a triad comes out C-G-G-G instead of C-G-E-G.
+- **The Note lane draws a marker at a height; every other lane draws a bar up to one.** The
+  difference is what the value *means*: a Velocity of 120 is a magnitude and a filled column says
+  so, but a Note of 5 is a name, and a column filled to 5 reads as "more than 4" - not something a
+  chord entry can be. It is also what makes room for the shape glyphs, which are contours of six
+  dashes drawn **inside** their own taller markers (`drawShapeGlyph`). Dashes drawn outside the
+  marker were tried first and read as noise; the marker has to contain the picture.
+- **A Reset lane (`laneReset`), Cthulhu's Position Reset.** It zeroes `dirCursor` and **must not
+  touch `stepBase`**: the manual's example is about which note of the chord comes out, and rebasing
+  the lanes onto the reset step would leave that lane reading its own reset cell for ever, so the
+  pattern would never move again. It runs **after** mute, rest, chain and chance, so a reset on a
+  low-Chance step does not fire on the passes the step itself skipped. It is a lane rather than
+  Cthulhu's alt-click because the right-click list is closed and a modifier is not a gesture Keys
+  may require - which is exactly what this file already said a per-step version would have to be.
+- **`buildLaneRow` no longer takes a lo/hi pair, and that was a real bug, not tidying.** Those
+  thirteen pairs were a second copy of `ArpEngine::laneRange`, whose own comment says three tables
+  that must agree is three tables that will not. Widening the Note lane's range in the engine left
+  every grid still clamped at the old ceiling, so the new values existed and could be neither drawn
+  nor set. **The grid reads `laneRange`. Do not reintroduce the arguments.**
+  In the same family: the lane tab row divided its width by a hard-coded twelve, so appending
+  Reset laid its tab out at **four pixels** - the identical starvation the Chain lane caused when
+  it made twelve, one row lower down. It counts `hasTab` now, and `LayoutTests` caught it.
 - **MUTATE and LOCK replace CHANCE on the macro cards, and Mutate is not a reversal of the Drift
   rule.** *"Drift changes how a step plays, never which note it plays"* still stands, and Mutate
   meets it rather than breaking it: the fear behind that rule was a machine wandering onto notes
@@ -1668,7 +1703,7 @@ Four things will bite otherwise:
   is invisible in plain Keys, so a script targeting it there will not find it, by design. The
   Draw page's own controls, all 2026-08-14: the lane tabs answer to their visible word
   (`Note`, `Octave`, `Velocity`, `Gate`, `Ratchet`, **`Chance`** - `Prob` until that day -
-  `Transpose`, `Late`, `Harmony`, `Chord`, **`Rand`**, **`Chain`**), and the tools beside them
+  `Transpose`, `Late`, `Harmony`, `Chord`, **`Rand`**, **`Chain`**, **`Reset`** (2026-08-18)), and the tools beside them
   are `Select steps`, `Reset lane`, `Roll lane`, `Less roll` / `More roll`, `Copy steps` /
   `Paste steps` (2026-08-18) and `Harmony voice`. The lane strip added the same day answers to
   `Lane on`, `Lane direction back` / `Lane direction forward` and the loop bar's own `Lane loop`,

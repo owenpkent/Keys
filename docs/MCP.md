@@ -83,7 +83,13 @@ the CHANCE knob's place on the macro cards; `arpChance` itself is unchanged and 
 **A lane's shape is not a parameter and `set_params` cannot reach it.** Length, clock divider,
 on/off, loop window and direction are lane data in the arp tree — use `get_arp_pattern` and
 `set_arp_pattern`. Alongside `lengths` and `clockDivs`, those two now carry `on` (true/false),
-`loopFrom` / `loopTo` (0-based and inclusive; `loopTo` past the lane's end means its end, and is
+`loopFrom` / `reset` joined the lane list on 2026-08-18 (1 restarts the shape's walk on that step) and the
+`note` lane's range grew with it: -1 rests, 0 follows the line's Shape, 1..8 are fixed chord
+entries, 9..12 are Prev/Hi/Low/Random, and **13..20 are per-step shapes** (up, down, up/down,
+down/up, up & down, down & up, fingered bottom, fingered top, in that order). A script writing a
+note lane may now use any of them.
+
+`loopTo` (0-based and inclusive; `loopTo` past the lane's end means its end, and is
 reported clamped to the length so a captured window reads as the window you see) and `dir`
 (0 Up, 1 Down, 2 Up alt, 3 Down alt — the alt pair goes out and back without playing the turning
 points twice). All four are optional maps of lane name to value, and all four read back as the

@@ -965,6 +965,84 @@ at least as often as after, and a disabled component takes no mouse events at al
 - **A per-step enable row per lane.** Kirnu has one; Keys' MUTE row is still the Note lane's alone.
   Recorded in `docs/REFERENCES.md` as the remaining not-taken.
 
+## The Note graph (2026-08-18)
+
+Owen sent screenshots of Cthulhu's manual pages 22-25 with *"more like this"*. What those pages
+describe, and Keys did not have, is that **the Note lane is an arpeggiator you draw** rather than a
+lane of note numbers with one global Shape somewhere else.
+
+### Eight shapes at the top of the lane
+
+Cthulhu p23: *"The top-half of the graph is various arpeggiator patterns, which act like a typical
+arpeggiator, where the note output varies consecutively one step after another."* Its Note lane is
+one continuous vertical scale - mute at the bottom, then the eight fixed chord indices, then eight
+shapes - so the whole vocabulary is one drag.
+
+Keys' lane was rest, follow-the-Shape, 1..8, and Kirnu's four questions. Values **13..20** are the
+shapes, appended above those in Cthulhu's own bottom-to-top order (up, down, up/down, down/up, up
+and down, down and up, fingered bottom, fingered top), so a drag up the lane meets them in the
+order the manual lists them. `shapeForNoteValue` is the map, with a `static_assert` tying its table
+to the value range.
+
+**The walk is shared, and that is the whole feature.** `nextDirectionIndex` gained an overload
+taking an explicit `Direction`; the cursor is untouched. So four steps of Up followed by four of
+Down comes back *down the line it went up* rather than restarting from the top - which is what
+"consecutively one step after another" means, and it is the difference between mixing shapes
+sounding composed and sounding like a shuffle.
+
+Keys' own vocabulary already matched Cthulhu's on six of the eight, including the subtle pair:
+`upDown` sounds each extreme once and `upAndDown` sounds it twice, which is exactly the distinction
+the manual draws between "up/down" and "up and down". No translation was needed.
+
+### The fingered pair
+
+`fingeredBottom` and `fingeredTop` are new `Direction`s, so the line's own Shape has them too.
+p24: *"every 2nd note is the high note of the chord"*. The half worth writing down is that the walk
+between those covers the notes that are **not** the extreme it alternates with - a triad comes out
+C-G-E-G, not C-G-G-G. `n - 1` notes, walked at half the cursor rate.
+
+Appending to `Direction` moves the number that means "Pattern" in a slot's stored shape. That is
+already handled - `shapeBase` is written into the arp tree for exactly this - but **four separate
+name lists have to grow with it**, and only the slot card's `static_assert` catches a missed one.
+
+### Markers, not bars
+
+Copied from the picture rather than the text. Cthulhu draws each Note step as a small block at the
+value's height; Keys drew every lane as a column filled up to its value. For Velocity that is right
+- 120 is a magnitude and a full column says so. For Note it is wrong: 5 is a *name*, and a column
+filled to 5 reads as "more than 4", which is not a thing a chord entry can be.
+
+It is also what makes the shapes legible. A contour is a picture, and a picture on top of a
+full-height fill is neither. Shape markers are taller than note markers and the contour is drawn
+**inside** the block - dashes spilling out of the top and bottom were tried first and read as noise.
+
+### Position Reset
+
+p25: *"the arpeggiator will reset on this step to play the first note of the arpeggiator pattern"*.
+Built as `laneReset`, and two details are the design:
+
+- **It zeroes `dirCursor` and must not touch `stepBase`.** The manual's example is entirely about
+  which note of the chord comes out. Rebasing the lanes onto the reset step would leave that lane
+  reading its own reset cell for ever, and the pattern would never move again.
+- **It runs after mute, rest, chain and chance.** A step that did not sound did not reach its reset
+  either, so a reset drawn on a low-Chance step does not fire on the passes the step skipped.
+
+Cthulhu reaches it by alt-clicking the Note graph. Keys' right-click list is closed and a modifier
+is not a gesture it may require, so it is a lane - which is what `docs/REFERENCES.md` had already
+predicted a per-step version would have to be.
+
+### What this round cost, and what caught it
+
+Two duplicate-table bugs, both of the family this repo keeps logging:
+
+- `ArpPanel::buildLaneRow` took a lo/hi pair per lane, and those thirteen pairs were a second copy
+  of `ArpEngine::laneRange` - whose own comment says three tables that must agree is three tables
+  that will not. Widening the Note lane in the engine left every grid clamped at the old ceiling,
+  so the new values existed and could be neither drawn nor set. The arguments are gone.
+- The lane tab row divided its width by a hard-coded twelve, so appending Reset laid its tab out at
+  four pixels - the identical starvation the Chain lane caused when it made twelve. `LayoutTests`
+  caught this one before it was ever seen on screen, which is the argument for that test.
+
 ## Mutate and Lock (2026-08-18)
 
 Owen: *"I'd like to explore the chance knob being a drift instead where it explores other patterns

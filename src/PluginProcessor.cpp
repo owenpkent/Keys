@@ -361,7 +361,8 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Direction"), 1 }, nm + " Direction",
                                                       StringArray { "Up", "Down", "Up-Down", "Down-Up",
                                                                     "Up & Down", "Down & Up", "As Played", "Reversed",
-                                                                    "Random", "Random Other", "Random Once", "Chord" }, 0));
+                                                                    "Random", "Random Other", "Random Once", "Chord",
+                                                                    "Fingered Bottom", "Fingered Top" }, 0));
     // Added after the arp shipped, both additive so an older session still loads: a
     // missing parameter falls back to its default here rather than shifting any
     // existing parameter's range. Note the default: arpPattern off means a session

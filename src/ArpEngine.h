@@ -32,7 +32,7 @@ public:
     // Sounding arp notes awaiting their note-off. Raised from 64 with the Chord shape and
     // the Harmony lane, which between them can put a spread chord's every note on one step.
     static constexpr int maxActive = 128;
-    static constexpr int numLanes = 13;
+    static constexpr int numLanes = 14;
 
     // The four after laneProbability arrived 2026-07-30. Appended, like everything else in
     // that round: a slot's lane data is serialized by index, so inserting would silently
@@ -71,12 +71,23 @@ public:
                 // about the step before. It self-corrects within a single step, which is the
                 // cheapest possible break of that rule and is why this form was chosen over
                 // Stochas' arbitrary cell-to-cell reference.
-                laneChain };
+                laneChain,
+                // Cthulhu's **Position Reset** (its manual p25): *"the arpeggiator will reset on
+                // this step to play the first note of the arpeggiator pattern"*. There it is an
+                // alt-click marker on the Note graph; Keys' right-click list is closed and alt is
+                // not a gesture it may require, so it is a lane - which is what this file already
+                // said a per-step version would have to be.
+                //
+                // It resets the **walk**, not the lanes. `dirCursor = 0` only: the manual's own
+                // example is about which note of the chord comes out, and zeroing `stepBase` here
+                // would rebase the lanes onto this step, so the lane would read its own reset cell
+                // for ever and the pattern would never move again.
+                laneReset };
 
     // The value each lane holds when it is doing nothing. Also what every lane reads as
     // while Params::usePattern is false, which is how "Shape: Up" behaves like a plain
     // arpeggiator even after the step lanes have been edited.
-    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0, 0, 0, 0 };
+    static constexpr int laneDefaults[numLanes] = { 0, 0, 100, 100, 1, 100, 0, 0, 0, 0, 0, 0, 0, 0 };
 
     // What each lane can hold, low and high. **One copy** (2026-08-14): the grid that draws a
     // lane, the reroll that randomizes one and the drift that strays from one all need these,
@@ -95,10 +106,22 @@ public:
     static constexpr int noteHi = 10;        // the highest note of the held chord, whatever it is
     static constexpr int noteLow = 11;       // ...and the lowest
     static constexpr int noteRnd = 12;       // any entry, drawn fresh each time
+    // **Per-step shapes** (2026-08-18), from Cthulhu's Note graph - the feature that makes that
+    // graph an arpeggiator you draw rather than a list of note numbers. Its manual p23: *"The
+    // top-half of the graph is various arpeggiator patterns, which act like a typical
+    // arpeggiator, where the note output varies consecutively one step after another."*
+    //
+    // Keys had exactly one shape, the line's own, and `noteFollow` to defer to it. These eight
+    // let a step name a shape of its own and still advance the same walk, so a lane can run four
+    // steps up, jump to the top note, and come back down - drawn, visible, and not random.
+    // Ordered as Cthulhu lists them bottom-to-top above the fixed indices, so a drag up the
+    // lane meets them in the manual's own order.
+    static constexpr int noteShapeFirst = 13; // 13..20 name a Direction; see shapeForNoteValue
+    static constexpr int noteShapeLast = 20;
 
     struct LaneRange { int lo, hi; };
     static constexpr LaneRange laneRanges[numLanes] = {
-        { -1, 12 },  // Note: -1 rest, 0 follow the shape, 1..8 a fixed entry, 9..12 a mode
+        { -1, 20 },  // Note: -1 rest, 0 follow the shape, 1..8 a fixed entry, 9..12 a mode, 13..20 a shape
         { -3, 3 },   // Octave
         { 10, 200 }, // Velocity, as a percentage of what was played
         { 5, 200 },  // Gate
@@ -111,6 +134,7 @@ public:
         { -8, 8 },   // Rand: how far this step's note selection may stray, and which way
         { 0, 1 },    // Mute: 1 silences the step without touching what it holds
         { 0, 2 },    // Chain: 0 always, 1 only after a step that fired, 2 only after one that did not
+        { 0, 1 },    // Reset: 1 restarts the shape's walk on this step
     };
     // Stray from `value` by up to `reach`, staying inside `r`. `u01` is a draw in [0, 1).
     //
@@ -168,6 +192,7 @@ public:
         false, // Rand - drift must not rewrite how random you drew a step
         false, // Mute - nor silence a step you did not silence
         false, // Chain - a condition is structure, not feel
+        false, // Reset - a restart you placed; a machine must not move it
     };
 
     // The Hz mode's range, which is not a round number by choice: it is exactly what the
@@ -407,9 +432,31 @@ public:
     // shapes every saved session already carries. `chord` is the odd one out - it is not a
     // walk order at all but "play the whole held chord on every step", which turns the arp
     // into a comping engine (Ableton calls it Chord Trigger).
+    // fingeredBottom / fingeredTop appended 2026-08-18, from Cthulhu's Note graph (its manual
+    // p24): *"fingered top - every 2nd note is the high note of the chord"*, and its mirror.
+    // Appending is safe and is the only safe direction: a slot stores its shape as this index
+    // and `shapeBase` in the arp tree records what numDirections was when it was written.
     enum class Direction { up = 0, down, upDown, downUp, upAndDown, downAndUp, asPlayed, asPlayedReverse,
-                           random, randomOther, randomOnce, chord };
-    static constexpr int numDirections = 12; // keep in step with Direction; the Shape combo lists these then "Pattern"
+                           random, randomOther, randomOnce, chord, fingeredBottom, fingeredTop };
+    static constexpr int numDirections = 14; // keep in step with Direction; the Shape combo lists these then "Pattern"
+
+    // Which Direction a Note lane value 13..20 names. Cthulhu's own order read upward from the
+    // fixed indices (its manual p24, listed there top-to-bottom): up, down, up/down, down/up,
+    // up and down, down and up, fingered bottom, fingered top. Keys' `upDown` sounds each
+    // extreme once and `upAndDown` sounds it twice, which is exactly the distinction Cthulhu
+    // draws between "up/down" and "up and down", so the two vocabularies line up with no
+    // translation.
+    static Direction shapeForNoteValue(int v) noexcept
+    {
+        static constexpr Direction table[] = {
+            Direction::up, Direction::down, Direction::upDown, Direction::downUp,
+            Direction::upAndDown, Direction::downAndUp,
+            Direction::fingeredBottom, Direction::fingeredTop,
+        };
+        static_assert(sizeof(table) / sizeof(table[0]) == noteShapeLast - noteShapeFirst + 1,
+                      "every per-step shape value needs a Direction");
+        return table[(size_t) juce::jlimit(noteShapeFirst, noteShapeLast, v) - noteShapeFirst];
+    }
 
     struct Params
     {
@@ -1207,7 +1254,12 @@ private:
     // The sequence is always built ascending (or in arrival order); directions are
     // realized here. Exclusive ping-pong (upDown/downUp) plays the endpoints once
     // per cycle; inclusive (upAndDown/downAndUp) repeats them, Cthulhu-style.
-    int nextDirectionIndex(const Params& p)
+    // The line's own shape. The overload below is the same walk under a shape a *step* named
+    // (Note lane 13..20): same cursor, so mixing shapes across a lane advances one walk rather
+    // than eight of them - Cthulhu's "varies consecutively one step after another".
+    int nextDirectionIndex(const Params& p) { return nextDirectionIndex(p, p.direction); }
+
+    int nextDirectionIndex(const Params& p, Direction dir)
     {
         const int n = seqCount;
         if (n <= 1)
@@ -1219,7 +1271,7 @@ private:
         // so a ping-pong starts at the right place *in its cycle* instead of being reflected
         // to some other note.
         const long long cursor = dirCursor++ + p.offset;
-        switch (p.direction)
+        switch (dir)
         {
             case Direction::up:
             case Direction::asPlayed:
@@ -1233,7 +1285,7 @@ private:
                 const int period = 2 * (n - 1);
                 const int c = (int) (cursor % period);
                 const int i = c < n ? c : period - c;
-                return p.direction == Direction::upDown ? i : n - 1 - i;
+                return dir == Direction::upDown ? i : n - 1 - i;
             }
             case Direction::upAndDown:
             case Direction::downAndUp:
@@ -1241,7 +1293,7 @@ private:
                 const int period = 2 * n;
                 const int c = (int) (cursor % period);
                 const int i = c < n ? c : period - 1 - c;
-                return p.direction == Direction::upAndDown ? i : n - 1 - i;
+                return dir == Direction::upAndDown ? i : n - 1 - i;
             }
             case Direction::random:
                 lastPicked = (int) (rng() % (unsigned) n);
@@ -1260,6 +1312,18 @@ private:
             case Direction::randomOnce:
                 rebuildPermIfNeeded();
                 return perm[(size_t) (cursor % n)];
+            case Direction::fingeredBottom:
+            case Direction::fingeredTop:
+            {
+                // Cthulhu p24: "every 2nd note is the high note of the chord". So the walk
+                // alternates with a fixed extreme - and it walks the notes that are *not* that
+                // extreme, which is what makes a triad come out C G E G rather than C G G G.
+                const bool top = dir == Direction::fingeredTop;
+                if ((cursor & 1) != 0)
+                    return top ? n - 1 : 0;
+                const int walk = (int) ((cursor / 2) % (n - 1)); // n > 1 here
+                return top ? walk : walk + 1;
+            }
             case Direction::chord:
                 return (int) (cursor % n); // fireStep plays them all; this is the fallback
         }
@@ -1335,6 +1399,13 @@ private:
         }
         lastStepFired = true; // everything below this point sounds
 
+        // Position Reset, after the step has survived mute, rest, chain and chance, and before
+        // anything asks the walk where it is: a step that did not sound did not reach its reset
+        // either, which is what keeps a reset on a low-Chance step from firing on the passes the
+        // step itself skipped.
+        if (laneValue(p, laneReset, globalStep) > 0)
+            dirCursor = 0;
+
         buildSequence(p);
         if (seqCount == 0)
             return;
@@ -1385,8 +1456,11 @@ private:
                     chosen = (int) (rng() % (unsigned) seqCount);
                     break;
                 default:
-                    chosen = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
-                                          : nextDirectionIndex(p);
+                    if (noteVal >= noteShapeFirst && noteVal <= noteShapeLast)
+                        chosen = nextDirectionIndex(p, shapeForNoteValue(noteVal));
+                    else
+                        chosen = noteVal >= 1 ? (noteVal - 1) % seqCount // fixed index, wraps politely
+                                              : nextDirectionIndex(p);
                     break;
             }
             // Mutate last, so it applies whichever route picked the note - a fixed index, a

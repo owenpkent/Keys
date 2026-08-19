@@ -488,7 +488,11 @@ private:
     void buildAttachments();
     // This line's id for a parameter, e.g. "arpRate" on A and "arp2Rate" on B.
     juce::String paramId(KeysProcessor::ArpParam) const;
-    void buildLaneRow(LaneRow&, ArpEngine::Lane, const juce::String& name, int loVal, int hiVal);
+    // No lo/hi here (2026-08-18): the grid reads ArpEngine::laneRange, which is documented as
+    // the one copy. This took a pair of arguments per lane and they were a second copy of that
+    // table - and the day the Note lane grew its per-step shapes, the engine accepted 13..20
+    // while every grid still stopped at 12, so the values existed and could not be drawn or set.
+    void buildLaneRow(LaneRow&, ArpEngine::Lane, const juce::String& name);
     void selectLane(int lane);
     void nudgeLength(int delta); // selected lane, or every lane while Link is on
     void cycleClockDiv();
