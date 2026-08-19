@@ -230,7 +230,7 @@ Turnaround, Vamp, Lift, Descent, Turn, Open. That third axis is the one that tur
 composing: "sad" is forty candidates and no way to choose, where "sad, and it loops" and "sad, and
 it ends" are different requests and you nearly always have one of them in mind.
 
-Two ways in, sharing one set of picks. **Library** on the generator's Source row fills the tray or
+Three ways in, sharing one set of picks. **Library** on the generator's Source row fills the tray or
 the page with whatever matches - whole progressions laid end to end, so a Vamp filter gives you
 eight vamps to compare and a 12-Bar Blues fills the tray on its own. The **Library** chip on the
 Pads bar opens the library itself: twelve rows a page with `<` `>`, each showing its name, what it
@@ -238,6 +238,11 @@ does, the progression in roman numerals *as written*, and its tags. **Click a ro
 progression** - the thing a single chord cannot tell you, since ii-V-I and ii-V-vi start
 identically - then send it to the generator's tray or straight onto the page's empty pads. Nothing
 there ever overwrites a chord you already have.
+
+**Star the ones you keep**, and **Follows** turns the list into the progressions that could come
+after whatever your pads already end with, best first - what follows a cadence is not what follows a
+turnaround, and the smoothest join comes top. A pad remembers which progression it is a step of, so
+the strip draws a bracket under the run and names it.
 
 The content is the named canon (Pachelbel, the Andalusian cadence, the backdoor, rhythm changes,
 folia, the classical schemas), modal vamps per mode, jazz turnarounds, film-score chromatic

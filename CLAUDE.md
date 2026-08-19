@@ -250,6 +250,54 @@ Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
   **`lastLibraryEntry` means "the row the tray is holding"**, not "the row the last generation
   used". It said the latter for about an hour and the To-tray push made that reading wrong on
   screen straight away: the tray held Bird changes and the diagram was still captioned Folia.
+  **A pad remembers what it is part of.** `ChordPad::progression` (the row's **name**, never an
+  index - `chordlib::table()` is the one append-*and*-insert-safe table in Keys precisely because
+  nothing stores an index into it, and one here would take that back) and `progressionStep`. The
+  strip brackets a run of adjacent pads sharing a row in step order, name on the run's first card.
+  A run breaks on a row change, a step that does not follow, **and a row break** - pads wrap from
+  the sixth to the seventh, so 5 and 6 are adjacent by index and nowhere near each other on screen.
+  A run of one draws nothing: that is a chord that remembers where it came from, not a progression.
+  **A pad from the library takes its numeral from `chordlib::numeralAt`, never from `degree`.**
+  `degree` is an index into the mode a chord was *generated* in, and a library row is generated
+  against its own - so an Andalusian cadence in a C major session read back as `I vii vi V` under a
+  bracket correctly naming it. A row and a step name a chord exactly and need no mode.
+  **`chordlib::couldFollow` is the relational layer**, surfaced as **Follows** in the library
+  window. Two signals: `functionsAfter` **gates** (what follows a Cadence is not what follows a
+  Turnaround; nothing follows an Open with another Open) and the harmonic join **orders** (last
+  chord against first - falling fifth top, a repeat last without being disqualified). Function is a
+  gate rather than a weight on purpose: a row that does not belong after this one is not a weak
+  answer, it is the wrong one. It points at the **pads** rather than a row you select, scanning the
+  current page backwards, because the last progression laid down is the one being followed.
+  **Favourites are per session and kept by name** (`LayoutState::libraryFavourites`), which is the
+  honest weakness - Scaler's are global and Keys has no global store for anything, the settings
+  gear's own switches included. The star is *painted* rather than a `TextButton`, the lock-dot call:
+  twelve more Components to lay out and re-title per page turn, for a two-state mark.
+  **The row is a table and the columns are measured.** Each chord is one column - the numeral over
+  the chord it comes out as in the current key - because two independent strings in two fonts drift
+  apart along a row until the pairing has to be worked out rather than seen. Measured with
+  `GlyphArrangement`: **`Font::getStringWidthFloat` under-measures**, and sizing the columns with it
+  made every cell as wide as the *chord* underneath, so `iim7` drew as `iim` and a bare `V` as
+  nothing at all. A row's name also drops its own trailing numerals when they are *exactly* the
+  numerals shown beside it, which is display-only - `Entry::name` is still the identity a favourite
+  and a pad store.
+  **Where the rows came from, and it is not what the docs first claimed.** They were **written out
+  from music-theory knowledge**; no corpus was queried and no statistic computed, which
+  `ChordLibrary.h` states at the point somebody would add a row. That claim was overstated in seven
+  places and corrected on the same day - if a row looks wrong it is wrong because somebody thought
+  it was right, not because a dataset said so.
+  **The corpora are in `datasets/`, gitignored, with `datasets/README.md` as the manifest** and the
+  licence column as the reason it exists: the MIT MIDI pack may feed shipped content, Chordonomicon
+  is CC-BY-NC and is Owen's personal-use call. **The trap they exposed is a second roman-numeral
+  convention**: that pack spells minor progressions against the *minor* scale, so its `III`, `VI`,
+  `VII` are already flat, and its `i VII VI V` is Keys' `i bVII bVI V`. Import one verbatim and it
+  parses perfectly and plays the wrong chords, which `ChordLibraryTests.cpp` cannot catch.
+  **The mood tags have been checked, not proven** (`docs/CHORD_LIBRARY.md` §11). The control - minor
+  should read sadder than major - **failed first**, because the obvious split counts minor chords
+  and a minor key is full of major triads, so the Andalusian cadence landed on the major side. Split
+  on the row's declared mode and it passes at +0.018, which is then the yardstick: the mood spread
+  is three times that, so most of it is genre and production rather than harmony. Valence and
+  arousal are two numbers and the vocabulary is 46 words, so Haunting and Eerie can never be
+  separated this way. No tag was changed by any of it.
 - **Every filled chord card carries its roman numeral in the top-left corner** (2026-08-18, Owen:
   "I want the progression number to show up in the generator on the chord pad") - the chord pads
   and the generator's audition tray both, because those are the same card read at two moments.

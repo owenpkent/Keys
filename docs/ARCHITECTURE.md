@@ -25,7 +25,10 @@ src/
 │                             # spellchecks the table on every build). The eighth Source, and
 │                             # the only one that looks a sequence up rather than computing it
 ├── ChordNumerals.h           # the roman numeral for a chord, in one place: the numeral the
-│                             # cards print in their corner and the Progressions diagram draws
+│                             # cards print in their corner and the Progressions diagram draws.
+│                             # A *library* pad asks chordlib::numeralAt instead - `degree` is an
+│                             # index into the mode a chord was generated in, and a library row is
+│                             # generated against its own
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync.
 │                             # The processor holds *three* of these since 2026-08-01,
@@ -46,7 +49,8 @@ src/
 │   ├── ChordGenPanel.{h,cpp} # a view onto it, the content of a window of its own. Built
 │   │                         # when that window opens, destroyed when it closes
 │   ├── ChordLibraryPanel.{h,cpp} # the library you browse: twelve rows a page, < >, click a
-│   │                         # row to hear the progression, two buttons to place it. Its own
+│   │                         # row to hear the progression, two buttons to place it, a star to
+│   │                         # keep it, and Follows for what could come after the pads. Its own
 │   │                         # window off the Pads bar; same view-never-owner split
 │   ├── SourceViz.{h,cpp}     # read-only diagram of the current source, under its button
 │   │                         # row in that window (2026-08-01). Click-through, no state
@@ -434,6 +438,16 @@ pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algo
 these five; Markov keeps its own three paths, because its chords carry a numeral these don't
 and its per-pad regeneration steps the chain from the left neighbour.
 
+Two folders outside `src/` belong to the library and are gitignored payload plus a manifest, the
+arrangement `manuals/` already used:
+
+```
+datasets/                     # chord corpora and audio-feature dumps, per-source licences in
+                              # datasets/README.md. Never redistributed with Keys
+scripts/corpus/               # what was actually run against them: the MIT pack comparison, the
+                              # ranking against Chordonomicon, and the mood-tag check
+```
+
 `ChordLibrary.h` added the eighth on 2026-08-18 and it is the odd one out: **Library** does not
 compute a chord sequence, it looks one up. 355 named progressions, each stored as a roman-numeral
 string in the grammar `ChordMarkov.h` already parses (so one row serves twelve keys, and the
@@ -451,8 +465,16 @@ unchanged, because it hands back plain `chordgen::Chord`s like the rest.
 The library has a **second surface**, `ChordLibraryPanel`, a window of its own off a Library chip
 on the Pads bar: twelve rows a page with `<` `>`, the whole row a Hear button that walks the
 progression a chord at a time, and two buttons per row that send it to the generator's tray or onto
-the page's empty pads. Both surfaces share one piece of state on `ChordGenMenu`, so a mood picked
-in either is the mood Fill obeys. `docs/CHORD_LIBRARY.md` is the design and the paper trail.
+the page's empty pads. Each row also carries a **star** (`LayoutState::libraryFavourites`, kept by
+name and per session) and the window a **Follows** toggle, which replaces the three filters with
+`chordlib::couldFollow` on whatever progression the pads end with. Both surfaces share one piece of
+state on `ChordGenMenu`, so a mood picked in either is the mood Fill obeys.
+
+A pad that came from the library remembers it: `ChordPad::progression` and `progressionStep` carry
+the row's *name* and position, the strip draws a bracket under a run of them, and the numeral on
+such a pad comes from `chordlib::numeralAt` rather than from `degree` - see ChordNumerals.h's entry
+above for why. `docs/CHORD_LIBRARY.md` is the design and the paper trail, including §10 and §11 on
+what the corpora were actually measured to say and what they cannot.
 
 Sitting over all eight is **Smooth Voicing** (`genSmooth`, renamed from "Voice Leading"
 2026-08-01, Owen: "I don't understand what the voice reading does"; the parameter id

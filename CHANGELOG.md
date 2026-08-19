@@ -5,6 +5,172 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a pad remembers which progression it is a step of, and the strip brackets the run
+
+`ChordPad` gains `progression` and `progressionStep` - the first fields added to that struct since
+Markov's numeral, and for a reason of the same kind: a pad knew what chord it was and not what it
+was *part of*, so a strip holding the Andalusian cadence looked identical to four unrelated minor
+chords. A run of adjacent pads sharing a library row in step order now carries a hairline bracket,
+with the row's name along the top of its first card.
+
+The row's **name**, never an index into `chordlib::table()`. That table is explicitly free to be
+inserted into - it is the one append-*and*-insert-safe table in Keys, because nothing stores an
+index into it - and an index here would quietly take that freedom away and move every saved pad the
+first time a row was added in the middle.
+
+**A run breaks on a row change, a step that does not follow, and a row break.** The last is the one
+worth stating: pads wrap from the sixth to the seventh, so 5 and 6 are adjacent by index and nowhere
+near each other on screen, and a bracket spanning them would be a line drawn across the strip to
+nothing. A run of one draws nothing at all - that is a chord that remembers where it came from, not
+a progression on the strip.
+
+**The numerals under that bracket were wrong for one build, and the fix is the interesting part.**
+`degree` is an index into the mode a chord was *generated* in, and a library row is generated
+against its own mode - so an Andalusian cadence dropped into a C major session read back as
+`I vii vi V` underneath a bracket correctly naming it. Four wrong numerals is worse than none.
+`chordlib::numeralAt` asks the row directly: a row and a step name a chord exactly and need no mode.
+
+### Added: Follows - a progression that could follow a progression
+
+The relational layer `docs/CHORD_LIBRARY.md` §7 has been promising, as `chordlib::couldFollow` and a
+toggle in the library window. **Two signals, because "could follow" is two questions.**
+
+**Structure decides which rows are eligible.** `functionsAfter` is a small grammar of song form:
+what follows a Cadence is not what follows a Turnaround, and nothing follows an Open with another
+Open. It is a **gate rather than a weight** on purpose - a row that does not belong after this one
+is not a weak answer, it is the wrong one, and letting it in on a good harmonic join is how a
+suggestion list stops meaning anything.
+
+**The harmonic join orders what is left.** The last chord of one against the first of the next: a
+falling fifth scores highest, a repeat lowest without being disqualified, since two progressions on
+the tonic do follow each other - it is just the dullest answer. Staying in the mode is worth about a
+rank; a shared mood nudges.
+
+It points at the **pads**, not at a row you select, because that is where the question comes from -
+you have laid a progression down and want the next one. It scans the current page backwards, so the
+*last* progression is the one being followed, and greys when no pad carries one.
+
+With the Andalusian cadence on the pads it answers with the Flamenco cycle, Trap Phrygian, the
+Phrygian cycle and the Phrygian dominant cycle - every one starting on the tonic, which is the V-i
+resolution, and every one Phrygian.
+
+### Added: Favourites in the library window
+
+A star at the left of every row, and **Starred only** beside the three pickers, narrowing whatever
+they matched rather than replacing it - so a star and a mood together mean "the sad ones I kept".
+The gap Scaler's own manual surfaced (p43): 355 rows and no way to keep the six you actually use.
+
+Kept **by name** in `LayoutState::libraryFavourites`, the same call `ChordPad::progression` makes and
+for the same reason. **Per session, which is the honest weakness** - Scaler's favourites are global,
+and a star set in one project is gone in the next. Keys has no global store for anything, the
+settings gear's three switches included, so a global one would be new machinery for one feature.
+
+The star is **painted, not a `TextButton`**, the same call the lock dot on a chord card makes:
+twelve more Components to lay out, hide and re-title on every page turn, for a two-state mark. Its
+cell is the mouse-only 34 px all the same, reserved out of the row before anything else.
+
+### Fixed: the library row reads as a table
+
+A UI pass, and three of the four are fixes rather than polish.
+
+**Numerals over the chords they come out as, one column per chord.** The row had a wide dead strip
+between the numerals and the tags that read as a table with a hole in it. What belongs there is the
+other half of the question: the numeral says what the progression *is* whatever key you are in, the
+chord says what you will hear. Drawn as **measured columns** rather than two strings - which they
+were for one build, and the two lines use different fonts at different sizes, so `I V vi IV` over
+`C G Am F` drifted apart along the row until the pairing was something you worked out rather than
+saw.
+
+**`Font::getStringWidthFloat` under-measures, badly.** Sizing those columns with it made every cell
+as wide as the *chord* underneath, so `iim7` drew as `iim`, `V7` as `V`, and a bare `V` as nothing
+at all - a table quietly deleting the last character of half its content. `GlyphArrangement`
+measures what actually draws, and is what JUCE 8's deprecation names as the replacement.
+
+**A name drops its own numerals when the row already shows them**, so it reads "Axis" rather than
+"Axis (I-V-vi-IV)". The names carry them because they were written for a combo box, where the name
+is the only thing on screen; in a table with two columns of the same information a third copy is
+noise, and it is what pushed the longest names into an ellipsis. The test is exact - the
+parenthetical must *be* the numerals - because plenty are not: "i-iv-v (natural minor)",
+"Autumn-leaves turn (major to relative minor)". Display only; `Entry::name` is still the identity a
+favourite and a pad store.
+
+**"To tray" / "To pads" become "Tray" / "Pads"** at 66 px. Twenty-four buttons repeating two phrases
+down the window is a lot of text saying one thing, and in a column the preposition carries nothing
+the position does not. Accessible names keep the whole phrase.
+
+### Changed: the library says where its progressions came from, and it is not what it first claimed
+
+The table's provenance was overstated in seven places. It said the rows were "ranked and
+section-tagged against Hooktheory's published Trends and the open Chordonomicon corpus". **They were
+not.** Both datasets are real and relevant, and summaries of them informed the design, but nothing
+had been downloaded, no query run and no statistic computed.
+
+What actually happened: the rows were **written out from music-theory knowledge** - the named canon,
+modal vamps derived per mode and picked by ear, jazz turnarounds, film-score mediants, and the loops
+that characterise each genre. Sixty rows are `MarkovData.h`'s, itself hand-authored for Keys.
+`ChordLibrary.h` now says so at the point somebody would add a row, which is where it matters.
+
+`docs/CHORD_LIBRARY.md` §3's **Section** tag (Intro / Verse / Chorus) is marked **unbuilt** rather
+than described as though it already had corpus data behind it. That is the one axis that genuinely
+could be derived from evidence, which is exactly the reason not to invent it by hand.
+
+### Added: the corpora, and seven rows they found missing
+
+`datasets/` and `scripts/corpus/`, with `datasets/README.md` as the manifest. Payloads are
+gitignored like `manuals/`, so a fresh clone gets the manifest and nothing else and Keys
+redistributes none of it.
+
+Two sources, and **the licences are the headline**. Ludovic Drolez's `free-midi-chords` is **MIT**
+and can feed shipped content freely; **Chordonomicon** (680,000 songs, chord progressions with
+structural-part annotation) is **CC-BY-NC-4.0**, and Owen's call is that Keys is personal use, which
+that licence permits squarely. If Keys ever ships commercially, anything derived from it has to come
+out or be re-derived from a permissive source.
+
+**The finding that could have done damage: two roman-numeral conventions.** Keys uses a fixed
+major-scale degree table for every mode, so minor's flat degrees are `bIII`, `bVI`, `bVII`. The MIT
+pack spells minor progressions against the *minor* scale, so its `III`, `VI` and `VII` are already
+flat and written unadorned. The pack's `i VII VI V` and Keys' `i bVII bVI V` are **the same
+progression**. Comparing them without translating first reported an overlap of 19 rows out of 138,
+which is nonsense for two collections that are both mostly canon; translated it is 25 and every
+minor row lines up. The dangerous direction is importing a pack row verbatim: it parses perfectly
+and plays the wrong chords, and `ChordLibraryTests.cpp` cannot catch it, because a well-formed
+numeral is all it can check for.
+
+**Seven rows added**, and they are the useful kind of gap. The commonest four-chord windows in the
+corpus with no row here turned out to be **two-chord vamps written across four bars** - `I V I V`,
+`I IV I IV`, `i bVII i bVII` - a shape the table already used and had never written down for the
+commonest degrees. Not an exotic progression nobody thought of; the obvious one everybody plays and
+nobody puts on a list.
+
+**Eight rows never occur** in the corpus, all seven chords or longer. Nothing was deleted: the count
+*fell* from eleven to eight when the sample went from 40,000 songs to 150,000, which is the tell -
+they are rare rather than absent, and an exact twelve-chord window is rare in user-entered chord
+sheets.
+
+### Added: a check on the mood tags, and a clear statement of what it can settle
+
+Chordonomicon carries a Spotify track id on 73% of its songs and the audio-feature dumps carry
+valence and energy per id, so every progression can be placed on Russell's circumplex and each row
+scored by the mean valence of the songs that play it.
+
+**The control is the part that matters, and it failed first.** Minor should read sadder than major.
+The first split counted how many of a row's chords were minor - the obvious test, and wrong, because
+a minor key is full of *major* triads: `bIII`, `bVI` and `bVII` all are, so the Andalusian cadence
+counts three major against one minor and landed on the major side of a test meant to identify it as
+minor. With that split the control said minor was *happier* and the whole run was noise. Split on
+the row's declared mode instead and it passes at **+0.018** in the right direction.
+
+That 0.018 is the yardstick, and it reframes the result: it is roughly the most a purely *harmonic*
+fact moves an **audio** valence measure. The mood ordering comes out sensible - Lighthearted, Tender
+and Playful at the top, Longing, Haunting, Sad and Melancholic at the bottom, energy running the
+other way - but its spread is 0.054, three times that ceiling. So most of the spread is **not
+harmony**; it is genre and production riding along.
+
+**Verdict, recorded rather than glossed:** the tags are directionally right, and the measurement
+mostly reflects the company a progression keeps rather than the progression itself. And some of it
+can never be settled this way - valence and arousal are two numbers where the vocabulary is 46
+words, so Haunting and Eerie will always land in the same place. **No tag was changed.**
+
 ### Added: a Library window you can actually browse
 
 Owen chose both surfaces when the library was designed - the generator source first, a window
