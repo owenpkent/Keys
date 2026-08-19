@@ -88,6 +88,24 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   two columns is load-bearing (a card's knob strip needs ~430 px), so more lines mean more rows,
   never narrower cards. `arpMacroH` is two cards plus a row gap and the layout in
   `ArpPanel::resized` walks rows of two.
+- **The bottom row collapses to a 34 px strip** (2026-08-19, Owen: *"maybe you should be able to
+  minimize bottom arps"*). Two card rows at 323 px each meant the All view alone set a **1349 px
+  minimum window** - `applyLayout` passes `idealHeight()` in as the resize *minimum*, and this
+  view is the default - which is 43 px under Owen's own 1392 px work area and more than a 1080p
+  screen has at all. Collapsed, the minimum falls to **1060**.
+  `LayoutState::arpMacroBottomFolded`, persisted, default false. The **Lines C D** chip on the arp
+  bar is the toggle (there, not in the panel, for the standing reason: the bar is 34 px that
+  already exists, and spending 34 inside the panel to buy back 289 would be absurd); the collapsed
+  strip is itself a click target that opens the row again. **It folds the view, never the lines** -
+  C and D keep their chords, their patterns and their output, the macro card's scrim rule one level
+  up - and the strip therefore carries **no On switches**, because those are the bar's letters and
+  a second writer for one parameter is exactly what deleted `MacroRow`'s own On toggle on
+  2026-08-02. Two traps already paid for: the cards in a folded row are **hidden, not resized** (a
+  card squeezed into 34 px draws its knobs over each other and still takes the mouse), and
+  `setMacroView` has to hide the strip as well as the cards, since `resized()`'s whole macro block
+  sits behind `if (macroView)` and a folded row would otherwise keep drawing its strip over the
+  deep view. `LayoutTests` pins that the fold buys the height back and that unfolding returns it
+  exactly.
 - **Each line has a colour**: `skin::lineAccent(line)` - A cyan (the accent Keys shipped with),
   B magenta, C amber, D lime, the hexes reused from `accentChoices()`. Fixed, not
   theme-following, because the job is telling four lines apart. Worn by the macro card's frame,
@@ -1988,7 +2006,11 @@ Four things will bite otherwise:
   (2026-08-19)**: each card also answers to `Macro harmony 1 A` / `Macro harmony 2 A` (the
   interval combos, reachable by current text like every combo) and `Macro harmony 1 chance A` /
   `Macro harmony 2 chance A` (their knobs) - and every per-line name now comes in A through
-  **D**, since all four lines are on screen. From 2026-08-03, H.TIME carries a *second* name for its ring,
+  **D**, since all four lines are on screen. The bottom-row fold answers to
+  `Minimise arp lines C and D` on the bar (on-screen words "Lines C D") and the collapsed strip
+  to `Expand arp lines C and D`; the strip is a plain Component offering no invokable pattern, so
+  drive the *chip*, and `-InvokeButtons` reaches neither in Keys Host - enumerate the `Keys Host`
+  top-level element and `FindFirst` under it, the trap documented further up. From 2026-08-03, H.TIME carries a *second* name for its ring,
   `Macro H.TIME range A`, and a third for the satellite, `Macro H.TIME range handle A`, since
   face, ring and handle are three controls in one cell. **VEL gained the matching pair on
   2026-08-17**, `Macro VEL range A` / `Macro VEL range handle A` - ring and handle are plain

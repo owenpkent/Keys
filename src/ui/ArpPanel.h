@@ -80,6 +80,18 @@ public:
     bool isMacroView() const { return macroView; }
     void setMacroView(bool);
 
+    // **The All view's bottom row of cards, collapsed to a strip** (2026-08-19, Owen: "maybe you
+    // should be able to minimize bottom arps"). Four lines in a 2x2 grid is two card rows, and a
+    // card is 323 px, so the view alone sets a 1349 px minimum window. Collapsed it is 34 px and
+    // the minimum falls to 1060.
+    //
+    // The lines themselves are untouched - they keep their chords, their patterns and their
+    // output, exactly as an off line keeps its card's controls live behind the scrim. The state
+    // lives on the processor (LayoutState::arpMacroBottomFolded), because this panel is destroyed
+    // every time the section folds.
+    bool bottomRowFolded() const;
+    void setBottomRowFolded(bool);
+
     // A line's deep view is three pages (2026-08-14, Owen: "can we simplify the detail view or
     // organize into pages"). Un-paged it was the band, the lane editor, the twelve slots and
     // the action row all at once - 612 px against the macro view's 240, so Details grew the
@@ -691,6 +703,34 @@ private:
     // "Up" as it is on an edited pattern, so unlike the lane editor these never hide.
     std::array<std::unique_ptr<SlotCard>, KeysProcessor::numArpPatterns> slotCards;
     bool macroView = false;
+    // The 34 px strip that stands in for the bottom row of macro cards while it is collapsed.
+    // It names the lines that are hidden, in their own accent colours and dimmed when the line
+    // is off, and the whole strip expands the row again - a big target, which is the point on a
+    // surface driven with one mouse.
+    //
+    // **It carries no On switches.** The arp bar's letter switches are those, they stay reachable
+    // with the whole section folded, and a second control bound to one parameter is the mistake
+    // that deleted MacroRow's own On toggle on 2026-08-02.
+    class FoldedRowStrip : public juce::Component,
+                           public juce::SettableTooltipClient
+    {
+    public:
+        FoldedRowStrip(ArpPanel& o, KeysProcessor& p) : owner(o), processor(p)
+        {
+            setTitle("Expand arp lines C and D");
+            setTooltip("Show the bottom row of arpeggiator cards again. Collapsed or not, "
+                       "these lines keep playing.");
+        }
+        void paint(juce::Graphics&) override;
+        void mouseDown(const juce::MouseEvent&) override { owner.setBottomRowFolded(false); }
+        bool hitTest(int, int) override { return true; }
+
+    private:
+        ArpPanel& owner;
+        KeysProcessor& processor;
+    };
+    std::unique_ptr<FoldedRowStrip> foldedRowStrip;
+
     std::array<std::unique_ptr<MacroRow>, KeysProcessor::numArpLines> macroRows;
     // The tabs, BPM and Launch Quantize all moved to the ARP section bar on 2026-08-02
     // (editor-owned; see KeysEditor), so the macro view is nothing but the two cards.

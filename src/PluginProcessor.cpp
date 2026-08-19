@@ -3413,6 +3413,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("libraryFavourites", layout.libraryFavourites.joinIntoString(juce::newLine), nullptr);
     tree.setProperty("arpLine", layout.arpLine, nullptr);
     tree.setProperty("arpMacro", layout.arpMacro, nullptr);
+    tree.setProperty("arpMacroBottomFolded", layout.arpMacroBottomFolded, nullptr);
     tree.setProperty("arpPage", layout.arpPage, nullptr);
     tree.setProperty("arpLights", layout.arpLights, nullptr);
     tree.setProperty("uiScalePercent", layout.uiScalePercent, nullptr);
@@ -3465,6 +3466,9 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // the only one a session from then can have anything in.
     layout.arpLine = juce::jlimit(0, numArpLines - 1, (int) tree.getProperty("arpLine", 0));
     layout.arpMacro = flag("arpMacro", true);
+    // Absent before the bottom row could collapse (2026-08-19). False is the view every
+    // session before it had: all four cards open.
+    layout.arpMacroBottomFolded = flag("arpMacroBottomFolded", false);
     // Absent before the deep view was paged (2026-08-14). Play is the right answer for those,
     // and for a fresh instance: see the LayoutState comment for why not Draw.
     layout.arpPage = juce::jlimit(0, 2, (int) tree.getProperty("arpPage", 2));

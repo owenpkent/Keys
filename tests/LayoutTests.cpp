@@ -172,6 +172,28 @@ public:
             panel.setMacroView(true);
             const int macroH = panel.preferredHeight();
 
+            // **Collapsing the bottom row is worth about a card** (2026-08-19, Owen: "maybe you
+            // should be able to minimize bottom arps"). Four lines in a 2x2 grid is two card
+            // rows, and the All view alone was setting the editor's minimum window height - so
+            // this is the test that the fold actually buys the height back rather than merely
+            // hiding two cards inside a box that stayed the same size. It also pins the other
+            // half of the contract: folding a *view* must not disturb the lines behind it.
+            expect(! panel.bottomRowFolded(), "the bottom row starts open");
+            panel.setBottomRowFolded(true);
+            const int foldedH = panel.preferredHeight();
+            expect(panel.bottomRowFolded(), "the fold stuck");
+            expect(foldedH < macroH,
+                   "collapsing the bottom row made the panel shorter ("
+                       + juce::String(foldedH) + " vs " + juce::String(macroH) + ")");
+            // A card row is ~323 px and the strip that replaces it is 34, so the saving is most
+            // of a card. A loose floor rather than an exact number, so tweaking a knob row does
+            // not fail this, but tight enough that a fold saving nothing would.
+            expect(macroH - foldedH > 200,
+                   "the fold saved most of a card row, not a token few pixels ("
+                       + juce::String(macroH - foldedH) + " px)");
+            panel.setBottomRowFolded(false);
+            expectEquals(panel.preferredHeight(), macroH, "unfolding put the height back exactly");
+
             panel.setMacroView(false);
             std::map<ArpPanel::Page, int> pageH;
             for (const auto page : { ArpPanel::Page::setup, ArpPanel::Page::slots,
