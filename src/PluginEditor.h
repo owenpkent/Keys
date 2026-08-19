@@ -512,6 +512,15 @@ private:
     // to "we need a way to get out the detail view": not a second control doing All's job, but
     // All finally sitting with the things it is an alternative to.
     std::array<std::unique_ptr<juce::TextButton>, 3> arpPageTabs;
+    // Collapses the All view's bottom row of macro cards to a strip (2026-08-19, Owen: "maybe
+    // you should be able to minimize bottom arps"). On the bar rather than in the panel for the
+    // reason every control here is: the bar is 34 px that already exists, so the picker costs
+    // the view nothing - and taking 34 px inside the panel to buy back 289 would be absurd.
+    //
+    // It shows only in the All view, where it has something to fold, and hides with the section
+    // like All and the page tabs: it navigates a panel, so with the section shut there is
+    // nothing behind it.
+    juce::TextButton arpFoldBottomButton { "Lines C D" };
     // Bar order is most-used first - **Play, Cards, Draw** - which is deliberately *not* the
     // Page enum's own order. That stays steps = 0 / slots = 1 / setup = 2 because
     // LayoutState::arpPage stores the plain value, and renumbering it would move the page

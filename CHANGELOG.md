@@ -5,6 +5,42 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the All view's bottom row of arps collapses to a strip
+
+Owen: *"maybe you should be able to minimize bottom arps"*.
+
+Four lines in a 2x2 grid is two card rows where it was one, and a macro card is 323 px, so the
+All view alone was setting a **1349 px minimum window** - `applyLayout` passes `idealHeight()`
+in as the resize *minimum*, and this view is the default. That is 43 px under a 1440p work area
+and more than a 1080p screen has at all, which is the 2026-08-02 "the keyboard is cut off at the
+bottom" failure waiting to happen: the keybed is laid out last, so every missing pixel comes off
+it with nothing on screen to say why.
+
+**Lines C D** on the arp bar collapses the bottom row to a 34 px strip, and the minimum falls to
+**1060**. The strip names the lines it is standing in for, each in its own accent colour and
+dimmed when that line is switched off, and the whole strip is a click target that opens the row
+again - a big target, which is the point on a surface driven with one mouse.
+
+**It folds the view, never the lines.** C and D keep their chords, their patterns and their
+output while collapsed; this is the macro card's scrim rule read one level up. That is also why
+the strip carries no On switches of its own: those are the letters at the other end of the same
+bar, they stay reachable with the whole section folded, and a second control bound to one
+parameter is exactly the mistake that deleted the macro card's own On toggle on 2026-08-02.
+
+The toggle rides the bar rather than the panel for the standing reason - the bar is 34 px that
+already exists, and spending 34 px inside the panel to buy back 289 would be absurd. It shows
+only in the All view, where there is a row to fold, and hides with the section like All and the
+page tabs, since it navigates a panel.
+
+Two traps worth recording. The cards in a folded row are **hidden, not resized**: a card squeezed
+into 34 px draws its knobs over one another and its controls still take the mouse. And
+`setMacroView` has to hide the strip as well as the cards, because `resized()`'s whole macro block
+sits behind `if (macroView)` and never runs in a deep view - so a folded bottom row went on
+drawing its strip over the band. `LayoutTests` pins that the fold actually buys the height back
+rather than hiding two cards inside a box that stayed the same size, and that unfolding returns
+the height exactly.
+
+
 ### Fixed: review pass on the four-arps round
 
 **Two harmony voices on the same interval hung a note for the rest of the session.** A duplicate

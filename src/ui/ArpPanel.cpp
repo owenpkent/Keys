@@ -796,6 +796,73 @@ juce::String ArpPanel::paramId(KeysProcessor::ArpParam which) const
 // rows take their place - one per line, each bound to its own line for good. The *current*
 // line is untouched by this: a chord card still has one target, and switching back to A, B or
 // C shows the same deep controls you left.
+bool ArpPanel::bottomRowFolded() const { return processor.layout.arpMacroBottomFolded; }
+
+// Collapsing changes the panel's height, so the editor has to re-fit - the same call every
+// other view and page change here makes. Nothing about the lines is touched: C and D keep
+// their chords, their patterns and their output, and their On switches stay on the arp bar.
+void ArpPanel::setBottomRowFolded(bool folded)
+{
+    if (folded == processor.layout.arpMacroBottomFolded)
+        return;
+    processor.layout.arpMacroBottomFolded = folded;
+    resized();
+    repaint();
+    if (onPreferredHeightChanged)
+        onPreferredHeightChanged();
+}
+
+// The collapsed row: a chevron, the word LINES, and the letters of the lines that are hidden,
+// each in its own accent and dimmed when that line is switched off. Reading which of them are
+// running is the whole job here - the switching itself is the arp bar's.
+void ArpPanel::FoldedRowStrip::paint(juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced(1.0f);
+    g.setColour(skin::bgBot.withAlpha(0.55f));
+    g.fillRoundedRectangle(b, 5.0f);
+    g.setColour(skin::control.withAlpha(0.75f));
+    g.drawRoundedRectangle(b, 5.0f, 1.0f);
+
+    auto area = getLocalBounds().reduced(10, 0);
+
+    // A chevron pointing down: this opens downward, which is where the cards come back.
+    const auto chev = area.removeFromLeft(16).toFloat();
+    juce::Path p;
+    const float cx = chev.getCentreX(), cy = chev.getCentreY();
+    p.startNewSubPath(cx - 5.0f, cy - 2.5f);
+    p.lineTo(cx, cy + 3.0f);
+    p.lineTo(cx + 5.0f, cy - 2.5f);
+    g.setColour(skin::textDim);
+    g.strokePath(p, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
+                                         juce::PathStrokeType::rounded));
+    area.removeFromLeft(10);
+
+    g.setFont(skin::ui(10.0f).withExtraKerningFactor(0.14f));
+    g.setColour(skin::textFaint);
+    const auto capW = 46;
+    g.drawText("LINES", area.removeFromLeft(capW), juce::Justification::centredLeft);
+    area.removeFromLeft(4);
+
+    // One letter per hidden line, in its own colour. The bottom row is the last row of the
+    // 2x2 grid, so it is whichever lines follow the first two.
+    g.setFont(skin::ui(13.0f).boldened());
+    for (int n = 2; n < KeysProcessor::uiArpLines; ++n)
+    {
+        const bool on = processor.apvts
+                            .getRawParameterValue(KeysProcessor::arpParamId(n, KeysProcessor::apOn))
+                            ->load() > 0.5f;
+        const auto accent = skin::lineAccent(n);
+        g.setColour(on ? accent.base : accent.base.withAlpha(0.32f));
+        g.drawText(juce::String::charToString((juce::juce_wchar) ('A' + n)),
+                   area.removeFromLeft(20), juce::Justification::centredLeft);
+        area.removeFromLeft(6);
+    }
+
+    g.setFont(skin::ui(10.0f));
+    g.setColour(skin::textFaint);
+    g.drawText("click to show", getLocalBounds().reduced(12, 0), juce::Justification::centredRight);
+}
+
 void ArpPanel::setMacroView(bool on)
 {
     if (on == macroView)
@@ -810,6 +877,12 @@ void ArpPanel::setMacroView(bool on)
     for (auto& row : macroRows)
         if (row != nullptr)
             row->setVisible(on);
+    // The collapsed-row strip belongs to this view exactly as the cards do. resized() picks
+    // cards-or-strip *within* the macro view, but its whole block sits behind `if (macroView)`,
+    // so leaving the view never reaches it - and a folded bottom row would go on drawing its
+    // strip over the deep view's band.
+    if (foldedRowStrip != nullptr)
+        foldedRowStrip->setVisible(on && processor.layout.arpMacroBottomFolded);
     refreshShape();   // hides or restores the band, the lane tabs and the step editor
     refreshMacro();
     // The bar's page tabs come and go with this view (they pick a page of a line's deep view,
@@ -3168,6 +3241,11 @@ void ArpPanel::buildControls()
         macroRows[(size_t) n] = std::move(row);
     }
 
+    // The stand-in for the bottom row while it is collapsed. addChildComponent, not
+    // addAndMakeVisible: resized() is the one place that decides which of the two is on screen.
+    foldedRowStrip = std::make_unique<FoldedRowStrip>(*this, processor);
+    addChildComponent(*foldedRowStrip);
+
     // After every control this panel owns exists, and after the slot cards and lane grids in
     // particular: the lists hold raw pointers into members built above, so this cannot move
     // any earlier.
@@ -3515,12 +3593,19 @@ namespace
     // 1320 - and height is the cheap axis in this view, as ever.
     constexpr int arpMacroRowGap = 12;
     constexpr int arpMacroH = 2 * arpMacroCard + arpMacroRowGap;
+    // The bottom row collapsed to a strip (2026-08-19, Owen: "maybe you should be able to
+    // minimize bottom arps"). 34 px, the mouse-only floor, because the whole strip is the
+    // target that expands the row again. Two cards at 323 come to 1349 px of minimum window on
+    // their own; this brings the All view back to what it cost when there were two lines.
+    constexpr int arpMacroStripH = 34;
+    constexpr int arpMacroFoldedH = arpMacroCard + arpMacroRowGap + arpMacroStripH;
     constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
     // The gap under the block. The outer `reduced(12)` is shared with the band and Pattern
     // views, and this height has to agree with resized() exactly or the panel is the wrong
     // size with nothing to say so.
     constexpr int arpMacroBelow = 8;
     constexpr int arpMacroTotalH = 12 + (arpMacroH + arpMacroBelow) + 12;
+    constexpr int arpMacroFoldedTotalH = 12 + (arpMacroFoldedH + arpMacroBelow) + 12;
     // Euclid and Clocks each open into one 34 px row plus its 8 px gap above the action row,
     // and the two are mutually exclusive (openEuclidStrip/openClocksStrip each close the
     // other), so at most one of them is ever open at once.
@@ -3631,7 +3716,7 @@ int ArpPanel::contentHeight() const
 int ArpPanel::pageHeight() const
 {
     if (macroView)
-        return arpMacroTotalH;
+        return processor.layout.arpMacroBottomFolded ? arpMacroFoldedTotalH : arpMacroTotalH;
     switch (currentPage())
     {
         case Page::steps:
@@ -3773,12 +3858,35 @@ void ArpPanel::resized()
         // load-bearing: a card's knob strip needs ~430 px, so a column is always half the
         // panel and more lines mean more *rows* - height is the cheap axis in this view,
         // width the expensive one, and this is that rule as arithmetic.
-        auto cardsArea = block.removeFromTop(arpMacroH);
+        const bool folded = processor.layout.arpMacroBottomFolded;
+        auto cardsArea = block.removeFromTop(folded ? arpMacroFoldedH : arpMacroH);
         const int cardGap = 12;
         const int cols = 2;
         const int rows = (juce::jmax(1, KeysProcessor::uiArpLines) + cols - 1) / cols;
         for (int rowIdx = 0; rowIdx < rows; ++rowIdx)
         {
+            // The last row collapses to the strip while folded. Every card in it is *hidden*
+            // rather than resized: a card squeezed into 34 px would draw its knobs on top of one
+            // another, and its controls would still take the mouse. The lines themselves keep
+            // running - this is a view, exactly as the All/Details split is.
+            const bool foldedRow = folded && rowIdx == rows - 1;
+            if (foldedRow)
+            {
+                auto stripArea = cardsArea.removeFromTop(arpMacroStripH);
+                if (foldedRowStrip != nullptr)
+                {
+                    foldedRowStrip->setVisible(true);
+                    foldedRowStrip->setBounds(stripArea);
+                }
+                for (int c = 0; c < cols; ++c)
+                {
+                    const int n = rowIdx * cols + c;
+                    if (n < (int) macroRows.size() && macroRows[(size_t) n] != nullptr)
+                        macroRows[(size_t) n]->setVisible(false);
+                }
+                continue;
+            }
+
             auto rowArea = cardsArea.removeFromTop(arpMacroCard);
             cardsArea.removeFromTop(arpMacroRowGap);
             const int colW = (rowArea.getWidth() - cardGap * (cols - 1)) / cols;
@@ -3787,10 +3895,13 @@ void ArpPanel::resized()
                 const int n = rowIdx * cols + c;
                 if (n >= (int) macroRows.size() || macroRows[(size_t) n] == nullptr)
                     continue;
+                macroRows[(size_t) n]->setVisible(true);
                 macroRows[(size_t) n]->setBounds(rowArea.removeFromLeft(colW));
                 rowArea.removeFromLeft(cardGap);
             }
         }
+        if (! folded && foldedRowStrip != nullptr)
+            foldedRowStrip->setVisible(false);
     }
 
     // Which page's blocks claim space this pass (2026-08-14). Everything below already used

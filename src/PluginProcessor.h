@@ -679,6 +679,22 @@ public:
         // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
         // slots, which are per-line and have nowhere to live in a row.
         bool arpMacro = true;
+        // Whether the All view's **bottom row of macro cards is collapsed to a strip**
+        // (2026-08-19, Owen: "maybe you should be able to minimize bottom arps"). Four lines in
+        // a 2x2 grid is two card rows where it was one, and a card is 323 px, so the All view
+        // alone sets a 1349 px minimum window - against a 1392 px work area on Owen's own
+        // screen, and more than a 1080p one has at all. Collapsed, the bottom row is a 34 px
+        // strip and the minimum falls to 1060.
+        //
+        // **The lines keep playing.** This is the macro card's scrim rule read one level up:
+        // collapsing is about what is on screen, never about what is running, so C and D keep
+        // their chords, their patterns and their output. It is also why the strip carries no On
+        // switches of its own - those are on the arp bar, and a second writer for one parameter
+        // is exactly the mistake that deleted MacroRow's own On toggle on 2026-08-02.
+        //
+        // Here rather than in the panel for the reason arpMacro and arpPage are: the panel is
+        // destroyed every time the section folds, and the view you left is the one to get back.
+        bool arpMacroBottomFolded = false;
         // Which page of a line's deep view is showing (2026-08-14, Owen: "can we simplify the
         // detail view or organize into pages"). Values are ArpPanel::Page: 0 = Draw (the step
         // lanes), 1 = Cards (the twelve slots), 2 = Play (rate, shape, feel).

@@ -743,6 +743,28 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addChildComponent(*arpBarAllTab);
 
+    // Collapse the All view's bottom row of cards to a strip (2026-08-19, Owen: "maybe you
+    // should be able to minimize bottom arps"). Four lines in a 2x2 grid took the view from one
+    // card row to two, and a card is 323 px, so the All view alone sets a 1349 px minimum
+    // window - 43 px under a 1440p work area, and more than a 1080p screen has at all.
+    //
+    // It folds the view, never the lines: C and D keep their chords, their patterns and their
+    // output, and their On switches are the letters at the other end of this same bar. That is
+    // why this carries no switching of its own - one parameter, one control.
+    arpFoldBottomButton.setClickingTogglesState(true);
+    arpFoldBottomButton.setTitle("Minimise arp lines C and D");
+    arpFoldBottomButton.setTooltip("Collapse the bottom row of arpeggiator cards to a strip, so "
+                                   "the window is shorter when you are working on A and B. The "
+                                   "lines keep playing either way.");
+    arpFoldBottomButton.onClick = [this]
+    {
+        if (arpPanel != nullptr)
+            arpPanel->setBottomRowFolded(arpFoldBottomButton.getToggleState());
+        refreshArpBarTabs();
+    };
+    okstudio::ui::makeMouseOnly(arpFoldBottomButton);
+    addChildComponent(arpFoldBottomButton);
+
     // The page tabs, right of All, most-used first. See arpPageForTab for why the bar's order
     // is not the enum's, and for where the names came from.
     {
@@ -1321,6 +1343,18 @@ void KeysEditor::refreshArpBarTabs()
                           juce::dontSendNotification);
         t->setEnabled(arpPanel == nullptr || arpPanel->pageAvailable(page));
     }
+    // The bottom-row fold, on the same terms: visible only in the All view, where there is a
+    // row to fold, and lit while that row is collapsed. Its word says what it acts on rather
+    // than what it does, because the toggle state already says which way it is.
+    const bool onAll = processor.layout.arp && processor.layout.arpMacro;
+    if (arpFoldBottomButton.isVisible() != onAll)
+    {
+        arpFoldBottomButton.setVisible(onAll);
+        shownChanged = true;
+    }
+    arpFoldBottomButton.setToggleState(processor.layout.arpMacroBottomFolded,
+                                       juce::dontSendNotification);
+
     // Their cell collapses with them (see resized()), so BPM and Quantize slide back rather
     // than orbiting a hole - the pageButtons lesson, one more time.
     if (shownChanged)
@@ -3014,6 +3048,13 @@ void KeysEditor::resized()
                 t->setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
                 bar.removeFromLeft(3);
             }
+        }
+        // The bottom-row fold, in the same collapsing cell as All and the page tabs and for
+        // the same reason. Only in the All view: it is the one view with a row to fold.
+        if (processor.layout.arp && processor.layout.arpMacro)
+        {
+            bar.removeFromLeft(6);
+            arpFoldBottomButton.setBounds(bar.removeFromLeft(96).withSizeKeepingCentre(94, 24));
         }
         bar.removeFromLeft(14);
         quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
