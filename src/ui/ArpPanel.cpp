@@ -41,6 +41,9 @@ namespace
     // logged twice already. Height is the cheap axis in this view.
     constexpr int arpRingPx = 8;
     constexpr int arpMacroKnobLine = arpMacroLine + 2 * arpRingPx;
+    // The harmony area's dropdown row (2026-08-19, second pass): a 26 px combo centred in it.
+    // Its chance knob sits below it at arpMacroLine, one column per voice.
+    constexpr int arpMacroHarmCombo = 30;
 
     // Show or hide a whole group of controls in one line. The parameter type is what makes it
     // work: a braced list of mixed component types cannot deduce its own element type, but it
@@ -2359,28 +2362,35 @@ void ArpPanel::MacroRow::resized()
     for (int k = 0; k < numKnobs; ++k)
         headFor(knobLabels[(size_t) k], knobCell(k));
 
-    // The harmony strip (2026-08-19): two interval combos, each with its chance knob to its
-    // right. The combos are the elastic cells and the knobs are reserved first, the standing
-    // rule; the headings are placed from the controls, the same one-source-of-truth move the
-    // knob headings above make.
+    // The harmony area, two columns (2026-08-19, second pass - Owen: "make harmony 2
+    // columns"): one column per voice, its dropdown stacked over its chance knob, the way the
+    // BigSky panel pairs a shift with its amount. The first cut ran all four controls in one
+    // row, which read as a strip of parts rather than as two voices; a column is the pairing
+    // drawn as geometry. Headings are placed from the controls, as ever.
     const auto harmHeads = full.removeFromTop(arpMacroHeads);
-    auto harmRow = full.removeFromTop(arpMacroLine);
+    auto harmCombos = full.removeFromTop(arpMacroHarmCombo);
+    const auto chanceHeads = full.removeFromTop(arpMacroHeads);
+    auto harmKnobs = full.removeFromTop(arpMacroLine);
     {
-        const int half = (harmRow.getWidth() - 12) / 2;
+        const int gap = 12;
+        const int half = (harmCombos.getWidth() - gap) / 2;
         for (int s = 0; s < 2; ++s)
         {
-            auto cell = s == 0 ? harmRow.removeFromLeft(half) : harmRow;
+            auto comboCell = s == 0 ? harmCombos.removeFromLeft(half) : harmCombos;
+            auto knobCol = s == 0 ? harmKnobs.removeFromLeft(half) : harmKnobs;
             if (s == 0)
-                harmRow.removeFromLeft(12);
-            auto& knob = harmChanceKnobs[(size_t) s];
-            knob.setBounds(cell.removeFromRight(52));
-            cell.removeFromRight(6);
+            {
+                harmCombos.removeFromLeft(gap);
+                harmKnobs.removeFromLeft(gap);
+            }
             auto& box = harmBoxes[(size_t) s];
-            box.setBounds(cell.withSizeKeepingCentre(cell.getWidth(), 26));
+            box.setBounds(comboCell.withSizeKeepingCentre(comboCell.getWidth(), 26));
+            auto& knob = harmChanceKnobs[(size_t) s];
+            knob.setBounds(knobCol.withSizeKeepingCentre(52, knobCol.getHeight()));
             harmLabels[(size_t) (s * 2)].setBounds(box.getX(), harmHeads.getY(),
                                                    box.getWidth(), harmHeads.getHeight());
-            harmLabels[(size_t) (s * 2 + 1)].setBounds(knob.getX(), harmHeads.getY(),
-                                                       knob.getWidth(), harmHeads.getHeight());
+            harmLabels[(size_t) (s * 2 + 1)].setBounds(box.getX(), chanceHeads.getY(),
+                                                       box.getWidth(), chanceHeads.getHeight());
         }
     }
 
@@ -3384,10 +3394,11 @@ namespace
     // The knob line is arpMacroKnobLine, not arpMacroLine: it carries the two range knobs and
     // is a ring taller either side for them (2026-08-03). The top line, which has no rings on
     // it, is unchanged - two constants because the rows genuinely differ now.
-    // + the harmony strip (2026-08-19): its own heading row and a combo-and-knob line at the
-    // plain-row height, between the knobs and the rate's modifiers.
+    // + the harmony area (2026-08-19, two columns since the second pass that day): heading,
+    // dropdown row, CHANCE heading, knob row - between the knobs and the rate's modifiers.
     constexpr int arpMacroCard = arpMacroCap + arpMacroHeads + arpMacroLine
                                  + arpMacroHeads + arpMacroKnobLine
+                                 + arpMacroHeads + arpMacroHarmCombo
                                  + arpMacroHeads + arpMacroLine + 2 + arpMacroMods + 6;
     // The second 2026-08-02 pass (Owen: "we need to make the window shorter ... move the BPM
     // up into the title ... move the A B All into the title and remove everything on the
