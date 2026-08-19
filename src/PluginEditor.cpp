@@ -535,6 +535,21 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         addAndMakeVisible(b);
     }
 
+    // The strip's Play switch (2026-08-19). Off, a pad click makes no sound - the strip is
+    // drag-only - so reaching for the arpeggiator cannot misfire a chord that, with Exclusive
+    // on, chokes every running line. Read at the moment a press or release is handled, so the
+    // next click already obeys it; nothing to rebuild.
+    padsPlayButton.setTitle("Pads play on click");
+    padsPlayButton.setTooltip("Whether clicking a chord card plays it. Untick this while you "
+                              "are dragging cards up into the arpeggiator: the cards go quiet "
+                              "under the mouse, so a click that meant to be a drag cannot fire "
+                              "a chord and cut the running lines off. Dragging, the card menu "
+                              "and dropping on the arp all still work.");
+    padsPlayButton.setToggleState(processor.layout.padsPlayOnClick, juce::dontSendNotification);
+    padsPlayButton.onClick = [this]
+    { processor.layout.padsPlayOnClick = padsPlayButton.getToggleState(); };
+    addAndMakeVisible(padsPlayButton);
+
     // The generator's bulk actions, on the same bar. They were buttons on a panel that no
     // longer exists, and they had to survive it: a right-click menu is not a left click, so
     // without these the only way to fill a page would be sixteen New chords one card at a
@@ -1656,6 +1671,7 @@ void KeysEditor::syncSectionControls()
     // already looking at is one click either way.
     for (auto& b : pageButtons)
         b.setVisible(lay.pads); // pointless without pads
+    padsPlayButton.setVisible(lay.pads); // acts on clicks the fold just hid
     // Fill, Regen, the Generator button and the three combos beside them are deliberately
     // *not* in the list above, and are never hidden: they are the arp On of this bar. Fill and
     // Regen used to hide with the strip, on the reasoning that generating into cards you cannot
@@ -2893,6 +2909,11 @@ void KeysEditor::resized()
             b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
             bar.removeFromLeft(4);
         }
+        bar.removeFromLeft(10);
+        // The strip's Play switch, after the pages: it acts on the same cards they page, and
+        // like them it is pointless with the strip folded away (see syncSectionControls). A
+        // toggle needs its box plus the word, the Light keys sizing.
+        padsPlayButton.setBounds(bar.removeFromLeft(64).withSizeKeepingCentre(62, 24));
         bar.removeFromLeft(14);
         // Humanize and its velocity range rode this bar from 2026-08-02 to 2026-08-03, when
         // they became a range knob *in the strip* with Strum beside them. They are pad

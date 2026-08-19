@@ -41,44 +41,58 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
 | `apply_euclid` | Write a Euclidean rhythm (Bjorklund's algorithm) into the active pattern's probability lane: 100 on a hit, 0 on a rest, and set that lane's length to `steps`. |
 
-### The two arpeggiator lines
+### The four arpeggiator lines
 
-Keys runs two arpeggiators (`docs/ARP_DESIGN.md`). All four arp tools take an optional
-**`line`**, 0 or 1 — A or B — and **default to 0**, the arpeggiator Keys has always had. Every
-script written before the lines existed therefore still drives the line it was written for,
-unchanged.
+Keys runs four arpeggiators (`docs/ARP_DESIGN.md`). Every arp tool takes an optional
+**`line`**, 0 through 3 - A, B, C or D - and **default to 0**, the arpeggiator Keys has always
+had. Every script written before the lines existed therefore still drives the line it was
+written for, unchanged.
 
-There were three until 2026-08-02, and **line C's parameters are still registered**: `arp3On`,
-`arp3Rate` and the rest still appear in `list_params` and still accept a write, because dropping
-them from the layout would break every saved session. Nothing reaches them — `arpLineOn` answers
-false above the UI's count, so line C has no engine running, no chip and no row. Writing an
-`arp3*` id is accepted and does nothing audible. Passing `"line": 2` is clamped to B.
+There were only two on screen between 2026-08-02 and 2026-08-19, and line C's parameters
+(`arp3On`, `arp3Rate` and the rest) stayed registered through that whole stretch, because
+dropping a parameter from the layout breaks every saved session even while nothing on screen
+reaches it. **All four lines are on screen from 2026-08-19**: `numArpLines` and `uiArpLines` are
+both 4 now, so line C has an engine running, a letter switch and a macro card again, and a new
+line D (`arp4*`, appended) joined it. Passing `"line": 2` reaches C, `"line": 3` reaches D;
+older scripts that only ever used 0 or 1 are unaffected.
 
 Each line owns its own live lanes, its own twelve slots, its own held chord and its own chain,
 so `slot` is read *within* a line: `{ "line": 1, "slot": 3 }` is B's fourth slot, a different
 place from A's. `set_arp_pattern` and `get_arp_pattern` echo the `line` they acted on.
 
-Two arp parameters are **not** per line, because they are about both of them together:
+Two arp parameters are **not** per line, because they are about all four lines together:
 `bpm` (the tempo they run at with no transport to follow) and `arpQuantize` (Launch Quantize -
 Off, or the boundary a chord card, a slot launch or a drag onto a line waits for before it
 lands). Setting `arpQuantize` from a script is worth knowing about: with it on, a
 `press_chord_pad` that feeds a line will not sound until the next boundary.
 
 The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
-`arpRate`, `arpSwing` — and B repeats that whole list as `arp2*`: `arp2On`, `arp2Rate`,
-`arp2Direction`, and so on. Five ids are newer than the original arp and worth knowing:
-`arpKeys` (does this line arpeggiate what you play, or only the chords handed to it),
-`arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
-`arpOctaves`, which stacks copies upward), `arpVelLevel` (0..127, this line's velocity outright -
-the top of the band it plays at, whatever velocity the chord arrived with, and 0 mutes the line),
-and `arpHumanVel` (0..127, how far under that level a hit may fall - the velocity half of
-Humanize, in the same units; `arpHumanize` is the timing half alone since 2026-08-02).
+`arpRate`, `arpSwing` - and B, C and D repeat that whole list as `arp2*`, `arp3*` and `arp4*`:
+`arp2On`, `arp2Rate`, `arp2Direction`, and so on. Five ids are newer than the original arp and
+worth knowing: `arpKeys` (does this line arpeggiate what you play, or only the chords handed to
+it), `arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
+`arpOctaves`, which stacks copies upward), `arpVelLevel` (0..127, this line's *typical* velocity,
+not a ceiling, whatever velocity the chord arrived with, and 0 mutes the line), and
+`arpHumanVel` (0..127, how far either side of that level a hit may land - the velocity half of
+Humanize, in the same units, opening equally louder and quieter since 2026-08-19; `arpHumanize`
+is the timing half alone since 2026-08-02, and still only ever lands late relative to the grid,
+never early).
 
 Two more arrived on 2026-08-18, both defaulting to 0, which is the engine exactly as it was:
-`arpMutate` (0..100 — how far the line explores *other notes of the chord it is holding*; it can
-never reach a note that chord does not contain) and `arpMutateLock` (0..100 — how long it keeps
-what it finds: 0 redraws the variation every pass, 100 locks the first one for good). They took
+`arpMutate` (0..100 - how far the line explores *other notes of the chord it is holding*. To 50
+it can only ever reach a note the chord already contains; past 50 a stray may land a scale
+degree or two outside the chord, and past 75 a growing share of those strays turn chromatic, so
+a value up near 100 can genuinely go out of key - Owen: "higher values can go out of scale") and
+`arpMutateLock` (0..100 - how long it keeps what it finds, in-chord variations and out-of-key
+strays alike: 0 redraws the variation every pass, 100 locks the first one for good). They took
 the CHANCE knob's place on the macro cards; `arpChance` itself is unchanged and still there.
+
+Four more arrived on 2026-08-19: `arpHarm1` / `arpHarm1Chance` / `arpHarm2` / `arpHarm2Chance`
+(and their `arp2*` / `arp3*` / `arp4*` twins) - each line's two fixed harmony voices, an
+interval choice from BigSky's own shimmer list (Off by default) with a 0..100 chance of firing
+per step (default 100). Each voice copies whatever note the step resolved, chord-lane steps and
+Mutate's strays included, transposed by its own interval in semitones - chromatic, not scale
+degrees, which is what tells it apart from the Harmony lane's chord-tone counting.
 
 **A lane's shape is not a parameter and `set_params` cannot reach it.** Length, clock divider,
 on/off, loop window and direction are lane data in the arp tree — use `get_arp_pattern` and
@@ -236,5 +250,5 @@ have written sit silent. `get_state` reports it for exactly this reason. It is p
 everything else, so the same call against line B needs `arp2Pattern`.
 
 5. `set_params { "values": { "arp2On": true, "arp2Rate": "1/4" } }`: bring line B in
-   underneath at half the speed. Both lines chew on the same held chord, because `arpKeys`
+   underneath at half the speed. The lines chew on the same held chord, because `arpKeys`
    and `arp2Keys` both default to on.

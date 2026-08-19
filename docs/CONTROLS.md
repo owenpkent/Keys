@@ -116,16 +116,17 @@ and Octave simply travel with the bar now (2026-08-02), rather than the second, 
 combo the detached window used to build for itself back when Size lived in the Controls band.
 
 What stays behind on a bar is whatever belongs to the editor rather than to the section: the
-arp's **A** / **B** switches and **Hold off** chip, **Launch Quantize**, the pad page buttons,
+arp's **A** / **B** / **C** / **D** switches and **Hold off** chip, **Launch Quantize**, the pad page buttons,
 the generator's **Fill**, **Regen** and **Generator** chips
 with the **Key** combo beside them, **Tempo**, **Sync**, **Root**, **Scale**, **Scale Lock**,
 **Voices**, **MIDI Ch**, the **Instrument** chip (Keys Host only), and the theme swatch. All of them keep
 working while the section they name is off in a window.
 
 Folding is the other case, and a stricter one: a folded bar keeps only what still means
-something with the section gone. That is **A**, **B** and **Hold off** (so the arpeggiators run
-on behind a closed panel, and can still be made to let go of a chord - A and B are that line's
-own On switch now, 2026-08-02, so they mean exactly as much folded as open), plus **Launch
+something with the section gone. That is **A**, **B**, **C**, **D** and **Hold off** (so the
+arpeggiators run on behind a closed panel, and can still be made to let go of a chord - the
+letters are each line's own On switch now, 2026-08-02, so they mean exactly as much folded as
+open), plus **Launch
 Quantize**, which is a plain setting rather than a way into the panel. **All** does not
 survive: it exists to open the macro view, and there is nothing to open once the section is
 gone, so it hides with the section - the one navigation control left on this bar, and the one
@@ -183,7 +184,7 @@ bar.
 | **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. On the *Controls bar*. |
 | **MIDI Ch** | dropdown | Output channel, 1–16. Its on-screen caption is "CH". On the *Controls bar*. |
 | **Instrument** | chip → menu | Keys Host only (2026-08-02, Owen: "the load instrument section with all that should go in the controls submenu"): Load instrument…, Show/Hide instrument GUI, and Eject, with the loaded instrument's name as the chip's own caption. Invisible in plain Keys, which never wires it up - the chip and its gap simply aren't reserved. The one *elastic* control on this bar: it gets whatever width the tempo group and the Root…MIDI Ch group leave over. |
-| **Strum** | range knob, in the *pads strip* | Spread a chord's notes instead of playing them together, over a time drawn from a 0–200 ms band — so repeated stabs do not all rake at the same speed. The knob is the longest it ever takes, the ring reaches back from it, and the **lamp** beside it switches strum off and on (off is simply zero: the chord lands all at once). Applies to chord pads and the live chord card. |
+| **Strum** | range knob, in the *pads strip* | Spread a chord's notes instead of playing them together, over a time drawn from a 0–200 ms band - so repeated stabs do not all rake at the same speed. The knob is the middle of the rake band, not its ceiling: the ring opens equally either side of it (2026-08-19, Owen: "moving the halo shouldn't move knob. should be equal from center"), and the **lamp** beside it switches strum off and on (off is simply zero: the chord lands all at once). Applies to chord pads and the live chord card. |
 | **Dir** | `<` `>` by the caption | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. The caption reads the live one — `STRUM UP`, `STRUM DOWN`, `STRUM RAND` — and the arrows wrap. |
 | **Settings** | gear → menu | Immediately left of Theme, plugin-level like the swatch so it never hides with the Controls fold (2026-08-17, Owen: "we need a settings icon and menu. populate menu"). Five groups: **Hold visuals during sustain** (default on, and today's behaviour either way - off makes a key held only by the pedal rest visually while it keeps sounding, a paint-only difference); **Sustained drag leaves a trail** (default on, also today's behaviour - whether a glide made with the pedal down piles up every key it crosses or stays monophonic; the name is not Octavium's "Drag While Sustain", since Keys' drag has always glided and that toggle would have promised something no switch here can do); **Sustained notes propose chords** (default **off** - see the Chord pads section below); **Chord pads play while held** (default **off**: a pad's chord starts when you release the click and runs 800 ms, and a drag stays silent throughout. Ticked, the press starts it and the release ends it - a stab is short, a lean is long - at the price that a press which turns out to be a drag has already choked the other chord sources, and with Exclusive on that includes each arp line's held chord); and **Check for updates** / **User guide** / **About**. |
 | **Theme** | swatch | Colours this instance (Cyan, Amber, Lime, Violet, Magenta, Orange, Rose, Ice), so you can tell it from Keys on your other tracks. Per instance, saved with the session. Sits on the *Controls bar*, so it stays reachable with that section folded. |
@@ -209,7 +210,8 @@ the pad header", then "make smaller to fit" once it landed there):
 
 | Control | Type | What it does |
 |---------|------|--------------|
-| **Humanize** | range knob, in the *pads strip* | How hard Keys plays, in **MIDI velocity, 0-127** (it stopped at 1 until 2026-08-18; the wire never carries 0, since a note-on at velocity 0 is a note-off, so 0 means "as quiet as MIDI can say" and what leaves is velocity 1). The knob is the hardest a note ever lands and the ring reaches back from it, so each note takes a random velocity inside that band and a part stops sounding typed in. The **lamp** beside it is the on/off: lit, notes are drawn from the band; unlit, the arc collapses to an ordinary one and every note plays the band's **midpoint**, which is the single number the readout then shows. (It had a separate tick box until 2026-08-03; the lamp says the same thing without a second control.) |
+| **Play** | toggle, on the *Pads bar* beside the page buttons | Whether clicking a chord card plays it (2026-08-19, Owen: "when I'm trying to drag a cord into the arpeggiator, it plays instead, and it stops everything"). Off, the strip goes **drag-only**: a click makes no sound, so a press that meant to become a drag up into the arpeggiator cannot fire a chord and - with Exclusive on - cut every running line off on the way past. Dragging, dropping on the arp and the right-click card menu all still work, and the one left-click arp behaviour that survives is the *stop* on a cleared card still feeding a line, which plays nothing either way. On is the default and today's behaviour; the setting rides the session. |
+| **Humanize** | range knob, in the *pads strip* | How hard Keys plays, in **MIDI velocity, 0-127** (it stopped at 1 until 2026-08-18; the wire never carries 0, since a note-on at velocity 0 is a note-off, so 0 means "as quiet as MIDI can say" and what leaves is velocity 1). The knob is the band's **centre**, not its ceiling: the ring opens equally either side of it (2026-08-19), so each note takes a random velocity that can land louder or quieter than the knob, and a part stops sounding typed in. The **lamp** beside it is the on/off: lit, notes are drawn from the band; unlit, the arc collapses to an ordinary one and every note plays the knob's **own value**, which is the single number the readout then shows. (It had a separate tick box until 2026-08-03; the lamp says the same thing without a second control.) |
 
 ## Holding notes
 
@@ -356,13 +358,15 @@ press until it ran off the keyboard.
 **The menu is kept short on purpose.** It hangs off a pad near the bottom of the window and
 every row is 34 px measured *upwards* from there, so a long menu runs off the top of the
 screen and turns into one you have to scroll by hovering, which is unusable with one mouse.
-Fourteen rows and two rules, about 510 px, is the budget today (up from eleven rows and 408 px,
-2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the first group). That is
-why the four **Next**
+Sixteen rows and two rules, about 578 px, is the budget today (up from fourteen rows and 510 px,
+2026-08-19, when **Send to arp** gained a row apiece for lines C and D; before that, eleven rows
+and 408 px until 2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the
+first group). That is why the four **Next**
 families sit behind one row, and it is why the generator's settings are not on this menu at all:
-they were, for a few hours, and they took it to 23 rows and about 820 px. Send to arp A and B
-were spent as two rows rather than one **Send to arp line** submenu because Owen asked for them
-by name, and a submenu costs a hover to save 68 px the menu can still afford.
+they were, for a few hours, and they took it to 23 rows and about 820 px. **Send to arp A**,
+**B**, **C** and **D** were spent as four rows rather than one **Send to arp line** submenu
+because Owen asked for them by name, and a submenu costs a hover to save the row height the menu
+can still afford.
 
 ## Chord generator
 
@@ -691,82 +695,96 @@ sounding (keyboard, a held note, a chord pad) and plays it one note at a time. T
 pads sit directly below it, so a chord is always one click away, and the knobs stay on
 screen above.
 
-### Two lines
+### Four lines
 
-There are **two arpeggiators**, A and B, and they run at once. Each has its own rate, shape,
-step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet is a polyrhythm out
-of one plugin rather than two.
+There are **four arpeggiator lines**, A through D, and they run at once. Each has its own rate,
+shape, step pattern, twelve slots, chord and chain, so 1/8 against a 1/8 triplet against a
+quintuplet is a polyrhythm out of one plugin rather than four. Line C - inert since 2026-08-02,
+when the UI only counted off two - is back on screen from 2026-08-19, alongside a new line D;
+`numArpLines` and `uiArpLines` are both 4 now, and D's parameters are appended (`arp4*`), so a
+session saved before this opens sounding identical. **Each line carries a fixed colour** - A
+cyan, B magenta, C amber, D lime - deliberately not the theme's own accent, since the job here
+is telling four lines apart at a glance rather than matching the skin. The colour marks a macro
+card's frame, fill and caption, a stripe under the line's letter switch on the bar (brighter
+when the line is on), the deep view's LINE caption, and the step it is sounding on the Draw
+grid's playhead. It is a mark, never a control.
 
-**A and B on the Arp bar are that line's own On switch** (2026-08-02, seventh pass, Owen: "the A
-and B on the left side of the header, I want those to be on and off buttons to turn on or off
-the ARP"). They live on the bar rather than inside the panel so folding it away leaves the
+**A, B, C and D on the Arp bar are each line's own On switch** (2026-08-02, seventh pass, Owen:
+"the A and B on the left side of the header, I want those to be on and off buttons to turn on or
+off the ARP"). They live on the bar rather than inside the panel so folding it away leaves the
 arpeggiators running and still switchable, and they are also where you drop a chord card to
-hand it to that line. **B starts off**, and with it off Keys behaves exactly as it did when
-there was one arpeggiator — which is also what a session saved before the lines does when you
-open it. A and B used to have a second job too - choosing which line the panel edited - with a
-separate lettered On chip doing the actual switching a few pixels away, near Hold off. Owen
-called that redundant ("we can remove the a and b check mark on the right side of the header")
-and the chip is gone: A and B are the switch, full time, which is also why they no longer hide
-when the section folds - a power switch is something you reach for while playing, the same
-case Hold off and Quantize already made for staying on a folded bar.
+hand it to that line. **B, C and D start off**, and with all three off Keys behaves exactly as
+it did when there was one arpeggiator - which is also what a session saved before the lines does
+when you open it. A and B used to have a second job too - choosing which line the panel edited -
+with a separate lettered On chip doing the actual switching a few pixels away, near Hold off.
+Owen called that redundant ("we can remove the a and b check mark on the right side of the
+header") and the chip is gone: the letters are the switch, full time, which is also why they no
+longer hide when the section folds - a power switch is something you reach for while playing,
+the same case Hold off and Quantize already made for staying on a folded bar.
 
 Beside them: **Hold off** lets go of every held chord and stops every chain, leaving the lines
-running. **All Off** does that *and* switches the lines off, which is the difference — release
+running. **All Off** does that *and* switches every line off, which is the difference - release
 alone hands the engines straight back to whatever the keybed is holding. **Light keys** lights
 the on-screen keyboard for the notes the arp is playing; it is display only and changes nothing
 you hear.
 
 **The panel edits one line at a time**, chosen now by that line's own **Details** button on its
 macro card (2026-08-02, seventh pass, Owen: "maybe we can add another button on the bottom by
-anchor, like details, and that can open up the detailed arpeggiator view") - A and B stopped
+anchor, like details, and that can open up the detailed arpeggiator view") - the letters stopped
 doing this the day they became the On switch. Everything on the panel follows whichever line
 Details last opened: the rate, the shape, the step lanes, the twelve slot cards, Bars and
-Chain. A small **LINE A** / **LINE B** caption in the panel's own top margin says which one you
-are looking at, since nothing on the arp bar names it any more.
+Chain. A small **LINE A** / **LINE B** / **LINE C** / **LINE D** caption, in that line's own
+colour, in the panel's own top margin says which one you are looking at, since nothing on the
+arp bar names it any more.
 
-### The macro view: both at once
+### The macro view: all four at once
 
 **All**, on the Arp bar, is where a polyrhythm gets built, and it is the view Keys opens in. It
-replaces the per-line band and the step editor with **one boxed card per line, side by side**
-(2026-08-02, Owen: "having the arpeggiators parallel to each other instead of one on top of the
-other"), each drawing its own captioned, ruled frame - **LINE A**, **LINE B** - because a frame
-around both cards together was what made two arpeggiators read as one ("we need a bit more
-clear delineation between the two arpeggiators. They kinda look like one right now"). A card
-holds:
+replaces the per-line band and the step editor with a **2x2 grid of boxed cards**, A and B on
+the top row, C and D below (2026-08-02, Owen: "having the arpeggiators parallel to each other
+instead of one on top of the other"; two columns rather than four across is load-bearing since
+2026-08-19 - a card's knob strip needs roughly 430 px, so a fourth line in one row would have
+squeezed every card, and a grid adds rows instead), each drawing its own captioned, ruled frame
+in its line's own colour - **LINE A**, **LINE B**, **LINE C**, **LINE D** - because a frame
+around the cards together was what made the lines read as one ("we need a bit more clear
+delineation between the two arpeggiators. They kinda look like one right now"). A card holds:
 
 | | |
 |---|---|
 | **Rate** | a knob, detented onto the divisions, with `<` `>` beside it and a **Sync / Hz** switch. A time division in Sync, a frequency in Hz. The readout is the step length as a plain fraction of a bar, modifiers included: `1/8`, `1/8.` dotted, `1/10` in fives. This is where a polyrhythm comes from: put one line on 1/8 and another on a 1/8 triplet |
 | **< shape >** | its shape, including Pattern (whose step editor is on that line's own Details view) |
 | **Dot / Tuplet / Anchor** | on a strip under the rate. Dotted steps, tuplet steps, and whether the run locks to the host's bar grid. Tuplet is a list — Straight, Triplet, 5-tuplet, 7-tuplet, 9-tuplet — fitting that many steps into the space a power of two would take; the rate readout shows the result, so 1/4 in fives reads `1/5`. All three grey out in Hz, where there is no beat to divide and no grid to lock to |
-| **Details** | opens that line's deep view - the band, and the step editor on Pattern shape. The only way there from this view (2026-08-02, seventh pass); A and B on the Arp bar used to do it and are that line's On switch now instead |
+| **Details** | opens that line's deep view - the band, and the step editor on Pattern shape. The only way there from this view (2026-08-02, seventh pass); the letters on the Arp bar used to do it and are that line's On switch now instead |
 | **Oct** | transposes that line's whole run up or down, centred at zero. (The upward-only stacking *range*, `arpOctaves`, is on the line's own Details view beside Distance - "how far does it reach" is a different question from "how high does it sit") |
-| **Gate** | how much of each step its notes fill. Short gates let the other line through |
-| **Mutate** | how far this line explores **other notes of the chord you are holding**. At zero it plays what you set up; turn it up and the run starts landing on different notes of that chord. It can only ever reach a note the chord already contains, so there is no setting at which it goes out of key or plays something you did not put there |
-| **Lock** | how long it keeps what Mutate finds. Hard left, a new variation every time round. Hard right, the first one it lands on repeats for good - so you can turn Mutate up, listen until something catches, and turn Lock up to keep it. In between it holds an idea for a while and then moves on. Nothing happens here while Mutate is at zero |
-| **Swing** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
-| **Offset** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
-| **Vel** | how loud that line plays, as **MIDI velocity, 0-127** (2026-08-18, Owen on the old readout: "still wrong", having just asked for velocity ranges to span 0-127). A **range knob**: the face is the hardest a hit ever lands, the ring is Humanize Velocity - how far under that a hit can randomly fall, in the same units - so the two read as one band, `54-100`, the same shape the pads' own Humanize knob has. At 0 the line is silent. It was a bipolar *percentage* trim around "as played" until then, which put percentages on a control called Vel and produced readouts like `-31 ~20`: numbers that look like velocities and are not. What the change costs is a line following the velocity of the chord fed to it, which with one mouse was already a constant - every chord Keys fires leaves at the pads' own Humanize velocity. The Velocity lane, the ramp and Drift still shape it exactly as before; only the base moved. The **lamp** switches Humanize Velocity on and off, remembering the amount while it's off - Vel's own zero means *silent*, so no position of the face can double as an off switch the way H.Time's zero means "no wander" |
-| **H.Time** | nudges each hit a little late, at random. At 0 the line is dead on the grid. A **range knob**: the knob is the most it ever nudges, and the ring around it is how far under that a hit can fall. Drag the little dial at its top left — or anywhere on the ring — to open and close it. Wide open it draws from nothing, which is what this did before it had a ring; closed it is a fixed nudge with no randomness left. Turn the knob and the whole range moves with it |
+| **Gate** | how much of each step its notes fill. Short gates let other lines through |
+| **Mutate** | how far this line explores **other notes of the chord you are holding**. At zero it plays what you set up; turn it up and the run starts landing on different notes of that chord. To halfway it can only ever reach a note the chord already contains, exactly the 2026-08-18 knob; past halfway a stray can land a scale degree or two outside the chord, and past three-quarters some of those strays turn chromatic - so a Mutate turned up past its middle genuinely can go out of key (Owen: "higher values can go out of scale") |
+| **Lock** | how long it keeps what Mutate finds, in-chord variations and out-of-key strays alike - both are hashed off the same step-and-era cell, so Lock cannot tell them apart. Hard left, a new variation every time round. Hard right, the first one it lands on repeats for good - so you can turn Mutate up, listen until something catches, and turn Lock up to keep it. In between it holds an idea for a while and then moves on. Nothing happens here while Mutate is at zero |
+| **Swing** | shifts its offbeats late or early. The quickest way to stop lines landing on top of each other |
+| **Offset** | starts its pattern from a different foot. Lines on the same rate and different offsets are out of phase rather than in unison |
+| **Vel** | how loud that line plays, as **MIDI velocity, 0-127** (2026-08-18, Owen on the old readout: "still wrong", having just asked for velocity ranges to span 0-127). A **range knob**, centred on the face (2026-08-19, Owen: "moving the halo shouldn't move knob. should be equal from center"): the face is the *typical* velocity a hit lands at, not the hardest, and the ring opens Humanize Velocity equally either side of it, in the same units, so a hit can land louder or quieter than the face - never only quieter. At 0 the line is silent. It was a bipolar *percentage* trim around "as played" until 2026-08-18, which put percentages on a control called Vel and produced readouts like `-31 ~20`: numbers that look like velocities and are not. What the change costs is a line following the velocity of the chord fed to it, which with one mouse was already a constant - every chord Keys fires leaves at the pads' own Humanize velocity. The Velocity lane, the ramp and Drift still shape it exactly as before; only the base moved. The **lamp** switches Humanize Velocity on and off, remembering the amount while it's off - Vel's own zero means *silent*, so no position of the face can double as an off switch the way H.Time's zero means "no wander" |
+| **H.Time** | nudges each hit a little late, at random - never early, since a hit can only ever be delayed relative to the grid, not advanced on it. At 0 the line is dead on the grid. A **range knob**, centred on the knob's own value (2026-08-19): the knob is the *typical* lateness, not the ceiling, and the ring opens equally either side of it - wide open the draw runs from 0 up to twice the knob's value, which is what this did before it had a ring; closed it is a fixed nudge with no randomness left. A drag on the halo, a scroll over the ring, or a scroll over the knob nudges the range without moving the knob; a drag on the knob face moves the whole range with it |
+| **Harmony 1** / **Harmony 2** | two interval dropdowns (2026-08-19), each with its own **Chance** knob stacked beneath it. The list is BigSky's own shimmer intervals, minus its two cents rows (MIDI cannot say ten cents): Off, then Octave down through minor 2nd down, minor 2nd up through Octave up, Octave & 5th, 2 Octaves. Chromatic semitones, not scale degrees - a Major 3rd is four semitones whatever Root and Scale say, which is what tells them apart from the Harmony *lane*'s chord-tone counting. Each voice copies every note the step resolved, chord-lane steps and Mutate's strays included, transposed by its own interval; Chance is rolled per step per voice off a stateless hash, so a transport jump lands on the same answer, and a voice that would land on its own source note is dropped rather than doubled |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
 
-Eight knobs (seven between 2026-08-17, when Vel absorbed H.Vel's own knob, and 2026-08-18, when Chance became Mutate and Lock - Chance itself is still on the Play page, and is still a step lane), a rate with its three modifiers, a shape, Dot/Tuplet/Anchor and Details: every
-setting a regular arpeggiator has, both lines deep, on one screen. Latch, **Play** and Chain
-still exist per line, just not on this card - Latch and Play live on that line's own Details
-view (the band), Chain on its action row under the twelve slots. The card's own On switch is
-gone outright (2026-08-02, seventh pass): A and B on the Arp bar are that line's actual On
-switch now, and two of them for one parameter was a control to get wrong twice.
+Eight knobs (seven between 2026-08-17, when Vel absorbed H.Vel's own knob, and 2026-08-18, when Chance became Mutate and Lock - Chance itself is still on the Play page, and is still a step lane), two Harmony dropdowns each with its own Chance knob (2026-08-19; the dropdown's list opens as two columns, minus intervals left and plus intervals right, the way BigSky's panel draws it), a rate with its three
+modifiers, a shape, Dot/Tuplet/Anchor and Details: every setting a regular arpeggiator has, all
+four lines deep, on one screen. Latch, **Play** and Chain still exist per line, just not on this
+card - Latch and Play live on that line's own Details view (the band), Chain on its action row
+under the twelve slots. The card's own On switch is gone outright (2026-08-02, seventh pass):
+the letters on the Arp bar are that line's actual On switch now, and two of them for one
+parameter was a control to get wrong twice.
 
 **A line that is off scrims its whole card, rather than losing a control from it** (2026-08-02,
 seventh pass, Owen: "if it's turned off, gray it out below"). A translucent grey fills the card
-body under the **LINE A** / **LINE B** caption, which stays legible, and every knob and the
-rate dial stay fully clickable even while it is greyed - both so you can dial a rate in before
-switching the line on, and because a chord dropped onto an off line still has to land.
+body under the **LINE A** / **LINE B** / **LINE C** / **LINE D** caption, which stays legible
+in the line's own colour, and every knob and the rate dial stay fully clickable even while it is
+greyed - both so you can dial a rate in before switching the line on, and because a chord
+dropped onto an off line still has to land.
 
 There is nothing shared under the cards any more: the **Tempo** and **Launch Quantize** that
 used to sit there moved out on 2026-08-02, Tempo to the *Controls* bar and Quantize to the
-*Arp* bar itself, alongside **A**, **B** and **All**. The macro view is now just the two cards,
-side by side.
+*Arp* bar itself, alongside **A**, **B**, **C**, **D** and **All**. The macro view is now just
+the four cards, two rows of two.
 
 The knobs are the same rotary the band above uses for the same settings, with each column
 heading written once at the top rather than repeated down every row. Rate is a knob too, but it
@@ -775,26 +793,27 @@ division. Clicking **All** selects the view; a card's own **Details** button tak
 that line's deep controls.
 
 **All is a view, not another line.** Whichever line Details last opened stays the edited one,
-so a chord card drag still has one unambiguous target while both lines are on screen. The
+so a chord card drag still has one unambiguous target while all four lines are on screen. The
 panel is exactly as tall in this view as in any other, because the cards take the band's space
 rather than joining it.
 
 **A click on a chord card never feeds a line any more** (2026-08-02, Owen: "when an
 arpeggiator's running and you click on a pad, I don't want it to send it to the arpeggiator
 unless you drag it"). Feeding a line is a **drag** now - onto a line's card in the macro view,
-onto A or B on the Arp bar, or onto a slot - and a click just plays the pad, whatever the lines
-are doing. The Pads bar's old letter chip, which used to name which line a click would feed,
-left with it: the current line is shown only by the panel's own **LINE A** / **LINE B** caption
-now, since A and B read as On/Off rather than as a selection. A card feeding a line still wears
-that line's letter in its ring.
+onto its letter switch on the Arp bar, or onto a slot - and a click just plays the pad, whatever
+the lines are doing. The Pads bar's old letter chip, which used to name which line a click would
+feed, left with it: the current line is shown only by the panel's own **LINE A** / **LINE B** /
+**LINE C** / **LINE D** caption now, since the letters read as On/Off rather than as a
+selection. A card feeding a line still wears that line's letter, in that line's own colour, in
+its ring.
 
 **Detach** is on the Arp bar too, but it hides with the fold the way every other section's
-does. The section starts folded, so **A**, **B** and Hold off are usually all of it you can
-see.
+does. The section starts folded, so **A**, **B**, **C**, **D** and Hold off are usually all of
+it you can see.
 
 **Hold off releases every line**, and stops every **Chain** that is running. It is one button
 on purpose: a release that only let go of the line whose Details view happened to be open would
-leave the other one droning with nothing on a folded bar to stop it. The arpeggiators
+leave the others droning with nothing on a folded bar to stop it. The arpeggiators
 themselves keep running and go back to arpeggiating whatever you play. It is greyed out when
 nothing is held and nothing is chaining, and it is the way to stop a hold outright: clicking
 the lit pad restrikes the chord rather than letting it go. A running chain counts as something
@@ -823,11 +842,11 @@ in seconds instead.
 
 | Control | Group | What it does |
 |---------|-------|--------------|
-| **A** / **B** | Arp bar | One per arpeggiator line: that line's own On switch, and a chord-drop target - drop a card straight onto the letter to hand that line the chord. Everything else stays editable while a line is off. B defaults to off. They used to be a navigation tab that hid with the section fold and left the actual switching to a separate chip nearby; the chip is gone (2026-08-02, seventh pass) and A / B never hide now, the same case Hold off and Quantize already had. |
-| **Details** | Macro card | Opens that line's deep view - band, step lanes, twelve slots, Bars, Chain - in the spot A and B used to reach it from (2026-08-02, seventh pass). One per macro card, beside Anchor. A small **LINE A** / **LINE B** caption in the panel's own top margin says which line Details opened. |
-| **Keys** | Playback | Does this line arpeggiate what you *play*, or only the chords you hand it? On for both by default. Turn it off and that line becomes a card player, independent of the keybed. |
+| **A** / **B** / **C** / **D** | Arp bar | One per arpeggiator line, each in that line's own fixed colour (cyan, magenta, amber, lime): that line's own On switch, and a chord-drop target - drop a card straight onto the letter to hand that line the chord. Everything else stays editable while a line is off. B, C and D default to off; C (inert since 2026-08-02) and D (appended) both joined the bar 2026-08-19. They used to be a navigation tab that hid with the section fold and left the actual switching to a separate chip nearby; the chip is gone (2026-08-02, seventh pass) and none of the letters hide now, the same case Hold off and Quantize already had. |
+| **Details** | Macro card | Opens that line's deep view - band, step lanes, twelve slots, Bars, Chain - in the spot the letters used to reach it from (2026-08-02, seventh pass). One per macro card, beside Anchor. A small **LINE A** / **LINE B** / **LINE C** / **LINE D** caption, in that line's colour, in the panel's own top margin says which line Details opened. |
+| **Keys** | Playback | Does this line arpeggiate what you *play*, or only the chords you hand it? On for all four by default. Turn it off and that line becomes a card player, independent of the keybed. |
 | **Quantize** | Arp bar | **Off**, or 1/16, 1/8, 1/4, 1/2, 1 Bar, 2 Bars. Off fires a chord the instant you click it. Anything else holds the click until the next boundary, so a card can only ever land on the grid - Ableton's Quantization, for the arp. It holds the whole gesture: a slot's pattern, shape, rate and chord all arrive together. The line's row shows `...` while one is waiting. **It never delays the keys you play.** Moved to the Arp bar 2026-08-02, from the macro view's shared row; it stays put through a fold, unlike **All** beside it, which still only opens the macro view and hides with the section. (The **Tempo** that used to sit next to it moved out the same day too, to the *Controls* bar - see the Top bar table above.) |
-| **Channel** | Playback | Where this line's notes go: **Global** (the plugin's own channel, and the old behaviour) or 1–16, for driving three different sounds in a multitimbral rack. It buys nothing in Keys Host until the hosted instrument is itself multitimbral. |
+| **Channel** | Playback | Where this line's notes go: **Global** (the plugin's own channel, and the old behaviour) or 1–16, for driving several different sounds in a multitimbral rack - up to four lines plus the plugin's own channel. It buys nothing in Keys Host until the hosted instrument is itself multitimbral. |
 | **Shape** | Pattern | Up, Down, Up-Down, Down-Up, Up & Down, Down & Up, As Played, Reversed, **Random**, **Random Other** (never the same note twice running), **Random Once** (a shuffled order, kept for as long as the chord is held), **Chord** (every note of the chord on every step, so the arp plays rhythm instead of a run), or **Pattern** (opens the step editor). |
 | **Rate** | Pattern | A dial. In **Sync**, step length from 16 bars down to 1/64, detented onto the eleven divisions. In **Hz**, a free-running 0.031 to 32 Hz, which is the same span those divisions cover at 120 bpm. The Hz dial is exponential: ten octaves, a tenth of the travel each, so 1 Hz sits at the centre and a degree of the dial is the same *ratio* wherever you are on it. |
 | **Sync** / **Hz** | Pattern | Which unit the dial is in. Sync follows the host tempo and its bar grid; Hz ignores both and runs whether the transport rolls or not. The chip reads the live unit and lights in Hz. |
@@ -836,7 +855,7 @@ in seconds instead.
 | **Gate** | Playback | 5–200%. Note length as a share of the step; over 100% ties into the next one. Works on **any** shape, and multiplies the Gate lane when you are using one. |
 | **Chance** | Playback | 0–100%. How likely each step is to fire — turn it down to thin a run out. Works on any shape, and multiplies the Probability lane. |
 | **Retrigger** | Playback | When the pattern starts over: **Off**, **Note** (a new chord restarts it), or a clock window — 1 or 2 beats, 1, 2 or 4 bars. A clock window is what makes a five-step lane still land on the bar. |
-| **Anchor** | Playback | On: steps lock to the bar grid, so the arp lines up after a jump **and two anchored lines walk in lockstep**. Off: free-running, never jumps, may drift on purpose. It needed a rolling host transport until 2026-08-18 - with none (the standalone, or a DAW sitting stopped) every line fell back to a phase of its own, zeroed when the line was switched on, so two lines switched on a second apart were a second out of phase for good and nothing could bring them together. Keys always kept a beat count of its own for Launch Quantize to measure from; it is offered to the engines as well now, so there is always a grid and every line reads the same one. Note this is not Launch Quantize's job: that aligns when a *chord* lands on a line, not where its steps fall. Greyed out in Hz, alongside Dot and Tuplet: a free-running rate follows no bar grid, so there is nothing there to anchor to. |
+| **Anchor** | Playback | On: steps lock to the bar grid, so the arp lines up after a jump **and anchored lines walk in lockstep, however many are anchored**. Off: free-running, never jumps, may drift on purpose. It needed a rolling host transport until 2026-08-18 - with none (the standalone, or a DAW sitting stopped) every line fell back to a phase of its own, zeroed when the line was switched on, so two lines switched on a second apart were a second out of phase for good and nothing could bring them together. Keys always kept a beat count of its own for Launch Quantize to measure from; it is offered to the engines as well now, so there is always a grid and every line reads the same one. Note this is not Launch Quantize's job: that aligns when a *chord* lands on a line, not where its steps fall. Greyed out in Hz, alongside Dot and Tuplet: a free-running rate follows no bar grid, so there is nothing there to anchor to. |
 | **Latch** | Playback | Keep arpeggiating after you let go, until a new chord arrives. |
 | **Repeats** | Spread | 1–4. How many times the chord is stacked up the keyboard before the run repeats. (This was "Octaves", back when an octave was the only thing it could stack by.) |
 | **Distance** | Spread | How far each repeat goes: **Octave**, **5th**, **4th**, **Maj 3rd**, **min 3rd**, or the scale-relative **Scale 2nd / 3rd / 5th / 7th**. The scale entries count degrees of Root and Scale, so a third stays a third *of this key* — C lifts to E, D lifts to F — which is the one thing the stock arps cannot do. |
@@ -844,7 +863,7 @@ in seconds instead.
 | **Ramp** | Feel | −100 – +100%. Velocity change over **Time**, counted from the moment a chord starts. Left fades a held chord away, right swells it, centre is flat. |
 | **Time** | Feel | 1–32 beats. How long the Ramp takes. |
 | **Human Time** | Feel | 0-100%. Nudges each hit a little late, by a different amount every time. At 0 the arp is dead on the grid. |
-| **Human Vel** | Feel | 0-100%. Takes a little off each hit's velocity, by a different amount every time. Late and quieter, never early and never louder - a *player* wandering. |
+| **Human Vel** | Feel | 0-100%. Takes each hit's velocity a little away from the level, louder or quieter, by a different amount every time - a *player* wandering. (Timing keeps the older rule, never early relative to the grid; "never louder" is retired as of 2026-08-19, since the band now opens on both sides of the level rather than only downward.) |
 | **Drift** | Feel | 0-100%. Strays from what the lanes hold **while it plays**, either side of the drawn value, so the part never repeats exactly and the lane on screen never changes. Octave, velocity, gate, lateness and chance wander; the notes never do. A *machine* wandering, which is why it is bipolar where Humanize is one-sided. |
 
 ### Undo and Redo
@@ -885,8 +904,8 @@ in it.
 | **Cards** | The twelve slot cards, plus Copy, Clear, Stop, Randomize, Euclid, Clocks and Chain. |
 | **Draw** | The step lanes. Pattern shape only - its tab greys out otherwise, and leaving Pattern with it up drops you back to Play. |
 
-**All** is the way back out to both lines side by side. It sits at the head of the same group,
-which is what makes it read as the fourth view rather than a third letter beside A and B.
+**All** is the way back out to all four cards. It sits at the head of the same group, which is
+what makes it read as an extra view rather than a fifth letter beside A, B, C and D.
 
 ### The step editor (Draw page, Shape -> Pattern)
 
@@ -1087,12 +1106,12 @@ under the panel. Each one answers "which line?" differently.
 
 - **Drag a chord card onto a line's card in the macro view.** The whole card lights while the
   chord is over it, anywhere on it, knobs included. This is the way to build a polyrhythm out
-  of chord cards - two cards on screen, drop a different chord on each. The view does not move
+  of chord cards - four cards on screen, drop a different chord on each. The view does not move
   when you let go; you dropped onto the line itself, and being thrown into that line's deep
   controls is not what the gesture asked for.
-- **Drag a chord card onto A or B on the Arp bar.** It goes to *that* line, whichever letter
-  you dropped it on, and that line becomes the current one - you aimed at it - whether the
-  letter is lit on or off.
+- **Drag a chord card onto A, B, C or D on the Arp bar.** It goes to *that* line, whichever
+  letter you dropped it on, and that line becomes the current one - you aimed at it - whether
+  the letter is lit on or off.
 - **Drag a chord card onto a slot card.** It binds the chord to that slot, in whichever line's
   detail view is currently open, ready to launch later. **Send to arp slot**, in a pad's
   right-click menu, is the aimless twin of this: it parks a copy of that chord in one of the

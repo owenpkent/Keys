@@ -104,6 +104,21 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   purpose**: the dropdown names intervals, which is what keeps this from being a third copy of
   the Harmony lane's chord-tone counting. On each macro card: two combos with a chance knob
   each, on their own strip under the knobs (`Macro harmony 1 A` / `Macro harmony 1 chance A`).
+- **"Make harmony 2 columns" meant the dropdown's own popup** (2026-08-19; a first reading put
+  the card's controls in two columns, and Owen, shown the menu: "still one column"). The
+  harmony combo opens as two columns, descending intervals left and ascending right, BigSky's
+  own split: `MacroRow::HarmonyBox::showPopup` rebuilds the ComboBox's menu with a column
+  break found by text (never a hard-coded index) and must hand the menu its LookAndFeel, or
+  it comes up in JUCE's stock grey.
+- **A Play toggle on the Pads bar** (`LayoutState::padsPlayOnClick`, default on; 2026-08-19,
+  Owen: "I want a toggle above the keyboard to play notes... when I'm trying to drag a cord
+  into the arpeggiator, it plays instead, and it stops everything"). Off, a pad click makes no
+  sound - the strip is drag-only - so a fumbled drag toward the arp cannot fire a chord that
+  Exclusive turns into a full stop of the running lines. Both gates live in
+  `ChordPads::mouseDown` / `mouseUp` beside `padHoldToPlay`; the release path still calls
+  `endAudition`, never `startAudition`, so a toggle flipped mid-press cannot strand a note.
+  The button hides with the Pads fold like the page buttons; accessible name
+  `Pads play on click`, on-screen word "Play".
 - **The RangeKnob's face is the band's centre, and the halo only ever writes the span**
   (2026-08-19, two corrections in one afternoon: "it should expand in both directions. up is
   more", then "moving the halo shouldn't move knob. should be equal from center"). The band is

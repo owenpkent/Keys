@@ -140,7 +140,9 @@ A probability sequencer. Where Cthulhu randomises *which* note, Stochas randomis
 
 **Taken (independently, but it validates the design):**
 
-- **Probability per cell** - Keys' Chance lane, multiplied by a per-line Chance knob.
+- **Probability per cell** - Keys' Chance lane, multiplied by the global Chance slider in the
+  Play page's PLAYBACK group (2026-08-18: the per-line macro-card knob that used to carry this
+  multiplier became Mutate and Lock instead - see `docs/ARP_DESIGN.md`, "Mutate and Lock").
 - **Variance is bipolar**: *"changing the position start, velocity and the length of the note,
   by any value between a + and - of the number chosen."* Keys' Drift wanders either side of the
   drawn value for exactly this reason, where Humanize is deliberately one-sided.
@@ -176,7 +178,18 @@ Not a sequencer reference - a *UI* reference, and it is where `RangeKnob` came f
 **Departed from, deliberately:** Serum's fallback for the fiddly satellite is Alt-click-drag on
 the knob body. A modifier is not a gesture Keys may require, so the whole margin drags the span
 instead. Serum flips the halo's hue for inverted depth; a range has nothing to invert into, so
-`Direction` picks which side it reaches.
+`Direction` picked which side it reaches - **retired 2026-08-19**, along with the one-sided band
+itself (see below).
+
+**A second departure, later than the first (2026-08-19):** Serum's own depth band is one-sided,
+reaching only away from the face. Owen's reading of the halo drag disagreed with that shape on
+sight - *"the halo scroll is not intuitive. it should expand in both directions. up is more"* -
+and the first attempt at a fix still moved the face under the drag, which was not what he meant
+either: *"moving the halo shouldn't move knob. should be equal from center."* Keys' `RangeKnob`
+now centres the band on the face - the halo (or the wheel over it) opens the range equally in
+both directions and the face itself never moves under that gesture - which is a deliberate
+departure from the manual's own model, not a correction of a misread. The satellite and the
+margin-drag fallback above are otherwise unchanged.
 
 ## Subharmonicon (`Subharmonicon_Manual AMZ.pdf`, 58pp)
 

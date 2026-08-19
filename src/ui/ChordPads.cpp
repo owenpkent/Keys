@@ -906,7 +906,10 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     dragging = false;
     dragSource = cellAt(e.position);
 
-    if (processor.layout.padHoldToPlay)
+    // Both gates: hold mode owns the press, and the Pads bar's Play toggle (2026-08-19) can
+    // silence the whole click - a strip you are only dragging from should not be able to fire
+    // a chord on the way to the arpeggiator.
+    if (processor.layout.padHoldToPlay && processor.layout.padsPlayOnClick)
         startAudition(/*fixedLength*/ false);
     repaint();
 }
@@ -1100,7 +1103,13 @@ void ChordPads::mouseUp(const juce::MouseEvent&)
         // Which end of the click owns the sound. Holding: the press already fired it and letting
         // go is the release, so a stab is short and a lean is long. Otherwise the press was
         // silent and this is where the chord *starts*, with the 800 ms timer owning its note-off.
-        if (processor.layout.padHoldToPlay)
+        //
+        // Unless the Pads bar's **Play** toggle is off (2026-08-19, Owen: "when I'm trying to
+        // drag a cord into the arpeggiator, it plays instead, and it stops everything"): then
+        // neither end of a click makes a sound and the strip is drag-only. endAudition still
+        // runs, not startAudition, so a press that was sounding when the toggle flipped
+        // mid-gesture is released rather than left ringing.
+        if (! processor.layout.padsPlayOnClick || processor.layout.padHoldToPlay)
             endAudition();
         else
             startAudition(/*fixedLength*/ true);

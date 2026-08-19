@@ -31,6 +31,14 @@ chance knob... and I want a mutate knob... higher values can go out of scale").
   stray onto in-scale neighbours; past 75 a growing share of the strays are chromatic, out of
   scale on purpose. LOCK holds the strays exactly as it holds the in-chord variations, so a
   wander that found a wrong-note lick can keep it.
+- **The harmony dropdown opens as two columns**, Off and the descending intervals on the left,
+  the ascending ones on the right - the split BigSky's own panel draws for the same list, and
+  what "make harmony 2 columns" turned out to mean.
+- **A Play toggle on the Pads bar.** Off, clicking a chord card makes no sound and the strip is
+  drag-only: a press that meant to become a drag toward the arpeggiator can no longer fire a
+  chord and, with Exclusive on, choke every running line on the way past. Dragging, dropping
+  and the card menu are untouched; on is today's behaviour and the default, and the setting
+  rides the session like every layout choice.
 - **The range knobs' halo opens the band equally both ways around the knob, which stays put.**
   The knob is the band's centre now: dragging the halo up widens the range on both sides at
   once, down tightens it, and the knob itself never moves under the gesture. The lit arc shows

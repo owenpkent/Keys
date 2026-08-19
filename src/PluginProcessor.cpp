@@ -3381,6 +3381,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("dragWhileSustain", layout.dragWhileSustain, nullptr);
     tree.setProperty("sustainProposesChords", layout.sustainProposesChords, nullptr);
     tree.setProperty("padHoldToPlay", layout.padHoldToPlay, nullptr);
+    tree.setProperty("padsPlayOnClick", layout.padsPlayOnClick, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -3431,6 +3432,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.dragWhileSustain = flag("dragWhileSustain", true);
     layout.sustainProposesChords = flag("sustainProposesChords", false);
     layout.padHoldToPlay = flag("padHoldToPlay", false);
+    layout.padsPlayOnClick = flag("padsPlayOnClick", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

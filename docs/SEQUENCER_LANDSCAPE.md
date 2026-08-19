@@ -53,7 +53,7 @@ what it became.
 | Step lanes over a held chord | **Yes.** The whole arp (Cthulhu's architecture) |
 | Euclidean rhythm | **Yes.** `EuclidGen.h`, the Euclid strip, into the Chance lane |
 | Polymeter / polyrhythm | **Yes.** Per-lane lengths with Link off, plus `rhythmDiv` |
-| Probability | **Yes.** Chance lane x the per-line Chance knob |
+| Probability | **Yes.** Chance lane x the global Chance slider (2026-08-18: the per-line knob it used to read became Mutate and Lock) |
 | Conditional trigger | **Partly.** `laneChain` is Elektron's PRE and PRE-not, and nothing else |
 | Chord memory per step | **Yes.** The Chord lane over the twelve slots |
 | Monophonic pitch sequencer | **No.** Spec'd in `docs/ACID_DESIGN.md`, unbuilt |
@@ -223,7 +223,9 @@ four randomnesses could do. Roll rerolls once and stops. Drift wanders and never
 per-step. Nothing in Keys wandered and then hardened.
 
 **Built 2026-08-18 as MUTATE x LOCK**, and this is the first thing on this page to move, so it is
-worth saying what changed on the way. It is not a ring buffer. A register carried between blocks
+worth saying what changed on the way. **MUTATE itself grew a second and third zone on
+2026-08-19** (Owen: "higher values can go out of scale") - see below for what that means for the
+"never leaves the chord" claim two paragraphs down. It is not a ring buffer. A register carried between blocks
 would have been the second thing in `ArpEngine` that is not stateless from the playhead - the
 first, `laneChain`, remembers one bit and self-corrects within a step, and that is documented as
 the cheapest possible break of the rule rather than an invitation. So the variation is a **hash of
@@ -234,7 +236,13 @@ cannot promise.
 
 The other departure: it does **not** feed the Note lane. The module's randomness is voltage and can
 land anywhere; Keys' has to answer to a held chord, so MUTATE moves the run to another entry of the
-sequence built from that chord and can never leave it. The 7 o'clock "double lock" is not built.
+sequence built from that chord and can never leave it - **true through the knob's first half (to
+50) as of 2026-08-19**. Past 50 a second stage (`ArpEngine::mutatedPitch`) may stray the placed
+pitch off the chord tone entirely: scale degrees from 50 to 75, chromatic steps from 75 to 100,
+which is what makes "higher values can go out of scale" true of the knob Owen asked for. Both
+stages hash through the same `(step, era)` cell, so LOCK holds an out-of-scale find exactly as it
+holds an in-chord one. See `docs/ARP_DESIGN.md`'s 2026-08-19 section for the full boundary
+detail. The 7 o'clock "double lock" is not built.
 
 ## 7. Non-linear playback order (René)
 

@@ -347,6 +347,12 @@ private:
 
     // Chord-pad page navigation, riding the Pads bar.
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
+    // The strip's own Play switch, beside them (2026-08-19, Owen: "I want a toggle above the
+    // keyboard to play notes... when I'm trying to drag a cord into the arpeggiator, it plays
+    // instead, and it stops everything"). Off, a pad click makes no sound and the strip is
+    // drag-only; see LayoutState::padsPlayOnClick for the whole story. A plain toggle rather
+    // than a parameter: it is a UI mode, like Light keys, and it lives in the layout tree.
+    juce::ToggleButton padsPlayButton { "Play" };
 
     // The generator's two bulk actions, riding the Pads bar. They are the fast path into
     // generation, and they are on a bar because a bar is 34 px that already exists: a control

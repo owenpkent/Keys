@@ -1650,6 +1650,42 @@ namespace
                   "every macro knob needs a heading and a parameter");
 } // namespace
 
+// The harmony dropdown's own two-column menu (2026-08-19, Owen: "make harmony 2 columns" -
+// and, shown a single tall column, "still one column"). Off and the descending intervals fill
+// the left column, the ascending ones the right, the split BigSky's panel draws for the same
+// list. The break is found by text rather than by a hard-coded index, so the choice list and
+// this popup cannot drift apart; everything else - ids, tick, attachment - is exactly what the
+// ComboBox's own menu would have carried.
+void ArpPanel::MacroRow::HarmonyBox::showPopup()
+{
+    juce::PopupMenu menu;
+    // The box's own LookAndFeel, exactly as ComboBox::showPopup hands its internal menu:
+    // a PopupMenu does not inherit the target component's skin on its own, and without this
+    // the two columns came up in JUCE's stock grey.
+    menu.setLookAndFeel(&getLookAndFeel());
+    for (int i = 0; i < getNumItems(); ++i)
+    {
+        const auto text = getItemText(i);
+        if (i > 0 && text.startsWith("+") && ! getItemText(i - 1).startsWith("+"))
+            menu.addColumnBreak();
+        menu.addItem(getItemId(i), text, true, getItemId(i) == getSelectedId());
+    }
+    menu.showMenuAsync(juce::PopupMenu::Options()
+                           .withTargetComponent(this)
+                           .withItemThatMustBeVisible(getSelectedId())
+                           .withMinimumWidth(getWidth()),
+                       [safe = juce::Component::SafePointer<HarmonyBox>(this)](int result)
+                       {
+                           if (safe == nullptr)
+                               return;
+                           // hidePopup first: it is what resets the box's own menu-active
+                           // state, which showPopupIfNotActive set before calling us.
+                           safe->hidePopup();
+                           if (result != 0)
+                               safe->setSelectedId(result);
+                       });
+}
+
 ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p), line(n)
 {
     okstudio::ui::makeMouseOnly(*this);

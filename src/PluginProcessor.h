@@ -749,6 +749,17 @@ public:
         // Exclusive off alongside it and the drag costs nothing at all.
         bool padHoldToPlay = false;
 
+        // The Pads bar's **Play** toggle (2026-08-19, Owen: "I want a toggle above the
+        // keyboard to play notes. Because some sometimes when I'm trying to drag a cord into
+        // the arpeggiator, it plays instead, and it stops everything"). Off, a click on a
+        // card makes no sound at all - the strip is drag-only - so a press that was meant to
+        // become a drag toward the arpeggiator cannot fire a chord and, with Exclusive on,
+        // choke every running line on the way past. The drag, the drop targets and the card
+        // menu are untouched; the one left-click arp behaviour that survives is the stop on a
+        // cleared card still feeding a line, which plays nothing either way. On is today's
+        // behaviour and the default.
+        bool padsPlayOnClick = true;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.

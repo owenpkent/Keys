@@ -281,7 +281,18 @@ public:
         // rate's modifiers - per card because Owen asked for them "in the arps", and a combo
         // because "pick from a list" is a combo in Keys. Labels are HARMONY 1 / CHANCE /
         // HARMONY 2 / CHANCE, in that order.
-        std::array<juce::ComboBox, 2> harmBoxes;
+        //
+        // **The dropdown opens as two columns**, descending intervals on the left and
+        // ascending on the right, which is how the BigSky panel lays the same list out and
+        // what "make harmony 2 columns" turned out to mean (2026-08-19; a first reading put
+        // the *card's* controls in two columns, and Owen, shown the popup: "still one
+        // column"). A ComboBox builds its own single-column menu internally, so the subclass
+        // rebuilds it with a column break - same items, same ids, nothing else changed.
+        struct HarmonyBox : juce::ComboBox
+        {
+            void showPopup() override;
+        };
+        std::array<HarmonyBox, 2> harmBoxes;
         std::array<juce::Slider, 2> harmChanceKnobs;
         std::array<juce::Label, 4> harmLabels;
         std::array<std::unique_ptr<ComboAtt>, 2> harmAtts;
