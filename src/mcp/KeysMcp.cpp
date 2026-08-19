@@ -15,28 +15,17 @@ namespace
                                                    "probability", "transpose", "late", "harmony", "chord",
                                                    "rand", "mute", "chain", "reset" };
 
-    // Legal per-lane range, straight from ArpEngine.h's Lanes comment: note is
-    // -1 (mute) .. 8 (fixed chord-note index, 0 = follow direction mode); octave is
-    // added octaves; velocity/gate are percentages; ratchet is sub-hits; probability
-    // is a percent chance; transpose counts scale degrees; late is a percentage of a
-    // step; harmony counts chord tones; chord names an arp slot, 1-based, 0 = off.
-    struct LaneRange
-    {
-        int lane;
-        int lo, hi;
-    };
-    const LaneRange laneRanges[ArpEngine::numLanes] = {
-        { ArpEngine::laneNote, -1, 8 },
-        { ArpEngine::laneOctave, -3, 3 },
-        { ArpEngine::laneVelocity, 10, 200 },
-        { ArpEngine::laneGate, 5, 200 },
-        { ArpEngine::laneRatchet, 1, 4 },
-        { ArpEngine::laneProbability, 0, 100 },
-        { ArpEngine::laneTranspose, -7, 7 },
-        { ArpEngine::laneLate, 0, 90 },
-        { ArpEngine::laneHarmony, 0, 7 },
-        { ArpEngine::laneChord, 0, 12 },
-    };
+    // **There is no lane-range table here any more, deliberately.** There was one, hand-copied
+    // out of ArpEngine.h's Lanes comment, and it went wrong in both directions at once. It was
+    // declared `[numLanes]` with ten initialisers, so the four lanes appended since (rand, mute,
+    // chain, reset) came through value-initialised as `{lane = 0, lo = 0, hi = 0}` - and
+    // `laneNote` *is* 0, so every one of them aliased the Note lane and clamped it to zero. A
+    // set_arp_pattern carrying a `note` array applied five edits: the real one, then four that
+    // flattened it, and reported success. Its own `hi` of 8 was stale too, from before the Note
+    // lane widened to 20, so Prev/Hi/Low/Rnd and all eight per-step shapes were unreachable.
+    //
+    // `ArpEngine::laneRange` is the one answer, which is the same rule the Draw grid was put on
+    // when `buildLaneRow`'s lo/hi arguments came out. Do not reintroduce a copy.
 
     juce::var intVectorToVar(const std::vector<int>& values)
     {
@@ -837,10 +826,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
     {
         struct LaneEdit { int lane; std::vector<int> values; };
         std::vector<LaneEdit> edits;
-        for (const auto& r : laneRanges)
+        for (int lane = 0; lane < ArpEngine::numLanes; ++lane)
         {
-            const char* name = laneNames[r.lane];
-            if (! args.hasProperty(name))
+            const char* name = laneNames[lane];
+            if (name == nullptr || ! args.hasProperty(name))
                 continue;
             std::vector<int> vals;
             if (! readIntArray(args.getProperty(name, juce::var()), vals) || vals.empty()
@@ -849,9 +838,10 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
                 error = juce::String(name) + " must be an array of 1.." + juce::String(ArpEngine::maxSteps) + " integers";
                 return {};
             }
+            const auto r = ArpEngine::laneRange(lane);
             for (auto& v : vals)
                 v = juce::jlimit(r.lo, r.hi, v);
-            edits.push_back({ r.lane, std::move(vals) });
+            edits.push_back({ lane, std::move(vals) });
         }
 
         // Every lane property arrives the same way: an optional map of lane name -> value. One
@@ -873,6 +863,18 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         const LaneEdits loopFromEdits = readLaneMap("loopFrom", 0, ArpEngine::maxSteps - 1);
         const LaneEdits loopToEdits = readLaneMap("loopTo", 0, ArpEngine::maxSteps - 1);
         const LaneEdits dirEdits = readLaneMap("dir", 0, (int) ArpEngine::numLaneDirs - 1);
+        // **"To the end" has to survive a round trip.** loopTo defaults to maxSteps - 1, past
+        // the end of every real lane, and is clamped at read - that sentinel is the whole reason
+        // a window set to the end of an eight-step lane still reaches the end once you grow the
+        // lane to sixteen. get_arp_pattern reports it clamped (7 on an eight-step lane), because
+        // a raw 31 would read as a window nobody set; so a script that read a pattern and wrote
+        // it straight back stored a literal 7 and pinned the window for good. A write landing on
+        // or past the lane's own last step means the end, and is stored as the sentinel.
+        const auto loopToStored = [](int wanted, int laneLen)
+        {
+            const int len = juce::jlimit(1, ArpEngine::maxSteps, laneLen);
+            return wanted >= len - 1 ? ArpEngine::maxSteps - 1 : wanted;
+        };
         const int laneShapeEdits = (int) (onEdits.size() + loopFromEdits.size()
                                           + loopToEdits.size() + dirEdits.size());
 
@@ -926,7 +928,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             for (const auto& e : loopFromEdits)
                 pattern.loopFrom[(size_t) e.first] = e.second;
             for (const auto& e : loopToEdits)
-                pattern.loopTo[(size_t) e.first] = e.second;
+                pattern.loopTo[(size_t) e.first] = loopToStored(e.second, pattern.length[(size_t) e.first]);
             for (const auto& e : dirEdits)
                 pattern.dir[(size_t) e.first] = e.second;
             if (hasRhythmDivs)
@@ -950,7 +952,8 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
             for (const auto& e : loopFromEdits)
                 processor.arpLine(line).lanes.loopFrom[(size_t) e.first].store(e.second);
             for (const auto& e : loopToEdits)
-                processor.arpLine(line).lanes.loopTo[(size_t) e.first].store(e.second);
+                processor.arpLine(line).lanes.loopTo[(size_t) e.first].store(
+                    loopToStored(e.second, processor.arpLine(line).lanes.length[(size_t) e.first].load()));
             for (const auto& e : dirEdits)
                 processor.arpLine(line).lanes.dir[(size_t) e.first].store(e.second);
             if (hasRhythmDivs)

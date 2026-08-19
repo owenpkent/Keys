@@ -5,6 +5,53 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: review pass on the step sequencer round
+
+**`set_arp_pattern` silently flattened the Note lane.** The MCP bridge kept its own hand-copied
+lane-range table, declared for every lane and filled in for ten of them. The four lanes appended
+since arrived value-initialised as `{lane = 0, lo = 0, hi = 0}`, and `laneNote` is 0, so each of
+them aliased the Note lane and clamped it to zero: a call carrying a `note` array applied the real
+edit and then four that wiped it, and reported success. The same table's Note range was stale at
+8, so Prev/Hi/Low/Rnd and all eight per-step shapes were unreachable through MCP. It reads
+`ArpEngine::laneRange` now, which is the rule the Draw grid was already put on.
+
+**A mute silenced the wrong step.** Mute is the Note lane's companion, not a lane of its own: it
+has no tab, and the MUTE strip under the grid is drawn and edited against the Note lane's cells.
+Its *length* has been kept in step since it arrived, for exactly that reason, but lanes grew a
+loop window and a direction this round and only the length was carried across. Set the Note lane's
+Dir to Down and the cell under the note drawn at step 0 silenced the note drawn at step 7, with no
+way to correct it because Mute cannot be selected. It borrows the Note lane's whole shape now, in
+`laneValue`, which is the one place lane data is read.
+
+**The loop bar did nothing on twelve of the thirteen lanes.** It wrote only the selected lane,
+while `enforceLinkedLengths` copies the Note lane's window over every lane on the 10 Hz tick, so
+any drag outside the Note lane was undone within 100 ms. It fans out under Link exactly as Steps
+and Speed already do, and Link off is still left alone. It also pushes an undo entry on the press
+now, like every other lane edit: the window rides the arp tree, so without one the next Undo
+reverted a window drag the user had not aimed at.
+
+**Mutate's variation drifted off the cells it varies.** The step and the era came off the raw step
+index rather than the lane's own walk, so at Speed x2 the era advanced twice per pass and a
+"locked" variation changed halfway round the loop, and a non-zero Offset shifted which drawn cell
+each stored variation belonged to. Both now use `laneStepIndex`'s own walk position.
+
+**The fingered shapes took the ends of the sequence as the chord's extremes.** Under "As Played"
+the sequence is in arrival order, so "the high note of the chord" could come out as the lowest
+note held. Scanned now, the way `noteHi` and `noteLow` already are.
+
+**The Note lane kept naming a chord nobody was holding.** `uiSeq` is written only where a step
+fires, and nothing cleared it when the chord came up, so the cells went on reading "E3" until the
+next step - which never came if the line was off. It goes quiet with the playhead now.
+
+Also: a switched-off lane no longer draws a playhead for cells the engine never reads; the
+out-of-loop dim is painted over the contour and the note name instead of under them, so excluded
+steps stop reading as brighter than the ones that play; the lane strip's fourteen-lane scan moved
+under the `isShowing()` gate, leaving only the length repair running while the panel is hidden;
+`dirNames` is pinned to `numLaneDirs` with a `static_assert`; a `loopTo` written at the end of a
+lane is stored as the "to the end" sentinel, so a get/set round trip stops pinning the window; and
+the Reset lane's documentation now says what it does when Offset is set.
+
+
 ### Fixed: review pass on the pad/arp routing round
 
 Six things the review caught, all of them in code this round touched.
@@ -96,7 +143,7 @@ Paging already moves the window, and this is the page the height buys something 
 Claude Code launches `keys-mcp` once per session and keeps it for hours; `run.py` closes and
 relaunches Keys on every build, and the in-plugin server takes a new OS-assigned port each time.
 The shim connected once and then wrote into a dead socket forever, so a tool call got **no
-response at all** and the client sat on its idle timeout — half an hour of looking exactly like a
+response at all** and the client sat on its idle timeout - half an hour of looking exactly like a
 slow tool. It reconnects on demand now, and never leaves a request unanswered: with nothing to
 connect to, with a connection that dropped mid-call, or with Keys alive but wedged, the call comes
 back as a JSON-RPC error instead of as silence.
@@ -110,25 +157,25 @@ Cthulhu's Note graph, which is the thing that makes that graph worth having. Its
 top half of the lane is *"various arpeggiator patterns, which act like a typical arpeggiator, where
 the note output varies consecutively one step after another"*.
 
-- **Eight shapes live at the top of the Note lane** — up, down, up/down, down/up, up & down,
-  down & up, fingered bottom and fingered top — appended above the existing values, in Cthulhu's
+- **Eight shapes live at the top of the Note lane** - up, down, up/down, down/up, up & down,
+ down & up, fingered bottom and fingered top - appended above the existing values, in Cthulhu's
   own bottom-to-top order, so a drag up the lane meets them in the order its manual lists them.
   Keys had exactly one shape, the line's, and a `follow` value to defer to it. Now a lane can run
   four steps up, jump to a fixed note, and come back down, all drawn and all visible.
 - **They share one walk.** Four steps of Up followed by four of Down comes back down the line it
-  went up, rather than restarting — one cursor read by whichever shape the step names, which is
+ went up, rather than restarting - one cursor read by whichever shape the step names, which is
   what Cthulhu means by "consecutively one step after another".
 - **Fingered bottom and fingered top are new shapes for the whole line too**, not only per step:
   *"every 2nd note is the high note of the chord"*, with the walk between them covering the notes
   that are not that extreme, so a triad comes out C–G–E–G rather than C–G–G–G. `Direction` gained
-  two entries, which is safe in that direction only — a slot stores its shape as an index and the
+ two entries, which is safe in that direction only - a slot stores its shape as an index and the
   tree records what `numDirections` was when it was written.
 - **The Note lane draws markers at a height, not bars filled up to one.** A Velocity of 120 is a
   magnitude and a column filled to 120 says so; a Note of 5 is a *name*, and a column filled to 5
   reads as "more than 4", which is not something a chord entry can be. It is also what makes room
   for the shape contours, which are drawn as pictures inside their own taller markers.
 - **A Reset lane**, Cthulhu's Position Reset: the step restarts the shape's walk, so it plays the
-  first note of its shape again. It restarts the *walk*, not the lanes — the manual's own example
+ first note of its shape again. It restarts the *walk*, not the lanes - the manual's own example
   is about which note of the chord comes out, and rebasing the lanes would leave the lane reading
   its own reset cell for ever. It is a lane because Cthulhu reaches it by alt-click and Keys has no
   modifier to spend.
@@ -136,13 +183,13 @@ the note output varies consecutively one step after another"*.
 ### Fixed: the panel kept a second copy of every lane's range
 
 `buildLaneRow` took a low and a high per lane, and those thirteen pairs were a duplicate of
-`ArpEngine::laneRange` — the table whose own comment says three tables that must agree is three
+`ArpEngine::laneRange` - the table whose own comment says three tables that must agree is three
 tables that will not. It bit immediately: the engine accepted the new Note values and every grid
 still stopped at the old ceiling, so the shapes existed and could be neither drawn nor set. The
 parameters are gone and the grid reads `laneRange`.
 
 The lane tab row divided its width by a hard-coded twelve, so the Reset lane's tab was laid out
-four pixels wide — the same invisible starvation the Chain lane caused when it made twelve. It
+four pixels wide - the same invisible starvation the Chain lane caused when it made twelve. It
 counts its tabs now, and the layout test caught it.
 
 ### Added: MUTATE and LOCK, a wander that stays in the chord and can be kept

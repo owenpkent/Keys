@@ -968,6 +968,13 @@ public:
             // dropping them here is also what keeps them from surfacing a block later.
             pendingCount = 0;
             uiRelStep.store(-1, std::memory_order_relaxed); // no playhead, not step 0
+            // The note names go with the playhead. uiSeq is written only by buildSequence, and
+            // buildSequence only runs from fireStep, so nothing cleared it when the chord came
+            // up: the Note lane went on printing "E3" for a chord nobody was holding until the
+            // next step fired, and with the line switched off that never came. Both halves of
+            // "what is this lane doing right now" go quiet together now, and the grid falls
+            // back to the raw number exactly as it does before a chord ever lands.
+            uiSeqCount.store(0, std::memory_order_relaxed);
         }
 
         // Whatever is still owed inside this block, then rebase the survivors onto the next
@@ -1097,9 +1104,21 @@ private:
         if (lanes.on[li].load(std::memory_order_relaxed) == 0)
             return laneDefaults[l]; // switched off: the drawing stays, nothing reads it
 
+        // **Mute walks the Note lane's shape, not its own.** It is the Note lane's companion
+        // rather than a polymetric lane of its own - it has no tab, the MUTE strip under the
+        // grid *is* its editor, and that strip is drawn and edited against the Note lane's
+        // cells. Its length has been kept in step since it arrived, for exactly this reason
+        // ("the engine wraps each lane by its own length and a disagreement would silence the
+        // wrong step"), but a lane grew a loop window and a direction on 2026-08-18 and only
+        // the length was carried across. Set the Note lane's Dir to Down and the cell under
+        // the note drawn at step 0 silenced the note drawn at step 7 instead: the strip could
+        // not select Mute to fix it, because it has no tab. Borrowing the shape here keeps the
+        // whole companion rule in the one place lane data is read.
+        const auto shape = lanes.shapeOf(l == laneMute ? (int) laneNote : (int) l);
+
         // Relative to the last restart, not to the absolute step index, so Retrigger means
         // step 1 for the lanes too; plus Offset, which starts the same lanes further in.
-        return lanes.value[li][(size_t) laneStepIndex(globalStep - stepBase, p.offset, lanes.shapeOf(l))]
+        return lanes.value[li][(size_t) laneStepIndex(globalStep - stepBase, p.offset, shape)]
                    .load(std::memory_order_relaxed);
     }
 
@@ -1170,13 +1189,22 @@ private:
             std::swap(from, to);
         const int span = juce::jmax(1, to - from + 1);
 
+        // **Counted in lane cells, not raw steps.** Both of these used to come off `rel`
+        // directly, which is only the same thing while the lane runs at x1 with no Offset:
+        // at Speed x2 one pass of an eight-step window takes sixteen raw steps, so the era
+        // advanced twice per pass and a "locked" variation audibly changed halfway round the
+        // loop - the opposite of what the comment above promises. `k` is laneStepIndex's own
+        // walk position (divider first, then Offset, exactly as it orders them), and the step
+        // is the cell that function actually reads, so a stored variation belongs to the cell
+        // it is drawn on rather than to a raw step index that drifts away from it.
         const long long rel = globalStep - stepBase;
-        const long long pass = (rel >= 0 ? rel : rel - span + 1) / span;
+        const long long k = (rel >> juce::jlimit(0, 2, sh.div)) + p.offset;
+        const long long pass = (k >= 0 ? k : k - span + 1) / span;
         const int lock = juce::jlimit(0, 100, p.mutateLock);
         // 0 -> a new era every pass; 99 -> one every ~62; 100 -> one era, ever.
         const long long era = lock >= 100 ? 0 : pass / (1 + (long long) lock * lock / 160);
 
-        const int step = (int) ((rel % span + span) % span);
+        const int step = laneStepIndex(rel, p.offset, sh);
         const unsigned int h = hash32((unsigned int) step * 2654435761u
                                       ^ (unsigned int) (era * 40503u)
                                       ^ (unsigned int) (p.mutateSeed * 2246822519u));
@@ -1316,16 +1344,43 @@ private:
                 // Cthulhu p24: "every 2nd note is the high note of the chord". So the walk
                 // alternates with a fixed extreme - and it walks the notes that are *not* that
                 // extreme, which is what makes a triad come out C G E G rather than C G G G.
+                //
+                // The extreme is **scanned**, never taken as an end of `seq`, for the reason
+                // noteHi and noteLow already carry: buildSequence sorts by pitch only for the
+                // shapes that walk by pitch, and stacks octaves on top, so neither end is
+                // reliably the extreme. Under "As Played" with C4, E4 then G3 pressed in that
+                // order, seq[n-1] is G3, and "the high note of the chord" came out as the
+                // lowest note actually held.
                 const bool top = dir == Direction::fingeredTop;
+                const int ext = extremeSeqIndex(top);
                 if ((cursor & 1) != 0)
-                    return top ? n - 1 : 0;
+                    return ext;
+                // The other n-1 entries, in order, wherever the extreme happens to sit: an
+                // index at or above it shifts up by one, which skips exactly that entry.
                 const int walk = (int) ((cursor / 2) % (n - 1)); // n > 1 here
-                return top ? walk : walk + 1;
+                return walk >= ext ? walk + 1 : walk;
             }
             case Direction::chord:
                 return (int) (cursor % n); // fireStep plays them all; this is the fallback
         }
         return 0;
+    }
+
+    // The entry of `seq` holding the highest (or lowest) sounding pitch. Shared by the two
+    // fingered directions; noteHi and noteLow in fireStep do the same scan inline against the
+    // step's own seqCount. Both exist because the positional ends of `seq` are only the pitch
+    // extremes for the shapes that sorted it by pitch in the first place.
+    int extremeSeqIndex(bool top) const
+    {
+        int best = 0;
+        for (int i = 1; i < seqCount; ++i)
+        {
+            const int a = held[(size_t) seq[(size_t) i].heldIndex].note + seq[(size_t) i].semitoneOffset;
+            const int b = held[(size_t) seq[(size_t) best].heldIndex].note + seq[(size_t) best].semitoneOffset;
+            if (top ? a > b : a < b)
+                best = i;
+        }
+        return best;
     }
 
     // A shuffled order held for as long as the chord is: random, but the same random every
