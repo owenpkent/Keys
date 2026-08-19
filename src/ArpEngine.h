@@ -560,16 +560,14 @@ public:
         // Kept for sessions saved before velTrim below; nothing in the UI writes it any more
         // and KeysProcessor::migrateVelTrim folds it into velTrim on load.
         int volume = 100;         // 0..100
-        // The control that replaced it on screen (2026-08-02, Owen: "it should start in the
-        // middle so you can turn it up or down. But really, the volume is controlling
-        // velocity"). Bipolar so the middle means "as played", and the multiplier is
-        // *squared* - ((100+velTrim)/100)^2 - because hearing is logarithmic and the linear
-        // version spent nearly all of its audible change in the last few degrees (same day,
-        // Owen: "I was at negative 96, and it was still pretty loud"). Halfway down plays a
-        // quarter of the velocity, which sounds about half as loud; -100 mutes exactly as
-        // volume 0 does. Applied after the 0.05 audibility floor, not before it - see the
-        // emit loop - so a deep cut reaches MIDI velocity 1 instead of pinning at 6.
-        int velTrim = 0;          // -100..+100
+        // `velTrim` was the control that replaced it on screen (2026-08-02) and `velLevel`
+        // below replaced *it* on 2026-08-18. It has no member here: the engine's two readers
+        // (the squared trim in the velocity path, and the velTrim <= -100 mute) both went with
+        // that change, so a field would only have been an atomic loaded per line per block to
+        // feed nothing - and, worse, a live-looking number the next velocity feature would
+        // reasonably assume was wired up. The APVTS parameter stays registered so saved
+        // sessions keep round-tripping; KeysProcessor::migrateVelLevel is what reads it, once,
+        // on load. Keeping a parameter for compatibility does not mean feeding it to the engine.
         // **The absolute level that replaced it** (2026-08-18, Owen, on the readout reading
         // "-31 ~20": "still wrong", having just asked for velocity ranges to span 0-127).
         // VelTrim was a *trim* on the velocity that arrived, so its numbers were percentages

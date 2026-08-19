@@ -155,12 +155,6 @@ private:
     // only empty pads, like every other generative action in Keys, and each card it places leaves
     // its cell, so what stays behind is exactly what would not fit.
     juce::TextButton toPadsButton;
-    // Commit the whole tray in one click (2026-08-18, Owen: "when you click on fill, I want a new
-    // button to send all to pads or something like that or fill empty spots to send a bunch of
-    // them to the main app"). The tray already had exactly one route to a pad per card - a drag,
-    // or Send to first empty pad on its own menu - so filling a page meant sixteen gestures.
-    // It writes only empty pads, like every other generative action in Keys, and each card it
-    // places leaves its cell, so what stays behind is what would not fit.
 
     // The audition tray. Owned here rather than by ChordGenMenu, and that is consistent with the
     // rest of this class rather than an exception to it: a tray card is not state, so throwing

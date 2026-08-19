@@ -5,6 +5,48 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: review pass on the pad/arp routing round
+
+Six things the review caught, all of them in code this round touched.
+
+**Changing a line's MIDI channel could hang a note for the rest of the session.** The
+channel-change flush emitted its note-offs straight into the outgoing buffer, past `ArpMerge`.
+Every note-on that line played had been counted by those refcounts, so closing them anywhere else
+left `held[ch][note]` stuck above zero, and a count that never returns to 0 suppresses the *real*
+note-off of every later hit on that pitch. It merges through `arpMerged` like every other path
+now. The flush emits at sample 0 and a `MidiBuffer` keeps its events in sample order, so those
+note-offs still close ahead of whatever the block goes on to play.
+
+**The oldest sessions came back at the wrong loudness.** `migrateVelLevel` read the line's old
+VelTrim out of the *saved* tree, but `migrateVelTrim` runs immediately before it and, for a session
+old enough to predate VelTrim as well, synthesises that trim from the session's Volume and writes
+it to the live parameter, never back into the tree. So exactly the sessions the chain exists for
+fell through to the "as played" default. It reads the live parameter now, which answers both cases.
+
+**A session load overwrote its own Root and Scale.** `replaceState` pushes genRoot and genMode
+through the parameter listener like any other write, which raised the Key/Mode mirror and had the
+next heartbeat write them over the Root and Scale that same session had just restored. Root and
+Scale are still ordinary parameters you can set on the Controls bar after picking a generator key,
+so a saved keybed setting was lost on every load, plus two gesture-less parameter writes at the
+host about 20 ms in. The mirror is for the user turning Key or Mode, and it stays that.
+
+**The arp bar's Draw tab relied on an accident.** `ArpPanel`'s constructor calls `refreshShape()`,
+where `lastPatternMode` starting at -1 was supposed to report the initial shape and open a session
+saved in Pattern shape with Draw already live. The constructor runs before `onShapeChanged` is
+assigned, so that report went into a null `std::function` every time; it worked only because
+`syncSectionControls()` happens to call `refreshArpBarTabs()` afterwards. Reported explicitly now.
+
+**Two answers to one question on the generator's Send all to pads.** The button greyed off the
+brain's own scan of the page while the commit it guards goes through `onSendToFirstEmpty`. Both
+routed to the same hook now, so they cannot disagree.
+
+**Removed:** the dead `velTrim` engine field and its per-block atomic load per line, an orphaned
+duplicate comment block in `ChordGenPanel.h`, and the stale `followAim` documentation on
+`sendPadToArpLine`, whose parameter this round deleted. `minWidthForView()`'s Pads-bar arithmetic
+was re-measured: it had itemised a Compliance chip and a Mode combo that left the bar on
+2026-08-02 while never accounting for the 124 px Mode combo that came back. The real total is 752,
+not 858, and the floor never moved.
+
 ### Added: the step sequencer says what it is doing, and the lanes stopped being one grid each
 
 A usability and functionality pass over the Draw page, drawn from Kirnu Cream's manual. The page
