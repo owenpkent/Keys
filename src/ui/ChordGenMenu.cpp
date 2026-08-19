@@ -542,6 +542,8 @@ void ChordGenMenu::writeChord(int slot, const chordgen::Chord& c)
     pad.rootPc = c.rootPc;
     pad.type = c.type;
     pad.degree = c.degree;
+    pad.progression = c.progression;       // Library only; empty from every other source
+    pad.progressionStep = c.progressionStep;
     pad.locked = processor.chordPad(slot).locked;
     processor.setChordPad(slot, pad);
 }
@@ -586,6 +588,7 @@ void ChordGenMenu::stopPreview()
         processor.noteOff(n);
     previewNotes.clear();
     progressionQueue.clear(); // a walk ends when anything else takes the room
+    walking = false;
 }
 
 // 550 ms a chord: fast enough that a four-chord progression is over in a little over two seconds -
@@ -604,6 +607,7 @@ void ChordGenMenu::auditionProgression(const std::vector<std::vector<int>>& chor
     // Held in reverse so stepping is a pop_back. The first chord is fired here rather than waiting
     // out a tick: a Hear button that stays silent for half a second reads as broken.
     progressionQueue.assign(chords.rbegin(), chords.rend());
+    walking = true; // stays true through the last chord's own hold, not just the queue
     const auto first = progressionQueue.back();
     progressionQueue.pop_back();
 
@@ -764,6 +768,12 @@ std::vector<KeysProcessor::ChordPad> ChordGenMenu::generateCandidates(int count)
         pad.rootPc = c.rootPc;
         pad.type = c.type;
         pad.degree = c.degree;
+        // Empty on every source but Library, which is the only one whose chords are steps of a
+        // written-down row. Without this the Library source's pads fell back to resolving
+        // `degree` against the *session's* mode, so an Aeolian row's bVI drew as "vi" - the
+        // exact fault numeralAt was added to fix, reached by the one route that skipped it.
+        pad.progression = c.progression;
+        pad.progressionStep = c.progressionStep;
         out.push_back(std::move(pad));
     }
     return out;

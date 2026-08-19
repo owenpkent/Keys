@@ -557,7 +557,6 @@ void ChordPads::paint(juce::Graphics& g)
     // pads 5 and 6 are adjacent by index and nowhere near each other on screen, and a bracket
     // spanning them would be a line drawn across the middle of the strip to nothing.
     {
-        const float lineY = padBounds(0).getBottom();
         int v = 0;
         while (v < KeysProcessor::padsPerPage)
         {
@@ -587,7 +586,14 @@ void ChordPads::paint(juce::Graphics& g)
             {
                 const auto a = padBounds(v);
                 const auto z = padBounds(end);
-                const float y = juce::jmin(lineY, a.getBottom()) + 3.0f;
+                // The bracket sits under the run's *own* row. This was
+                // `jmin(padBounds(0).getBottom(), a.getBottom())`, which is row 0's bottom for
+                // every run: a run on the second row therefore drew its bracket up in the gap
+                // under the first row, over the columns of the pads it does not belong to, and
+                // two runs one per row drew two identical brackets on the same line. The loop
+                // above already refuses to let a run cross a row, so `a` and `z` share one and
+                // either end answers for it.
+                const float y = a.getBottom() + 3.0f;
                 const auto accent = skin::accentOf(*this);
 
                 juce::Path bracket;

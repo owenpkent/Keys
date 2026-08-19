@@ -144,7 +144,10 @@ def build_songs(con, limit=None):
       )
       SELECT id, any_value(spotify_song_id) AS sid,
              list(((({CHORD_EXPR}) % 12 + 12) % 12)::VARCHAR ||
-                  CASE WHEN regexp_matches(tok, '^[A-G][sbf#]?(min|dim|m)') THEN 'm' ELSE 'M' END
+                  -- 'maj' is excluded first, or "Cmaj7" matches the bare 'm' and every
+                  -- major seventh in the corpus is labelled minor. Same fix as chord_parts()
+                  -- in rank_against_chordonomicon.py and validate_moods.py, which shared it.
+                  CASE WHEN regexp_matches(tok, '^[A-G][sbf#]?(min|dim|m(?!aj))') THEN 'm' ELSE 'M' END
                   ORDER BY ord) AS seq
       FROM toks GROUP BY id
     """)

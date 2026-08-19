@@ -538,14 +538,7 @@ void ChordGenPanel::buildControls()
     // opens, and the three picks outlive it on purpose. Without this the boxes would come back
     // reading "Any" while generation still filtered on your last pick, which is the exact failure
     // Markov's Mood and Start were given this shape to avoid.
-    for (int i = 0; i < libMoodBox.getNumItems(); ++i)
-        if (libMoodBox.getItemText(i) == gen.libraryMood())
-            libMoodBox.setSelectedId(libMoodBox.getItemId(i), juce::dontSendNotification);
-    for (int i = 0; i < libGenreBox.getNumItems(); ++i)
-        if (libGenreBox.getItemText(i) == gen.libraryGenre())
-            libGenreBox.setSelectedId(libGenreBox.getItemId(i), juce::dontSendNotification);
-    if (gen.libraryFunction() >= 0)
-        libFunctionBox.setSelectedId(gen.libraryFunction() + 2, juce::dontSendNotification);
+    adoptLibraryFilters();
     refreshLibraryResult();
 
 
@@ -822,6 +815,25 @@ void ChordGenPanel::refreshLibraryResult()
 // screen-coordinate methods that used to live here went with the editor's plumbing that called
 // them (2026-08-02).
 
+// The three Library picks live on the brain, which outlives this window, and can also be moved
+// from the Chord Library window. One place that pulls them onto these combos, called both when
+// the window is built and whenever the polled signature changes underneath it.
+void ChordGenPanel::adoptLibraryFilters()
+{
+    for (int i = 0; i < libMoodBox.getNumItems(); ++i)
+        if (libMoodBox.getItemText(i) == gen.libraryMood())
+            libMoodBox.setSelectedId(libMoodBox.getItemId(i), juce::dontSendNotification);
+    if (gen.libraryMood().isEmpty())
+        libMoodBox.setSelectedId(1, juce::dontSendNotification); // "Any"
+    for (int i = 0; i < libGenreBox.getNumItems(); ++i)
+        if (libGenreBox.getItemText(i) == gen.libraryGenre())
+            libGenreBox.setSelectedId(libGenreBox.getItemId(i), juce::dontSendNotification);
+    if (gen.libraryGenre().isEmpty())
+        libGenreBox.setSelectedId(1, juce::dontSendNotification);
+    libFunctionBox.setSelectedId(gen.libraryFunction() >= 0 ? gen.libraryFunction() + 2 : 1,
+                                 juce::dontSendNotification);
+}
+
 void ChordGenPanel::timerCallback()
 {
     pageLabel.setText("Page " + juce::String(processor.padPage() + 1) + " of "
@@ -854,6 +866,20 @@ void ChordGenPanel::timerCallback()
     if (shownSource == 7 && gen.lastLibraryEntry() != lastLibraryEntry)
     {
         lastLibraryEntry = gen.lastLibraryEntry();
+        refreshLibraryResult();
+    }
+
+    // The filters themselves, which this band polled for neither. ChordLibraryPanel::timerCallback
+    // watches exactly this signature and re-selects its own combos; this one watched only the
+    // entry name, so setting Mood in the *library* window left these three combos and the match
+    // count stale for ever while Fill quietly generated under the new filter. The header comment
+    // claims the two are one state rather than two that drift, and they drifted in this direction.
+    const auto sig = gen.libraryMood() + "|" + gen.libraryGenre() + "|"
+                     + juce::String(gen.libraryFunction());
+    if (sig != lastLibSignature)
+    {
+        lastLibSignature = sig;
+        adoptLibraryFilters();
         refreshLibraryResult();
     }
 

@@ -219,6 +219,7 @@ private:
     // is a Label rather than a fourth combo on purpose: the pick is a filter, so "which row" is an
     // *answer*, and offering it as a control would invite you to set it and then be overruled.
     juce::ComboBox libMoodBox, libGenreBox, libFunctionBox;
+    void adoptLibraryFilters(); // pull the brain's three picks onto the combos above
     juce::Label libMoodLabel, libGenreLabel, libFunctionLabel, libResultLabel;
 
     // Brightness sweeps the seven diatonic modes from Lydian to Locrian, which is what "a slider
@@ -270,6 +271,10 @@ private:
     // ride the tray's header, and the Pads bar has its own pair - so polling is the only way this
     // band learns what it got.
     juce::String lastLibraryEntry;
+    // The Library filters can move from the *other* window - they are one piece of state, held on
+    // ChordGenMenu - so this band has to notice, exactly as ChordLibraryPanel does. Polled rather
+    // than pushed because the two windows do not know about each other and should not have to.
+    juce::String lastLibSignature { "" }; // never a real signature, so the first tick adopts
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordGenPanel)
 };

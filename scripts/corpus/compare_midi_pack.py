@@ -37,13 +37,20 @@ def token_to_keys(tok: str, minor_ctx: bool) -> str:
 
     # A trailing capital M on a plain numeral means "major triad"; Keys says that with case alone.
     # It must not eat the M of M7, and M-5 is diminished, so only a bare trailing M is dropped.
+    # Captured before the suffix branch below rewrites the numeral. It used to be read after,
+    # so a minor-quality token ("VIm") had already been lowercased to "vi" and `upper` came out
+    # False - which meant the minor-context flattening could never fire for exactly the tokens
+    # that most need it, and those rows landed in the "only in pack" bucket as Keys rows under
+    # the wrong spelling. This file's own header is about that failure being silent: it parses
+    # cleanly and names the wrong chords.
+    upper = num.isupper()
+
     if suf == "M":
         suf = ""
     elif suf == "m":
         suf = ""
         num = num.lower()
 
-    upper = num.isupper()
     if minor_ctx and not acc and upper and num in MINOR_FLATTEN:
         acc, num = "b", MINOR_FLATTEN[num][1:]
 

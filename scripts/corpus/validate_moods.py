@@ -71,7 +71,14 @@ def chord_parts(sym):
     if base is None:
         return None
     rest = m.group(3)
-    minor = rest.startswith("min") or rest.startswith("dim") or rest.startswith("m")
+    # "maj" must be excluded before the bare "m", or every maj7/maj9 in the corpus is counted
+    # as minor: rest is "maj7" for "Cmaj7", and "maj7".startswith("m") is true. That silently
+    # mislabelled every major-seventh chord, so rows written with M7 never joined the corpus
+    # windows they actually match, and the major/minor valence the whole mood table is gated on
+    # was computed over bad data.
+    minor = not rest.startswith("maj") and (
+        rest.startswith("min") or rest.startswith("dim") or rest.startswith("m")
+    )
     return (base + ACCIDENTAL.get(m.group(2), 0)) % 12, minor
 
 

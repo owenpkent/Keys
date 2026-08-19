@@ -5,6 +5,65 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: review pass on the chord library round
+
+**The Library generator source produced pads with the wrong numerals.** It built chords through
+`chordlib::chordsFor` against the row's own mode, correctly, and then dropped the row name and the
+position within it on the floor - so the strip fell back to resolving `degree` against the
+*session's* mode and drew an Aeolian row's bVI as "vi", a major chord labelled minor. That is the
+exact fault `numeralAt` was added to fix, reached by the one route that skipped the stamp. The
+stamp moved into `chordsFor` itself, which is the one function that knows both the row and the
+position, so every route out of the library carries it: the library window's Tray and Pads
+buttons, and the generator's own source. A Library fill also gets a bracket and a seed for
+Follows now, which it never had.
+
+**A progression's numerals could all be off by one.** `chordsFor` skips a token it cannot parse
+and the empty entries `StringArray::fromTokens` emits for consecutive separators, while
+`numeralAt` indexed the raw token list. A row with a double space, a trailing space or a typo'd
+suffix therefore shifted every later chord's numeral by one, under a bracket correctly naming the
+progression. Both go through one `playableNumerals` now, and a test walks all 355 rows checking
+that every chord's `progressionStep` names its own numeral.
+
+**A bracket on the second pad row drew under the first.** The Y was clamped with `jmin` against
+row 0's bottom, which is always the smaller value, so a run in the lower row drew its bracket up
+in the gap under the upper one, spanning columns it has nothing to do with - and two runs, one per
+row, drew two identical brackets on the same line. The run loop already refuses to let a run cross
+a row, so either end answers for it.
+
+**Closing the library window cut off the generator's audition.** `ChordGenMenu` owns one preview
+path for both the progression walk and the tray's 800 ms single-chord audition, and the destructor
+stopped it unconditionally - so closing this window inside those 800 ms killed a sound it had
+nothing to do with. It stops only a walk now.
+
+**A progression's last chord read as finished while it was still sounding.** `auditioningProgression`
+answered off the queue, which is popped as each chord *fires*, so it went false the moment the
+final chord started. The library row went dark about 100 ms into an 800 ms chord, and clicking it
+during those 800 ms restarted the whole progression instead of stopping it. A flag that lives
+until the walk actually ends replaces the queue test.
+
+**The generator's Library band never noticed the filters moving.** `ChordLibraryPanel` polls the
+shared mood/genre/function signature and re-selects its combos; the generator band polled only the
+last entry name, so a filter set in the library window left its three combos and its match count
+stale for ever while Fill quietly generated under the new one. It polls the same signature now,
+through one `adoptLibraryFilters` shared with the window's own construction.
+
+**Every maj7 in the corpus was counted as minor.** `rest.startswith("m")` is true for `"maj7"`,
+in `rank_against_chordonomicon.py`, `validate_moods.py` and `corpus.py`'s SQL alike, so rows
+written with M7 never joined the corpus windows they match and the major/minor valence the mood
+table is gated on was computed over mislabelled data. `compare_midi_pack.py` had the sibling bug:
+it read `upper` *after* the suffix branch had already lowercased the numeral, so a minor-quality
+token could never get the minor-context flattening and landed in the "only in pack" bucket under
+the wrong spelling.
+
+Also: `couldFollow`'s shared-mood bonus could reach +4, because its `break` left only the inner
+loop - enough to outweigh the +3 for staying in the mode and to close most of the join score's own
+spread, so a tag-heavy row on a tritone could outrank a same-mode falling fifth. It is one point
+however many moods overlap. The library window's Close button was a 26 px target in a 28 px
+header, under the 34 px mouse-only floor, on the only on-screen way out of the window; the header
+is 34 like its sibling's. And `numeralAt` builds its per-row token lists once rather than scanning
+355 rows and re-tokenising on every call, which it takes per filled pad per repaint of the strip.
+
+
 ### Added: a pad remembers which progression it is a step of, and the strip brackets the run
 
 `ChordPad` gains `progression` and `progressionStep` - the first fields added to that struct since

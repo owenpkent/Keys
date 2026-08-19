@@ -110,7 +110,13 @@ public:
     // almost nothing: ii-V-I and ii-V-vi start identically. This is the button that answers the
     // question the tray cannot.
     void auditionProgression(const std::vector<std::vector<int>>& chords);
-    bool auditioningProgression() const { return ! progressionQueue.empty(); }
+    // **A flag, not the queue's emptiness.** The queue is popped as each chord *fires*, so it
+    // empties the moment the last chord starts - and that chord then sounds for another 800 ms
+    // with this answering false. The library window's row went dark about 100 ms in, and clicking
+    // it during those 800 ms restarted the whole progression instead of stopping it, because the
+    // "this row is the one playing" test had already stopped matching. The walk is over when the
+    // last chord is over, which is what stopPreview and the final timer tick decide.
+    bool auditioningProgression() const { return walking; }
 
     // What each of those two would find to do, for the bar and the window to grey their
     // buttons on.
@@ -285,6 +291,7 @@ private:
     // which is also what `auditioningProgression` answers with and what tells `timerCallback`
     // whether its tick is the end of an 800 ms preview or the start of the next chord.
     std::vector<std::vector<int>> progressionQueue;
+    bool walking = false; // a progression is sounding, including its final chord
 
     int editingSlot = -1; // pad the keyboard is editing, pushed from the editor; see the setter
 

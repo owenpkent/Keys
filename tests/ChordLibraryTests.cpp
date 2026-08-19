@@ -269,6 +269,35 @@ namespace
                 expect(m7.valid);
                 expectEquals(m7.type, keys::chordgen::typeIndex("Minor 7th"));
             }
+
+            beginTest("every chord's progressionStep names its own numeral, across the table");
+            {
+                // `chordsFor` skips empty and unparseable tokens while `numeralAt` used its own
+                // tokenisation of the raw string, so a row with a double space, a trailing space
+                // or a typo'd suffix shifted every later chord's numeral by one - drawn on the
+                // strip under a bracket correctly naming the progression. Both go through
+                // `playableNumerals` now; this pins that they agree for all 355 rows rather than
+                // for the tidy ones, which is the whole point of the shared tokenisation.
+                int checked = 0;
+                for (const auto& e : keys::chordlib::table())
+                {
+                    const auto tokens = keys::chordlib::playableNumerals(e, 0);
+                    const auto chords = keys::chordlib::chordsFor(e, 0, e.mode, 4);
+                    expectEquals((int) chords.size(), tokens.size(),
+                                 "a chord per playable numeral in " + juce::String(e.name));
+                    for (const auto& c : chords)
+                    {
+                        expect(c.progression == juce::String(e.name),
+                               "the row stamped its name on " + juce::String(e.name));
+                        expect(c.progressionStep >= 0, "and a real step index");
+                        expectEquals(keys::chordlib::numeralAt(e.name, c.progressionStep),
+                                     tokens[c.progressionStep],
+                                     "numeralAt agrees with the step in " + juce::String(e.name));
+                        ++checked;
+                    }
+                }
+                expect(checked > 1000, "the whole table was walked, not a corner of it");
+            }
         }
     };
 

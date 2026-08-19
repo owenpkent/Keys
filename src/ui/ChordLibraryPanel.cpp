@@ -11,7 +11,12 @@ namespace
 {
     constexpr int kInset = 12;
     constexpr int kGap = 8;
-    constexpr int kHeaderH = 28;
+    // 34, matching ChordGenPanel's own header, which this window otherwise copies line for
+    // line. It was 28, and the Close button centred in it was therefore a 26 px target - under
+    // the 34 px floor CLAUDE.md states as an invariant, on the only on-screen way out of the
+    // window. The rule is to give the cell the height the target needs rather than shrink the
+    // target into the cell, and `contentSize` below reads this, so the window grew to suit.
+    constexpr int kHeaderH = 34;
     constexpr int kAfterHeader = 10;
     constexpr int kFilterRowH = 44; // 14 px caption over a 30 px control, as everywhere else
     constexpr int kAfterFilters = 10;
@@ -211,7 +216,13 @@ ChordLibraryPanel::~ChordLibraryPanel()
     // A progression left walking must not outlive the window that started it. The audition itself
     // lives on ChordGenMenu, which outlives this - that is why it lives there - but nothing else
     // would stop it, and a window closing mid-walk would leave chords arriving from nowhere.
-    gen.stopAudition();
+    //
+    // **Only a walk, though.** ChordGenMenu owns one preview path for both this and the tray's
+    // 800 ms single-chord audition, so an unconditional stop here cut off a chord the *generator*
+    // window was auditioning whenever this window happened to close inside those 800 ms - killing
+    // a sound this window did not start and has nothing to do with.
+    if (gen.auditioningProgression())
+        gen.stopAudition();
 }
 
 void ChordLibraryPanel::buildControls()
@@ -396,7 +407,6 @@ std::vector<KeysProcessor::ChordPad> ChordLibraryPanel::padsFor(const chordlib::
     const int oct = juce::jlimit(0, 8, (int) processor.apvts.getRawParameterValue("genOctave")->load());
 
     std::vector<KeysProcessor::ChordPad> out;
-    int step = 0;
     for (const auto& c : chordlib::chordsFor(e, root, e.mode, oct))
     {
         KeysProcessor::ChordPad pad;
@@ -405,12 +415,13 @@ std::vector<KeysProcessor::ChordPad> ChordLibraryPanel::padsFor(const chordlib::
         pad.rootPc = c.rootPc;
         pad.type = c.type;
         pad.degree = c.degree;
-        // Stamped here rather than at the placing end, because this is the one function that
-        // knows both the row and the position within it. A pad carries it from now on: the strip
-        // draws a bracket under consecutive steps, and it is what lets "could follow" ask about a
-        // progression rather than about a chord.
-        pad.progression = e.name;
-        pad.progressionStep = step++;
+        // The row and the position within it come off the chord now: `chordsFor` stamps them,
+        // because it is the one function that knows both, and stamping there is what gives the
+        // generator's own Library source the same pair rather than leaving it to each placing
+        // end to remember. A pad carries it from here on - the strip draws a bracket under
+        // consecutive steps, and it is what lets "could follow" ask about a progression.
+        pad.progression = c.progression;
+        pad.progressionStep = c.progressionStep;
         out.push_back(pad);
     }
     return out;
@@ -775,7 +786,7 @@ void ChordLibraryPanel::resized()
     {
         auto header = area.removeFromTop(kHeaderH);
         title.setBounds(header.removeFromLeft(kTitleW));
-        closeButton.setBounds(header.removeFromRight(kCloseW).withSizeKeepingCentre(kCloseW, 26));
+        closeButton.setBounds(header.removeFromRight(kCloseW).withSizeKeepingCentre(kCloseW, kHeaderH));
     }
     area.removeFromTop(kAfterHeader);
 

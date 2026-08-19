@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "ChordMarkov.h"
 #include <juce_core/juce_core.h>
 #include <algorithm>
@@ -1087,21 +1089,46 @@ namespace keys::chordlib
     // walking - and wrong here, where a silent tonic in the middle of a named progression would
     // be a typo that plays as music. `ChordLibraryTests.cpp` walks every row so no such typo
     // reaches a build.
+    // **The one tokenisation of a row's numerals**, shared by `chordsFor` and `numeralAt`.
+    //
+    // They had one each, and the two did not agree. `chordsFor` skips a token it cannot parse
+    // and skips the empty entries `StringArray::fromTokens` emits for every run of consecutive
+    // separators; `numeralAt` indexed the raw token list. So a row with a double space, a
+    // trailing space or a typo'd suffix shifted every later chord's numeral by one - drawn under
+    // a bracket correctly naming the progression, which is exactly the failure that made a
+    // numeral worth storing rather than deriving. `progressionStep` counts these, so both ends
+    // of that lookup now count the same things.
+    inline juce::StringArray playableNumerals(const Entry& e, int rootPc)
+    {
+        juce::StringArray out;
+        for (const auto& token : juce::StringArray::fromTokens(juce::String(e.numerals), " ", ""))
+        {
+            if (token.isEmpty())
+                continue;
+            if (! markov::detail::parseNumeralToken(token, rootPc).valid)
+                continue;
+            out.add(token);
+        }
+        return out;
+    }
+
     inline std::vector<chordgen::Chord> chordsFor(const Entry& e, int rootPc, int mode, int octave)
     {
         std::vector<chordgen::Chord> out;
-        const auto tokens = juce::StringArray::fromTokens(juce::String(e.numerals), " ", "");
+        const auto tokens = playableNumerals(e, rootPc);
         const auto& modeObj = modes::get(mode);
 
         for (const auto& token : tokens)
         {
-            if (token.isEmpty())
-                continue;
             const auto parsed = markov::detail::parseNumeralToken(token, rootPc);
-            if (! parsed.valid)
-                continue;
 
             chordgen::Chord c;
+            // Stamped here, in the one function that turns a row into chords, so every route
+            // out of the library carries it: the panel's Tray and Pads buttons, and the
+            // generator's own Library source, which had no stamp at all and so produced pads
+            // whose numerals were resolved against the session's mode instead of the row's.
+            c.progression = e.name;
+            c.progressionStep = out.size();
             c.rootPc = parsed.rootPc;
             c.type = parsed.type;
             c.notes = chordgen::chordNotes(parsed.rootPc, parsed.type, octave);
@@ -1226,9 +1253,24 @@ namespace keys::chordlib
 
             // Sharing a mood carries the *feel* across a section change, which is usually what you
             // want and never what you must have - so it nudges rather than gates.
+            //
+            // **One point, however many moods overlap.** The `break` here only ever left the
+            // inner loop, so a row sharing all four of `from`'s moods scored +4 - more than the
+            // +3 for staying in the mode, and enough to close most of joinScore's own spread
+            // (a tritone join is 3, a falling fifth 10). A tag-heavy row on a tritone could then
+            // outrank a same-mode falling-fifth resolution, which inverts the ordering this list
+            // is for: how well the last chord joins onto the first is meant to decide it, with
+            // mood as the nudge.
+            bool sharesMood = false;
             for (const auto* m : from.moods)
+            {
                 for (const auto* n : e.moods)
-                    if (juce::String(m) == n) { score += 1; break; }
+                    if (juce::String(m) == n) { sharesMood = true; break; }
+                if (sharesMood)
+                    break;
+            }
+            if (sharesMood)
+                score += 1;
 
             scored.push_back({ score, &e });
         }
@@ -1266,14 +1308,23 @@ namespace keys::chordlib
     {
         if (name.isEmpty() || step < 0)
             return {};
-        for (const auto& e : table())
+        // **Built once.** This is called per filled pad per repaint from ChordPads::paint, and
+        // the strip repaints on hover and all the way through a drag - so a linear scan of 355
+        // rows was already the wrong shape, and tokenising the winner (which now means parsing
+        // every numeral in it, since chordsFor and this share one tokenisation) would have made
+        // each call materially worse. The table is static data, so the answer is too.
+        static const std::map<juce::String, juce::StringArray> byRow = []
         {
-            if (name != e.name)
-                continue;
-            const auto tokens = juce::StringArray::fromTokens(juce::String(e.numerals), " ", "");
-            return step < tokens.size() ? tokens[step] : juce::String();
-        }
-        return {};
+            std::map<juce::String, juce::StringArray> m;
+            for (const auto& e : table())
+                m.emplace(juce::String(e.name), playableNumerals(e, 0)); // rootPc gates validity, not text
+            return m;
+        }();
+
+        const auto it = byRow.find(name);
+        if (it == byRow.end())
+            return {};
+        return step < it->second.size() ? it->second[step] : juce::String();
     }
 
     // The row of a given name, or null. The one lookup by name, for a `ChordPad::progression` to
