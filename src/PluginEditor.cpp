@@ -69,11 +69,22 @@ namespace
     //     four bars          4 * SectionBar::height (34)     =  136
     //     three gaps         3 * 6                           =   18
     //     Controls           4 + headerH 52 + 6 + 110        =  172
-    //     Arp                4 + ArpPanel::preferredHeight() =  584   (arpPatternH 564 + 16)
+    //     Arp                4 + ArpPanel::preferredHeight() =  698   (arpMacroTotalH 682 + 16)
     //     Pads               4 + padRowH                     =  100
     //     Keyboard           4 + dockedKeybedH               =  193
     //                                                          ----
-    //                                                          1223
+    //                                                          1341
+    //
+    // **Re-measured 2026-08-19, and the tallest view is now the macro one.** Four lines in a
+    // 2x2 grid is two card rows where it was one, and the harmony strip made each card taller
+    // again, so ArpPanel::preferredHeight() in the macro view overtook Pattern shape's 584.
+    // This is not academic: applyLayout() passes idealHeight() in as the resize *minimum*, and
+    // the macro view is the default, so this number is the shortest Keys can be with everything
+    // open. It fits a 1440p work area (1392) with room to spare and does **not** fit a 1080p one
+    // (about 1040), where the keybed - laid out last, so it absorbs every missing pixel - would
+    // lose the difference off the bottom with nothing on screen to say why. Owen's own machine
+    // is 1440p and this was his layout call; a shorter screen needs the arp section folded, or
+    // the macro view given a viewport, which is a design change and not a number.
     // It was 1283 with the Controls band's second row still in it, and 1473 before that while
     // Big cards existed and the Pads line could read 290. 1800 leaves room for the arp to grow
     // a lane row or two without this becoming a bug again, and the slack above idealHeight()
@@ -298,13 +309,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Humanize on the Pads bar - and both belong to what a chord *pad* does, which is where
     // they now sit: in the two columns the grid gave up going from sixteen pads to twelve.
     //
-    // Each is stored as a low/high pair, so the face attaches to the **high** and the low is
-    // written by hand from `rangeLo()` - on a span drag *and* on a face move, because the range
-    // travels with the knob and a low that stayed put would silently widen it.
+    // Each is stored as a low/high pair, and **the face is the pair's centre since 2026-08-19**
+    // (Owen, on the halo: "moving the halo shouldn't move knob. should be equal from center").
+    // A centre is not a parameter, so no attachment can bind the face: it and the span are set
+    // from the pair here, both ends are pushed back on every change - a face move slides the
+    // whole band, a halo move opens it equally both ways - and syncPadRangeKnobs() re-pulls
+    // when the pair changes under us (a session load). The parameters keep meaning what they
+    // always meant, which is what keeps the engine and every saved session untouched.
     const auto wireRange = [this](RangeKnob& rk, juce::Label& head, const juce::String& name,
                                   const juce::String& loId, const juce::String& hiId,
                                   double lo, double hi, const juce::String& unit,
-                                  std::unique_ptr<SliderAtt>& att, const juce::String& tip)
+                                  const juce::String& tip)
     {
         styleLabel(head, name);
         padsHolder.addAndMakeVisible(head);
@@ -314,40 +329,46 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         rk.setTitle(name + " range");
         rk.setTooltip(tip);
         rk.spanHandle().setTitle(name + " range handle");
-        rk.setSpanTooltip("Drag up and down to open or close the range. Closed is a fixed "
-                          "value; open, every chord draws a new one inside it.");
+        rk.setSpanTooltip("Drag up to open the range, down to close it - it opens equally "
+                          "both ways around the knob, which stays put. The wheel works too. "
+                          "Closed is a fixed value; open, every chord draws a new one inside "
+                          "it.");
         rk.textFromRange = [unit](double a, double b)
         { return juce::String((int) a) + "-" + juce::String((int) b) + unit; };
-        att = std::make_unique<SliderAtt>(processor.apvts, hiId, rk.face());
-        rk.setSpan(processor.apvts.getRawParameterValue(hiId)->load()
-                   - processor.apvts.getRawParameterValue(loId)->load());
-        const auto pushLow = [this, &rk, loId] { writeParam(loId.toRawUTF8(), rk.rangeLo()); };
-        rk.onValueChanged = pushLow;
-        rk.onSpanChanged = [pushLow](double) { pushLow(); };
-        rk.onSpanDragStart = [this, loId]
+        const auto loV = (double) processor.apvts.getRawParameterValue(loId)->load();
+        const auto hiV = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        rk.face().setValue((loV + hiV) * 0.5, juce::dontSendNotification);
+        rk.setSpan((hiV - loV) * 0.5);
+        const auto pushBoth = [this, &rk, loId, hiId]
         {
-            if (auto* p = processor.apvts.getParameter(loId))
-                p->beginChangeGesture();
+            writeParam(loId.toRawUTF8(), rk.rangeLo());
+            writeParam(hiId.toRawUTF8(), rk.rangeHi());
         };
-        rk.onSpanDragEnd = [this, loId]
+        rk.onValueChanged = pushBoth;
+        rk.onSpanChanged = [pushBoth](double) { pushBoth(); };
+        const auto gesture = [this, loId, hiId](bool begin)
         {
-            if (auto* p = processor.apvts.getParameter(loId))
-                p->endChangeGesture();
+            for (const auto& id : { loId, hiId })
+                if (auto* p = processor.apvts.getParameter(id))
+                    begin ? p->beginChangeGesture() : p->endChangeGesture();
         };
+        rk.onSpanDragStart = [gesture] { gesture(true); };
+        rk.onSpanDragEnd = [gesture] { gesture(false); };
+        // The face writes parameters too now and has no attachment to bracket its drags.
+        rk.face().onDragStart = [gesture] { gesture(true); };
+        rk.face().onDragEnd = [gesture] { gesture(false); };
         padsHolder.addAndMakeVisible(rk);
     };
 
     wireRange(strumKnob, strumHead, "Strum", "chordStrum", "chordStrumMax", 0.0, 200.0, " ms",
-              chordStrumAtt,
-              "How long a chord takes to rake, in milliseconds. The knob is the longest it "
-              "ever takes and the ring is how far under that it can fall, so every chord "
+              "How long a chord takes to rake, in milliseconds. The knob is the middle of the "
+              "band and the ring is how far either side of it a chord may land, so every chord "
               "strums at its own speed instead of sounding stamped out. Closed is a fixed "
               "rake; at zero the chord lands all at once.");
-    wireRange(humanKnob, humanHead, "Humanize", "humanizeVelMin", "humanizeVelMax", 1.0, 127.0, "",
-              humanizeVelAtt,
-              "Velocity. The knob is the hardest a note ever lands and the ring is how far "
-              "under that it can fall, so a part stops sounding typed in. Closed is one fixed "
-              "velocity for everything.");
+    wireRange(humanKnob, humanHead, "Humanize", "humanizeVelMin", "humanizeVelMax", 0.0, 127.0, "",
+              "Velocity. The knob is the middle of the band and the ring is how far either "
+              "side of it a note may land, so a part stops sounding typed in. Closed is one "
+              "fixed velocity for everything.");
     // **The lamp is the switch** (2026-08-03, Owen: "clicking the blue satellite button should
     // turn on or off the feature. And then I don't think we need the humanized check mark
     // anymore"). Humanize had a tick box; it is gone, and the lamp says lit-or-not instead,
@@ -525,6 +546,21 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         addAndMakeVisible(b);
     }
 
+    // The strip's Play switch (2026-08-19). Off, a pad click makes no sound - the strip is
+    // drag-only - so reaching for the arpeggiator cannot misfire a chord that, with Exclusive
+    // on, chokes every running line. Read at the moment a press or release is handled, so the
+    // next click already obeys it; nothing to rebuild.
+    padsPlayButton.setTitle("Pads play on click");
+    padsPlayButton.setTooltip("Whether clicking a chord card plays it. Untick this while you "
+                              "are dragging cards up into the arpeggiator: the cards go quiet "
+                              "under the mouse, so a click that meant to be a drag cannot fire "
+                              "a chord and cut the running lines off. Dragging, the card menu "
+                              "and dropping on the arp all still work.");
+    padsPlayButton.setToggleState(processor.layout.padsPlayOnClick, juce::dontSendNotification);
+    padsPlayButton.onClick = [this]
+    { processor.layout.padsPlayOnClick = padsPlayButton.getToggleState(); };
+    addAndMakeVisible(padsPlayButton);
+
     // The generator's bulk actions, on the same bar. They were buttons on a panel that no
     // longer exists, and they had to survive it: a right-click menu is not a left click, so
     // without these the only way to fill a page would be sixteen New chords one card at a
@@ -615,9 +651,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         att = std::make_unique<ComboAtt>(processor.apvts, paramID, box);
     };
     genCombo(genRootBox, "Generator key",
-             "The key the chord generator writes in. Separate from the Root that drives Scale "
-             "Lock; also on a pad's right-click menu.",
+             "The key the chord generator writes in. Setting it also moves the Root that drives "
+             "Scale Lock, so the keybed greys to the key you are generating in.",
              okstudio::scales::noteNames(), "genRoot", genRootAtt);
+    genCombo(genModeBox, "Generator mode",
+             "The mode the chord generator writes in. Setting it also moves the Scale that "
+             "drives Scale Lock, wherever the two lists have the same scale.",
+             modes::names(), "genMode", genModeAtt);
     // Mode and Scale Compliance sat here beside it until 2026-08-02 (Owen: "remove the scale
     // and percentage and letter b from pads header"). Both are still in the Generator window,
     // which holds every setting the generator has, so nothing became unreachable; the Key
@@ -684,16 +724,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         auto tab = std::make_unique<ArpBarTab>(*this, n);
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
         tab->setTooltip("Arpeggiator line " + letter + ". Lit, it arpeggiates what you play "
-                        "and whatever chord card you send it. Two lines at two rates is the "
-                        "polyrhythm; Hold off, at the end of this bar, lets both go. Drop a "
-                        "chord card here to hand it to line " + letter + " whether it is on "
-                        "or off.");
+                        "and whatever chord card you send it. Four lines at four rates is the "
+                        "polyrhythm; Hold off, at the end of this bar, lets them all go. The "
+                        "stripe is line " + letter + "'s own colour, the same one its card "
+                        "wears. Drop a chord card here to hand it to line " + letter
+                        + " whether it is on or off.");
         addAndMakeVisible(*tab); // never hides - see syncSectionControls
         arpBarTabs[(size_t) n] = std::move(tab);
     }
     arpBarAllTab = std::make_unique<ArpBarTab>(*this, -1);
-    arpBarAllTab->setTooltip("Both lines side by side, one card each: the view for building a "
-                             "polyrhythm. The letters beside it are where you go deep on one.");
+    arpBarAllTab->setTooltip("All four lines, one card each in two rows: the view for building "
+                             "a polyrhythm. The letters beside it are where you go deep on one.");
     arpBarAllTab->onClick = [this]
     {
         if (arpPanel != nullptr)
@@ -868,9 +909,10 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
-    // followAim false: this is the menu row, which routes a chord and must not navigate.
+    // Routes a chord and does not navigate, which is now true of every caller - see the note
+    // over sendPadToArpLine's definition for why the followAim flag went.
     chordPads.onSendToArpLine = [this](int slot, int line)
-    { sendPadToArpLine(slot, line, /*followAim*/ false); };
+    { sendPadToArpLine(slot, line); };
 
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
@@ -1068,6 +1110,43 @@ void KeysEditor::writeParam(const char* paramID, double value)
     }
 }
 
+// The pull half of the pad range knobs' hand wiring (see wireRange): their face is the band's
+// centre, which no attachment can bind, so a session load or an automation write lands here on
+// the editor's timer. Pulled only when the stored pair disagrees with the knob's own derived
+// ends - pushing our derived ends back through unconditionally would erase the latent span a
+// rail is holding back - and never mid-gesture, which would yank the band out from under the
+// hand.
+void KeysEditor::syncPadRangeKnobs()
+{
+    const auto sync = [this](RangeKnob& rk, const char* loId, const char* hiId)
+    {
+        if (rk.spanDragging() || rk.face().isMouseButtonDown())
+            return;
+        const double lo = (double) processor.apvts.getRawParameterValue(loId)->load();
+        const double hi = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        // **The derived ends are compared rounded, because that is the form they are stored in.**
+        // Still the ends and not the raw span, which is what preserves a latent span a rail is
+        // holding back (reach() clamps to the nearer rail, so the knob can carry more span than
+        // the pair records, and pushing the pair back unconditionally would erase it).
+        //
+        // What changed is the rounding. The face snaps to whole units - setRange's 1.0 interval
+        // - while the span stays continuous, so a halo drag storing centre +/- a fractional
+        // reach into two integer parameters leaves the derived ends exactly 0.5 away from the
+        // stored pair. `std::abs(...) < 0.5` can never be satisfied by exactly 0.5, so this
+        // re-pulled and repainted both knobs on every editor tick for the rest of the session,
+        // with the readout permanently half a unit off the parameters it exists to mirror.
+        // Comparing what the ends round to asks the question the parameters can actually answer.
+        const auto rounded = [](double v) { return std::floor(v + 0.5); };
+        if (rounded(rk.rangeLo()) == rounded(lo) && rounded(rk.rangeHi()) == rounded(hi))
+            return;
+        rk.face().setValue(rounded((lo + hi) * 0.5), juce::dontSendNotification);
+        rk.setSpan((hi - lo) * 0.5);
+        rk.refresh();
+    };
+    sync(strumKnob, "chordStrum", "chordStrumMax");
+    sync(humanKnob, "humanizeVelMin", "humanizeVelMax");
+}
+
 void KeysEditor::refreshSectionPanels()
 {
     // Called on every fold and every detach. The arp is the only section left with a panel
@@ -1114,6 +1193,16 @@ KeysEditor::ArpBarTab::ArpBarTab(KeysEditor& o, int n)
 void KeysEditor::ArpBarTab::paintButton(juce::Graphics& g, bool over, bool down)
 {
     juce::TextButton::paintButton(g, over, down);
+    // The line's own colour (2026-08-19), as an underline rather than a repaint of the chip:
+    // the toggle's lit state still reads exactly as every other bar chip's does, and the
+    // stripe is the mark that says which card below is this letter's. Brighter while the
+    // line is on, present either way so the letters name their colours even at rest.
+    if (line >= 0)
+    {
+        g.setColour(skin::lineAccent(line).base.withAlpha(getToggleState() ? 0.95f : 0.40f));
+        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(7.0f, 0.0f)
+                                   .removeFromBottom(3.0f), 1.5f);
+    }
     if (dropTarget)
     {
         g.setColour(skin::accentOf(*this).base);
@@ -1143,29 +1232,31 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
     }
 }
 
-// Through the panel when it is open, the same path a drop on a macro card takes - which is what
-// moves the aim to this line without moving the view. A / B are power switches now and stay on
-// the bar with the section folded, so the fallback below is reachable in earnest: it is what a
-// drop, or the pad menu's "Send to arp A", does while the arp panel does not exist.
+// Through the panel when it is open, the same path a drop on a macro card takes. A / B are power
+// switches now and stay on the bar with the section folded, so the fallback below is reachable in
+// earnest: it is what a drop, or the pad menu's "Send to arp A", does while the arp panel does
+// not exist.
 //
-// `followAim` separates the two callers. A **drop** on a line's tab or macro card aimed at that
-// line, so the aim moves with it. The pad menu's **Send to arp A / B** did not: that row promises
-// to route a chord, and taking the panel to the other line on the strength of it threw away the
-// page and lane the user had open - several clicks to get back, on a surface with one mouse.
-void KeysEditor::sendPadToArpLine(int padSlot, int line, bool followAim)
+// **Nothing that routes a chord moves the panel** (2026-08-18, Owen: "the number of steps
+// changes, straight vs triplet etc, when you drag a chord onto a new arpeggiator"). Nothing was
+// written: dropping on B took the panel to B, and STEPS, Tuplet, Shape and the rate then read B's
+// own settings instead of A's, which looks exactly like the drop having changed them.
+//
+// `followAim` used to separate a drop from the pad menu's Send to arp rows, and its whole
+// justification was that a drop aimed at a line so "the next card click should follow the same
+// aim". That justification has been stale since 2026-08-02, when a card click stopped feeding a
+// line at all - there is no next click for the aim to serve. So both callers now pass false and
+// the flag is gone: routing a chord routes a chord, and the way to *look* at a line is its tab or
+// its Details button. See ArpPanel::takeChordOnLine.
+void KeysEditor::sendPadToArpLine(int padSlot, int line)
 {
     if (arpPanel != nullptr)
     {
-        arpPanel->takeChordOnLine(line, padSlot, followAim);
+        arpPanel->takeChordOnLine(line, padSlot);
         return;
     }
 
     processor.holdArpChordFromPad(padSlot, line);
-    if (followAim)
-    {
-        processor.setArpCurrentLine(line);
-        refreshArpBarTabs();
-    }
 }
 
 ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)
@@ -1319,6 +1410,8 @@ void KeysEditor::refreshArpPanel()
     // has to say so. This is the panel's half - a chord dropped on a macro card lands here.
     arpPanel->onEditLineChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onPageChanged = [this] { refreshArpBarTabs(); };
+    // Draw greys outside Pattern shape, so the bar has to hear about a shape change too.
+    arpPanel->onShapeChanged = [this] { refreshArpBarTabs(); };
     arpPanel->onClose = [this]
     {
         processor.layout.arp = false;
@@ -1331,6 +1424,16 @@ void KeysEditor::refreshArpPanel()
     arpHolder.addAndMakeVisible(*arpPanel);
     arpPanel->sendLookAndFeelChange();
     layoutArpHolder();
+
+    // **Report the shape once, now the hooks exist.** ArpPanel's constructor calls
+    // refreshShape(), and that is where "lastPatternMode starts at -1 makes the first call
+    // report" was supposed to open a session saved in Pattern shape with Draw already live -
+    // but the constructor runs before the line above assigns onShapeChanged, so that first
+    // report went into a null std::function every time. It looks like it works only because
+    // syncSectionControls() happens to call refreshArpBarTabs() after us; that is an
+    // incidental rescue, not a contract, and the day it moves the tab greys with nothing on
+    // screen to say why.
+    refreshArpBarTabs();
 }
 
 void KeysEditor::refreshInstrumentChip()
@@ -1450,6 +1553,10 @@ void KeysEditor::showSettingsMenu()
     // piles up behind you. See LayoutState::dragWhileSustain, which kept the field name.
     menu.addItem(2002, "Sustained drag leaves a trail", true, processor.layout.dragWhileSustain);
     menu.addItem(2003, "Sustained notes propose chords", true, processor.layout.sustainProposesChords);
+    // Ticked, a pad sounds for as long as you hold it; unticked - the default - the press is
+    // silent and the release fires the chord for 800 ms. See LayoutState::padHoldToPlay for why
+    // the quiet press is the default, and ChordPads' own note for what each mode costs.
+    menu.addItem(2004, "Chord pads play while held", true, processor.layout.padHoldToPlay);
     menu.addSeparator();
 
     // Greyed rather than missing when there is nothing to check: Keys Host never builds
@@ -1478,6 +1585,11 @@ void KeysEditor::showSettingsMenu()
                 break;
             case 2003:
                 e->processor.layout.sustainProposesChords = ! e->processor.layout.sustainProposesChords;
+                break;
+            case 2004:
+                // Nothing to repaint or rebuild: the flag is read at the moment a press or a
+                // release is handled, so the next click already obeys it.
+                e->processor.layout.padHoldToPlay = ! e->processor.layout.padHoldToPlay;
                 break;
             case 3001:
                 e->checkForUpdatesNow();
@@ -1620,6 +1732,7 @@ void KeysEditor::syncSectionControls()
     // already looking at is one click either way.
     for (auto& b : pageButtons)
         b.setVisible(lay.pads); // pointless without pads
+    padsPlayButton.setVisible(lay.pads); // acts on clicks the fold just hid
     // Fill, Regen, the Generator button and the three combos beside them are deliberately
     // *not* in the list above, and are never hidden: they are the arp On of this bar. Fill and
     // Regen used to hide with the strip, on the reasoning that generating into cards you cannot
@@ -1695,14 +1808,21 @@ int KeysEditor::minWidthForView() const
     // contentArea() (the window less 20 of margin, less the 92 px fold zone and the 8 px each
     // side of it):
     //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 6, Library 80, 10,
-    //             Compliance 74, 6, Mode 148, 6, Key 58                        = 730
-    //     left    four pages at 46 + 4, 14                                     = 214
-    //                                                                    total = 944
-    // 1070 would hand it 942, which the Library chip took it two pixels past on 2026-08-18 - the
-    // Pads bar no longer fits at the *old* floor. It does at the current one: 1280 hands it 1152,
-    // so there is 208 px of caption zone left over when the section is docked. Worth knowing
-    // rather than tidying away, because it means the Pads bar is one chip from being the binding
-    // constraint again if Controls ever gives ground.
+    //             Mode 124, 4, Key 58                                          = 624
+    //     left    four pages at 46 + 4, 10, Play 64, 14                        = 288
+    //                                                                    total = 912
+    // 1280 hands it 1152 and the current 1320 floor hands it 1192, so the bar sits with 280 px
+    // of caption zone left over when the section is docked.
+    //
+    // Re-measured 2026-08-19, twice over, and both halves of this line had drifted. It read
+    // 644 / 858 on one side, itemising a Compliance chip at 74 and a Mode combo at 148 that
+    // both left this bar on 2026-08-02 while never accounting for the 124 px Mode combo that
+    // came back; and 730 / 944 on the other, which carried those same two stale figures forward
+    // and concluded from them that the Library chip had pushed the bar two pixels past what a
+    // 1070 px window hands it. It had not: against the real widths the bar is 912, which fits
+    // 942 with 30 px to spare, so the Pads bar never became the binding constraint. Controls
+    // (1320) is still what sets the floor. The "measure, do not assume" rule this file states,
+    // broken by this file, in two places, in opposite directions.
     //
     // The Controls bar, measured off the running app rather than assumed (Owen's window is
     // 1072 px, essentially the old 1070 floor): at that width, after Detach 104 and Theme's
@@ -1919,7 +2039,7 @@ void KeysEditor::setChordGenWindowOpen(bool open)
         chordGenWindow = std::make_unique<DetachedWindow>(
             "Keys Chord Generator", lnf, *chordGenPanel, processor.layout.chordGenBounds,
             ChordGenPanel::minWindowSize(), ChordGenPanel::defaultWindowSize(),
-            close, [this] { rememberChordGenBounds(); });
+            close, [this] { rememberChordGenBounds(); }, ChordGenPanel::maxWindowSize());
         chordGenPanel->sendLookAndFeelChange(); // built before it was ever parented
     }
     else
@@ -2381,6 +2501,19 @@ void KeysEditor::timerCallback()
     refreshTakeControls();
 
     refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
+
+    syncPadRangeKnobs(); // cheap: early-outs unless the stored pair changed under the knob
+
+    // **The layout toggles, which no attachment drives.** These read `LayoutState` rather than
+    // a parameter, so nothing pushed a session's saved value back into them: load a set saved
+    // with Play off and the button still showed ticked, while ChordPads::mouseDown read the
+    // *field* and made the strip drag-only. Worse, the first click then wrote the button's
+    // stale state back over the loaded value, so the control did the opposite of what its face
+    // said. Pulled on the timer, the way the range knobs above are, because a state restore has
+    // no hook of its own to hang this on. setToggleState with dontSendNotification is a no-op
+    // when it already agrees, so this costs nothing on the ticks where nothing changed.
+    padsPlayButton.setToggleState(processor.layout.padsPlayOnClick, juce::dontSendNotification);
+    arpLightsButton.setToggleState(processor.layout.arpLights, juce::dontSendNotification);
 
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());
@@ -2930,6 +3063,12 @@ void KeysEditor::resized()
         // one height. What the bar spends, at its floor and above, is worked out in
         // minWidthForView().
         bar.removeFromRight(10);
+        // Mode then Key, right to left, so they read Key-then-Mode left to right the way the
+        // generator window's own top row does. Mode is the wide one: "Mixolydian" and
+        // "Phrygian Dominant" are what has to fit, and a ComboBox ellipsises rather than
+        // complaining (the Voices lesson, 2026-08-02).
+        genModeBox.setBounds(bar.removeFromRight(124).withSizeKeepingCentre(122, 24));
+        bar.removeFromRight(4);
         genRootBox.setBounds(bar.removeFromRight(58).withSizeKeepingCentre(56, 24));
         // The page buttons ride on the Pads bar, where they used to sit in a row of their
         // own under the strip. One click still reaches any page, and the section keeps its
@@ -2939,6 +3078,11 @@ void KeysEditor::resized()
             b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
             bar.removeFromLeft(4);
         }
+        bar.removeFromLeft(10);
+        // The strip's Play switch, after the pages: it acts on the same cards they page, and
+        // like them it is pointless with the strip folded away (see syncSectionControls). A
+        // toggle needs its box plus the word, the Light keys sizing.
+        padsPlayButton.setBounds(bar.removeFromLeft(64).withSizeKeepingCentre(62, 24));
         bar.removeFromLeft(14);
         // Humanize and its velocity range rode this bar from 2026-08-02 to 2026-08-03, when
         // they became a range knob *in the strip* with Strum beside them. They are pad

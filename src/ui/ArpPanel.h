@@ -65,6 +65,11 @@ public:
     // It is the processor's state rather than the panel's, because the Pads bar's letter chip
     // and the per-card Send to arp slot read it with this panel folded away.
     int editLine() const;
+
+    // Which lane the Draw page is showing. Public because the loop bar and the grids are
+    // handed the panel rather than an index, for the same reason `editLine` is: the tabs
+    // change it under them, and a copy taken at construction would go stale.
+    int selectedLaneIndex() const { return selectedLane; }
     // `leaveMacroView` false sets the line without changing what is on screen. A drop passes
     // false: it is routing a chord, not navigating, and in the macro view all three lines are
     // in front of you already, so there is nothing to switch to.
@@ -103,6 +108,17 @@ public:
     // have to be told about each other in both directions.
     std::function<void()> onPageChanged;
 
+    // Fired when this line's shape crosses into or out of Pattern, because that is what decides
+    // whether the **Draw** page exists at all - and the tab that says so lives on the section bar,
+    // which is the editor's, not the panel's (2026-08-18, Owen: "how do we get to the part where
+    // we add harmony and stuff like that?", with Shape already reading Pattern and Draw greyed).
+    //
+    // refreshShape() runs on every 10 Hz tick and knew this the whole time; nothing carried it
+    // across. The tab's enabled state was written only by refreshArpBarTabs(), which runs when the
+    // line or the page changes - so setting Shape to Pattern left Draw greyed until you happened
+    // to visit another page and come back, and the way to the lane editor looked broken.
+    std::function<void()> onShapeChanged;
+
     // What a chord card dropped on this panel does, once JUCE has said where it landed. The
     // slot cards, line tabs and macro rows are each a `DragAndDropTarget` of their own and call
     // one of these; the panel owns the actions because both of them touch more than one card.
@@ -119,11 +135,12 @@ public:
     // which pad it came from, and taking the slot lets a pad's own "Send to arp A" menu row
     // (2026-08-16) reach this same method instead of growing a second copy of it.
     //
-    // `makeCurrent` is what tells those two callers apart. A **drop** aimed at the line, so the
-    // aim follows it and the panel starts editing that line. A **menu row** did not: it says
-    // "Send to arp B", which promises routing, and re-pointing the panel on the strength of it
-    // tore the user off whatever page and lane they had open, several clicks from getting back.
-    void takeChordOnLine(int line, int padSlot, bool makeCurrent = true);
+    // **It routes and does not navigate**, for both callers alike (2026-08-18). A drop used to
+    // re-point the panel at the line it landed on, which wrote nothing but made every per-line
+    // readout - STEPS, Tuplet, Shape, the rate - jump to that line's own settings under the hand
+    // that was routing a chord, and a view change reads as a data change when you are watching
+    // numbers. See the definition for the reason the aim used to follow, and why it expired.
+    void takeChordOnLine(int line, int padSlot);
 
     // **The panel itself takes a chord, anywhere on it** (2026-08-14, Owen: "need to be able to
     // drag chords to not just the main arp window"). Paging the deep view is what made this
@@ -195,7 +212,10 @@ public:
         // separate knob, so there is one loudness control per line rather than two two cells
         // apart. H.TIME stays its own RangeKnob for the timing nudge; Ramp and Time still
         // live on the per-line tab.
-        enum Knob { kOctShift = 0, kGate, kChance, kSwing, kOffset, kVel, kHTime,
+        // Eight again as of 2026-08-18: CHANCE became MUTATE and LOCK joined it. The strip was
+        // eight until H.VEL folded into VEL's ring on 2026-08-17, so this is a width the row
+        // has already carried - and the reserve-before-Shape rule below is what made that safe.
+        enum Knob { kOctShift = 0, kGate, kMutate, kLock, kSwing, kOffset, kVel, kHTime,
                     numKnobs };
 
     private:
@@ -255,6 +275,28 @@ public:
         juce::Slider& knobFace(int k);
         static bool isRangeKnob(int k) { return k == kHTime || k == kVel; }
         std::array<juce::Label, numKnobs> knobLabels;
+        // The two fixed harmony voices (2026-08-19, Owen holding up BigSky's shimmer list:
+        // "2 harmony drop down like the photo. and each of those has a chance knob"). An
+        // interval combo and a chance knob each, on their own strip between the knobs and the
+        // rate's modifiers - per card because Owen asked for them "in the arps", and a combo
+        // because "pick from a list" is a combo in Keys. Labels are HARMONY 1 / CHANCE /
+        // HARMONY 2 / CHANCE, in that order.
+        //
+        // **The dropdown opens as two columns**, descending intervals on the left and
+        // ascending on the right, which is how the BigSky panel lays the same list out and
+        // what "make harmony 2 columns" turned out to mean (2026-08-19; a first reading put
+        // the *card's* controls in two columns, and Owen, shown the popup: "still one
+        // column"). A ComboBox builds its own single-column menu internally, so the subclass
+        // rebuilds it with a column break - same items, same ids, nothing else changed.
+        struct HarmonyBox : juce::ComboBox
+        {
+            void showPopup() override;
+        };
+        std::array<HarmonyBox, 2> harmBoxes;
+        std::array<juce::Slider, 2> harmChanceKnobs;
+        std::array<juce::Label, 4> harmLabels;
+        std::array<std::unique_ptr<ComboAtt>, 2> harmAtts;
+        std::array<std::unique_ptr<SliderAtt>, 2> harmChanceAtts;
         // RATE and SHAPE, over the top line's two stepper groups (2026-08-02, Owen: "the
         // arrows to adjust certain parameters are not clear as to what they're adjusting"):
         // two flanked `< >` pairs side by side read as one puzzle without names above them.
@@ -318,6 +360,9 @@ public:
         // step < 0 = take it from x (the press); otherwise edit that step alone (the drag).
         void paintStepFromMouse(const juce::MouseEvent&, int step);
         juce::String cellText(int value) const;
+        // The pitch a Note lane index currently names, or empty for every other lane and for
+        // the values that ask the chord a question rather than counting into it.
+        juce::String noteNameFor(int value) const;
 
         KeysProcessor& processor;
         ArpPanel& owner;
@@ -330,6 +375,31 @@ public:
         int cursorValue = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LaneGrid)
+    };
+
+    // Kirnu's loop control (its manual p11), one per lane, drawn under the grid on the same
+    // cell grid so a window means the steps it is sitting over. Click or drag: "Loop points
+    // follow mouse click... the pointer closest to the mouse is moved" is Kirnu's own rule and
+    // it is already a click-only path, so this needs no steppers beside it.
+    class LoopBar : public juce::Component,
+                    public juce::SettableTooltipClient
+    {
+    public:
+        LoopBar(KeysProcessor&, const ArpPanel& owner);
+
+        void paint(juce::Graphics&) override;
+        void mouseDown(const juce::MouseEvent&) override;
+        void mouseDrag(const juce::MouseEvent&) override;
+
+    private:
+        int stepAtX(float x) const;
+        void moveNearestHandle(float x);
+
+        KeysProcessor& processor;
+        const ArpPanel& owner;
+        int grabbed = -1; // 0 = the left handle, 1 = the right, -1 = not dragging
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopBar)
     };
 
     // The note lane's mute row: one button per step, flipping that step's note value
@@ -405,9 +475,23 @@ private:
     // division used to live here, per lane, which meant six copies of both on screen at
     // once with no room left to label any of them. With one lane visible there is one
     // of each, shared, below the grid.
+    // A lane tab that reports on the lane behind it. Twelve identical buttons over eleven
+    // invisible lanes is the Draw page's oldest readability hole: whichever lane you are not
+    // looking at could be flat, could be the reason the part sounds wrong, and says nothing
+    // either way. Kirnu marks its own control tabs for exactly this (its manual p12: a corner
+    // mark for whether the control is on, and a second one meaning "this control has input
+    // values"), and both marks are copied here.
+    class LaneTab : public juce::TextButton
+    {
+    public:
+        void paintButton(juce::Graphics&, bool over, bool down) override;
+        bool laneOn = true;    // struck through when off
+        bool laneHasData = false; // a dot when the lane holds anything but its default
+    };
+
     struct LaneRow
     {
-        juce::TextButton tab;
+        LaneTab tab;
         std::unique_ptr<LaneGrid> grid;
         // Not every lane gets a tab: Mute is drawn by the MUTE row under the grid, so it has a
         // lane but nothing to click. Without this the loops below laid out and counted its
@@ -426,7 +510,11 @@ private:
     void buildAttachments();
     // This line's id for a parameter, e.g. "arpRate" on A and "arp2Rate" on B.
     juce::String paramId(KeysProcessor::ArpParam) const;
-    void buildLaneRow(LaneRow&, ArpEngine::Lane, const juce::String& name, int loVal, int hiVal);
+    // No lo/hi here (2026-08-18): the grid reads ArpEngine::laneRange, which is documented as
+    // the one copy. This took a pair of arguments per lane and they were a second copy of that
+    // table - and the day the Note lane grew its per-step shapes, the engine accepted 13..20
+    // while every grid still stopped at 12, so the values existed and could not be drawn or set.
+    void buildLaneRow(LaneRow&, ArpEngine::Lane, const juce::String& name);
     void selectLane(int lane);
     void nudgeLength(int delta); // selected lane, or every lane while Link is on
     void cycleClockDiv();
@@ -566,6 +654,33 @@ private:
     int selectedLane = (int) ArpEngine::laneNote;
     std::unique_ptr<MuteRow> muteRow;
     juce::Label muteRowLabel;
+    std::unique_ptr<LoopBar> loopBar;
+
+    // The selected lane's own shape, on the page the lane is drawn on (2026-08-18). Steps,
+    // Speed and Link used to sit in the STEPS band group on the *Play* page, so changing how
+    // long the lane you are drawing runs meant leaving the page you were drawing it on. They
+    // are per-lane controls; they belong beside the lane.
+    juce::TextButton laneOnButton { "On" };
+    juce::TextButton dirPrev { "<" }, dirNext { ">" };
+    juce::Label dirLabel, dirReadout;
+
+    // Kirnu's remaining palette tools (its manual p8: Draw / Select / Random / Copy / Paste /
+    // Clear). Keys had the first three; Select is what these three were waiting for, since
+    // each of them needs a span to aim at. The clipboard is one lane's worth of steps and
+    // lives here rather than in the processor: it is a UI convenience, not session state, and
+    // Kirnu's own rule is that "only same control steps can be copied/pasted".
+    // Copy and Paste only. Kirnu's palette has a Clear beside them ("set values to default"),
+    // and Keys' Reset already *is* that once it narrows to the Select span - a second button
+    // doing what the one next to it does is the trap this file warns about twice elsewhere.
+    juce::TextButton copyStepsButton { "Copy" }, pasteStepsButton { "Paste" };
+    std::vector<int> stepClipboard;
+    int stepClipboardLane = -1;
+    void copySteps();   // the Select span, or the whole lane when nothing is selected
+    void pasteSteps();  // tiles the clipboard across the span, so 2 steps fill 8
+    void refreshStepTools();
+    void nudgeLaneDir(int delta);
+    void toggleLaneOn();
+    void refreshLaneStrip();
 
     // The shared length / clock-division controls for whichever lane is showing.
     juce::Label stepsLabel, speedLabel, stepsReadout;

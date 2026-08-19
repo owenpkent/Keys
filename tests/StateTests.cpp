@@ -104,6 +104,46 @@ public:
                                       "...and Volume went back to its default");
         }
 
+        beginTest("migrateVelLevel turns an old bipolar trim into the level that plays it");
+        {
+            Host h;
+            const auto trimId = KeysProcessor::arpParamId(0, KeysProcessor::apVelTrim);
+            const auto levelId = KeysProcessor::arpParamId(0, KeysProcessor::apVelLevel);
+
+            // VEL became MIDI velocity on 2026-08-18. An old session carries its level in the
+            // bipolar trim and has no VelLevel at all; the level is left somewhere else first, so
+            // "kept the live value" stays distinguishable from "migrated".
+            setParam(h.processor, trimId, -50.0f);
+            setParam(h.processor, levelId, 20.0f);
+            auto block = stateWithout(h.processor, { levelId });
+            h.processor.setStateInformation(block.getData(), (int) block.getSize());
+
+            // The trim's own curve, ((100+trim)/100)^2, against the velocity every chord Keys
+            // fires actually left at: the midpoint of the pads' default Humanize band, 76.
+            // trim -50 is a quarter of that: 19.
+            expectWithinAbsoluteError(paramOf(h.processor, levelId), 19.0f, 1.0f,
+                                      "trim -50 became the level that plays at the same loudness");
+
+            // "As played" - the default trim - is the band's own midpoint, so a session that
+            // never touched VEL opens playing exactly as loud as it always did.
+            Host h2;
+            setParam(h2.processor, trimId, 0.0f);
+            setParam(h2.processor, levelId, 20.0f);
+            block = stateWithout(h2.processor, { levelId });
+            h2.processor.setStateInformation(block.getData(), (int) block.getSize());
+            expectWithinAbsoluteError(paramOf(h2.processor, levelId), 76.0f, 1.0f,
+                                      "an untouched VEL lands on the pads' own played velocity");
+
+            // And the mute survives the change of units: full-left trim was silence, and 0 is.
+            Host h3;
+            setParam(h3.processor, trimId, -100.0f);
+            setParam(h3.processor, levelId, 20.0f);
+            block = stateWithout(h3.processor, { levelId });
+            h3.processor.setStateInformation(block.getData(), (int) block.getSize());
+            expectWithinAbsoluteError(paramOf(h3.processor, levelId), 0.0f, 0.5f,
+                                      "trim -100 was a mute and level 0 is one");
+        }
+
         beginTest("migrateTuplet folds a set Trip into Triplet and retires Trip");
         {
             Host h;
@@ -315,6 +355,38 @@ public:
             expect(h.processor.layout.libraryFavourites.contains("Axis, vi start (vi-IV-I-V)"));
             expect(h.processor.layout.libraryFavourites.contains("ii-V-I"));
         }
+
+        beginTest("every UI line, switched on and listening, arpeggiates the keys");
+        {
+            // Processor-level, deliberately: ArpTests proves one engine works, and the bug this
+            // is for is the routing around it - a line whose queue, parameter cache or lift is
+            // wired to the wrong index plays nothing while its engine passes every test it has
+            // (2026-08-19, Owen: "line b isn't working"). One line at a time, so a line that
+            // only sounds because a neighbour's routing leaks into it fails rather than passes.
+            for (int line = 0; line < KeysProcessor::uiArpLines; ++line)
+            {
+                Host h;
+                h.processor.prepareToPlay(48000.0, 512);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+
+                juce::AudioBuffer<float> audio(2, 512);
+                int ons = 0;
+                for (int blk = 0; blk < 40; ++blk) // ~0.4 s: several 1/16 steps at any default
+                {
+                    juce::MidiBuffer midi;
+                    if (blk == 0)
+                        for (int note : { 60, 64, 67 })
+                            midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+                    h.processor.processBlock(audio, midi);
+                    for (const auto meta : midi)
+                        if (meta.getMessage().isNoteOn())
+                            ++ons;
+                }
+                expect(ons >= 3, "line " + juce::String::charToString(
+                                     (juce::juce_wchar) ('A' + line))
+                                     + " played " + juce::String(ons) + " notes");
+            }        }
     }
 };
 

@@ -60,11 +60,12 @@ src/
 │   │                         # window closes
 │   ├── ArpPanel.{h,cpp}      # the arp section: Shape gates a tabbed lane editor,
 │   │                         # plus the control band and twelve launchable slots. Which
-│   │                         # of the two lines it edits is chosen by that line's own
+│   │                         # of the four lines it edits is chosen by that line's own
 │   │                         # Details button in the macro view since 2026-08-02, second
-│   │                         # pass - A and B on the editor's arp bar are that line's
-│   │                         # On switch now, not a way to pick one; the macro view
-│   │                         # (both lines side by side) is the third choice on the bar
+│   │                         # pass - the letters on the editor's arp bar are each line's
+│   │                         # own On switch now, not a way to pick one; the macro view
+│   │                         # (all four lines in a 2x2 grid, four lines from 2026-08-19)
+│   │                         # is the extra choice on the bar
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── StepComboBox.h        # a combo that reports every pick, including one already
@@ -134,7 +135,7 @@ The keyboard runs on the message (UI) thread. It must not write to the outgoing
 
 The audio thread does nothing else: `buffer.clear()` (silence), watch the input, drain the
 collector, and run the arp stage over what came out (`docs/ARP_DESIGN.md`). That stage is
-two lines now: it drains each line's own queue, hands the keybed's notes to the lines with
+four lines now: it drains each line's own queue, hands the keybed's notes to the lines with
 **Keys** on, runs **every** engine into its own buffer and merges them all back - the engine's
 `enabled` flag gates only whether steps fire, so a line that is off still takes chords in and
 holds them silently until you switch it on. Routing is
@@ -544,23 +545,27 @@ on the bar shifts when the section folds.
 The **arpeggiator is a section of its own** rather than a centre view (changed 2026-07-25).
 Competing with the knobs and the generator was backwards for a panel that runs while you
 play, and the arp is the one thing you want on screen *next to* a chord. Its bar carries the
-**A** and **B** buttons - one per arpeggiator line on screen (a third, C, still exists in the
-engine and the parameter layout for session compatibility; `KeysProcessor::uiArpLines` is what
-keeps it off this bar and everywhere else since 2026-08-02, see `docs/ARP_DESIGN.md`) - the
-**Hold off** chip and a **Detach**; everything but Detach survives folding
-the panel away, because folding it destroys the view and never the arpeggiator, and a chord
-held into a folded arp needs a way out that is still on screen. **Hold off is deliberately
-still one button**: it releases every line and stops every chain, because a per-line release
-would leave the other droning with nothing on a folded bar to stop it. **All Off** beside it
-does that *and* switches the lines off, and **Light keys** beside that is a display toggle.
+**A**, **B**, **C** and **D** buttons - one per arpeggiator line, each in that line's own fixed
+colour (cyan, magenta, amber, lime; `skin::lineAccent(line)`) so a glance tells them apart
+across the bar, the macro cards and the Draw grid's playhead. Line C sat inert in the engine
+and the parameter layout for session compatibility from 2026-08-02 until 2026-08-19
+(`KeysProcessor::uiArpLines` was what kept it off this bar and everywhere else), and a new line
+D was appended alongside it that day; `numArpLines` and `uiArpLines` are both 4 now, see
+`docs/ARP_DESIGN.md`. Beside the letters, the **Hold off** chip and a **Detach**; everything but
+Detach survives folding the panel away, because folding it destroys the view and never the
+arpeggiator, and a chord held into a folded arp needs a way out that is still on screen. **Hold
+off is deliberately still one button**: it releases every line and stops every chain, because a
+per-line release would leave the others droning with nothing on a folded bar to stop it. **All
+Off** beside it does that *and* switches every line off, and **Light keys** beside that is a
+display toggle.
 
-**A and B are that line's own On switch** (2026-08-02, seventh pass, Owen: "the A and B on the
-left side of the header, I want those to be on and off buttons to turn on or off the ARP ...
+**Each letter is that line's own On switch** (2026-08-02, seventh pass, Owen: "the A and B on
+the left side of the header, I want those to be on and off buttons to turn on or off the ARP ...
 we can remove the a and b check mark on the right side of the header"). They used to be a pure
 navigation tab choosing which line the *panel* edited, moved onto this bar 2026-08-02 (Owen:
 "move the bpm and the a b and all into the header also") from the panel's own slot row, with a
 separate lettered On toggle doing the actual switching a few pixels away near Hold off - two
-controls for one job. The toggle is deleted; A and B are bound via `ButtonAttachment` straight
+controls for one job. The toggle is deleted; each letter is bound via `ButtonAttachment` straight
 to that line's On parameter, which means they no longer select a line for editing (no
 `onClick`) and, being a power switch rather than a navigation control, they never hide with the
 section fold any more - the same case Hold off and Quantize already made for staying on a
@@ -570,26 +575,32 @@ hands it to that line, on or off.
 Which line the *panel* edits is chosen by that line's own **Details** button instead, in the
 macro view (2026-08-02, seventh pass, Owen: "maybe we can add another button on the bottom by
 anchor, like details, and that can open up the detailed arpeggiator view"), and the panel
-paints a small **LINE A** / **LINE B** caption in its own top margin so something on screen
-still says which line you are looking at, now that A and B no longer do.
+paints a small **LINE A** / **LINE B** / **LINE C** / **LINE D** caption, in that line's own
+colour, in its own top margin so something on screen still says which line you are looking at,
+now that the letters no longer do.
 
-The **macro view (All)** is the third choice on the bar - **All** is the one navigation control
+The **macro view (All)** is the extra choice on the bar - **All** is the one navigation control
 left there, and the only one that still hides with the section fold, since it is the only one
 still pointing at a panel that a fold takes off screen. It replaces the band and the step
-editor with one boxed card per line, side by side, each with a detented rate knob, its shape,
-seven knobs (Oct, Gate, Chance, Swing, Offset, Vel, H.Time - H.Vel folded into Vel's own ring
-2026-08-17, `docs/ARP_DESIGN.md` has the mechanism) and, since the same pass, a
-**Details** button beside Anchor - the card's own On toggle is gone the same way the bar's
-separate chip is, and an off line scrims the whole card body instead (`paintOverChildren`,
-skipping every control's `setEnabled` so a chord can still be dropped on it and a rate still
-dialled in before switching it on). **Launch Quantize** rides the arp's section bar alongside
-A, B and All; the **tempo** rides the *Controls* bar instead, one build earlier (both
-2026-08-02; see `docs/ARP_DESIGN.md` for the passes). The macro view is a *view* rather than a
-fourth line - `editedLine` is untouched by it, so a chord card drag keeps one unambiguous
-target - and it takes the band's space rather than adding to it, so the panel does not grow.
-Each row's attachments bind to its own line for the row's life, unlike the band's, which rebind
-whenever the edited line changes (a Details click, where a tab click used to do it): two lines
-on screen at once cannot each be "the current line".
+editor with a **2x2 grid of boxed cards** (A and B on top, C and D below, since 2026-08-19 -
+two columns rather than four across is load-bearing, since a card's knob strip needs roughly
+430 px and a fourth line in one row would have squeezed every card, where a grid only ever adds
+rows), each with a detented rate knob, its shape, eight knobs (Oct, Gate, **Mutate**, **Lock**,
+Swing, Offset, Vel, H.Time - Chance became Mutate and Lock 2026-08-18, H.Vel folded into Vel's
+own ring 2026-08-17, `docs/ARP_DESIGN.md` has the mechanism), two **Harmony** interval
+dropdowns each with its own **Chance** knob beneath it (appended 2026-08-19, from BigSky's
+shimmer list) and, since the seventh 2026-08-02 pass, a **Details** button beside Anchor - the
+card's own On toggle is gone the same way the bar's separate chip is, and an off line scrims
+the whole card body instead (`paintOverChildren`, skipping every control's `setEnabled` so a
+chord can still be dropped on it and a rate still dialled in before switching it on). **Launch
+Quantize** rides the arp's section bar alongside the four letters and All; the **tempo** rides
+the *Controls* bar instead, one build earlier (both 2026-08-02; see `docs/ARP_DESIGN.md` for
+the passes). The macro view is a *view* rather than a fifth line - `editedLine` is untouched by
+it, so a chord card drag keeps one unambiguous target - and it takes the band's space rather
+than adding to it, so the panel does not grow. Each row's attachments bind to its own line for
+the row's life, unlike the band's, which rebind whenever the edited line changes (a Details
+click, where a tab click used to do it): four lines on screen at once cannot each be "the
+current line".
 
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
@@ -600,18 +611,18 @@ Pads bar from the left, **Humanize** and its velocity range sit after them since
 with the strip, everything else on this bar never does). **Mode**, **Scale Compliance** and the
 arp's old target-line letter chip left this end of the bar on 2026-08-02 (Owen: "remove the
 scale and percentage and letter b from pads header"); Mode and Compliance are still in the
-generator's window, which holds every setting it has, and the arp bar's **A / B** switches no
+generator's window, which holds every setting it has, and the arp bar's letter switches no
 longer name which line a card feeds, since they read On/Off rather than a selection - the
-panel's own **LINE A** / **LINE B** caption does that now.
+panel's own **LINE A** / **LINE B** / **LINE C** / **LINE D** caption does that now.
 
 **A click never hands a chord to a line any more** (2026-08-02, Owen: "when an arpeggiator's
 running and you click on a pad, I don't want it to send it to the arpeggiator unless you drag
 it"): `ChordPads::mouseUp` plays the pad for a short audition exactly as it would with every
 line off, regardless of what `KeysProcessor::cardsFeedArp` says. Feeding a line is a **drag** -
-onto a card in the macro view, onto A or B on the arp bar, or onto a slot - and each names a
-different "which line": A/B or a slot's own line makes that line current, a macro card is
+onto a card in the macro view, onto a letter on the arp bar, or onto a slot - and each names a
+different "which line": a letter or a slot's own line makes that line current, a macro card is
 already labelled with its own. Dragging a card onto an arp slot binds the chord there, and onto
-A/B or a macro card hands it over immediately; both are ordinary JUCE drag-and-drop targets
+a letter or a macro card hands it over immediately; both are ordinary JUCE drag-and-drop targets
 rather than something the editor mediates in screen coordinates by hand (`src/ui/ChordDrag.h`,
 2026-08-02 - see the chord generator section below for why that mattered), the same mechanism
 the audition tray's own drags use, and both suppress the strip's drag-off-to-clear so a gesture
@@ -1114,9 +1125,12 @@ from 2026-08-01 `arpKeys` and `arpChannel`, and from 2026-08-02 `arpOctShift`, `
 (retained; folded into its replacement on every load by `migrateVelTrim`), `arpHumanVel` and
 `arpVelTrim`, and from 2026-08-03 `arpTuplet` (Straight / Triplet / 5-tuplet / 7-tuplet /
 9-tuplet, the general form of the `arpTrip` toggle it retired) plus `arpHumanizeSpan` and
-`arpHumanVelSpan` (how far under the knob each Humanize draw may fall, so each is a range that
-travels with its knob rather than "nothing up to the knob"; the ring of a `RangeKnob` sets
-them, default 100 = the whole scale = the old behaviour) — every one of them appended.
+`arpHumanVelSpan` (the two range knobs' reach: originally how far under the knob a Humanize
+draw could fall, so a range that travelled with its knob rather than "nothing up to the knob";
+from 2026-08-19 the range knobs are centred on the knob's own value instead, opening equally
+either side of it, and `arpHumanVelSpan` is registered but no longer read by the engine at all
+- Vel's ring reads `arpHumanVel` directly - while `arpHumanizeSpan` still drives H.Time's ring,
+default 100 = the whole scale) - every one of them appended.
 The six after
 `arpChance` arrived on 2026-07-30 and are appended; the rate's two arrived the same day and
 sit beside `arpRate` instead, which costs nothing, because what a session and an automation
@@ -1130,16 +1144,20 @@ together: `bpm` (the tempo they run at when there is no transport to follow) and
 for before it lands). A quantize setting per line would be one more way for the lines to miss
 each other, which is the opposite of what it is for.
 
-**That whole set exists three times**, once per arpeggiator line. `createLayout` calls
-`addArpLineParams` three times rather than writing it out three times, so a control cannot
-exist on one line and not another and the ranges and defaults are provably identical. **Line 0
-registers under the bare ids above** — `arpRate` is line A's rate and always was — and B and C
-take a digit: `arp2Rate`, `arp3Direction`. That is the entire session-compatibility story, and
-it is why the ids are built by `KeysProcessor::arpParamId(line, suffix)` from one table
-(`arpParamSuffix`) shared by the layout, the UI's attachments and the audio thread's cached
-pointers. The suffix strings *are* the ids: renaming one loses that setting out of every saved
-session. `arpKeys` and `arpChannel` are the only two an older session sees appear on line A,
-and both default to what Keys did before there were lines.
+**That whole set exists four times**, once per arpeggiator line, since line D was appended
+2026-08-19. `createLayout` calls `addArpLineParams` four times rather than writing it out four
+times, so a control cannot exist on one line and not another and the ranges and defaults are
+provably identical. **Line 0 registers under the bare ids above** - `arpRate` is line A's rate
+and always was - and B, C and D take a digit: `arp2Rate`, `arp3Direction`, `arp4Gate`. That is
+the entire session-compatibility story, and it is why the ids are built by
+`KeysProcessor::arpParamId(line, suffix)` from one table (`arpParamSuffix`) shared by the
+layout, the UI's attachments and the audio thread's cached pointers. The suffix strings *are*
+the ids: renaming one loses that setting out of every saved session. `arpKeys` and
+`arpChannel` are the only two an older session sees appear on line A, and both default to what
+Keys did before there were lines. **Harm1, Harm1Chance, Harm2 and Harm2Chance are the newest
+suffixes** (2026-08-19), appended after every other line parameter for the same reason the
+rate's two units and the Vel/Humanize spans were: appending is the only direction that leaves
+an id's meaning untouched for a session saved before it existed.
 
 The audio thread never builds one of those ids. Each line caches a
 `std::atomic<float>*` per parameter at construction (`ArpLine::param`, indexed by the
@@ -1159,7 +1177,7 @@ not a reset**: APVTS creates the child on the spot and flushes whatever the live
 currently holding into it, so loading an old preset while the dial was in Hz left the arp
 free-running under a panel showing a division. `migrateRateMode` reads the incoming tree,
 spots the absence, and writes both defaults explicitly, which brings such a session back in
-Sync. It loops over all three lines now, because B and C's rate parameters are absent from
+Sync. It loops over all four lines now, because B, C and D's rate parameters are absent from
 every session saved before the lines for exactly the same reason and want exactly the same
 repair. `migrateStrumRange` repairs the same shape for the strum band.
 
@@ -1171,10 +1189,10 @@ happened to hold. And the chain's running state is transient: it starts stopped,
 session that reopens already playing a progression is a session that surprises you.
 
 **All of that is per line too, and the tree says so by shape.** Line 0's twelve slots and its
-live lanes sit directly on the `arp` node, exactly where they always have; B and C hang off a
+live lanes sit directly on the `arp` node, exactly where they always have; B, C and D hang off a
 `line` child each. So a session written here still loads into a build that predates the lines,
 and — the point that matters — every session written *by* those builds loads here with no
-migration at all: no `line` children means B and C keep their defaults, which with both
+migration at all: no `line` children means B, C and D keep their defaults, which with all three
 switched off is precisely the arpeggiator that session was saved from.
 
 `bpm` (40..240, default 120) was registered last, though it stopped being the newest when the

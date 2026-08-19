@@ -83,7 +83,7 @@ namespace
         juce::MidiMessageSequence seq;
         seq.addEvent(juce::MidiMessage::tempoMetaEvent((int) std::llround(60000000.0 / bpm)), 0.0);
         seq.addEvent(juce::MidiMessage::timeSignatureMetaEvent(4, 4), 0.0);
-        const float vel = juce::jlimit(0.04f, 1.0f, velocity01); // the floor noteOn() itself uses
+        const float vel = juce::jlimit(1.0f / 127.0f, 1.0f, velocity01); // the floor noteOn() uses
         for (const int n : notes)
             seq.addEvent(juce::MidiMessage::noteOn(1, n, vel), 0.0);
         for (const int n : notes)
@@ -627,10 +627,13 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
-// A pad's card menu. Fourteen rows and two separators (2026-08-17: Copy chord, Paste chord and
-// Save chord as MIDI joined the first group, Owen: "need to be able to copy paste chords"),
-// which at the 34 px mouse-only item height (a separator is half that,
-// KeysLookAndFeel::getIdealPopupMenuItemSize) is 14 * 34 + 2 * 17 = 510 px. That budget is the
+// A pad's card menu. **Sixteen rows and two separators since 2026-08-19**, when uiArpLines went
+// to four and the Send to arp loop started emitting A, B, C and D (it was fourteen rows from
+// 2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the first group, Owen:
+// "need to be able to copy paste chords"). At the 34 px mouse-only item height (a separator is
+// half that, KeysLookAndFeel::getIdealPopupMenuItemSize) that is 16 * 34 + 2 * 17 = 578 px, up
+// from 510. **The row count is a function of uiArpLines now, so raising that raises this**: a
+// fifth line would make it 612. That budget is the
 // reason the three new rows landed flat in the existing first group rather than behind a
 // submenu: the menu hangs off a pad near the bottom of the window and grows *upwards*, and JUCE
 // answers one taller than the space it has by splitting it into columns or making it
@@ -750,8 +753,9 @@ void ChordPads::showPadMenu(int slot)
                      filled && onSendToArpLine != nullptr);
 
     // Bind this card to an arp slot, so launching that slot plays this chord through that
-    // slot's pattern. The other half of the "cards into the arp" pair: the two rows above hold a
-    // card in a line right now, this parks one in a slot for later.
+    // slot's pattern. The other half of the "cards into the arp" pair: the rows above - one per
+    // line, so four of them since 2026-08-19 - hold a card in a line right now, this parks one
+    // in a slot for later.
     juce::PopupMenu slots;
     for (int s = 0; s < KeysProcessor::numArpPatterns; ++s)
     {
@@ -952,7 +956,12 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
     {
-        // Right-click never plays or drags; it opens the pad's card menu.
+        // Right-click never plays or drags; it opens the pad's card menu. Both fields are put
+        // back explicitly rather than left to whatever the last gesture set: since 2026-08-18 it
+        // is *mouseUp* that sounds a card, and the mouseUp closing this right-click must not find
+        // a stale `dragSource` under it and play the chord you opened the menu to throw away.
+        dragging = false;
+        dragSource = -1;
         const int cell = cellAt(e.position);
         if (cell >= 0)
             showPadMenu(cell);
@@ -989,24 +998,34 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     // of the card from playing, dragging and feeding the arp, and every one of those is a
     // gesture the whole surface is supposed to answer. Lock is a right-click item now, and only
     // that; the card paints a dot when it is set, which is a mark and not a target.
-    // **The press sounds the chord, and holding it is what keeps it sounding** (2026-08-16,
-    // Owen: "when you click a pad cord, it should only play it for the amount of time that
-    // you're holding it, not a fixed value"). A pad is an instrument you play, and a fixed
-    // 800 ms blip is a preview of one - you could not stab it short or lean on it long, which
-    // is most of what a pad is for.
     //
-    // This restores sounding-on-press, which 2026-08-02 removed, so it is worth being exact
-    // about what that change was really fixing. The bug then was not the noise: it was that the
-    // press branch also handed the card to a running arp line *and cleared `dragSource`*, so a
-    // card could not be dragged in the one mode where dragging it onto a line is the point.
-    // That branch is gone for other reasons (a click no longer feeds a line at all), and
-    // `dragSource` is set here and left alone, so sounding on press costs nothing this time.
-    // Which gesture it was is still decided by whether the mouse moved - mouseDrag silences
-    // this before it starts carrying the card, and mouseUp releases it if it never moved.
+    // **The press sounds nothing unless you asked it to** (2026-08-18). By default all it does is
+    // remember where the gesture started and what was under it; mouseUp sounds the chord if the
+    // mouse never travelled, and mouseDrag carries the card if it did. Firing here is what let a
+    // drag choke the other chord sources on its way out - see the note on `auditionMs` in the
+    // header for why that, rather than the blurt it made, is what moved this to the release.
+    //
+    // *Chord pads play while held* on the settings menu puts the press back, because deciding on
+    // the way up costs the thing a pad is most for: a stab you can cut short and a chord you can
+    // lean on. Both modes go through startAudition, so there is one place a card starts sounding
+    // and one place it stops however you got there.
     downPos = e.position;
     dragging = false;
     dragSource = cellAt(e.position);
 
+    // Both gates: hold mode owns the press, and the Pads bar's Play toggle (2026-08-19) can
+    // silence the whole click - a strip you are only dragging from should not be able to fire
+    // a chord on the way to the arpeggiator.
+    if (processor.layout.padHoldToPlay && processor.layout.padsPlayOnClick)
+        startAudition(/*fixedLength*/ false);
+    repaint();
+}
+
+// Sound whatever the gesture is pointing at - a filled pad, or the live card's own chord - and
+// decide what will end it. `fixedLength` starts the 800 ms timer; otherwise the mouse-up owns
+// the note-off, which is what makes a lean long.
+void ChordPads::startAudition(bool fixedLength)
+{
     if (dragSource >= 0 && ! processor.chordPad(dragSource).notes.empty())
     {
         processor.pressChordPad(dragSource);
@@ -1014,21 +1033,26 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     }
     else if (dragSource == -2 && isChord(currentNotes))
     {
-        // The live card plays too, and for the same length of time as a pad: holding a chord on
-        // the keyboard sounds the keys, and pressing the card fires the same notes as one chord,
-        // strummed and humanized the way a pad plays it. Owen named the pads, but leaving this
-        // one on a fixed blip would make two cards on one strip answer the same press
-        // differently.
+        // The live card plays too, and the same way: it fires the chord you are holding as one
+        // strummed, humanized gesture the way a pad plays it, so two cards on one strip must not
+        // answer the same click differently.
         processor.pressLiveChord(currentNotes);
         playingLive = true;
     }
-    repaint();
+    else
+    {
+        return; // nothing under the gesture; no timer to start either
+    }
+
+    if (fixedLength)
+        startTimer(auditionMs);
 }
 
 // Let go of whatever this strip is currently sounding, if anything. Safe to call at any time
 // and on any path - it is how a release, a drag and every interruption end the same state.
 void ChordPads::endAudition()
 {
+    stopTimer(); // whatever ends the audition also cancels the one scheduled to end it
     if (playingLive)
     {
         processor.releaseLiveChord(); // Sustain holds it, exactly as the old mouse-up did
@@ -1039,6 +1063,13 @@ void ChordPads::endAudition()
         processor.releaseChordPad(playing);
         playing = -1;
     }
+}
+
+// The audition has run its 800 ms. Sustain and Latch still get their say, because endAudition
+// releases through releaseChordPad / releaseLiveChord - a pedalled chord goes on ringing.
+void ChordPads::timerCallback()
+{
+    endAudition();
 }
 
 void ChordPads::mouseDrag(const juce::MouseEvent& e)
@@ -1056,11 +1087,15 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
         return;
     }
 
-    // A drag is not a performance, so silence what the press started. There is a blurt of
-    // whatever it took to travel six pixels, and that is the honest cost of hold-to-play: the
-    // press cannot know yet which gesture it is, and waiting for the drag threshold before
-    // sounding would put a lag on every note. Six pixels of deliberate movement is a few tens of
-    // milliseconds - the same trade every drum pad makes.
+    // A drag is routing, not playing. In the default mode the press sounded nothing and this has
+    // only an *earlier* card's 800 ms audition to end - carrying a card while the last one plays
+    // on is its own confusion. In hold mode it silences the blurt this press made, which is the
+    // few tens of milliseconds it took to travel six pixels.
+    //
+    // What it cannot undo in hold mode is the *choke*: firing a chord stops the other chord
+    // sources, and with Exclusive on that includes each arp line's held chord, so by the time a
+    // drag is recognised a running line has already been stopped. That is Exclusive doing exactly
+    // what it says, and it is why the quiet press is the default rather than the tick.
     endAudition();
     beginChordDrag(e);
 }
@@ -1078,6 +1113,30 @@ void ChordPads::beginChordDrag(const juce::MouseEvent& e)
         dragSource = -1;
         return;
     }
+
+    // **Say out loud that this window is in front** (2026-08-18, Owen: "you couldn't drag things
+    // into the arpeggiator when the generator was opened").
+    //
+    // JUCE resolves a cross-window drop through `Desktop::findComponentAt`, which walks its own
+    // `desktopComponents` list from the top and **returns from the first window whose bounds
+    // contain the point** - it never falls through to a lower window when the one it picked has
+    // no interested target there. That list is maintained by `Desktop::componentBroughtToFront`,
+    // which fires from `Component::toFront` and from a peer's `handleBroughtToFront`.
+    //
+    // The generator window calls `toFront` when it opens, so it goes to the top of that list. The
+    // plugin editor never reports the same thing: it is a *child* window inside the host's, so
+    // clicking it raises it on screen without any peer activation JUCE hears about. The list
+    // therefore keeps the generator on top for good, and since that window is nearly full screen,
+    // every drop aimed at the arpeggiator landed inside its bounds and was resolved against it -
+    // finding nothing interested, and vanishing.
+    //
+    // This is not gaming the order, it is correcting it: the press that started this drag was in
+    // *this* window, so this window is the front one, and `toFront(false)` (no focus grab) is how
+    // a component says so. The reverse direction still works for the same reason it always did -
+    // dragging out of the tray means you clicked the generator, and that window is a real
+    // top-level one whose activation JUCE does hear.
+    if (auto* top = getTopLevelComponent(); top != nullptr && top->isOnDesktop())
+        top->toFront(false);
 
     const bool live = dragSource == -2;
     auto chord = live ? KeysProcessor::ChordPad {} : processor.chordPad(dragSource);
@@ -1103,51 +1162,27 @@ void ChordPads::beginChordDrag(const juce::MouseEvent& e)
                              /*allowDraggingToExternalWindows*/ true, &grab, &e.source);
 }
 
-void ChordPads::mouseUp(const juce::MouseEvent& e)
+void ChordPads::mouseUp(const juce::MouseEvent&)
 {
     if (dragging)
     {
-        // Where the card was let go, in screen coordinates - the strip may be in its own window.
-        const auto releasedAt = e.getScreenPosition();
-        // Where this drag landed is not known yet. Every drop - onto a pad of this strip, onto
-        // the live card, onto the generator's reference box, onto an arp slot or line - is
-        // delivered by JUCE *after* this method, later in the same event, so the one question
-        // left here has to be asked a message-loop turn from now. See chorddrag::whenDragSettles
-        // for why that is the right length of wait and dragOperationEnded is not.
-        chorddrag::whenDragSettles(
-            *this, inFlight,
-            [releasedAt](ChordPads& pads, const chorddrag::Payload& p)
-            {
-                // Nobody took it, so the card was let go off the row, and off the row means
-                // clear. The veto is what keeps this from being the way to *lose* a chord:
-                // reaching for the reference box means dragging a card off the strip, and that
-                // box - like every arp target - says so by setting `taken`.
-                //
-                // **"Nobody took it" is not the same question as "off the strip"** (2026-08-14).
-                // It used to be the only test, so letting a card go anywhere that happens not to
-                // be a drop target - the gap between two sections, a bar, the keybed - destroyed
-                // the chord, with no undo anywhere in Keys. Changing your mind mid-drag and
-                // putting the card back down on the strip is the commonest way to do that, and
-                // it is the one gesture that most obviously should not delete anything. So the
-                // release has to have actually left the strip as well.
-                //
-                // A locked card dropped off the strip does nothing at all. The lock is the thing
-                // that stops a chord being destroyed (Owen, 2026-07-30), and "Clear pad" on the
-                // card menu has always greyed for a locked pad - this path was the hole in that,
-                // and a wider gesture than the menu item it was quietly overriding. The drag
-                // itself stays allowed, because moveChordPad only swaps two slots and a locked
-                // card still has to be arrangeable.
-                if (! p.taken && p.from == chorddrag::Payload::From::padSlot
-                    && ! pads.getScreenBounds().contains(releasedAt)
-                    && ! pads.processor.chordPad(p.index).locked)
-                {
-                    pads.processor.pushUndo("Clear pad", KeysProcessor::UndoScope::pads);
-                    pads.processor.clearChordPad(p.index);
-                }
-
-                pads.inFlight = nullptr;
-                pads.repaint();
-            });
+        // **A drag that lands on nothing is a cancelled drag** (2026-08-18, Owen: "when you drag
+        // your chord out of the pad into the arpeggiator, it disappears"). This used to clear the
+        // pad whenever no target claimed the card and the release had left the strip, on the
+        // reading that "off the row means bin it". The trouble is how much of the window is
+        // neither the strip nor a target: the two section bars above and below the arp panel, the
+        // Controls band, the keybed, every gap between them. Dragging *up* out of the strip
+        // crosses the Pads bar on the way to the arpeggiator, so a release a few pixels short of
+        // the panel destroyed the chord instead of routing it - and the four arp targets set the
+        // `taken` veto correctly, which is why this only ever bit on a near miss and so read as
+        // random.
+        //
+        // The gesture it cost is the one that had the least claim to the pixels: Clear pad is on
+        // the card menu, which is its documented home, and undo has covered accidents since
+        // 2026-08-14. Aiming at a target with one mouse is hard enough without the whole rest of
+        // the window being a shredder. `taken` stays as the flag targets set - the reference box
+        // and the tray still read it - it simply no longer has a destructive default behind it.
+        inFlight = nullptr;
     }
     else
     {
@@ -1171,7 +1206,20 @@ void ChordPads::mouseUp(const juce::MouseEvent& e)
         {
             processor.releaseArpChord(holder);
         }
-        endAudition();
+
+        // Which end of the click owns the sound. Holding: the press already fired it and letting
+        // go is the release, so a stab is short and a lean is long. Otherwise the press was
+        // silent and this is where the chord *starts*, with the 800 ms timer owning its note-off.
+        //
+        // Unless the Pads bar's **Play** toggle is off (2026-08-19, Owen: "when I'm trying to
+        // drag a cord into the arpeggiator, it plays instead, and it stops everything"): then
+        // neither end of a click makes a sound and the strip is drag-only. endAudition still
+        // runs, not startAudition, so a press that was sounding when the toggle flipped
+        // mid-gesture is released rather than left ringing.
+        if (! processor.layout.padsPlayOnClick || processor.layout.padHoldToPlay)
+            endAudition();
+        else
+            startAudition(/*fixedLength*/ true);
     }
     // Putting the outside taker's highlight back out is nobody's job here any more. Every target
     // gets `itemDragExit` from JUCE on every path a drag can end - dropped elsewhere, dragged

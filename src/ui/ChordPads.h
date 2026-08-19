@@ -62,7 +62,8 @@ namespace keys
 // parented into, which is what makes the machinery survive the Pads section being popped out
 // into a window of its own.
 class ChordPads : public juce::Component,
-                  public juce::DragAndDropTarget
+                  public juce::DragAndDropTarget,
+                  private juce::Timer
 {
 public:
     explicit ChordPads(KeysProcessor&);
@@ -130,7 +131,8 @@ public:
     // ARP a or b"). The editor services it rather than this strip calling the processor the way
     // "Send to arp slot" does, so the item lands on exactly the path a chord *dragged* onto that
     // line's switch or its macro card takes - `KeysEditor::sendPadToArpLine`, which prefers the
-    // panel while it is open and moves the aim to the line you named.
+    // panel while it is open. Neither route moves the panel to the line it named (2026-08-18):
+    // routing a chord is not navigating to it.
     std::function<void(int slot, int line)> onSendToArpLine;
 
     // Every drop this strip takes, wherever the chord came from: a pad moved to another pad, a
@@ -215,22 +217,36 @@ private:
     std::vector<int> currentNotes;
     juce::String currentName;
 
-    // **A card sounds for exactly as long as you hold it** (2026-08-16, Owen: "when you click a
-    // pad cord, it should only play it for the amount of time that you're holding it, not a
-    // fixed value"). The press fires it and the release lets it go, so a stab is short and a
-    // lean is long - which is most of what a pad is for, and what a fixed 800 ms preview could
-    // not do. Sustain and Latch still decide what "release" means, since endAudition goes
-    // through releaseChordPad / releaseLiveChord exactly as the old mouse-up did.
+    // **A card sounds on release, and a drag never sounds at all** (2026-08-18, Owen: "the chord
+    // should only play when you release the mouse. I was having a problem where an arpeggiator
+    // was playing where as soon as I tried to drag a different chord to the second arpeggiator,
+    // it played the new chord and stopped the first arpeggiator").
     //
-    // `auditionMs` (800, borrowed from ChordGenMenu's own preview) went with that change, and
-    // so did the juce::Timer it needed: with the release owning the note-off, nothing was left
-    // to schedule, and a base class no path can start is weight this component was carrying for
-    // a feature it no longer has. **The generator's tray keeps its fixed 800 ms** and that is
-    // not an inconsistency: a tray card is a candidate you are sampling, where a length that
-    // does not depend on your hand is the point, and a pad is an instrument you are playing.
+    // This reverses the hold-to-play of 2026-08-16 (press fires, release lets go), and what it is
+    // really fixing is not the noise. **Firing a chord chokes the other chord sources** - that is
+    // pressChordPad's job, and with Exclusive on it reaches each line's held chord - so a press
+    // that turns out to be a drag had already stopped line A by the time the card was moving
+    // toward line B. Silencing the blurt when the drag starts does not put that back, and there
+    // is nothing on screen to explain why aiming at one arpeggiator stopped the other. Deciding
+    // on the way *up* means the gesture is known before anything is choked: a drag is routing and
+    // stays silent, a click is playing.
     //
-    // endAudition() stays exactly what it was - the one choke point every path ends a sounding
-    // card through - minus the stopTimer() that had nothing to stop.
+    // The cost is that a pad can no longer be stabbed short or leaned on long: sounding starts at
+    // mouse-up, so there is no hand left to hold it, and the length is `auditionMs` again - 800,
+    // the same as the generator's tray, which never left it. Sustain and Latch still decide what
+    // the release means, since endAudition goes through releaseChordPad / releaseLiveChord
+    // exactly as it always has.
+    //
+    // **That cost bought a tick rather than a decision** (same day, Owen: "maybe we should have a
+    // checkbox to toggle that on and off so we can lean on chords when we want"). *Chord pads
+    // play while held* on the settings menu puts the press back;
+    // `LayoutState::padHoldToPlay` carries why release-and-fixed is the default of the two, and
+    // mouseDrag carries the one thing hold mode cannot take back.
+    static constexpr int auditionMs = 800;
+    // Both modes start a card sounding through here, so there is one place it begins and one
+    // place - endAudition - it stops, whichever end of the click owns each.
+    void startAudition(bool fixedLength);
+    void timerCallback() override;
     void endAudition();
 
     // The cell a drag - anyone's, from either window - is currently offering a chord to, or -1.

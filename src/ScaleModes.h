@@ -108,6 +108,49 @@ namespace keys::modes
         return out;
     }
 
+    // The kit scale this mode is, by name, or -1 (2026-08-18, Owen: "when you lock a scale on
+    // top, some of the keys turn gray, but I don't think they're accurate or I don't understand
+    // the UI"). They were accurate and answering a different question: the keybed greys from
+    // `root`/`scale`, the kit's table, and the generator writes in `genRoot`/`genMode`, this one.
+    // Two independent key settings that both read as "the key", so setting the generator to
+    // Mixolydian left the keybed greying whatever Scale said. The generator drives both now.
+    //
+    // **Every mode here has a kit scale**, which is what makes that safe - the table below is
+    // total, not best-effort. The reverse is not: Whole Tone and Chromatic are scales the
+    // generator cannot express, since it needs a chord quality per degree and they have no
+    // degrees to speak of. So the drive is one-way, and picking one of those on the Controls bar
+    // leaves the generator where it is rather than snapping it somewhere arbitrary.
+    //
+    // Matched by name rather than by index because they are two independently ordered lists in
+    // two repositories, and an index match would be a coincidence waiting to be broken by an
+    // append on either side - the same reasoning that makes `genSource` append-only.
+    inline int kitScaleIndexFor(int modeIndex)
+    {
+        static const std::pair<const char*, const char*> pairs[] = {
+            { "Major (Ionian)", "Major" },
+            { "Natural Minor (Aeolian)", "Natural Minor" },
+            { "Harmonic Minor", "Harmonic Minor" },
+            { "Melodic Minor", "Melodic Minor" },
+            { "Dorian", "Dorian" },
+            { "Phrygian", "Phrygian" },
+            { "Lydian", "Lydian" },
+            { "Mixolydian", "Mixolydian" },
+            { "Locrian", "Locrian" },
+            { "Pentatonic Major", "Major Pentatonic" },
+            { "Pentatonic Minor", "Minor Pentatonic" },
+            { "Blues", "Blues" },
+        };
+        const auto modes = names();
+        if (modeIndex < 0 || modeIndex >= modes.size())
+            return -1;
+        const auto wanted = modes[modeIndex];
+        const auto scales = okstudio::scales::names();
+        for (const auto& pair : pairs)
+            if (wanted == pair.first)
+                return scales.indexOf(pair.second);
+        return -1; // a mode added here without a kit scale simply does not drive the keybed
+    }
+
     // Modes worth borrowing from for each mode (modal interchange). Ported from
     // Octavium's _PARALLEL_MODES; drives the mid-range of Scale Compliance.
     inline std::vector<int> parallelModes(int modeIndex)

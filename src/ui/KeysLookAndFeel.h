@@ -94,6 +94,25 @@ namespace skin
     // not need to know who owns it. Falls back to cyan outside a Keys editor.
     Accent accentOf(const juce::Component&);
 
+    // One colour per arp line (2026-08-19, Owen: "I want 4 arps. and each one should have a
+    // color"). Fixed, not theme-following: the point is telling the four lines apart, and a
+    // palette that moved with the theme swatch could put the theme's own colour on the wrong
+    // line. A is the OK Studio cyan so the line Keys has always had keeps the colour it has
+    // always worn; B, C and D reuse hexes from accentChoices() so nothing new needs tuning.
+    // Worn by the macro card's frame and caption, the bar's letter switch and the Draw grid's
+    // playhead - the marks that say *which line*, never the whole control set, so the one-cyan
+    // skin law bends here rather than breaks.
+    inline Accent lineAccent(int line)
+    {
+        switch (((line % 4) + 4) % 4)
+        {
+            case 1:  return derive(juce::Colour(0xffd7459f)); // B: magenta
+            case 2:  return derive(juce::Colour(0xffd7a635)); // C: amber
+            case 3:  return derive(juce::Colour(0xff8fd735)); // D: lime
+            default: return cyanAccent;                       // A: the accent Keys shipped with
+        }
+    }
+
     // Brightened on 2026-08-01 (Owen: "hard to read some text. too dark"). `textDim` was
     // 0xff8a919c and `textFaint` 0xff5a6068, which are fine as *shades* and were chosen looking
     // at them next to `text`. That is the wrong comparison: almost everything wearing them is
@@ -112,6 +131,11 @@ namespace skin
     // stretch is its range. Named here rather than spelled out at both ends, since a typo in
     // one of two string literals would fail silently by simply never matching.
     inline const juce::Identifier arcFromProperty { "okArcFrom" };
+    // Its twin: where the lit arc *ends*, instead of at the value. RangeKnob sets both since
+    // the band became symmetric around the face (2026-08-19, Owen: "should be equal from
+    // center") - the arc has to reach past the pointer on the high side, which no end-at-value
+    // arc can.
+    inline const juce::Identifier arcToProperty { "okArcTo" };
     constexpr float panelRadius = 8.0f;  // panels / modules
 
     // Segoe UI keeps the panel crisp on Windows (the shipping target) and falls

@@ -985,19 +985,23 @@ public:
             expect(sawLate, "something actually moved");
         }
 
-        beginTest("Humanize velocity is its own knob, and VEL trim is bipolar");
+        beginTest("Humanize velocity is its own knob, and VEL is an absolute 0-127 band");
         {
             // One Humanize drove both halves until 2026-08-02; now `humanize` is the timing
-            // nudge alone and `humanVel` the velocity shave alone, and `velTrim` is the level
-            // control centred on "as played". Each question below fails if the split leaks.
-            const auto velsWith = [&](int human, int humanVel, int trim)
+            // nudge alone and `humanVel` the velocity shave alone. `velLevel` replaced the
+            // bipolar `velTrim` on 2026-08-18 (Owen: "still wrong", on a VEL readout showing
+            // "-31 ~20" right after asking for velocity ranges to span 0-127): it is MIDI
+            // velocity outright rather than a percentage trim on the velocity that arrived, and
+            // `humanVel` is how far under it a hit may fall, in the same units. Each question
+            // below fails if the split leaks or the units drift apart again.
+            const auto velsWith = [&](int human, int humanVel, int level)
             {
                 ArpEngine e;
                 e.prepare(sr);
                 auto sp = p;
                 sp.humanize = human;
                 sp.humanVel = humanVel;
-                sp.velTrim = trim;
+                sp.velLevel = level;
                 std::vector<float> vels;
                 for (int i = 0; i < 8; ++i)
                 {
@@ -1011,41 +1015,53 @@ public:
                 return vels;
             };
 
-            const auto base = velsWith(0, 0, 0);
+            // **The knob is the velocity, whatever the chord arrived at.** chordOn() feeds every
+            // note at 0.8, and the run below plays at 100/127 regardless - which is the whole
+            // change, and the one thing "as played" used to mean that no longer applies.
+            const auto base = velsWith(0, 0, 100);
             expect(! base.empty(), "the reference run plays");
+            for (const float v : base)
+                expectWithinAbsoluteError(v, 100.0f / 127.0f, 0.012f,
+                                          "VEL 100 plays at MIDI velocity 100, not at the input's");
 
-            const auto timingOnly = velsWith(100, 0, 0);
+            const auto quiet = velsWith(0, 0, 40);
+            for (const float v : quiet)
+                expectWithinAbsoluteError(v, 40.0f / 127.0f, 0.012f, "and VEL 40 at velocity 40");
+
+            const auto timingOnly = velsWith(100, 0, 100);
             for (size_t i = 0; i < timingOnly.size() && i < base.size(); ++i)
                 expectWithinAbsoluteError(timingOnly[i], base[i], 0.005f,
                                           "full H.TIME leaves every velocity alone");
 
-            const auto velOnly = velsWith(0, 100, 0);
-            bool sawQuieter = false;
-            for (size_t i = 0; i < velOnly.size() && i < base.size(); ++i)
+            // The ring is in velocity units too, and it reaches **either side of the level**
+            // since 2026-08-19 (Owen, on the halo: "should be equal from center"): 40 around a
+            // level of 60 is a band of 20..100, and both halves of it actually get used.
+            const auto ringed = velsWith(0, 40, 60);
+            bool sawQuieter = false, sawLouder = false;
+            for (const float v : ringed)
             {
-                expect(velOnly[i] <= base[i] + 0.005f, "H.VEL only ever shaves, never louder");
-                sawQuieter = sawQuieter || velOnly[i] < base[i] - 0.005f;
+                expect(v <= 100.0f / 127.0f + 0.012f, "never further above the level than the ring");
+                expect(v >= 20.0f / 127.0f - 0.012f, "and never further below it");
+                sawQuieter = sawQuieter || v < 60.0f / 127.0f - 0.005f;
+                sawLouder = sawLouder || v > 60.0f / 127.0f + 0.005f;
             }
-            expect(sawQuieter, "full H.VEL actually moved something");
+            expect(sawQuieter && sawLouder, "a ring of 40 lands on both sides of the level");
 
-            // The trim's curve is squared - hearing is logarithmic, and the linear version
-            // spent nearly all its audible change at the very end of the travel - and it
-            // multiplies *after* the 0.05 audibility floor, so a deep cut reaches MIDI
-            // velocity 1 instead of pinning at 6 from -90 down.
-            const auto half = velsWith(0, 0, -50);
-            for (size_t i = 0; i < half.size() && i < base.size(); ++i)
-                expectWithinAbsoluteError(half[i], base[i] * 0.25f, 0.02f,
-                                          "trim at -50 plays at quarter velocity (half as loud)");
-            const auto boosted = velsWith(0, 0, 100);
-            for (size_t i = 0; i < boosted.size() && i < base.size(); ++i)
-                expectWithinAbsoluteError(boosted[i], juce::jmin(1.0f, base[i] * 4.0f), 0.02f,
-                                          "trim at +100 quadruples, into the 1.0 ceiling");
-            const auto deep = velsWith(0, 0, -96);
-            expect(! deep.empty(), "a deep cut still plays");
+            // Equal from centre at the rails too: a level of 120 leaves only 7 of room above,
+            // so the band is 113..127 however wide the ring is turned.
+            for (const float v : velsWith(0, 40, 120))
+                expect(v >= 113.0f / 127.0f - 0.012f && v <= 1.0f + 0.005f,
+                       "at the rail the band stays equal, not lopsided");
+
+            // The bottom of the band is taken literally now: no 0.05 audibility floor lifting it,
+            // because the level *is* the velocity and a band drawn low is meant to be quiet. The
+            // clamp still stops at one MIDI step, since zero would be a note-off in disguise.
+            const auto deep = velsWith(0, 0, 1);
+            expect(! deep.empty(), "a level of 1 still plays");
             for (const float v : deep)
-                expectWithinAbsoluteError(v, 1.0f / 127.0f, 0.012f,
-                                          "-96 reaches the bottom MIDI step, not the old velocity-6 pin");
-            expect(velsWith(0, 0, -100).empty(), "full-left trim is a mute, exactly as VOL 0 was");
+                expectWithinAbsoluteError(v, 1.0f / 127.0f, 0.006f,
+                                          "velocity 1 leaves as velocity 1");
+            expect(velsWith(0, 0, 0).empty(), "a level of 0 is a mute, exactly as VOL 0 was");
         }
 
         // ---------------------------------------------------------------------------------
@@ -1157,14 +1173,14 @@ public:
             expectWithinAbsoluteError(period(syncTrip, 4), 4000, 2, "a triplet 1/16 is two thirds of one");
         }
 
-        beginTest("a Humanize range reaches back from the knob by its span");
+        beginTest("the Humanize knob is the centre of its range, and the ring reaches both ways");
         {
-            // 2026-08-03, the range knobs (Owen: "a serum style knob where you can set a range
-            // in the knob ... when the outer ring is enabled, moving the dial moves the outer
-            // ring with it"). Humanize was always "uniform between nothing and the knob"; the
-            // span says how far under the knob the draw may fall, so the knob stays the
-            // ceiling and the *range travels with it* - which is the half of this that has to
-            // be pinned, because it is the half that is easy to build the other way round.
+            // 2026-08-03 built the ring; 2026-08-19 centred it (Owen, on the halo: "moving the
+            // halo shouldn't move knob. should be equal from center"). The draw is the knob
+            // plus or minus the ring, equal on both sides, with the reach stopped where a rail
+            // is nearer - the knob itself on the low side, so a hit is never early, and 100
+            // less the knob on the high side, so the band never goes lopsided. The halves
+            // pinned here are the ones that are easy to build the other way round.
             const auto onsets = [&](int amount, int spanPct)
             {
                 auto sp = p;
@@ -1174,12 +1190,11 @@ public:
                 return onsetsOf(sp, clock, block, 12, steady);
             };
 
-            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - but
-            // the engine also caps a nudge at 40% of the gap to the next sub-hit, so the
-            // ceiling in force is min(1200, 2400) = 1200.
+            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - under
+            // the engine's 40% ordering cap at this rate, so 1200 is the scale in force.
             const auto closed = onsets(100, 0);
             expect(closed.size() >= 4, "the run has to fire before this proves anything");
-            // A span of zero collapses the range onto the knob: no randomness left, every hit
+            // A ring of zero collapses the range onto the knob: no randomness left, every hit
             // exactly 1200 late, so the gaps are all one step.
             for (size_t i = 1; i < closed.size(); ++i)
                 expectWithinAbsoluteError((double) (closed[i] - closed[i - 1]), 6000.0, 2.0,
@@ -1188,36 +1203,52 @@ public:
             expectWithinAbsoluteError((double) closed[0], 1200.0, 2.0,
                                       "every hit is a full 25 ms late");
 
-            // Wide open is the old behaviour: somewhere in 0..1200, and different draws.
-            const auto open = onsets(100, 100);
-            expect(open.size() >= 4);
-            expect(open != closed, "a full span still randomizes");
-            for (const auto o : open)
-                expect(o % 6000 <= 1201, "and never past the ceiling it always had");
+            // The knob at its top has no room above, so equal-from-centre means no room below
+            // either: a maxed knob is the same fixed offset whatever the ring says.
+            const auto maxed = onsets(100, 100);
+            expect(maxed.size() >= 4);
+            for (const auto o : maxed)
+                expectWithinAbsoluteError((double) (o % 6000), 1200.0, 2.0,
+                                          "at the rail the band has nowhere to open");
 
-            // **The range travels with the knob.** Halve the knob with the span closed and
-            // every hit lands at half the offset - the proof that the span is measured back
-            // from the knob rather than up from zero.
+            // Mid-knob, ring wide open: the full reach both ways, nothing early, up to 2x the
+            // knob late, and actually random.
+            const auto open = onsets(50, 100);
+            expect(open.size() >= 4);
+            expect(open != closed, "an open ring still randomizes");
+            bool sawBelow = false, sawAbove = false;
+            for (const auto o : open)
+            {
+                expect(o % 6000 <= 1201, "never past twice the knob");
+                sawBelow = sawBelow || (o % 6000) < 599;
+                sawAbove = sawAbove || (o % 6000) > 601;
+            }
+            expect(sawBelow && sawAbove, "the draw lands on both sides of the knob");
+
+            // **The range travels with the knob.** Halve the knob with the ring closed and
+            // every hit lands at half the offset - the proof that the range is measured from
+            // the knob rather than up from zero.
             const auto halfClosed = onsets(50, 0);
             expect(halfClosed.size() >= 4);
             expectWithinAbsoluteError((double) halfClosed[0], 600.0, 2.0,
                                       "the closed range moved with the dial");
 
-            // A span narrower than the knob is a floor under a draw: at least 30% of 25 ms.
-            const auto narrow = onsets(100, 70);
+            // A narrower ring is a narrower band either side of the knob: 50 +/- 20 is 30% to
+            // 70% of 25 ms, and nothing outside it.
+            const auto narrow = onsets(50, 20);
             expect(narrow.size() >= 4);
             for (const auto o : narrow)
             {
-                expect(o % 6000 >= 359, "every hit is at least as late as the range's bottom");
-                expect(o % 6000 <= 1201, "and no later than the knob");
+                expect(o % 6000 >= 359, "every hit is at least as late as the band's bottom");
+                expect(o % 6000 <= 841, "and no later than its top");
             }
 
-            // Humanize itself off means the span does nothing: there is no draw to put a
-            // bottom under, and a range that nudged on its own would make a knob at zero audible.
+            // Humanize itself off means the ring does nothing: there is no draw to open, and a
+            // ring that nudged on its own would make a knob at zero audible.
             const auto off = onsets(0, 0);
             expect(off.size() >= 4);
             expectWithinAbsoluteError((double) off[0], 0.0, 2.0,
-                                      "a closed range under a Humanize of zero is still zero");
+                                      "a closed ring under a Humanize of zero is still zero");
         }
 
         beginTest("the rate readout is the step length as a fraction of a bar");
@@ -1625,6 +1656,164 @@ public:
             const auto onB = onsetsOf(spOff, hostRolling, block, 8, steady);
             expect(onA == onB, "followHost changes nothing while the rate is in Hz");
             expectEquals((int) onA.size(), 8, "still one step per 6000-sample block at 8 Hz");
+        }
+
+        // Two anchored lines must walk the same grid even with no transport to follow
+        // (2026-08-18, Owen: "I think that the notes should be playing at the same time, but
+        // they're not"). The engine's own free-running phase is zeroed by restart(), so a line
+        // switched on later used to start counting from its own zero and stay out of phase for
+        // good; HostClock::hasGrid is the processor's answer to that, and this pins that a line
+        // joining late lands on the shared grid rather than on a grid of its own.
+        beginTest("with no transport, an anchored line joining late still lands on the shared grid");
+        {
+            ArpEngine::HostClock noTransport;   // stopped, no host position at all...
+            noTransport.playing = false;
+            noTransport.hasPpq = false;
+            noTransport.hasGrid = true;         // ...but the processor always supplies a grid
+            noTransport.bpm = 120.0;
+            noTransport.hasBpm = true;
+
+            auto ap = p;
+            ap.anchored = true;
+
+            ArpEngine early, late;
+            early.prepare(sr);
+            late.prepare(sr);
+
+            // The grid is one running beat count both lines are handed in the same block, exactly
+            // as runArpLines hands them `arpBeats`. Half a step of offset (0.125 beat) so a line
+            // counting from its own zero would be visibly off the beat rather than accidentally
+            // on it.
+            std::vector<int> earlyOnsets, lateOnsets;
+            for (int b = 0; b < 8; ++b)
+            {
+                noTransport.ppq = 0.125 + 0.25 * (double) b;
+
+                juce::MidiBuffer outE;
+                early.process(ap, noTransport, block, b == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, outE);
+                for (auto& x : collect(outE))
+                    if (x.on)
+                        earlyOnsets.push_back(b * block + x.sample);
+
+                // The late line is handed its chord four blocks in - the switch going on, or a
+                // card dropped onto it - and from then on must fire alongside the early one.
+                juce::MidiBuffer outL;
+                late.process(ap, noTransport, block, b == 4 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, outL);
+                for (auto& x : collect(outL))
+                    if (x.on)
+                        lateOnsets.push_back(b * block + x.sample);
+            }
+
+            expect(! lateOnsets.empty(), "the late line plays at all");
+            for (int onset : lateOnsets)
+                expect(std::find(earlyOnsets.begin(), earlyOnsets.end(), onset) != earlyOnsets.end(),
+                       "every onset of the late line coincides with one of the early line's");
+        }
+
+        beginTest("anchored off keeps a line's own phase, so it drifts on purpose");
+        {
+            ArpEngine::HostClock noTransport;
+            noTransport.playing = false;
+            noTransport.hasPpq = false;
+            noTransport.hasGrid = true;
+            noTransport.bpm = 120.0;
+            noTransport.hasBpm = true;
+
+            auto freeRun = p;
+            freeRun.anchored = false;
+
+            // Same shared grid, offset half a step off the beat. Free-running, the line counts
+            // from its own start instead, so its onsets land on the block boundaries the grid's
+            // own offset would have moved them off - which is the whole difference Anchor names.
+            ArpEngine e;
+            e.prepare(sr);
+            std::vector<int> onsets;
+            for (int b = 0; b < 4; ++b)
+            {
+                noTransport.ppq = 0.125 + 0.25 * (double) b;
+                juce::MidiBuffer out;
+                e.process(freeRun, noTransport, block, b == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer {}, out);
+                for (auto& x : collect(out))
+                    if (x.on)
+                        onsets.push_back(b * block + x.sample);
+            }
+            expect(! onsets.empty(), "a free-running line still plays");
+            expectEquals(onsets[0], 0, "and starts at its own zero, not at the grid's offset");
+        }
+
+        // Two lines meeting on one pitch (2026-08-18, Owen: "how does it handle when there's an
+        // overlap in a note that's being played, and how should it handle that?"). ArpMerge is the
+        // answer and lives beside the engine precisely so it can be driven like this, with two
+        // lines' events hand-built into one buffer in sample order.
+        beginTest("two lines sharing a pitch: one note-on, re-struck, released by the last line");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer in, out;
+            // Line A takes C4 at 0 and holds it past line B's whole note. B strikes the same
+            // pitch at 100 and lets go at 200 - entirely inside A's note.
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.5f), 100);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 200);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 300);
+            merge.merge(in, out);
+
+            auto ev = collect(out);
+            expectEquals((int) ev.size(), 4, "B's attack is heard, and only one note-off leaves");
+            expect(ev[0].on && ev[0].sample == 0, "A's note-on goes out as it is");
+            expect(! ev[1].on && ev[1].sample == 100, "B's attack closes the sounding note first");
+            expect(ev[2].on && ev[2].sample == 100, "...and re-strikes it at the same offset");
+            expect(! ev[3].on && ev[3].sample == 300,
+                   "the pitch ends when the LAST line lets go, not the first");
+        }
+
+        beginTest("a pitch only one line is playing passes through untouched");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer in, out;
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 100);
+            in.addEvent(juce::MidiMessage::noteOn(1, 64, 0.8f), 100); // a different pitch, no overlap
+            in.addEvent(juce::MidiMessage::noteOff(1, 64), 200);
+            merge.merge(in, out);
+            expectEquals((int) collect(out).size(), 4, "nothing added, nothing swallowed");
+        }
+
+        beginTest("the same pitch on two channels is two notes, and never collides");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer in, out;
+            // A line with a Channel of its own is the other answer to an overlap, and the two
+            // must not interfere: these are different notes to the instrument downstream.
+            in.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOn(2, 60, 0.8f), 0);
+            in.addEvent(juce::MidiMessage::noteOff(1, 60), 100);
+            in.addEvent(juce::MidiMessage::noteOff(2, 60), 200);
+            merge.merge(in, out);
+            auto ev = collect(out);
+            expectEquals((int) ev.size(), 4, "no re-strike and no suppression across channels");
+            expect(ev[0].on && ev[1].on, "both attacks stand");
+            expect(! ev[2].on && ! ev[3].on, "and both releases do");
+        }
+
+        beginTest("a panic clears the counts, so the next note-off is not swallowed");
+        {
+            keys::ArpMerge merge;
+            juce::MidiBuffer stranded, out;
+            stranded.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            stranded.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 10); // two lines holding it
+            merge.merge(stranded, out);
+
+            // A panic silences the instrument directly and leaves the engines to catch up. Without
+            // the reset the count stays at 2, and the single note-off that eventually arrives is
+            // swallowed as "another line still holds it" - a stuck note.
+            merge.reset();
+            juce::MidiBuffer after, out2;
+            after.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            after.addEvent(juce::MidiMessage::noteOff(1, 60), 100);
+            merge.merge(after, out2);
+            auto ev = collect(out2);
+            expectEquals((int) ev.size(), 2, "a clean note pair after the panic");
+            expect(ev[0].on && ! ev[1].on, "and the note-off reaches the instrument");
         }
 
         // --- Three lines ------------------------------------------------------------------
@@ -2311,8 +2500,477 @@ public:
                 }
             expectEquals(ons, 1, "the collapsed voice is dropped, leaving only the main note");
         }
+
+        // --- Lane on/off, loop window and direction (2026-08-18) --------------------------
+
+        beginTest("a lane switched off reads its default and keeps its drawing");
+        {
+            auto lp = p;
+            lp.usePattern = true;
+
+            ArpEngine e;
+            e.prepare(sr);
+            for (int st = 0; st < 8; ++st)
+                e.lanes.value[ArpEngine::laneOctave][(size_t) st].store(2); // two octaves up
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(lp, clock, block, chordOn({ 60 }), out);
+            auto lifted = collect(out);
+            expect(! lifted.empty() && lifted[0].note == 60 + 24, "the lane is being read");
+
+            ArpEngine e2;
+            e2.prepare(sr);
+            for (int st = 0; st < 8; ++st)
+                e2.lanes.value[ArpEngine::laneOctave][(size_t) st].store(2);
+            e2.lanes.on[ArpEngine::laneOctave].store(0);
+            juce::MidiBuffer out2;
+            clock.ppq = 0.0;
+            e2.process(lp, clock, block, chordOn({ 60 }), out2);
+            auto off = collect(out2);
+            expect(! off.empty() && off[0].note == 60, "switched off, the lane reads its default");
+            expectEquals(e2.lanes.value[ArpEngine::laneOctave][0].load(), 2,
+                         "and the drawing is still there - off is not Reset");
+        }
+
+        beginTest("laneStepIndex: the loop window, and all four directions");
+        {
+            ArpEngine::LaneShape sh;
+            sh.len = 8;
+            sh.loopFrom = 2;
+            sh.loopTo = 5; // a four-step window
+
+            const auto walk = [&sh](int dir, int n)
+            {
+                sh.dir = dir;
+                juce::String out;
+                for (int i = 0; i < n; ++i)
+                    out += juce::String(ArpEngine::laneStepIndex(i, 0, sh));
+                return out;
+            };
+            expectEquals(walk(ArpEngine::dirUp, 8), juce::String("23452345"),
+                         "Up wraps inside the window");
+            expectEquals(walk(ArpEngine::dirDown, 8), juce::String("54325432"),
+                         "Down walks it backwards");
+            // 2*span-2 = 6, and neither end is repeated: 2 3 4 5 4 3, then round again.
+            expectEquals(walk(ArpEngine::dirUpAlt, 12), juce::String("234543234543"),
+                         "Up alt bounces without doubling its turning points");
+            expectEquals(walk(ArpEngine::dirDownAlt, 12), juce::String("543234543234"),
+                         "Down alt is its mirror");
+
+            sh.dir = ArpEngine::dirUp;
+            sh.loopFrom = 3;
+            sh.loopTo = 3;
+            expectEquals(ArpEngine::laneStepIndex(7, 0, sh), 3, "a one-step window holds that step");
+            sh.loopFrom = 0;
+            sh.loopTo = ArpEngine::maxSteps - 1;
+            expectEquals(ArpEngine::laneStepIndex(9, 0, sh), 1,
+                         "the default window is the whole lane, exactly as before it existed");
+        }
+
+        // --- Mutate (2026-08-18) ---------------------------------------------------------
+
+        beginTest("Mutate at 0 changes nothing at all");
+        {
+            ArpEngine e1, e2;
+            e1.prepare(sr);
+            e2.prepare(sr);
+            auto mp = p;
+            juce::MidiBuffer o1, o2;
+            clock.ppq = 0.0;
+            e1.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), o1);
+            mp.mutate = 0;
+            mp.mutateLock = 50;
+            clock.ppq = 0.0;
+            e2.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), o2);
+            const auto a = collect(o1), b = collect(o2);
+            expectEquals((int) a.size(), (int) b.size(), "same number of events");
+            for (size_t i = 0; i < a.size() && i < b.size(); ++i)
+                expectEquals(b[i].note, a[i].note, "same notes");
+        }
+
+        beginTest("Mutate to 50 never leaves the held chord");
+        {
+            // The 2026-08-18 rule, kept for the knob's lower half: to 50, Mutate moves the run
+            // to another entry of the sequence built from what is held, so every pitch it can
+            // reach is one of them. Swept, because a reach that grows with the amount is just
+            // the sort of thing that falls off the end at the boundary and nowhere else.
+            for (int amt = 10; amt <= 50; amt += 10)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = amt;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 16, chordOn({ 60, 64, 67 }), out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        expect(ev.note == 60 || ev.note == 64 || ev.note == 67,
+                               "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
+                                   + ", which is not in the held chord");
+            }
+        }
+
+        beginTest("Mutate past 50 strays in scale; only past 75 may it leave the scale");
+        {
+            // The 2026-08-19 zones (Owen: "higher values can go out of scale"). C major as the
+            // mask - the default 0xFFF is chromatic and would make "in scale" vacuous.
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            for (int amt = 55; amt <= 75; amt += 10)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = amt;
+                mp.rootPc = 0;
+                mp.scaleMask = cMajor;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        expect((cMajor >> (ev.note % 12)) & 1u,
+                               "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
+                                   + ", out of scale below the chromatic zone");
+            }
+            // At the top the strays are chromatic but still local: a stray is at most three
+            // semitones off a note the walk could have chosen, so nothing lands far from the
+            // chord. The bound is what pins the reach; scale membership is deliberately not
+            // asserted, because leaving the scale is the feature.
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 100;
+                mp.rootPc = 0;
+                mp.scaleMask = cMajor;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                bool leftScale = false;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                    {
+                        int nearest = 127;
+                        for (int c : { 60, 64, 67 })
+                            nearest = juce::jmin(nearest, std::abs(ev.note - c));
+                        expect(nearest <= 4, "Mutate 100 played " + juce::String(ev.note)
+                                                 + ", further than a stray can reach");
+                        leftScale = leftScale || (((cMajor >> (ev.note % 12)) & 1u) == 0);
+                    }
+                expect(leftScale, "at 100, over 32 steps, at least one stray left the scale");
+            }
+        }
+
+        beginTest("Lock at 100 repeats one variation; at 0 it keeps finding new ones");
+        {
+            const auto run = [&](int lock)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 100;
+                mp.mutateLock = lock;
+                // A drawn Note lane, not the Up shape: the shape walk carries a cursor, so its
+                // base index has period 3 over a triad and is not a function of the step at all.
+                // Fixed indices make the base periodic at the lane length and stateless, which
+                // is what these two tests are actually about.
+                mp.usePattern = true;
+                for (int st = 0; st < 8; ++st)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) st].store(1 + st % 3);
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> notes;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        notes.push_back(ev.note);
+                return notes;
+            };
+
+            const auto locked = run(100);
+            expect(locked.size() >= 16, "enough steps to compare two passes");
+            bool repeats = true;
+            for (size_t i = 8; i < locked.size(); ++i)
+                if (locked[i] != locked[i - 8])
+                    repeats = false;
+            expect(repeats, "locked, every pass of the eight-step lane plays the same notes");
+
+            const auto loose = run(0);
+            bool differs = false;
+            for (size_t i = 8; i < loose.size(); ++i)
+                if (loose[i] != loose[i - 8])
+                    differs = true;
+            expect(differs, "unlocked, a later pass is not the first one over again");
+        }
+
+        beginTest("Mutate is stateless from the playhead: a jump lands where a walk would");
+        {
+            // The same rule the rhythm dividers are pinned against. The era is derived from the
+            // step index, so the twelfth step is the twelfth step whether or not you walked to it.
+            const auto noteAt = [&](bool jump)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 80;
+                mp.mutateLock = 40;
+                mp.usePattern = true; // see the Lock test above for why the shape will not do
+                for (int st = 0; st < 8; ++st)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) st].store(1 + st % 3);
+                juce::MidiBuffer warm;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block, chordOn({ 60, 64, 67 }), warm); // hold the chord
+                if (! jump)
+                    for (int i = 1; i < 12; ++i)
+                    {
+                        juce::MidiBuffer skip;
+                        clock.ppq = 0.25 * i;
+                        e.process(mp, clock, block, {}, skip);
+                    }
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * 12;
+                e.process(mp, clock, block, {}, out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        return ev.note;
+                return -1;
+            };
+            expectEquals(noteAt(true), noteAt(false), "the same step plays the same note either way");
+        }
+
+        // --- The per-line harmony voices (2026-08-19, BigSky's shimmer list) --------------
+
+        beginTest("A harmony voice doubles every note at its interval; chance 0 is silence");
+        {
+            const auto run = [&](int semis, int chancePct)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.harmSemis[0] = semis;
+                mp.harmChance[0] = chancePct;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> ons;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        ons.push_back(ev.note);
+                return ons;
+            };
+
+            const auto plain = run(0, 100);
+            const auto octaveUp = run(12, 100);
+            expectEquals((int) octaveUp.size(), (int) plain.size() * 2,
+                         "at chance 100 every note carries its voice");
+            for (int n : octaveUp)
+                expect(n == 60 || n == 64 || n == 67 || n == 72 || n == 76 || n == 79,
+                       "harmony +12 played " + juce::String(n)
+                           + ", which is neither the chord nor its octave");
+
+            // Chance 0 is Off by another route, and Off must mean byte-identical.
+            const auto silent = run(12, 0);
+            expectEquals((int) silent.size(), (int) plain.size(), "chance 0 adds nothing");
+            for (size_t i = 0; i < silent.size() && i < plain.size(); ++i)
+                expectEquals(silent[i], plain[i], "chance 0 changes nothing");
+        }
+
+        beginTest("Both harmony voices stack, and a clamped voice is dropped, not doubled");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 12;
+            mp.harmSemis[1] = -12;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), out);
+            int ons = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    ++ons;
+            expectEquals(ons % 3, 0, "each step is the note and its two voices");
+            expect(ons >= 9, "two voices tripled the steps");
+
+            // A voice pushed past the MIDI range clamps onto its own source and is dropped -
+            // the subharmonic rule: a collapsed interval is a silence, not a doubled attack.
+            ArpEngine e2;
+            e2.prepare(sr);
+            auto mp2 = p;
+            mp2.harmSemis[0] = 24;
+            juce::MidiBuffer out2;
+            clock.ppq = 0.0;
+            e2.process(mp2, clock, block * 4, chordOn({ 120, 124 }), out2);
+            for (auto& ev : collect(out2))
+                if (ev.on)
+                    expect(ev.note == 120 || ev.note == 124 || ev.note == 127,
+                           "a clamped voice either lands clamped or not at all");
+        }
+
+        beginTest("Two harmony voices at the same interval cannot hang a note");
+        {
+            // The regression: a duplicate {note, channel} inside one step is not a doubled
+            // attack, it is a hung note. Both hits land at the same offset, so the second goes
+            // down emitHit's tie branch and writes a note-off at `on - 1` - before the first
+            // one's note-on. Downstream that leaves ArpMerge's refcount pinned above zero and
+            // the pitch is never released. Every note-on a step emits must have its own
+            // note-off, and no pitch may be opened twice in one step.
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 7; // both voices on the same interval
+            mp.harmSemis[1] = 7;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+
+            // Walk the stream in order and count owners per pitch, the way ArpMerge does.
+            std::array<int, 128> refs {};
+            int maxRefs = 0;
+            for (auto& ev : collect(out))
+            {
+                if (ev.on)
+                {
+                    ++refs[(size_t) ev.note];
+                    maxRefs = juce::jmax(maxRefs, refs[(size_t) ev.note]);
+                }
+                else if (refs[(size_t) ev.note] > 0)
+                {
+                    --refs[(size_t) ev.note];
+                }
+            }
+            expectEquals(maxRefs, 1, "no pitch is ever opened twice over");
+
+            // Whatever is still open at the end is what the line is holding, and the engine
+            // must be able to let go of all of it.
+            juce::MidiBuffer flushed;
+            e.flushInto(flushed);
+            for (auto& ev : collect(flushed))
+                if (! ev.on && refs[(size_t) ev.note] > 0)
+                    --refs[(size_t) ev.note];
+            for (int n = 0; n < 128; ++n)
+                expectEquals(refs[(size_t) n], 0, "every note-on is released");
+        }
+
+        // --- Per-step shapes, the fingered pair, and the Reset lane (2026-08-18) ----------
+
+        beginTest("a Note lane step can name its own shape, and they share one walk");
+        {
+            // Cthulhu's Note graph, p23: the top half of the lane is arpeggiator shapes, and
+            // they "vary consecutively one step after another" - one walk, read by whichever
+            // shape the step names, not a separate walk per shape.
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.usePattern = true;
+            sp.direction = ArpEngine::Direction::up;
+            // Four steps up, then four down. One cursor, so the second half reflects the walk
+            // the first half left rather than starting over.
+            for (int st = 0; st < 4; ++st)
+                e.lanes.value[ArpEngine::laneNote][(size_t) st].store(ArpEngine::noteShapeFirst);     // up
+            for (int st = 4; st < 8; ++st)
+                e.lanes.value[ArpEngine::laneNote][(size_t) st].store(ArpEngine::noteShapeFirst + 1); // down
+
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(sp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+            std::vector<int> notes;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    notes.push_back(ev.note);
+            expect(notes.size() >= 8, "eight steps sounded");
+            // Up over a triad from cursor 0: 60 64 67 60. Then "down" reads the *same* advancing
+            // cursor mirrored, n-1-(c%n): cursor 4,5,6,7 -> 64 60 67 64. Not 67 64 60 67, which
+            // is what a walk that restarted at the shape change would give - the point of the
+            // test is that it does not restart.
+            const std::vector<int> want { 60, 64, 67, 60, 64, 60, 67, 64 };
+            for (size_t i = 0; i < want.size() && i < notes.size(); ++i)
+                expectEquals(notes[i], want[i], "step " + juce::String((int) i));
+        }
+
+        beginTest("fingered top and bottom alternate the walk with the chord's extreme");
+        {
+            const auto run = [&](ArpEngine::Direction d)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto fp = p;
+                fp.direction = d;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(fp, clock, block * 6, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> notes;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        notes.push_back(ev.note);
+                return notes;
+            };
+
+            const auto top = run(ArpEngine::Direction::fingeredTop);
+            expect(top.size() >= 6, "six steps sounded");
+            // "every 2nd note is the high note of the chord" - and the walk between them covers
+            // the notes that are *not* the high one, or the shape would repeat the top twice.
+            const std::vector<int> wantTop { 60, 67, 64, 67, 60, 67 };
+            for (size_t i = 0; i < wantTop.size() && i < top.size(); ++i)
+                expectEquals(top[i], wantTop[i], "fingered top step " + juce::String((int) i));
+
+            const auto bot = run(ArpEngine::Direction::fingeredBottom);
+            const std::vector<int> wantBot { 64, 60, 67, 60, 64, 60 };
+            for (size_t i = 0; i < wantBot.size() && i < bot.size(); ++i)
+                expectEquals(bot[i], wantBot[i], "fingered bottom step " + juce::String((int) i));
+        }
+
+        beginTest("the Reset lane restarts the walk, and does not rebase the lanes");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto rp = p;
+            rp.usePattern = true;
+            rp.direction = ArpEngine::Direction::up;
+            // A two-step reset lane against a three-note chord, so the two cannot coincide by
+            // accident: with the reset the walk can only ever reach its first two notes.
+            e.lanes.length[ArpEngine::laneReset].store(2);
+            e.lanes.value[ArpEngine::laneReset][0].store(1);
+
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(rp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+            std::vector<int> notes;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    notes.push_back(ev.note);
+            expect(notes.size() >= 8, "eight steps sounded");
+            // The reset zeroes the cursor *before* the step reads it, so the reset step itself
+            // plays the first note of the shape - which is what the manual's example describes.
+            // 67 never sounds: every other step is a restart, so the walk never gets past its
+            // second note. Without the lane this would be 60 64 67 60 64 67 60 64.
+            const std::vector<int> want { 60, 64, 60, 64, 60, 64, 60, 64 };
+            for (size_t i = 0; i < want.size() && i < notes.size(); ++i)
+                expectEquals(notes[i], want[i], "step " + juce::String((int) i));
+
+            // And the lanes kept walking: had the reset rebased them, step 2 would be the reset
+            // cell for ever and the Note lane could never reach its own step 3.
+            expectEquals(e.lanes.value[ArpEngine::laneReset][0].load(), 1, "the lane is untouched");
+        }
+
+        beginTest("every per-step shape value maps to a Direction, and no other value does");
+        {
+            for (int v = ArpEngine::noteShapeFirst; v <= ArpEngine::noteShapeLast; ++v)
+            {
+                const auto d = ArpEngine::shapeForNoteValue(v);
+                expect((int) d >= 0 && (int) d < ArpEngine::numDirections,
+                       "value " + juce::String(v) + " names a real Direction");
+            }
+            expectEquals(ArpEngine::noteShapeLast - ArpEngine::noteShapeFirst + 1, 8,
+                         "eight shapes, as in Cthulhu's Note graph");
+            expectEquals(ArpEngine::laneRange((int) ArpEngine::laneNote).hi, ArpEngine::noteShapeLast,
+                         "the Note lane's range reaches the last of them");
+        }
     }
 };
+
 
 static ArpEngineTests arpEngineTests;
 } // namespace keys::tests

@@ -14,15 +14,18 @@ mute row appear between the band and the slots.
 
 ![The arpeggiator in Pattern shape](../assets/screenshots/arpeggiator.png)
 
-The **All** tab, and the view Keys opens in: both lines at once, over the tempo and the Launch
-Quantize they share. Shorter than a shape, because two rows take less than the band they
-replace, and that slack goes to the chord strip below.
+The **All** tab, and the view Keys opens in: all four lines at once, over the tempo and the
+Launch Quantize they share, laid out as a **2x2 grid** of cards (2026-08-19 - see below).
+Shorter than a shape, because two rows of cards take less than the band they replace, and that
+slack goes to the chord strip below.
 
 ![The macro view, both lines at once](../assets/screenshots/arpeggiator-macro.png)
 
 > Both lines are in **Hz** in that shot, which is why Dot and Tuplet are greyed on each row: they
 > subdivide a beat, and a free-running rate has none. Click **Hz** to go back to Sync and they
-> come alive. (That shot predates 2026-08-03, when Trip became the Tuplet chip.)
+> come alive. (That shot predates 2026-08-03, when Trip became the Tuplet chip, **and predates
+> 2026-08-19**, when a third and fourth line joined A and B in a 2x2 grid - it still shows the
+> two-card row this section used to describe.)
 
 ## Placement and contract
 
@@ -42,7 +45,172 @@ ppqPosition, isPlaying). Keys historically never reads the playhead; the arp sta
 follows the Contour/Lattice model instead. `CLAUDE.md` carries the amendment: the
 arp is the only playhead consumer in Keys.
 
+## Four lines in four colours, harmony voices, and Mutate off the leash (2026-08-19)
+
+Owen: *"I want 4 arps. and each one should have a color. and I want new knobs, 2 harmony drop
+down like the photo. and each of those has a chance knob which effects the harmony probability.
+and I want a mutate knob, which effects the notes being played. higher values can go out of
+scale."* Four separate asks, landed in one pass.
+
+### Four lines, and it is a two-constant change again
+
+The **Two lines** section below is not history to correct, it is the mechanism: `numArpLines`
+and `uiArpLines` were built as two different numbers precisely so that raising the UI-facing one
+would be cheap, and this is the day that paid off. Both are **4** now. Line D is `arp4*`,
+appended exactly the way B and C were, so a session saved before this opens sounding identical;
+line C, inert since 2026-08-02 because `uiArpLines` sat at 2, comes back in the same stroke.
+`arpChordTagFor` now spans four lines deep, -3 down through -6, so each line's hold still cancels
+on its own tag and never another's.
+
+**The macro view is a 2x2 grid, not a wider row.** A card's knob strip needs about 430 px to
+read at all, so the fix for more lines was never narrower cards - it was more rows.
+`arpMacroH` is two cards' height plus the 12 px gap between the rows; two columns is the
+constant, and a fifth line (should one ever arrive) grows the grid down, not sideways. The bar
+now carries four letter switches, A through D, and the pad menu grew a fourth **Send to arp**
+row to match.
+
+**"It is a view, not a fourth line" (below) still holds, and needs one word changed.** That
+section was arguing against a *pseudo*-line - a "D" that meant "all of them" - because a drag
+that could land on "everything" has no single target. A real line D is not that: it is a fourth
+`ArpEngine`, as ordinary as B or C, with its own card, its own tag and its own drag target. The
+macro *view* is still not a line (`editedLine` still ignores it, the panel still does not grow),
+but the collision the old note was warning about was never about the count, only about a line
+that meant "all". Four ordinary lines don't raise it.
+
+Anchor is unchanged: any number of anchored lines read the same `HostClock` beat count and walk
+in lockstep, the same guarantee **Two lines at once** (below) describes for two.
+
+### Colour is a mark, never a control
+
+`skin::lineAccent(line)` returns a fixed colour per line - A cyan (the shipped accent Keys has
+always worn), B magenta, C amber, D lime - reusing hexes already in `accentChoices` rather than
+inventing a second palette. **Fixed, not theme-following**: the point of the colour is "which
+line is this", and a colour that repainted itself under a theme swap would answer a different
+question each time. It shows in five places, all read-only: the macro card's frame and fill, a
+stripe under that line's letter switch on the bar, the deep view's `LINE A`/`LINE B`/`LINE C`/
+`LINE D` caption, and the Draw grid's playhead marker. Nothing about a line's behaviour reads its
+own colour back; it is exactly as load-bearing as the LINE caption it sits beside.
+
+### Two harmony voices per line, chromatic on purpose
+
+**HARMONY 1** and **HARMONY 2**, a pair of interval dropdowns on the macro card, laid out as
+**two columns** between the knob strip and the Dot/Tuplet/Anchor row - and **the dropdown's own
+popup opens as two columns too**, Off and the descending intervals on the left, the ascending
+ones on the right, exactly as BigSky's panel draws the same list (Owen: *"make harmony 2
+columns"*, then, shown a single tall menu, *"still one column"* - which is what the ask had
+meant all along; `MacroRow::HarmonyBox::showPopup` rebuilds the ComboBox's menu with a column
+break found by text, so the list and the split cannot drift apart). The list is BigSky's
+shimmer interval table with its
+two cents-detune rows dropped, since Keys has no concept of a partial-cent shift: Off, - Octave
+down through - minor 2nd, + minor 2nd up through + Octave, + Octave & 5th, + 2 Octaves. The
+semitone table lives in `KeysProcessor::harmonySemisFor`, the on-screen strings in
+`KeysProcessor::harmonyChoices` - append-only, the same rule every choice list in this file
+already answers to.
+
+Each voice carries its own **CHANCE** knob stacked beneath its dropdown. The parameters are
+`arp*Harm1` / `arp*Harm2` and `arp*Harm1Chance` / `arp*Harm2Chance`, appended per line, defaulting
+Off/100 - an absent voice does nothing and a present one at its default chance always fires.
+
+In the engine, `Params::harmSemis[2]` and `Params::harmChance[2]` carry plain semitone offsets;
+the dropdown's choice index means nothing past the UI edge, only the semitone table does. Inside
+`fireStep`, each voice copies the step's *resolved* hits - chord-lane steps and whatever Mutate
+already strayed onto both included, since a harmony voice has to shadow what actually played, not
+what the lane says - transposed by its interval, gated per step per voice by a stateless hash
+salted with the voice index and `mutateSeed` (so two voices, and two lines at the same settings,
+never fire in lockstep). **A voice that would clamp onto its own source note is dropped** - the
+subharmonic rule: an interval of "Off" or one that folds back onto the note it shadows is not a
+harmony, it is a doubled note wearing the name. Note-offs ride the same `active[]` bookkeeping
+every other emitted note already uses.
+
+**Chromatic is deliberate, not an oversight.** The Harmony *lane* (`laneHarmony`, from the
+2026-08-14 generative round) counts chord tones and stays inside the chord; these two voices
+count semitones and can land outside the scale entirely, which is what keeps a shimmer voice
+sounding like BigSky's rather than like a second, quieter copy of the lane that already has that
+job.
+
+### Mutate: three zones, not one
+
+**Mutate off the leash is exactly what Owen asked the knob to become.** The 2026-08-18 build
+(`## Mutate and Lock`, below) is the first half and is unchanged over the knob's first fifty
+points: `mutatedIndex` still moves the run among the held chord's own entries and still cannot
+leave it. What is new is the other half of the knob's travel.
+
+- **0-50: in the chord**, exactly as shipped 2026-08-18.
+- **50-75: `ArpEngine::mutatedPitch`**, a second stage applied to the pitch *after* the index walk
+  has already picked a chord entry and *before* the harmony voices copy it, so a harmony voice
+  shadows whatever Mutate actually played. In this band a stray note may wander one or two scale
+  degrees off the chord tone it started from - still governed by Root/Scale, so "out of the
+  chord" here still means "in the key".
+- **75-100: a growing share of those degree strays turn chromatic** instead - one to three
+  semitones off the nearest scale tone, rising to every stray being chromatic by 100. This is the
+  band Owen meant by *"higher values can go out of scale"*: past 75 the knob is explicitly
+  allowed to leave Root/Scale behind, which nothing in Keys' arp has ever been allowed to do
+  before.
+
+Both stages hash through the **same** `(step, era)` cell as the index walk - `mutateCell` is the
+one factored function all three read - so **LOCK still holds an out-of-scale find exactly as it
+holds an in-chord one**: a variation that strayed onto a chromatic passing tone repeats for the
+rest of its era instead of re-rolling every pass, the same promise LOCK already made for the
+50-and-under band.
+
+**This retires two absolute claims from the 2026-08-18 section, below**, and they are marked
+there rather than rewritten: *"there is no amount at which it plays something you did not put
+there"* and *"true at 100 as well as at 10"* both described only the knob's first half now.
+`ArpTests.cpp` pins the three boundaries: in-chord through 50, in-scale through 75, every stray
+within four semitones of a chord tone regardless of amount, and at 100 at least one stray that
+provably leaves the scale.
+
+### RangeKnob: the band is centred, not one-sided
+
+Owen, on the shipped satellite-drag halo (2026-08-03 build, described in full below): *"the halo
+scroll is not intuitive. it should expand in both directions. up is more,"* then, on the first
+attempt at that: *"not quite. moving the halo shouldn't move knob. should be equal from center."*
+
+The **RangeKnob** entry further down this file describes a one-sided band: the face sets the top,
+the ring reaches back below it. That model is gone. The face is now the band's **centre**:
+dragging the halo (or scrolling over it - a wheel notch is a twentieth of the sweep) opens the
+band equally in both directions and never moves the face; dragging the face still moves the whole
+band, halo included. `RangeKnob::reach()` replaces the old one-sided span math with a single
+number, `min(span, distance to either rail)` - one reach, shared by both sides, so a band that
+hits a rail on one side stops growing on **both**, rather than the far side quietly outrunning the
+near one. The lit arc follows: it now spans the band's two halves through `skin::arcToProperty`,
+the new twin of `arcFromProperty` used everywhere else - an arc that only ever draws from zero (or
+centre) *to* a value cannot light past a pointer sitting in the middle of a knob, which centring
+required. **The `Direction` enum is deleted outright**: it existed to pick which side of the value
+a one-sided span reached toward, nothing in Keys ever set it to anything but its default, and a
+centred band has no "which side" left to ask.
+
+Both engines that read a RangeKnob's band follow the same centring:
+
+- **VEL**: a hit's velocity now lands at `level +/- min(humanVel, level, 127 - level)` - centred on
+  the level knob, never pushed past either MIDI velocity rail.
+- **H.TIME**: a hit's lateness lands at `knob +/- min(ring, knob, 100 - knob)` on the existing
+  25 ms scale. **"Never early" survives this change; "never louder" does not** - the low rail is
+  still zero-late, so nothing Humanize does can rush a hit ahead of the grid, but a ring left at
+  its old default of 100 now reads as "0 to twice the knob" rather than "0 to the knob's own
+  value only downward." The knob has always meant "typical lateness"; centring makes that honest
+  instead of making it a ceiling.
+
+`arpHumanVelSpan` stays registered - removing a parameter breaks saved sessions - but the engine
+no longer reads it; the UI pins it at 100 the way it already pinned it after the 2026-08-17 VEL
+merge, below.
+
+**The pads' own Strum and Humanize knobs are not APVTS-backed at their face any more.** A centred
+band has no single value to attach a `SliderParameterAttachment` to - the face is a centre, not an
+endpoint - so `KeysEditor::wireRange` reads the stored lo/hi pair and sets the face and the span
+from it directly, writes both ends back on every change with a hand-bracketed gesture (the same
+begin/set/end shape `MacroRow` already used for the cards' own range knobs), and
+`syncPadRangeKnobs()` re-pulls off the editor's timer only when the stored pair has changed
+underneath the control and never mid-gesture, so a drag is never fought by its own readback. The
+stored parameters still mean exactly what they meant before - the band's two ends - so the pads'
+engine and every saved session are untouched; only the knob's own face gained a centre instead of
+an edge.
+
 ## Two lines (2026-08-02)
+
+**Four since 2026-08-19** - see `## Four lines in four colours, harmony voices, and Mutate off
+the leash (2026-08-19)`, above. The two-constant mechanism this section describes (`numArpLines`
+vs. the UI-facing count) is exactly what made that change cheap; only the numbers moved.
 
 Owen: *"I only wanna view two arpeggiators in this window, and I wanna be able to drag a chord
 from below to each one."*
@@ -50,6 +218,10 @@ from below to each one."*
 **The section below describes three, and everything in it still holds - it is where the
 machinery is written down.** What changed a day later is how many of it the product has: line C
 came out, and the count now lives in one place, `KeysProcessor::uiArpLines`.
+
+**Superseded 2026-08-19**: `uiArpLines` (and `numArpLines` with it) is 4 now, not 2/3 - see the
+new section above. The bullets below describe the mechanism exactly as it still works; only the
+numbers in them are history.
 
 - **Two constants, not one.** `numArpLines` is still 3: the engines, the storage and the `arp3*`
   parameter ids are untouched, because dropping parameters from the layout is what breaks every
@@ -68,7 +240,8 @@ came out, and the count now lives in one place, `KeysProcessor::uiArpLines`.
   the strip you drag from. Each macro card's own **Details** button is how you reach a line's
   step lanes and twelve slots, which are per-line and have nowhere to live in a row.
 
-Raising `uiArpLines` back to 3 is all it would take to bring C back.
+Raising `uiArpLines` back to 3 is all it would take to bring C back. (It went to 4, along with
+`numArpLines`, on 2026-08-19 - see above.)
 
 ## Three lines (2026-08-01)
 
@@ -240,18 +413,23 @@ remove the 'lines' text"* - they are editor-owned there, because the bar outlive
 the **tempo** is a plain number on the *Controls* bar one pass later (*"like the bpm in
 ableton, just a number"* - it is the plugin's clock rather than the arp's, which is why
 Quantize stayed behind), and the twelve slots and the Copy / Clear / Stop / Chain action row
-belong to the per-line tabs. Each card draws its own captioned ruled frame - **LINE A**, **LINE B**, filled, with the
+belong to the per-line tabs. Each card draws its own captioned ruled frame - **LINE A**, **LINE B**, filled
+(and, since 2026-08-19, **LINE C** and **LINE D** alongside them, each card's frame and fill in
+that line's own colour - see the section above), with the
 old outer LINES box gone, since a frame around both was what made two arpeggiators read as one
 (*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
 panel's width cannot hold what used to be one full-width row: a detented rate knob with `<`
 `>` and its Sync/Hz switch, and the shape with steppers of its own, under **RATE / SHAPE**
-micro-caps so the two stepper pairs read as belonging to their words; **seven knobs** under
-their own headings - Oct, Gate, Chance, Swing, Offset, Vel, H.Time (eight until 2026-08-17,
-when H.Vel folded into Vel's own ring - see below), Vel and H.Time both being
-**range knobs** (face for the most a draw ever does, the ring around it for how
-far under that it may fall, arc between them the range, and the whole range travels with the
-face - see `src/ui/RangeKnob.h`, and the note below on the satellite that opens it); and the
-rate's
+micro-caps so the two stepper pairs read as belonging to their words; **eight knobs** under
+their own headings - Oct, Gate, Mutate, Lock, Swing, Offset, Vel, H.Time (seven for one day,
+2026-08-17 to 2026-08-18, when H.Vel folded into Vel's own ring - see below - before Chance
+split into Mutate and Lock the next day, restoring the strip to eight; see `## Mutate and Lock`
+and the 2026-08-19 section above), Vel and H.Time both being
+**range knobs** (a centred face for the band's typical value, a ring around it for how far
+either side it may fall, arc between them the range - centred on both sides since 2026-08-19,
+see above; see `src/ui/RangeKnob.h`, and the note below on the satellite that opens it); below
+the knobs, since 2026-08-19, **two HARMONY interval dropdowns in two columns**, each with its
+own CHANCE knob beneath it (see above); and the rate's
 **Dot / Tuplet / Anchor**, a **Details** button and the held chord along the bottom. Owen's
 brief when the first cut carried three lines: *"what other knobs can we have? should be like
 regular arp settings."* The row carried Latch, PLAY, Chain and its own On switch for a day;
@@ -273,12 +451,27 @@ slot) is the only way in, and a click just plays the pad.
 Four of those knobs are not what the first cut had (both passes 2026-08-02). **Oct** is
 `arpOctShift`, a transpose centred at zero, not `arpOctaves`, which stacks copies upward and
 has no middle; the stacking range stays on the per-line tab beside Distance, the other half of
-the same feature. **Vel** is `arpVelTrim`, bipolar around "as played" (up boosts, down cuts,
-full left mutes) and **squared** - `((100+VEL)/100)^2`, applied after the engine's 0.05
-audibility floor so a deep cut reaches MIDI velocity 1 rather than pinning at 6, and a chord
-handed to a line skips the keyboard Humanize range so the reference level holds still (all
-three 2026-08-02, Owen: "I was at negative 96, and it was still pretty loud"). It replaced
-**Vol** (`arpVolume`, cut-only, misnamed for what it touched -
+the same feature. **Vel** is `arpVelLevel`, **MIDI velocity outright**, 0-127: the level this line plays
+at, whatever velocity the chord arrived with, and 0 mutes it (2026-08-18, Owen on a readout
+reading `-31 ~20`: "still wrong", having just asked for velocity ranges to span 0-127). Its ring
+is `arpHumanVel` in the same units, so the pair reads as one band the way the pads' own Humanize
+knob does. **"The top of the band" is superseded 2026-08-19**: the ring now reaches both above
+and below Vel's own value, centred on it rather than only downward from it - see the RangeKnob
+entry in the 2026-08-19 section near the top of this file.
+
+It was `arpVelTrim` until then - bipolar around "as played", **squared** (`((100+VEL)/100)^2`)
+and applied after a 0.05 audibility floor so a deep cut reached MIDI velocity 1 rather than
+pinning at 6. Two velocity controls in two units was one too many, and no two-number readout can
+honestly join a percentage trim to a percentage of a shave. The floor went with it: it existed
+because a *trim* had to reach silence past a floor protecting programmed dynamics, and a level is
+the velocity itself, so a band drawn low is meant to be quiet. The clamp still stops at one MIDI
+step, since zero is a note-off in disguise. What the change costs is a line following the velocity
+of the chord fed to it, which with one mouse was already a constant: every chord Keys fires leaves
+at the pads' own Humanize velocity. `arpVelTrim` stays registered and is read by nothing;
+`migrateVelLevel` converts a saved session through the trim's own curve against 76, the midpoint
+of the pads' default Humanize band, so a session that never touched Vel opens exactly as loud.
+
+`arpVelTrim` had itself replaced **Vol** (`arpVolume`, cut-only, misnamed for what it touched -
 the parameter survives for old sessions and `migrateVelTrim` folds it in exactly), which had
 itself taken the place of **Ramp *and* Time** together - they are one feature between them,
 and a row carrying Time with no Ramp would be a control with nothing to time. **H.Time and
@@ -300,16 +493,20 @@ a drag target and those are the click-only path to every division.
 Four decisions worth keeping:
 
 1. **It is a view, not a fourth line.** `editedLine` is untouched by it, so a chord card drag
-   still has one unambiguous target while both lines are on screen. A "line D" that meant
-   "all of them" would have made that drag ambiguous and the arp bar's A/B tabs a lie.
+   still has one unambiguous target while all the lines are on screen. A "line D" that meant
+   "all of them" would have made that drag ambiguous and the arp bar's A/B tabs a lie. **This is
+   still true, and worth restating precisely since 2026-08-19: there is now a real line D**, a
+   fourth ordinary `ArpEngine` with its own card and its own drag target, and it raises none of
+   this - the collision this point warns against was never about the *count* of lines, only about
+   a pseudo-line that meant "all of them at once." A fourth real line is just another line.
 2. **The panel does not grow.** `arpMacroTotalH` replaces the two band rows rather than joining
    them. A fourth band would have taken Pattern shape past the default window height, which is
    the whole reason this is a tab and not a section.
 3. **Each row's attachments are bound to its own line for good**, unlike the band's, which
    rebind whenever the edited line changes - a Details click now, where a tab click used to do
-   it. Two lines at once cannot each be "the current line", so the two cannot share a mechanism
-   - and the rows are built once and hidden rather than created on demand, so nothing churns
-   when the edited line moves.
+   it. Two lines at once (four, since 2026-08-19) cannot each be "the current line", so they
+   cannot share a mechanism - and the rows are built once and hidden rather than created on
+   demand, so nothing churns when the edited line moves.
 
 4. **The knob strip is reserved out of the row before Shape takes its cut.** Laying the knobs
    last and giving the last one "whatever remains" starved it to nothing as soon as the row got
@@ -591,7 +788,10 @@ lives in `KeysProcessor::noteOn`, which the arp's own notes never pass through, 
 have always been exactly on the grid. One control nudges each hit late (up to 25 ms) and
 takes up to 30% off its velocity. Late-only and quieter-only, on purpose: a nudge that can
 also rush is what Swing is for, and a velocity that can also rise makes an edited Velocity
-lane mean less than it says. **The nudge is clamped to 40% of the gap to the next sub-hit**,
+lane mean less than it says. **"Quieter-only" is retired 2026-08-19**, when VEL and H.TIME's
+rings centred on the face instead of reaching only downward from it (see the RangeKnob entry in
+the 2026-08-19 section near the top of this file) - the knob still never rushes a hit ahead of
+the grid, but it can now land either louder or quieter than the face's own level. **The nudge is clamped to 40% of the gap to the next sub-hit**,
 because unbounded it can carry one ratchet sub-hit past the next, and two hits of one pitch
 arriving out of order is the one thing `emitHit`'s close-what-you-land-on rule cannot
 survive. At 0 the engine draws no random numbers at all, which is also what keeps the older
@@ -869,6 +1069,225 @@ lane's length and speed onto every lane whenever the readouts refresh, so the re
 load rather than waiting for a nudge. **This is the shape of the problem for every future lane**,
 not a one-off.
 
+## The step sequencer pass (2026-08-18)
+
+Owen, on the Draw page: *"a usability and functionality pass of the step sequencer. I wanna draw a
+lot of inspiration from [Kirnu Cream] and how you can make really interesting, melodic patterns, and
+it's very easy to understand. Right now, everything is kinda smushed together."*
+
+The page had thirteen lanes, one visible at a time, and answered neither of the two questions you
+actually have while drawing.
+
+### Where is it now: the published playhead
+
+Nothing in Keys published the arp's step position, so no grid could draw one. That is worse than it
+sounds, because with Link off - which is the entire point of per-lane lengths - **every lane is
+somewhere different**, and none of those positions is the transport's.
+
+What is published is the one number every lane's answer derives from: `ArpEngine::uiRelStep`, the
+step index relative to the last restart, which is exactly what `laneValue` indexes by.
+`laneStepIndex(rel, offset, shape)` is that function's own arithmetic lifted out and called by both
+the engine and the grids, so a playhead cannot land on a cell the engine did not read.
+
+Two details that are the design rather than the implementation:
+
+- **It is published where a step fires, not from the clock.** A boundary suppressed by a rhythm
+  divider, and a step reached with no chord held, both pass through the step loop without touching a
+  lane. A playhead driven off the clock would advance through those and point at cells nothing read.
+- **`-1` means "not running", and is not step 0.** Every lane parked on its first cell reads as a
+  stopped sequencer waiting there, which is a different and wrong statement.
+
+### What is in the eleven lanes I cannot see: the tab marks
+
+Kirnu marks its own control tabs (its manual p12): a corner mark for whether the control is on, and
+a second meaning *"that control has input values"*. Both are copied - a dot for data, a strike for
+off - and between them they are the cheapest thing in this pass and probably the most useful. The
+dot is measured **over the lane's own length**, not over all 32 cells, or every lane that had ever
+been longer than it is now would light for steps that are not played.
+
+### Loop points and direction: where the melody comes from
+
+Keys had per-lane *length* and nothing else - every lane started at step 0 and walked forwards, so
+"polymeter" meant three lanes of eight that could only ever be three lanes of eight in step. Kirnu
+gives every control its own **loop window** (p11) and its own **direction**: Up, Down, Up alt, Down
+alt. That is the feature that makes Cream sound composed rather than shuffled, because none of it is
+random: two lanes crossing the same eight steps in opposite directions never line up the same way
+twice and are still completely predictable by ear.
+
+`Lanes::loopFrom` / `loopTo` / `dir`, and the arithmetic lives in `laneStepIndex` with everything
+else:
+
+- `loopTo` **defaults past the end** (`maxSteps - 1`) and is clamped at read time. That is what makes
+  "to the end" survive a length change with nothing having to rewrite it, and it is why a lane
+  nobody has touched behaves byte for byte as it did before any of this existed.
+- The alt pair bounces with period `2 * span - 2`, so **neither turning point is played twice**. A
+  doubled step at each end is audible as a stutter and is not what a bounce means.
+- A window dragged backwards is read as the span between its ends rather than as an error: the two
+  handles are the same kind of thing.
+- It stays **stateless from the step index** - no cursor, no direction bit carried between blocks -
+  which is what lets a transport jump land on the right cell without the engine having walked there.
+
+**Link pushes the window and not the direction.** Link on means the lanes share one grid, and a
+window is part of which grid that is; a direction is how a lane *walks* the grid it shares. Sharing
+directions too would have deleted the feature for everyone who leaves Link on, which is most people.
+
+### A lane can be switched off
+
+Kirnu again (p12): *"when control is off all it's values are ignored"*. `Lanes::on`, read at the top
+of `laneValue`, which returns the lane's default and touches nothing else. Keys had no way to take a
+lane out - Reset flattens it, which sounds the same and loses the work. That is the exact trap
+Cthulhu's mute-preserves-value rule already fixed one level down, on a single step, and it had never
+been applied to the lane itself.
+
+The grid **scrims** an off lane rather than disabling it. You draw on a lane before switching it on
+at least as often as after, and a disabled component takes no mouse events at all.
+
+### What the pass deliberately did not build
+
+- **Kirnu's Clear tool.** Its job is "set values to default" over the selection, and Reset already
+  narrows to the Select span and already means that. Finishing a palette by adding a button that
+  duplicates its neighbour is not finishing it.
+- **The right-button loop handle.** Kirnu moves the far handle with the right button when the click
+  lands inside the window. The right-click list is closed; nearer handle always is the whole rule.
+- **A per-step enable row per lane.** Kirnu has one; Keys' MUTE row is still the Note lane's alone.
+  Recorded in `docs/REFERENCES.md` as the remaining not-taken.
+
+## The Note graph (2026-08-18)
+
+Owen sent screenshots of Cthulhu's manual pages 22-25 with *"more like this"*. What those pages
+describe, and Keys did not have, is that **the Note lane is an arpeggiator you draw** rather than a
+lane of note numbers with one global Shape somewhere else.
+
+### Eight shapes at the top of the lane
+
+Cthulhu p23: *"The top-half of the graph is various arpeggiator patterns, which act like a typical
+arpeggiator, where the note output varies consecutively one step after another."* Its Note lane is
+one continuous vertical scale - mute at the bottom, then the eight fixed chord indices, then eight
+shapes - so the whole vocabulary is one drag.
+
+Keys' lane was rest, follow-the-Shape, 1..8, and Kirnu's four questions. Values **13..20** are the
+shapes, appended above those in Cthulhu's own bottom-to-top order (up, down, up/down, down/up, up
+and down, down and up, fingered bottom, fingered top), so a drag up the lane meets them in the
+order the manual lists them. `shapeForNoteValue` is the map, with a `static_assert` tying its table
+to the value range.
+
+**The walk is shared, and that is the whole feature.** `nextDirectionIndex` gained an overload
+taking an explicit `Direction`; the cursor is untouched. So four steps of Up followed by four of
+Down comes back *down the line it went up* rather than restarting from the top - which is what
+"consecutively one step after another" means, and it is the difference between mixing shapes
+sounding composed and sounding like a shuffle.
+
+Keys' own vocabulary already matched Cthulhu's on six of the eight, including the subtle pair:
+`upDown` sounds each extreme once and `upAndDown` sounds it twice, which is exactly the distinction
+the manual draws between "up/down" and "up and down". No translation was needed.
+
+### The fingered pair
+
+`fingeredBottom` and `fingeredTop` are new `Direction`s, so the line's own Shape has them too.
+p24: *"every 2nd note is the high note of the chord"*. The half worth writing down is that the walk
+between those covers the notes that are **not** the extreme it alternates with - a triad comes out
+C-G-E-G, not C-G-G-G. `n - 1` notes, walked at half the cursor rate.
+
+Appending to `Direction` moves the number that means "Pattern" in a slot's stored shape. That is
+already handled - `shapeBase` is written into the arp tree for exactly this - but **four separate
+name lists have to grow with it**, and only the slot card's `static_assert` catches a missed one.
+
+### Markers, not bars
+
+Copied from the picture rather than the text. Cthulhu draws each Note step as a small block at the
+value's height; Keys drew every lane as a column filled up to its value. For Velocity that is right
+- 120 is a magnitude and a full column says so. For Note it is wrong: 5 is a *name*, and a column
+filled to 5 reads as "more than 4", which is not a thing a chord entry can be.
+
+It is also what makes the shapes legible. A contour is a picture, and a picture on top of a
+full-height fill is neither. Shape markers are taller than note markers and the contour is drawn
+**inside** the block - dashes spilling out of the top and bottom were tried first and read as noise.
+
+### Position Reset
+
+p25: *"the arpeggiator will reset on this step to play the first note of the arpeggiator pattern"*.
+Built as `laneReset`, and two details are the design:
+
+- **It zeroes `dirCursor` and must not touch `stepBase`.** The manual's example is entirely about
+  which note of the chord comes out. Rebasing the lanes onto the reset step would leave that lane
+  reading its own reset cell for ever, and the pattern would never move again.
+- **It runs after mute, rest, chain and chance.** A step that did not sound did not reach its reset
+  either, so a reset drawn on a low-Chance step does not fire on the passes the step skipped.
+
+Cthulhu reaches it by alt-clicking the Note graph. Keys' right-click list is closed and a modifier
+is not a gesture it may require, so it is a lane - which is what `docs/REFERENCES.md` had already
+predicted a per-step version would have to be.
+
+### What this round cost, and what caught it
+
+Two duplicate-table bugs, both of the family this repo keeps logging:
+
+- `ArpPanel::buildLaneRow` took a lo/hi pair per lane, and those thirteen pairs were a second copy
+  of `ArpEngine::laneRange` - whose own comment says three tables that must agree is three tables
+  that will not. Widening the Note lane in the engine left every grid clamped at the old ceiling,
+  so the new values existed and could be neither drawn nor set. The arguments are gone.
+- The lane tab row divided its width by a hard-coded twelve, so appending Reset laid its tab out at
+  four pixels - the identical starvation the Chain lane caused when it made twelve. `LayoutTests`
+  caught this one before it was ever seen on screen, which is the argument for that test.
+
+## Mutate and Lock (2026-08-18)
+
+Owen: *"I'd like to explore the chance knob being a drift instead where it explores other patterns
+and notes"*, and then *"could be multiple knobs. want notes. mutations"*.
+
+### Why this does not break the Drift rule
+
+`ArpEngine::laneDrifts` exists to say that **drift changes how a step plays, never which note it
+plays**, and that split is what lets Drift be one knob instead of ten. The fear behind it was
+specific: a machine wandering over notes nobody aimed at is noise.
+
+`mutatedIndex` meets that fear rather than accepting it. It moves the run to a **different entry of
+the sequence already built from the held chord** - so every note it can reach is a note that chord
+contains. There is no amount at which it plays something you did not put there, only a different one
+of the ones you did. The reach is in **chord entries, never semitones**, which is what makes that
+true at 100 as well as at 10; `ArpTests.cpp` sweeps the amount against the held chord to pin it.
+
+**Superseded 2026-08-19, and only past the knob's own halfway point**: everything in this
+paragraph is still exactly true through 50. Past it, `ArpEngine::mutatedPitch` is a second stage
+that may move the *pitch* off the chord entry entirely - degrees of the scale from 50 to 75,
+chromatic steps from 75 to 100 - so "there is no amount at which it plays something you did not
+put there" and "true at 100 as well as at 10" both describe the first half of the range only. See
+the 2026-08-19 section near the top of this file for the three zones in full.
+
+`laneRand` keeps its own claim, which is a narrower one: it is the only thing allowed to change a
+note **you drew**, because you drew it on that step. Mutate changes which note the *run* lands on.
+
+### Lock is the Turing Machine, without the register
+
+`docs/SEQUENCER_LANDSCAPE.md` ranked the shift register as the one randomness Keys lacked - *"a
+sequencer that you can steer in one direction or another"*, whose famous middle position is
+*"slipping; looping but occasionally changing notes"*. Roll rerolls once and stops, Drift wanders and
+never settles, Rand is per step: nothing in Keys wandered and then hardened.
+
+The obvious build is a ring buffer with a recycle probability. It was not built that way, because a
+register carried between blocks would be the **second** thing in this engine that is not stateless
+from the playhead, and `laneChain` is documented as the cheapest possible break of that rule rather
+than as an invitation to make more.
+
+So the variation is a **hash of (step, era)**. Lock stretches an era: at 0 every pass is its own, at
+100 there is one era and the first variation repeats for good, and in between it holds for a while
+and moves on. Same three positions the module's knob describes, and a transport jump lands on the
+variation it would have walked to, which a register cannot promise.
+
+The pass is counted over the window the Note lane actually **walks**, not its length. A four-step
+loop inside a sixteen-step lane comes round every four, and a variation that changed every sixteen
+would be heard changing in the wrong place.
+
+Two more placements that are load-bearing: Mutate applies **after** whichever route picked the note -
+a fixed index, the shape's walk, or one of Kirnu's four questions - so it works on a pattern nobody
+has drawn on yet as well as on one that is fully written; and **before** `lastPlayedIdx`, so a later
+Prev repeats what was heard rather than what was aimed at. `mutateSeed` is the line index, so two
+lines at the same setting never explore in lockstep.
+
+**Chance lost nothing** by giving up its knob. It is still a step lane, and still has its own slider
+in the Play page's PLAYBACK group - which is where a control you set once and leave belongs, as
+against the two you sit and turn.
+
 ## Scale awareness
 
 Keys already owns Root/Scale. The arp editor flags out-of-key results visually
@@ -931,10 +1350,12 @@ line today is a **drag**, and that took the last of them off the left click 2026
   then fires, applying Exclusive to the new one - so dropping the same card on a line it is
   already feeding is a restrike and never a second owner of the same pitches.
 
-- **`Send to arp A` / `Send to arp B` on a pad's right-click menu** (2026-08-16, Owen: "I'd like
-  to be able to right click on a chord pad and say send to ARP a or b"). The drag above with the
-  aim taken out of the mouse, on the same `sendPadToArpLine` path, so it can hold no chord the
-  drag could not. One row per line the UI shows (`uiArpLines`), enabled whether or not that line
+- **`Send to arp A` / `Send to arp B` / `Send to arp C` / `Send to arp D` on a pad's right-click
+  menu** (2026-08-16, Owen: "I'd like to be able to right click on a chord pad and say send to
+  ARP a or b"; the C and D rows joined 2026-08-19 with the third and fourth lines). The drag
+  above with the aim taken out of the mouse, on the same `sendPadToArpLine` path, so it can hold
+  no chord the drag could not. One row per line the UI shows (`uiArpLines` - four rows since
+  2026-08-19), enabled whether or not that line
   is switched on, because a line that is off still takes a chord in and plays it when it is
   switched on. The accelerator relationship is exactly Send to arp slot's with a drop on a slot
   card, which is why this is not a new right-click-only path.
@@ -989,10 +1410,12 @@ than the arp bar, now that A and B read as On/Off instead of a selection); a dra
 line whose tab, macro card or slot it landed on, and makes that line current, because you
 aimed at it.
 
-The held chord is tagged `arpChordTag - line` (-3, -4, -5) so it never collides with pad or
+The held chord is tagged `arpChordTag - line` (-3, -4, -5, and, since 2026-08-19's fourth line,
+-6) so it never collides with pad or
 live-card scheduling *or with another line's hold* - each is released independently, and
 `cancelScheduledNotes` matches the exact tag, so one shared tag would have letting go of B
-drop A's un-fired strum notes. `allNotesOff()` forgets all three - otherwise a panic silences
+drop A's un-fired strum notes. `allNotesOff()` forgets all of them (four since 2026-08-19) -
+otherwise a panic silences
 the chord while the launched slot still paints as playing.
 
 ### Hold off, and `releaseArpHold()`
@@ -1032,6 +1455,53 @@ card that is already launched calls `stopArpSlot()`. A slot card is a launcher w
 state, so one control starting and stopping it is what its ring already promises; a chord
 pad is a pad, and pads re-fire.
 
+## Two lines at once (2026-08-18)
+
+**Four lines since 2026-08-19** - the machinery below is unchanged by the count. `ArpMerge`
+folds however many lines are on into one buffer the same way regardless, and `HostClock::hasGrid`
+already handed every engine the same beat count whether two of them read it or four do.
+
+Everything above describes one line's machinery. Two of them running into one instrument raise
+two questions the original design never had to answer, and both were answered badly by default.
+
+**Do their steps coincide?** Only if both are anchored, and anchoring needed a rolling host
+transport. With none - the standalone, or a DAW sitting stopped - every line fell back to
+`freePhaseBeats`, its own phase, which `restart()` zeroes when the line is switched on. Two lines
+switched on a second apart were therefore a second out of phase for good, and no setting could
+bring them together. Launch Quantize is not that setting and never was: it aligns when a *chord*
+lands on a line, not where that line's steps fall.
+
+`HostClock::hasGrid` is the answer. Keys already kept a beat count of its own - the host's
+position while it rolls, its own count otherwise - for Launch Quantize to measure its boundaries
+from; it is handed to the engines as well now, so there is always a grid and all three lines read
+the same number in the same block. **Anchor is still the switch**: off, a line keeps its own
+free-running phase and drifts on purpose. What changed for an anchored line with no transport is
+that switching it on drops it onto the shared grid rather than restarting the pattern at step one,
+which is what it has always done in a DAW with the transport rolling.
+
+**What happens when they land on the same pitch?** Nothing good, until the same day. Each line's
+output went straight into the outgoing stream, so two lines on one channel sharing a pitch sent
+two note-ons for it and **whichever released first ended it for both** - the other line's note cut
+short, its own note-off arriving later as a stray. The lines are usually fed related chords, so
+shared pitches are the common case, and it read as random dropouts rather than as a fault.
+
+`ArpMerge` (in `ArpEngine.h`, beside the engine and free of the processor so it can be driven from
+a test) folds every line's output under one rule: **one note-on per sounding pitch, released by
+the last line holding it**, and a line striking a pitch another one already holds re-strikes it -
+a note-off at the same sample offset immediately before the note-on, which is exactly the tie rule
+`fireStep` already uses inside a single line. The lines must be interleaved in time before it
+runs, which is why they merge into one buffer first: deduplicating line 0's whole buffer and then
+line 1's would read an event at sample 6000 before one at sample 0.
+
+Giving a line its own **Channel** is the other answer and is untouched: the same pitch on two
+channels is two notes to the instrument downstream, and they never interact.
+
+The counts stay honest on their own, because every path that abandons a sounding arp note emits
+its note-offs first (`flushInto` on the bypass edge and on a channel change). A panic is the
+exception - it silences the instrument directly and leaves the engines to catch up - so it clears
+them explicitly. Without that, a stale count would swallow a later note-off as "another line still
+holds it", which is a stuck note: the precise failure the counts exist to prevent.
+
 ## Mouse-only interaction (the part nobody else got right)
 
 Verified: Serum's *feel* is the model, its *gestures* are not. Serum's editor
@@ -1058,8 +1528,10 @@ Concrete remaps:
 ## UI placement (decided: a section of its own)
 
 The arp is a foldable **section**, between the Controls section and the chord pads, with its
-line switches (**A**, **B** on screen - a single **On** until 2026-08-01, three lettered
-switches for a day after that, down to two when line C left the UI 2026-08-02), a **Hold off**
+line switches (**A**, **B**, **C** and **D** on screen since 2026-08-19, each in its own line
+colour - a single **On** until 2026-08-01, three lettered switches for a day after that, down to
+two when line C left the UI 2026-08-02, back up to four when C and a new D joined it
+2026-08-19), a **Hold off**
 chip, **All Off**, **Light keys**, **Launch Quantize** and a **Detach** button on its own bar.
 Folding the section destroys the editor, never the arpeggiators, which is why the switches live
 on the bar rather than inside the panel, and why they, Hold off and Quantize stay put when
@@ -1191,6 +1663,10 @@ What carries it:
   have like a little light next to it that sets the range"*, then *"when the outer ring is
   enabled, moving the dial moves the outer ring with it"*). The face sets one end, the span
   reaches back from it, and the whole range **travels with the face**.
+  **Superseded 2026-08-19**: the face is the band's *centre* now, not one end - the span reaches
+  equally both ways from it and the face still travels the whole band when dragged, but a halo
+  drag or a scroll over the ring no longer moves the face at all. See the RangeKnob entry in the
+  2026-08-19 section near the top of this file.
   **The knob's own arc is the range, and there is no second ring** (*"it looks like there's two
   rings around the knob ... everything should be reflected on that single ring"*). A concentric
   ring outside the face was built first and was one too many. What replaced it is one line in
@@ -1224,6 +1700,9 @@ What carries it:
   outline with a pip read as a tiny knob. And
   there is no negative span: Serum flips the halo's hue for an inverted depth, but a range has
   nothing to invert into, so `Direction` picks which side of the value it reaches instead.
+  **`Direction` is deleted 2026-08-19**: centring the band on the face removed the question it
+  answered - nothing ever set it to anything but its default, so there was never a second side to
+  pick. See the RangeKnob entry near the top of this file.
   The component owns no parameter: the span comes in through `setSpan()` and goes out through
   three callbacks, so the consumer keeps the parameter and the gesture brackets. In Keys that is
   `arpHumanizeSpan`, H.TIME's own span (default 100 - a span of the whole scale, which puts the
@@ -1233,9 +1712,13 @@ What carries it:
   Humanize Velocity's own amount, handed straight to `setSpan()`. `arpHumanVelSpan`, H.VEL's own
   former span from when it was a knob of its own, is pinned to 100 by every write the new ring
   makes rather than removed - the draw was already uniform at that default, so pinning it keeps
-  that true with one fewer number on screen.
+  that true with one fewer number on screen. **`arpHumanVelSpan` is unchanged in name and
+  registration by the 2026-08-19 centring, but the engine stopped reading it that same day** -
+  see the RangeKnob entry near the top of this file for what replaced the reach it used to
+  describe.
   The engine, not the layout, clamps the floor to its own ceiling, since either can be
-  automated past the other.
+  automated past the other. **Superseded 2026-08-19**: there is no floor and ceiling any more,
+  only a centre and an equal reach either side of it - see above.
 - **Tuplet is a combo box, and was briefly not.** For one build it was a `ToggleButton` that
   cycled its own text through five values, and Owen's reply was *"confusing UI. it's a check
   box but it changes"* - a check box is a promise of two states, and a control whose shape

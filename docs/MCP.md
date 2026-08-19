@@ -41,40 +41,79 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `store_arp_pattern` | Snapshot the live lanes into the active pattern slot. |
 | `apply_euclid` | Write a Euclidean rhythm (Bjorklund's algorithm) into the active pattern's probability lane: 100 on a hit, 0 on a rest, and set that lane's length to `steps`. |
 
-### The two arpeggiator lines
+### The four arpeggiator lines
 
-Keys runs two arpeggiators (`docs/ARP_DESIGN.md`). All four arp tools take an optional
-**`line`**, 0 or 1 — A or B — and **default to 0**, the arpeggiator Keys has always had. Every
-script written before the lines existed therefore still drives the line it was written for,
-unchanged.
+Keys runs four arpeggiators (`docs/ARP_DESIGN.md`). Every arp tool takes an optional
+**`line`**, 0 through 3 - A, B, C or D - and **default to 0**, the arpeggiator Keys has always
+had. Every script written before the lines existed therefore still drives the line it was
+written for, unchanged.
 
-There were three until 2026-08-02, and **line C's parameters are still registered**: `arp3On`,
-`arp3Rate` and the rest still appear in `list_params` and still accept a write, because dropping
-them from the layout would break every saved session. Nothing reaches them — `arpLineOn` answers
-false above the UI's count, so line C has no engine running, no chip and no row. Writing an
-`arp3*` id is accepted and does nothing audible. Passing `"line": 2` is clamped to B.
+There were only two on screen between 2026-08-02 and 2026-08-19, and line C's parameters
+(`arp3On`, `arp3Rate` and the rest) stayed registered through that whole stretch, because
+dropping a parameter from the layout breaks every saved session even while nothing on screen
+reaches it. **All four lines are on screen from 2026-08-19**: `numArpLines` and `uiArpLines` are
+both 4 now, so line C has an engine running, a letter switch and a macro card again, and a new
+line D (`arp4*`, appended) joined it. Passing `"line": 2` reaches C, `"line": 3` reaches D;
+older scripts that only ever used 0 or 1 are unaffected.
 
 Each line owns its own live lanes, its own twelve slots, its own held chord and its own chain,
 so `slot` is read *within* a line: `{ "line": 1, "slot": 3 }` is B's fourth slot, a different
 place from A's. `set_arp_pattern` and `get_arp_pattern` echo the `line` they acted on.
 
-Two arp parameters are **not** per line, because they are about both of them together:
+Two arp parameters are **not** per line, because they are about all four lines together:
 `bpm` (the tempo they run at with no transport to follow) and `arpQuantize` (Launch Quantize -
 Off, or the boundary a chord card, a slot launch or a drag onto a line waits for before it
 lands). Setting `arpQuantize` from a script is worth knowing about: with it on, a
 `press_chord_pad` that feeds a line will not sound until the next boundary.
 
 The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
-`arpRate`, `arpSwing` — and B repeats that whole list as `arp2*`: `arp2On`, `arp2Rate`,
-`arp2Direction`, and so on. Five ids are newer than the original arp and worth knowing:
-`arpKeys` (does this line arpeggiate what you play, or only the chords handed to it),
-`arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
-`arpOctaves`, which stacks copies upward), `arpVelTrim` (-100..+100, this line's level as a
-velocity trim around "as played", with a squared response so half travel sounds about half as
-loud; it replaced `arpVolume` on screen on 2026-08-02 — the old id still exists but every load
-folds it into `arpVelTrim` and resets it to 100, so scripts should write the new one), and
-`arpHumanVel` (0..100, the velocity half of Humanize; `arpHumanize` is the timing half alone
-since the same day).
+`arpRate`, `arpSwing` - and B, C and D repeat that whole list as `arp2*`, `arp3*` and `arp4*`:
+`arp2On`, `arp2Rate`, `arp2Direction`, and so on. Five ids are newer than the original arp and
+worth knowing: `arpKeys` (does this line arpeggiate what you play, or only the chords handed to
+it), `arpChannel` (Global, or 1-16), `arpOctShift` (-3..+3, transposes the whole run; **not**
+`arpOctaves`, which stacks copies upward), `arpVelLevel` (0..127, this line's *typical* velocity,
+not a ceiling, whatever velocity the chord arrived with, and 0 mutes the line), and
+`arpHumanVel` (0..127, how far either side of that level a hit may land - the velocity half of
+Humanize, in the same units, opening equally louder and quieter since 2026-08-19; `arpHumanize`
+is the timing half alone since 2026-08-02, and still only ever lands late relative to the grid,
+never early).
+
+Two more arrived on 2026-08-18, both defaulting to 0, which is the engine exactly as it was:
+`arpMutate` (0..100 - how far the line explores *other notes of the chord it is holding*. To 50
+it can only ever reach a note the chord already contains; past 50 a stray may land a scale
+degree or two outside the chord, and past 75 a growing share of those strays turn chromatic, so
+a value up near 100 can genuinely go out of key - Owen: "higher values can go out of scale") and
+`arpMutateLock` (0..100 - how long it keeps what it finds, in-chord variations and out-of-key
+strays alike: 0 redraws the variation every pass, 100 locks the first one for good). They took
+the CHANCE knob's place on the macro cards; `arpChance` itself is unchanged and still there.
+
+Four more arrived on 2026-08-19: `arpHarm1` / `arpHarm1Chance` / `arpHarm2` / `arpHarm2Chance`
+(and their `arp2*` / `arp3*` / `arp4*` twins) - each line's two fixed harmony voices, an
+interval choice from BigSky's own shimmer list (Off by default) with a 0..100 chance of firing
+per step (default 100). Each voice copies whatever note the step resolved, chord-lane steps and
+Mutate's strays included, transposed by its own interval in semitones - chromatic, not scale
+degrees, which is what tells it apart from the Harmony lane's chord-tone counting.
+
+**A lane's shape is not a parameter and `set_params` cannot reach it.** Length, clock divider,
+on/off, loop window and direction are lane data in the arp tree - use `get_arp_pattern` and
+`set_arp_pattern`. Alongside `lengths` and `clockDivs`, those two now carry `on` (true/false),
+`loopFrom` / `reset` joined the lane list on 2026-08-18 (1 restarts the shape's walk on that step) and the
+`note` lane's range grew with it: -1 rests, 0 follows the line's Shape, 1..8 are fixed chord
+entries, 9..12 are Prev/Hi/Low/Random, and **13..20 are per-step shapes** (up, down, up/down,
+down/up, up & down, down & up, fingered bottom, fingered top, in that order). A script writing a
+note lane may now use any of them.
+
+`loopTo` (0-based and inclusive; `loopTo` past the lane's end means its end, and is
+reported clamped to the length so a captured window reads as the window you see) and `dir`
+(0 Up, 1 Down, 2 Up alt, 3 Down alt - the alt pair goes out and back without playing the turning
+points twice). All four are optional maps of lane name to value, and all four read back as the
+old behaviour when absent, so a pattern captured by an older script still applies cleanly.
+
+**Two retired velocity ids are still registered and read by nothing**: `arpVolume`, which
+`arpVelTrim` replaced on 2026-08-02, and `arpVelTrim` itself, which `arpVelLevel` replaced on
+2026-08-18 when Vel stopped being a bipolar percentage trim around "as played" and became MIDI
+velocity. Every load folds each into its successor. Scripts should write `arpVelLevel`; writing
+either of the old two changes nothing you can hear.
 
 **A line that is off still takes chords in.** Handing a chord to a line that is not running
 makes no sound and is not lost: the engine holds it silently, and setting that line's `On`
@@ -156,6 +195,39 @@ the shim connects to whichever advertised itself most recently; pass `--port=N` 
 pin it to a specific instance's port instead (read the port from that instance's
 discovery file if you need to find it).
 
+## Restarting Keys does not break the bridge (2026-08-18)
+
+**This is the one thing to know about the shim.** Claude Code launches `keys-mcp` once,
+at the start of a session, and keeps that one process for hours. `run.py` closes and
+relaunches Keys on every build, and the in-plugin server takes a **new OS-assigned port
+each time**. So the socket underneath the shim dies constantly, and the shim has to
+survive it.
+
+It does now. A tool call arriving while it is disconnected re-reads the discovery
+directory and connects to whatever is running at that moment - the reconnect costs
+milliseconds and needs no handshake, because the server is stateless per request.
+
+**Before this it hung.** The shim connected once and then wrote into a dead socket
+forever, so a tool call got *no response at all* and the client sat on its idle timeout
+ - 30 minutes of looking exactly like a slow tool. If you ever see that again, it is not
+the plugin: check `%APPDATA%\OK Studio\mcp` for the live instance's port and talk to it
+directly to tell the two apart.
+
+Three more failure modes are closed with it, all of which used to be silence:
+
+- **Nothing running at all** - a call answers with a JSON-RPC error saying so, rather
+  than hanging. The shim also no longer exits when it finds no instance at startup; it
+  serves errors and connects when Keys appears, since the client only ever launches it
+  once and an exit would leave the session with no tools.
+- **A call in flight when Keys closes** - answered with an error. A write into a socket
+  whose peer has already gone can succeed, so "it sent" never meant "a reply is coming".
+- **Keys alive but wedged** - a blocked message thread answers nothing while its socket
+  stays open, so a watchdog answers after `--timeout-ms` (default 30 s). Every tool
+  handler runs on the message thread, so this is a real case, not a theoretical one.
+
+The fix is in the kit (`src/McpShimMain.cpp`), so every OK Studio plugin with a shim gets
+it; `tests/mcp_shim_reconnect.py` there pins all five cases and runs under ctest.
+
 ## Security
 
 The server only binds `127.0.0.1` and never authenticates a connection: any local
@@ -178,5 +250,5 @@ have written sit silent. `get_state` reports it for exactly this reason. It is p
 everything else, so the same call against line B needs `arp2Pattern`.
 
 5. `set_params { "values": { "arp2On": true, "arp2Rate": "1/4" } }`: bring line B in
-   underneath at half the speed. Both lines chew on the same held chord, because `arpKeys`
+   underneath at half the speed. The lines chew on the same held chord, because `arpKeys`
    and `arp2Keys` both default to on.

@@ -15,7 +15,10 @@ namespace
     // The panel's geometry, written once and read by both resized() and contentSize(), so the
     // window's minimum size is the layout's own arithmetic and not a number somebody chose.
     constexpr int kInset = 12;   // margin round everything
-    constexpr int kHeaderH = 28; // title, mode character, page, Close
+    // 34, not 28, since 2026-08-18: the header carries the four page tabs now, and a tab is a
+    // target like any other - the mouse-only floor applies to the small ones exactly as it does
+    // to a TextButton (CLAUDE.md's own standing rule, paid for at least three times before).
+    constexpr int kHeaderH = 34; // title, page tabs, Close
     constexpr int kRowH = 44;    // a labelled control row: 14 px label over a 30 px control
     constexpr int kGap = 8;      // between cells in a row
     constexpr int kAfterHeader = 10;
@@ -35,7 +38,12 @@ namespace
     // A tick box is 34 px wide and the full height of its cell. The mouse-only floor applies to a
     // check box exactly as it does to a button, and a tick in the 14 px caption strip would be a
     // target you cannot hit.
-    constexpr int kCheckW = 34;
+    // 52, not 34: the gates carry the word SET or ROLL now (2026-08-18) rather than a tick, and
+    // "ROLL" is what has to fit. A ComboBox ellipsises when it cannot fit its text and a
+    // TextButton simply crops, which is worse - it says nothing at all - so this is measured
+    // against the wider of the two words rather than guessed.
+    constexpr int kCheckW = 52;
+    constexpr int kAfterCheck = 6; // ...and it is a control of its own, so it gets its own gap
     constexpr int kSourceBtnW = 128; // eight of these plus gaps sets the window's floor width
 
     // The audition tray. Its rows are 54 px rather than the 34 px mouse-only floor because a
@@ -46,8 +54,21 @@ namespace
     // button that used to be here at 18.
     constexpr int kTrayHeaderH = 38;
     constexpr int kTrayRowH = 54;
+    // **What a card is allowed to grow to** (2026-08-18, Owen: "I think we can make the pads on
+    // the bottom more space efficient"). The tray took *everything* left over, so on any window
+    // taller than the layout's floor the sixteen cards soaked up every spare pixel and grew to
+    // twice the height a name over a note list needs - the settings above stayed at their
+    // minimum while the disposable half of the window ate the difference. 78 px is the same
+    // card the pad strip draws, which is about 50 px for its own two rows - 64 is already
+    // generous for a name over a note list. It went to the diagram for one build and that was
+    // worse than the fault: the bar chart grew to the height of a hand and the window stayed
+    // enormous. Nothing absorbs slack here now; the window has a ceiling instead.
+    constexpr int kTrayRowMaxH = 64;
     constexpr int kTrayGap = 6;
-    constexpr int kTrayH = kTrayHeaderH + 4 * kTrayRowH + 3 * kTrayGap;
+    // Off ChordTray's own row count, so the two cannot disagree about how tall a full tray is -
+    // which they would have the moment the grid went from four rows to three (2026-08-18).
+    constexpr int kTrayH = kTrayHeaderH + ChordTray::rows * kTrayRowH
+                         + (ChordTray::rows - 1) * kTrayGap;
     constexpr int kTrayMinW = 4 * 150 + 3 * kTrayGap; // four readable cards side by side
 
     // The reference row: a caption, one chord card, and the three buttons that act on it. 56 px
@@ -75,7 +96,9 @@ namespace
     constexpr int kPlaningW = 140;
     constexpr int kLibMoodW = 150, kLibGenreW = 160, kLibFuncW = 140, kLibResultW = 320;
     constexpr int kFillW = 120, kRegenW = 150, kClearW = 120;
-    constexpr int kTitleW = 160, kPageW = 120, kCloseW = 90;
+    constexpr int kToPadsW = 150; // "Send all to pads"
+    constexpr int kPageBtnW = 34; // four of them, at the floor
+    constexpr int kTitleW = 160, kPageW = 4 * kPageBtnW + 3 * 4, kCloseW = 90;
 
     int rowWidth(std::initializer_list<int> cells)
     {
@@ -116,16 +139,19 @@ juce::Point<int> ChordGenPanel::contentSize()
     // Both then take the panel's margin on each side.
     const int rows =
         juce::jmax(juce::jmax(rowWidth({ kTitleW, kPageW, kCloseW }),
-                              rowWidth({ kKeyW, kModeW, kBrightW, kMajMinW }) + 2 * kCheckW,
-                              rowWidth({ kNotesW, kInvW, kOctaveW, kOctaveW }) + 3 * kCheckW,
-                              rowWidth({ kComplianceW, kLockInfW, kSmoothW }) + kCheckW),
+                              rowWidth({ kKeyW, kModeW, kBrightW, kMajMinW })
+                                  + 2 * (kCheckW + kAfterCheck),
+                              rowWidth({ kNotesW, kInvW, kOctaveW, kOctaveW })
+                                  + 3 * (kCheckW + kAfterCheck),
+                              rowWidth({ kComplianceW, kLockInfW, kSmoothW })
+                                  + kCheckW + kAfterCheck),
                    // Nested rather than one call: juce::jmax takes at most four arguments, and
                    // the Library band made this list five long.
                    juce::jmax(juce::jmax(8 * kSourceBtnW + 7 * kGap,
                                          rowWidth({ kChainW, kMoodW, kStartW, kTempW, kLengthW }),
                                          rowWidth({ kLibMoodW, kLibGenreW, kLibFuncW, kLibResultW })),
                               rowWidth({ kPlrW, kPlrW, kPlrW }),
-                              kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW })));
+                              kTrayMinW + kGap + rowWidth({ kFillW, kRegenW, kClearW, kToPadsW })));
     // No action row of its own since 2026-08-01: the three buttons ride the tray's header, which
     // is the row that says they belong to it. The reference row is its own though, because what
     // is on it is a card rather than controls and a card wants the height.
@@ -149,12 +175,31 @@ juce::Point<int> ChordGenPanel::minWindowSize()
     return { c.x + 8, c.y + 38 + 8 };
 }
 
+juce::Point<int> ChordGenPanel::maxWindowSize()
+{
+    // **The window cannot be taller than its content** (2026-08-18, Owen: "window still too big").
+    // Every block in this layout has a size of its own and none of them absorbs slack any more,
+    // so a taller window buys literally nothing - it just spreads the same controls over more
+    // glass, or, while the diagram was the elastic one, drew a bar chart the height of a hand.
+    // A ceiling is the honest way to say that, and it clamps a session saved at the old size on
+    // the way in rather than waiting for the user to drag it back.
+    //
+    // The height is the floor plus what the tray's cards are allowed to grow by, which is the one
+    // block with a range rather than a single size. The width has no such ceiling: extra width
+    // goes to the seven source buttons and to the chord cards' own names, which do read better
+    // wider, so it stays free.
+    const auto m = minWindowSize();
+    return { 4000, m.y + ChordTray::rows * (kTrayRowMaxH - kTrayRowH) };
+}
+
 juce::Point<int> ChordGenPanel::defaultWindowSize()
 {
     // A little over the floor, so the first opening does not look like it is already jammed
     // against its own minimum.
     const auto m = minWindowSize();
-    return { m.x + 60, m.y + 40 };
+    // Clamped to the ceiling, so "a little over the floor" can never overshoot what the content
+    // can use - which on a layout this tight is a real possibility rather than a theoretical one.
+    return { m.x + 60, juce::jmin(m.y + 40, maxWindowSize().y) };
 }
 
 ChordGenPanel::ChordGenPanel(KeysProcessor& p, ChordGenMenu& g)
@@ -310,7 +355,13 @@ void ChordGenPanel::buildControls()
     clearButton.setTooltip("Empty the tray. Nothing is lost: a candidate is not on a pad until "
                            "you drag it onto one.");
     clearButton.onClick = [this] { tray.clear(); };
-    for (auto* b : { &fillButton, &regenButton, &clearButton })
+    toPadsButton.setButtonText("Send all to pads");
+    toPadsButton.setTitle("Send every tray card to the pads");
+    toPadsButton.setTooltip("Commit every candidate in the tray to the empty pads on this page, "
+                            "in order. Only empty pads are written, and any card that does not "
+                            "fit stays in the tray.");
+    toPadsButton.onClick = [this] { tray.sendAllToPads(); };
+    for (auto* b : { &fillButton, &regenButton, &clearButton, &toPadsButton })
         addAndMakeVisible(*b);
 
     // The generator's brain: the weighted pool above, or Octavium's Markov chains.
@@ -378,7 +429,8 @@ void ChordGenPanel::buildControls()
     addAndMakeVisible(majMinSlider);
     majMinAtt = std::make_unique<SliderAtt>(processor.apvts, "genMajMin", majMinSlider);
 
-    // The six tick boxes, in the order their settings appear.
+    // The six gates, in the order their settings appear. See the member declaration for why they
+    // are word chips rather than the tick boxes they were until 2026-08-18.
     {
         static const char* ids[] = { "genUseKey", "genUseMode", "genUseOctave",
                                      "genUseNotes", "genUseInversions", "genUseCompliance" };
@@ -386,14 +438,16 @@ void ChordGenPanel::buildControls()
                                       "scale compliance" };
         for (int i = 0; i < (int) useBoxes.size(); ++i)
         {
-            useBoxes[(size_t) i].setTitle(juce::String("Constrain ") + what[i]);
-            useBoxes[(size_t) i].setTooltip(juce::String("Ticked, generation obeys the ") + what[i]
-                                            + " beside this box. Unticked, the generator picks it "
-                                              "freely each time it generates.");
-            addAndMakeVisible(useBoxes[(size_t) i]);
-            useAtts[(size_t) i] = std::make_unique<ButtonAtt>(processor.apvts, ids[i],
-                                                              useBoxes[(size_t) i]);
+            auto& b = useBoxes[(size_t) i];
+            b.setClickingTogglesState(true);
+            b.setTitle(juce::String("Constrain ") + what[i]);
+            b.setTooltip(juce::String("SET: generation obeys the ") + what[i]
+                         + " beside this. ROLL: the generator picks it freely each time it "
+                           "generates.");
+            addAndMakeVisible(b);
+            useAtts[(size_t) i] = std::make_unique<ButtonAtt>(processor.apvts, ids[i], b);
         }
+        refreshGateChips();
     }
 
     // "Voice Leading" until 2026-08-01, when Owen said "I don't understand what the voice
@@ -633,10 +687,23 @@ void ChordGenPanel::buildControls()
     tray.onPageHasEmptyPad = [this] { return onPageHasEmptyPad ? onPageHasEmptyPad() : false; };
     addAndMakeVisible(tray);
 
-    pageLabel.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
-    pageLabel.setColour(juce::Label::textColourId, okstudio::theme::textDim);
-    pageLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(pageLabel);
+    // The page tabs. Bound straight to `padPage` rather than to a copy, so the Pads bar's own
+    // four buttons and these are one state and neither can drift; the timer below lights them.
+    for (int i = 0; i < KeysProcessor::numPadPages; ++i)
+    {
+        auto& b = pageButtons[(size_t) i];
+        b.setButtonText(juce::String(i + 1));
+        b.setTitle("Generator pad page " + juce::String(i + 1));
+        b.setTooltip("Which page of chord pads a committed card lands on. The same four pages as "
+                     "the buttons on the Pads bar.");
+        b.setClickingTogglesState(false); // the lit state is derived, below - never toggled here
+        b.onClick = [this, i]
+        {
+            if (auto* param = processor.apvts.getParameter("padPage"))
+                param->setValueNotifyingHost(param->convertTo0to1((float) i));
+        };
+        addAndMakeVisible(b);
+    }
 }
 
 // The two sets that share row B. They are laid into the *same* rect, so exactly one of them
@@ -836,9 +903,12 @@ void ChordGenPanel::adoptLibraryFilters()
 
 void ChordGenPanel::timerCallback()
 {
-    pageLabel.setText("Page " + juce::String(processor.padPage() + 1) + " of "
-                          + juce::String(KeysProcessor::numPadPages),
-                      juce::dontSendNotification);
+    refreshGateChips();
+
+    // Derived rather than toggled, the same rule refreshArpBarTabs follows: a click, the Pads
+    // bar's own buttons and a session load all agree because none of them writes the lit state.
+    for (int i = 0; i < KeysProcessor::numPadPages; ++i)
+        pageButtons[(size_t) i].setToggleState(processor.padPage() == i, juce::dontSendNotification);
 
     // Each action greys itself out when it would find nothing to do. These ask the tray now, not
     // the page: Fill wants a hole to write into, and Regen and Clear both want a candidate that
@@ -847,6 +917,18 @@ void ChordGenPanel::timerCallback()
     fillButton.setEnabled(tray.hasEmptyCells());
     regenButton.setEnabled(tray.hasFilledCells());
     clearButton.setEnabled(tray.hasFilledCells());
+    // It needs a card to send *and* a pad to send it to, so it greys on either being missing -
+    // the same "say so without a tooltip" rule the three beside it follow.
+    //
+    // Through `onPageHasEmptyPad`, deliberately, and not `gen.pageHasEmptyPads()`: the commit
+    // this button guards runs tray.sendAllToPads() -> onSendToFirstEmpty ->
+    // ChordPads::firstEmptyPadOnPage(), so asking the brain its own separate question was two
+    // answers to one question that agree only by coincidence. Sharpen either definition - what
+    // a locked pad counts as, a page-offset fix - and the button goes live while the commit
+    // refuses, or greys while pads are free. ChordTray.cpp:342 already routes the empty-cell
+    // menu through this same hook for exactly this reason.
+    const bool padRoom = onPageHasEmptyPad ? onPageHasEmptyPad() : gen.pageHasEmptyPads();
+    toPadsButton.setEnabled(tray.hasFilledCells() && padRoom);
 
     // All three reference actions need a reference. An empty slot greys them rather than hiding
     // them, so the row still says what the box is for while it is empty.
@@ -915,6 +997,15 @@ void ChordGenPanel::timerCallback()
         c->setEnabled(scaleAware);
 }
 
+// The gate chips say which state they are in, in words. Driven from the toggle state rather than
+// from the click, so a session load and a host automating one of the six land here too - and
+// cheap enough for the 10 Hz timer because setButtonText early-outs on an unchanged string.
+void ChordGenPanel::refreshGateChips()
+{
+    for (auto& b : useBoxes)
+        b.setButtonText(b.getToggleState() ? "SET" : "ROLL");
+}
+
 void ChordGenPanel::paint(juce::Graphics& g)
 {
     // A window of its own, so this is the whole surface rather than a card floating on the
@@ -936,7 +1027,15 @@ void ChordGenPanel::resized()
     auto top = area.removeFromTop(kHeaderH);
     title.setBounds(top.removeFromLeft(kTitleW));
     closeButton.setBounds(top.removeFromRight(kCloseW).withSizeKeepingCentre(kCloseW, kHeaderH));
-    pageLabel.setBounds(top.removeFromRight(kPageW));
+    top.removeFromRight(kGap);
+    {
+        auto tabs = top.removeFromRight(kPageW);
+        for (auto& b : pageButtons)
+        {
+            b.setBounds(tabs.removeFromLeft(kPageBtnW));
+            tabs.removeFromLeft(4);
+        }
+    }
     area.removeFromTop(kAfterHeader);
 
     const auto cell = [](juce::Rectangle<int>& row, int w, juce::Label& lab, juce::Component& ctl)
@@ -952,10 +1051,15 @@ void ChordGenPanel::resized()
     // A cell with its tick box: the box takes 34 px of full height at the left, then the caption
     // and control fill what is left. Only the six settings where "free" differs from "zero" have
     // one, which is why `cell` still exists beside this.
-    const auto checkCell = [&cell](juce::Rectangle<int>& row, int w, juce::ToggleButton& box,
+    // A gated cell: the chip takes its own 52 px column at full height, then a gap, then the
+    // caption and control fill what is left. The gap is what stops a chip reading as the leading
+    // edge of the control beside it - which, on the fixed row, put it in a run of four inversion
+    // ticks that mean something else entirely.
+    const auto checkCell = [&cell](juce::Rectangle<int>& row, int w, juce::TextButton& box,
                                    juce::Label& lab, juce::Component& ctl)
     {
-        box.setBounds(row.removeFromLeft(kCheckW));
+        box.setBounds(row.removeFromLeft(kCheckW).withSizeKeepingCentre(kCheckW, 34));
+        row.removeFromLeft(kAfterCheck);
         cell(row, w, lab, ctl);
     };
 
@@ -982,7 +1086,11 @@ void ChordGenPanel::resized()
     }
     area.removeFromTop(kAfterSourceRow);
 
-    // The diagram, directly under the buttons that choose what it draws.
+    // The diagram, directly under the buttons that choose what it draws, at its own height and no
+    // more. It absorbed the slack for one build on 2026-08-18 and that was worse than the problem
+    // it fixed: the bar chart grew to twice the size it needs to be read while the window stayed
+    // enormous. **Nothing here absorbs slack any more** - every block is at its own size, and the
+    // window is simply not allowed to be taller than the sum of them (see maxWindowSize).
     viz.setBounds(area.removeFromTop(SourceViz::preferredHeight()));
     area.removeFromTop(kAfterViz);
 
@@ -992,7 +1100,8 @@ void ChordGenPanel::resized()
     {
         auto row = area.removeFromTop(kFixedRowH);
         // Notes first: it is the one most often reached for, and it is the one that changed shape.
-        useBoxes[3].setBounds(row.removeFromLeft(kCheckW));
+        useBoxes[3].setBounds(row.removeFromLeft(kCheckW).withSizeKeepingCentre(kCheckW, 34));
+        row.removeFromLeft(kAfterCheck);
         {
             auto c = row.removeFromLeft(kNotesW);
             row.removeFromLeft(kGap);
@@ -1002,7 +1111,8 @@ void ChordGenPanel::resized()
             c.removeFromLeft(kGap);
             notesMaxSlider.setBounds(c.removeFromLeft(w));
         }
-        useBoxes[4].setBounds(row.removeFromLeft(kCheckW));
+        useBoxes[4].setBounds(row.removeFromLeft(kCheckW).withSizeKeepingCentre(kCheckW, 34));
+        row.removeFromLeft(kAfterCheck);
         {
             auto c = row.removeFromLeft(kInvW);
             row.removeFromLeft(kGap);
@@ -1126,7 +1236,13 @@ void ChordGenPanel::resized()
     action(clearButton, kClearW);
     action(regenButton, kRegenW);
     action(fillButton, kFillW);
+    action(toPadsButton, kToPadsW);
     trayLabel.setBounds(trayHeader);
-    tray.setBounds(area);
+    // Capped, so the sixteen disposable cards cannot grow past the size the pad strip draws them
+    // at. Anything left over is simply not used: with the window's own maximum height set to what
+    // this layout adds up to, there is never more than a pixel or two of it.
+    tray.setBounds(area.removeFromTop(
+        juce::jmin(area.getHeight(),
+                   ChordTray::rows * kTrayRowMaxH + (ChordTray::rows - 1) * kTrayGap)));
 }
 } // namespace keys

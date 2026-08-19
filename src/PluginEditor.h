@@ -279,7 +279,10 @@ private:
     // which is what they shape. See the wireRange lambda in the editor's constructor.
     RangeKnob strumKnob, humanKnob;
     juce::Label strumHead, humanHead;
-    std::unique_ptr<SliderAtt> chordStrumAtt, humanizeVelAtt;
+    // No attachments for the two pad range knobs: their face is the band's *centre* since
+    // 2026-08-19, which is not a parameter - see wireRange in the constructor, and
+    // syncPadRangeKnobs() for the pull half.
+    void syncPadRangeKnobs();
     // The strum direction's `< >` pair, which replaced its combo on 2026-08-03. The caption
     // beside them reads the live direction, so there is no third control saying it.
     juce::TextButton strumDirPrev { "<" }, strumDirNext { ">" };
@@ -353,6 +356,12 @@ private:
 
     // Chord-pad page navigation, riding the Pads bar.
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
+    // The strip's own Play switch, beside them (2026-08-19, Owen: "I want a toggle above the
+    // keyboard to play notes... when I'm trying to drag a cord into the arpeggiator, it plays
+    // instead, and it stops everything"). Off, a pad click makes no sound and the strip is
+    // drag-only; see LayoutState::padsPlayOnClick for the whole story. A plain toggle rather
+    // than a parameter: it is a UI mode, like Light keys, and it lives in the layout tree.
+    juce::ToggleButton padsPlayButton { "Play" };
 
     // The generator's two bulk actions, riding the Pads bar. They are the fast path into
     // generation, and they are on a bar because a bar is 34 px that already exists: a control
@@ -399,6 +408,12 @@ private:
     // StepComboBox.h), and that wiring went with it.
     juce::ComboBox genRootBox;
     std::unique_ptr<ComboAtt> genRootAtt;
+    // Mode, back on the bar beside the key (2026-08-18, Owen: "in the pad section, we also need
+    // a drop down for the second part of the key. We already have the letter, but we need the
+    // mode"). It sat here until 2026-08-02 and left with Scale Compliance; a key without its
+    // mode is half a key, and this is the pair you reach for between fills.
+    juce::ComboBox genModeBox;
+    std::unique_ptr<ComboAtt> genModeAtt;
 
     // Alive whenever the arp section is open, wherever that section currently is.
     std::unique_ptr<ArpPanel> arpPanel;
@@ -514,11 +529,13 @@ private:
     void refreshArpBarTabs();
     // A pad's chord into one line, whichever surface asked: a card dropped on that line's switch
     // on the bar, and the "Send to arp A / B" rows on a pad's own menu (2026-08-16). One method
-    // because the two must not drift - it prefers the panel while the arp section is open, since
-    // the panel is what also moves the aim to the line you named.
-    // `followAim` true for a drop, which aimed at the line; false for the pad menu's
-    // Send to arp A / B, which routes a chord and must leave the panel where it was.
-    void sendPadToArpLine(int padSlot, int line, bool followAim = true);
+    // because the two must not drift.
+    //
+    // It took a `followAim` flag until 2026-08-18, separating a drop (which had aimed at the
+    // line, so the aim could follow) from the menu row (which had not). Routing a chord now
+    // never navigates from either surface, so there is nothing left for the flag to choose
+    // between - see the note over the definition in PluginEditor.cpp.
+    void sendPadToArpLine(int padSlot, int line);
     void nudgeBpm(int delta);
     void nudgeOctave(int delta); // the Keyboard bar's < > pair beside the octave read-out
 

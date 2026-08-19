@@ -64,7 +64,7 @@ ChordTray::ChordTray(KeysProcessor& p, ChordGenMenu& g) : processor(p), gen(g)
 {
     okstudio::ui::makeMouseOnly(*this);
     setTitle("Chord audition tray");
-    cells.resize((size_t) numCells); // sixteen blanks, then fill() writes every one of them
+    cells.resize((size_t) numCells); // twelve blanks, then fill() writes every one of them
     fill();
 }
 
@@ -120,6 +120,26 @@ bool ChordTray::hasEmptyCells() const
 bool ChordTray::hasFilledCells() const
 {
     return std::any_of(cells.begin(), cells.end(), [](const auto& c) { return ! c.notes.empty(); });
+}
+
+int ChordTray::sendAllToPads()
+{
+    if (! onSendToFirstEmpty)
+        return 0;
+
+    int placed = 0;
+    for (auto& cell : cells)
+    {
+        if (cell.notes.empty())
+            continue;
+        if (! onSendToFirstEmpty(cell))
+            break; // the page is full; every later card would get the same answer
+        cell = {};  // committed, so it leaves a hole exactly as a drag does
+        ++placed;
+    }
+    if (placed > 0)
+        repaint();
+    return placed;
 }
 
 // The one place candidates are asked for, so Fill and Regen differ only in which cells they
