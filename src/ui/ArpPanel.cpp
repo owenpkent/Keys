@@ -106,8 +106,18 @@ namespace
         const long long rel = eng.uiRelStep.load(std::memory_order_relaxed);
         if (rel < 0)
             return -1;
+        // A lane that is switched off has no playhead, for the same reason a stopped line has
+        // none: laneValue returns the lane's default and never reads a cell, so lighting a
+        // column would show the engine reading something it did not look at - the one thing
+        // this function exists to prevent.
+        if (eng.lanes.on[(size_t) lane].load(std::memory_order_relaxed) == 0)
+            return -1;
+        // Mute walks the Note lane's shape (see ArpEngine::laneValue): it is that lane's
+        // companion, and the MUTE strip is drawn against the Note lane's cells. Reading its
+        // own shape here would light a different column than the engine reads.
+        const int shapeLane = lane == ArpEngine::laneMute ? (int) ArpEngine::laneNote : lane;
         return ArpEngine::laneStepIndex(rel, eng.uiOffset.load(std::memory_order_relaxed),
-                                        eng.lanes.shapeOf(lane));
+                                        eng.lanes.shapeOf(shapeLane));
     }
 } // namespace
 
@@ -316,15 +326,7 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
             }
         }
 
-        // Outside the loop window the cell is still drawn - it is still yours, and you can
-        // still edit it - but it is dimmed, because the difference between "a step you drew"
-        // and "a step that plays" is the whole point of having a window at all.
         const bool inLoop = i >= loopFrom && i <= loopTo;
-        if (! inLoop)
-        {
-            g.setColour(skin::bgBot.withAlpha(0.55f));
-            g.fillRect(cell);
-        }
 
         // A shape value is drawn as its contour, inside the marker's own column rather than in
         // the marker: the glyph needs vertical room to be a picture at all, and the marker is
@@ -356,6 +358,21 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
                 g.drawText(txt, (markerLane ? marker.expanded(0.0f, 2.0f) : cell).toNearestInt(),
                            juce::Justification::centred);
             }
+        }
+
+        // Outside the loop window the cell is still drawn - it is still yours, and you can
+        // still edit it - but it is dimmed, because the difference between "a step you drew"
+        // and "a step that plays" is the whole point of having a window at all.
+        //
+        // **Last, over everything the cell drew.** It ran before the marker's contour and the
+        // note name, which are painted at full alpha, so an excluded step came out with bright
+        // text and a bright glyph sitting on a dimmed background - reading as brighter than the
+        // steps that actually play, which is the opposite of what the dim is for, and looking
+        // like a rendering fault rather than a state.
+        if (! inLoop)
+        {
+            g.setColour(skin::bgBot.withAlpha(0.55f));
+            g.fillRect(cell);
         }
     }
 
@@ -545,10 +562,23 @@ void ArpPanel::LoopBar::moveNearestHandle(float x)
     if (grabbed < 0)
         grabbed = std::abs(step - from) <= std::abs(step - to) ? 0 : 1;
 
-    if (grabbed == 0)
-        lanes.loopFrom[li].store(juce::jmin(step, to), std::memory_order_relaxed);
-    else
-        lanes.loopTo[li].store(juce::jmax(step, from), std::memory_order_relaxed);
+    const int newFrom = grabbed == 0 ? juce::jmin(step, to) : from;
+    const int newTo   = grabbed == 0 ? to : juce::jmax(step, from);
+
+    // **Written to every lane when Link is on**, the way nudgeLength and cycleClockDiv already
+    // are. Link on means the lanes share one grid, and a window is part of which grid that is -
+    // enforceLinkedLengths copies the Note lane's window over all of them on the 10 Hz tick, so
+    // a drag on any other lane's bar was undone within 100 ms and 12 of the 13 tabbed lanes had
+    // a control that visibly did nothing. Link off is polymeter and is left alone, as ever.
+    const bool linked = processor.apvts.getRawParameterValue(
+                            owner.paramId(KeysProcessor::apLinkLanes))->load() > 0.5f;
+    const int lo = linked ? 0 : (int) li;
+    const int hi = linked ? ArpEngine::numLanes - 1 : (int) li;
+    for (int i = lo; i <= hi; ++i)
+    {
+        lanes.loopFrom[(size_t) i].store(newFrom, std::memory_order_relaxed);
+        lanes.loopTo[(size_t) i].store(newTo, std::memory_order_relaxed);
+    }
     repaint();
     if (auto* g = getParentComponent())
         g->repaint(); // the grid dims what the window leaves out
@@ -557,6 +587,12 @@ void ArpPanel::LoopBar::moveNearestHandle(float x)
 void ArpPanel::LoopBar::mouseDown(const juce::MouseEvent& e)
 {
     grabbed = -1;
+    // The press is the whole gesture's undo entry, the same rule LaneGrid and MuteRow follow -
+    // a drag along the bar would otherwise be one entry per step crossed. It has to push at
+    // all because loopFrom/loopTo ride the arp tree, so arpToTree() snapshots them: without an
+    // entry of its own, a window drag was silently reverted by the *next* Undo, which the user
+    // aimed at whatever they had drawn before it.
+    processor.pushUndo("Loop window", KeysProcessor::UndoScope::arp);
     moveNearestHandle(e.position.x);
 }
 
@@ -960,7 +996,13 @@ void ArpPanel::refreshLaneStrip()
     laneOnButton.setToggleState(on, juce::dontSendNotification);
     laneOnButton.setButtonText(on ? "On" : "Off");
 
+    // One entry per LaneDir, pinned to the enum. Every other name table in this file that
+    // shadows an enum carries the same assert (SlotCard::shapeNames, ArpEngine's shape names):
+    // the index below is clamped to numLaneDirs - 1, so appending a direction without adding a
+    // name here reads one past the end of this array and hands the result to setText.
     static const char* dirNames[] = { "Up", "Down", "Up alt", "Down alt" };
+    static_assert(std::size(dirNames) == (size_t) ArpEngine::numLaneDirs,
+                  "every LaneDir needs a name in dirNames");
     const int d = juce::jlimit(0, (int) ArpEngine::numLaneDirs - 1, lanes.dir[li].load(std::memory_order_relaxed));
     dirReadout.setText(dirNames[d], juce::dontSendNotification);
 
@@ -2829,7 +2871,7 @@ void ArpPanel::buildControls()
         "Play this step only on a condition: 0 always, 1 only if the step before it sounded, "
         "2 only if it did not. Chance says maybe; this says only if.");
     laneRows[(size_t) ArpEngine::laneReset].tab.setTooltip(
-        "Restart the shape's walk on this step, so it plays the first note of its shape again. "
+        "Restart the shape's walk on this step, so it plays the note the walk starts on again. "
         "Cthulhu's Position Reset. It restarts the walk, not the lanes - everything else keeps "
         "running, so a reset every other step keeps an Up shape on its first two notes.");
 
@@ -3361,7 +3403,14 @@ void ArpPanel::timerCallback()
     // lane existed loads that lane at ArpPattern's default 8 while its neighbours are at 16 or
     // 32, and the ARP section may well be folded when it lands - so gating this on being on
     // screen would leave the repair waiting for the user to open the panel.
-    refreshLaneReadouts();
+    //
+    // **The repair only, not the readout.** This was refreshLaneReadouts(), which also runs
+    // refreshLaneStrip() - a walk of all fourteen lanes across up to 32 cells each, plus button
+    // text, toggle states, the Dir readout and Paste enablement - for controls that are not on
+    // screen. That is exactly the per-tick cost the gate three lines below refuses to pay, and
+    // it was being paid above it. The readout runs under the gate now, with the rest of the
+    // display work.
+    enforceLinkedLengths();
 
     // Everything below here is display. The panel keeps existing while its section is folded
     // and while it sits in a closed detached window, and refreshing controls nobody can see
@@ -3375,10 +3424,9 @@ void ArpPanel::timerCallback()
     refreshRateMode(); // ... and arpRateFree, which decides what the dial is even measuring
     refreshTuplet();   // ... and arpTuplet, which has no attachment to hear it change
     refreshRetrig();
-    // No second refreshLaneReadouts() here: the one above the isShowing() gate already ran this
-    // tick, and having both meant enforceLinkedLengths walked all thirteen lanes twice and both
-    // readouts were written twice, per tick, in a pass whose whole point is removing per-tick
-    // cost.
+    // The readout and the lane strip, on screen only. Above the gate there is just the length
+    // repair, which is the one part of this that has to run while the panel is hidden.
+    refreshLaneReadouts();
     refreshPatternButtons();
     if (! patternMode())
         return; // nothing of the step editor is on screen to repaint

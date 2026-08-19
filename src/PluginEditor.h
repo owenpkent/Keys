@@ -519,10 +519,12 @@ private:
     void refreshArpBarTabs();
     // A pad's chord into one line, whichever surface asked: a card dropped on that line's switch
     // on the bar, and the "Send to arp A / B" rows on a pad's own menu (2026-08-16). One method
-    // because the two must not drift - it prefers the panel while the arp section is open, since
-    // the panel is what also moves the aim to the line you named.
-    // `followAim` true for a drop, which aimed at the line; false for the pad menu's
-    // Send to arp A / B, which routes a chord and must leave the panel where it was.
+    // because the two must not drift.
+    //
+    // It took a `followAim` flag until 2026-08-18, separating a drop (which had aimed at the
+    // line, so the aim could follow) from the menu row (which had not). Routing a chord now
+    // never navigates from either surface, so there is nothing left for the flag to choose
+    // between - see the note over the definition in PluginEditor.cpp.
     void sendPadToArpLine(int padSlot, int line);
     void nudgeBpm(int delta);
     void nudgeOctave(int delta); // the Keyboard bar's < > pair beside the octave read-out

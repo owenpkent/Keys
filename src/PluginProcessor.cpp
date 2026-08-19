@@ -1916,11 +1916,19 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // ringing has to be closed on the channel it started on. Flushed and merged under the
         // *old* channel before lastChannel moves, because restamping this line's whole output
         // with the new one would send those note-offs somewhere the notes never sounded.
+        //
+        // Into `arpMerged`, never straight into `midi`: every note-on this line emitted was
+        // counted by `arpOut`, so its note-offs have to be counted back down by the same
+        // refcounts. Writing them past the merge left `held[ch][note]` stuck above zero for
+        // good, and a count that never returns to 0 suppresses the *real* note-off of every
+        // later hit on that pitch - a note hung on the instrument for the rest of the session.
+        // The flush emits at sample 0, and MidiBuffer keeps its events in sample order, so
+        // these still close ahead of anything this block goes on to play.
         if (channel != l.lastChannel)
         {
             l.engine.flushInto(l.out);
             watchArpNotes(l.out);
-            mergeArpOut(midi, l.out, l.lastChannel);
+            mergeArpOut(arpMerged, l.out, l.lastChannel);
             l.out.clear();
             l.lastChannel = channel;
         }
@@ -1982,7 +1990,6 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.humanVel = (int) arpParam(n, apHumanVel);
         ap.octShift = (int) arpParam(n, apOctShift);
         ap.volume = (int) arpParam(n, apVolume);
-        ap.velTrim = (int) arpParam(n, apVelTrim); // registered for saved sessions; read by nothing
         ap.velLevel = (int) arpParam(n, apVelLevel);
         ap.chords = &l.chordTable; // what the Chord lane calls up, this line's slots
 
@@ -3067,6 +3074,16 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
+
+    // **A restore is not a move, so the Key/Mode mirror must not fire off one.** replaceState
+    // pushes genRoot and genMode through parameterChanged like any other write, which raised
+    // the pending flag and had the next heartbeat mirror them onto `root` and `scale` - over
+    // the values this very session had just restored. Root and Scale are still ordinary
+    // parameters you can set on the Controls bar after choosing a generator key, so that
+    // silently threw away a saved keybed setting on every single load, and pushed two
+    // gesture-less parameter writes at the host ~20 ms in for good measure. The mirror is
+    // for the user turning the generator's Key or Mode; dropped here, it stays that.
+    pendingGenKeyMirror.set(0);
 }
 
 void KeysProcessor::migrateStrumRange(const juce::ValueTree& root)
@@ -3241,17 +3258,22 @@ void KeysProcessor::migrateVelLevel(const juce::ValueTree& root)
         const auto levelId = arpParamId(line, apVelLevel);
         const auto trimId = arpParamId(line, apVelTrim);
         bool sawLevel = false;
-        double savedTrim = 0.0; // the parameter's default: "as played"
         for (int i = 0; i < params.getNumChildren(); ++i)
-        {
-            const auto child = params.getChild(i);
-            const auto id = child.getProperty("id").toString();
-            sawLevel = sawLevel || id == levelId;
-            if (id == trimId)
-                savedTrim = (double) child.getProperty("value", 0.0);
-        }
+            sawLevel = sawLevel || params.getChild(i).getProperty("id").toString() == levelId;
         if (sawLevel)
             continue;
+
+        // **The trim is read live, not out of the tree, and the order is why.** migrateVelTrim
+        // runs immediately before this one and, for a session old enough to predate VelTrim
+        // too, *synthesises* the trim from that session's Volume and writes it to the live
+        // parameter - it never goes back into the saved tree. Scanning the tree here therefore
+        // saw no trim child on exactly the oldest sessions, fell back to the 0 default, and
+        // handed them "as played" instead of the level they were saved at, which is the one
+        // thing this chain of migrations exists to preserve. replaceState has already pushed
+        // the tree's own value into the parameter by now, so a live read answers both cases.
+        double savedTrim = 0.0; // the parameter's default: "as played"
+        if (auto* trim = apvts.getRawParameterValue(trimId))
+            savedTrim = (double) trim->load();
 
         if (auto* param = apvts.getParameter(levelId))
         {

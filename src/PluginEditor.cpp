@@ -882,7 +882,8 @@ KeysEditor::KeysEditor(KeysProcessor& p)
 
     chordPads.onExtraMenuItems = [this](int slot, juce::PopupMenu& m) { chordGen.addPadMenuItems(slot, m); };
     chordPads.onExtraMenuChoice = [this](int slot, int id) { chordGen.handlePadMenuChoice(slot, id); };
-    // followAim false: this is the menu row, which routes a chord and must not navigate.
+    // Routes a chord and does not navigate, which is now true of every caller - see the note
+    // over sendPadToArpLine's definition for why the followAim flag went.
     chordPads.onSendToArpLine = [this](int slot, int line)
     { sendPadToArpLine(slot, line); };
 
@@ -1375,6 +1376,16 @@ void KeysEditor::refreshArpPanel()
     arpHolder.addAndMakeVisible(*arpPanel);
     arpPanel->sendLookAndFeelChange();
     layoutArpHolder();
+
+    // **Report the shape once, now the hooks exist.** ArpPanel's constructor calls
+    // refreshShape(), and that is where "lastPatternMode starts at -1 makes the first call
+    // report" was supposed to open a session saved in Pattern shape with Draw already live -
+    // but the constructor runs before the line above assigns onShapeChanged, so that first
+    // report went into a null std::function every time. It looks like it works only because
+    // syncSectionControls() happens to call refreshArpBarTabs() after us; that is an
+    // incidental rescue, not a contract, and the day it moves the tab greys with nothing on
+    // screen to say why.
+    refreshArpBarTabs();
 }
 
 void KeysEditor::refreshInstrumentChip()
@@ -1747,11 +1758,17 @@ int KeysEditor::minWidthForView() const
     // contentArea() (the window less 20 of margin, less the 92 px fold zone and the 8 px each
     // side of it):
     //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 10,
-    //             Compliance 74, 6, Mode 148, 6, Key 58                        = 644
+    //             Mode 124, 4, Key 58                                          = 538
     //     left    four pages at 46 + 4, 14                                     = 214
-    //                                                                    total = 858
-    // 1070 hands it 942, so the bar fits with 84 px of caption zone left over when the section
-    // is docked.
+    //                                                                    total = 752
+    // 1070 hands it 942, so the bar fits with 190 px of caption zone left over when the
+    // section is docked.
+    //
+    // Re-measured 2026-08-19. It had read 644 / 858 / 84 px, itemising a Compliance chip at 74
+    // and a Mode combo at 148 that both left this bar on 2026-08-02, while never accounting for
+    // the 124 px Mode combo that came back. Two revisions of drift in the one comment the next
+    // control added here would have been sized against - the "measure, do not assume" rule this
+    // file states, broken by this file. The floor itself never moved: Controls wants 1320.
     //
     // The Controls bar, measured off the running app rather than assumed (Owen's window is
     // 1072 px, essentially the old 1070 floor): at that width, after Detach 104 and Theme's
