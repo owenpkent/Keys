@@ -69,11 +69,22 @@ namespace
     //     four bars          4 * SectionBar::height (34)     =  136
     //     three gaps         3 * 6                           =   18
     //     Controls           4 + headerH 52 + 6 + 110        =  172
-    //     Arp                4 + ArpPanel::preferredHeight() =  584   (arpPatternH 564 + 16)
+    //     Arp                4 + ArpPanel::preferredHeight() =  698   (arpMacroTotalH 682 + 16)
     //     Pads               4 + padRowH                     =  100
     //     Keyboard           4 + dockedKeybedH               =  193
     //                                                          ----
-    //                                                          1223
+    //                                                          1341
+    //
+    // **Re-measured 2026-08-19, and the tallest view is now the macro one.** Four lines in a
+    // 2x2 grid is two card rows where it was one, and the harmony strip made each card taller
+    // again, so ArpPanel::preferredHeight() in the macro view overtook Pattern shape's 584.
+    // This is not academic: applyLayout() passes idealHeight() in as the resize *minimum*, and
+    // the macro view is the default, so this number is the shortest Keys can be with everything
+    // open. It fits a 1440p work area (1392) with room to spare and does **not** fit a 1080p one
+    // (about 1040), where the keybed - laid out last, so it absorbs every missing pixel - would
+    // lose the difference off the bottom with nothing on screen to say why. Owen's own machine
+    // is 1440p and this was his layout call; a shorter screen needs the arp section folded, or
+    // the macro view given a viewport, which is a design change and not a number.
     // It was 1283 with the Controls band's second row still in it, and 1473 before that while
     // Big cards existed and the Pads line could read 290. 1800 leaves room for the arp to grow
     // a lane row or two without this becoming a bug again, and the slack above idealHeight()
@@ -1089,9 +1100,22 @@ void KeysEditor::syncPadRangeKnobs()
             return;
         const double lo = (double) processor.apvts.getRawParameterValue(loId)->load();
         const double hi = (double) processor.apvts.getRawParameterValue(hiId)->load();
-        if (std::abs(lo - rk.rangeLo()) < 0.5 && std::abs(hi - rk.rangeHi()) < 0.5)
+        // **The derived ends are compared rounded, because that is the form they are stored in.**
+        // Still the ends and not the raw span, which is what preserves a latent span a rail is
+        // holding back (reach() clamps to the nearer rail, so the knob can carry more span than
+        // the pair records, and pushing the pair back unconditionally would erase it).
+        //
+        // What changed is the rounding. The face snaps to whole units - setRange's 1.0 interval
+        // - while the span stays continuous, so a halo drag storing centre +/- a fractional
+        // reach into two integer parameters leaves the derived ends exactly 0.5 away from the
+        // stored pair. `std::abs(...) < 0.5` can never be satisfied by exactly 0.5, so this
+        // re-pulled and repainted both knobs on every editor tick for the rest of the session,
+        // with the readout permanently half a unit off the parameters it exists to mirror.
+        // Comparing what the ends round to asks the question the parameters can actually answer.
+        const auto rounded = [](double v) { return std::floor(v + 0.5); };
+        if (rounded(rk.rangeLo()) == rounded(lo) && rounded(rk.rangeHi()) == rounded(hi))
             return;
-        rk.face().setValue((lo + hi) * 0.5, juce::dontSendNotification);
+        rk.face().setValue(rounded((lo + hi) * 0.5), juce::dontSendNotification);
         rk.setSpan((hi - lo) * 0.5);
         rk.refresh();
     };
@@ -1759,10 +1783,11 @@ int KeysEditor::minWidthForView() const
     // side of it):
     //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 10,
     //             Mode 124, 4, Key 58                                          = 538
-    //     left    four pages at 46 + 4, 14                                     = 214
-    //                                                                    total = 752
-    // 1070 hands it 942, so the bar fits with 190 px of caption zone left over when the
-    // section is docked.
+    //     left    four pages at 46 + 4, 10, Play 64, 14                       = 288
+    //                                                                    total = 826
+    // 1070 hands it 942, so the bar fits with 116 px of caption zone left over when the
+    // section is docked. The Play toggle (2026-08-19) is the 74 px that took the left group
+    // from 214 to 288.
     //
     // Re-measured 2026-08-19. It had read 644 / 858 / 84 px, itemising a Compliance chip at 74
     // and a Mode combo at 148 that both left this bar on 2026-08-02, while never accounting for
@@ -2366,6 +2391,17 @@ void KeysEditor::timerCallback()
     refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
 
     syncPadRangeKnobs(); // cheap: early-outs unless the stored pair changed under the knob
+
+    // **The layout toggles, which no attachment drives.** These read `LayoutState` rather than
+    // a parameter, so nothing pushed a session's saved value back into them: load a set saved
+    // with Play off and the button still showed ticked, while ChordPads::mouseDown read the
+    // *field* and made the strip drag-only. Worse, the first click then wrote the button's
+    // stale state back over the loaded value, so the control did the opposite of what its face
+    // said. Pulled on the timer, the way the range knobs above are, because a state restore has
+    // no hook of its own to hang this on. setToggleState with dontSendNotification is a no-op
+    // when it already agrees, so this costs nothing on the ticks where nothing changed.
+    padsPlayButton.setToggleState(processor.layout.padsPlayOnClick, juce::dontSendNotification);
+    arpLightsButton.setToggleState(processor.layout.arpLights, juce::dontSendNotification);
 
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());

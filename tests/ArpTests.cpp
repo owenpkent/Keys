@@ -2809,6 +2809,51 @@ public:
                            "a clamped voice either lands clamped or not at all");
         }
 
+        beginTest("Two harmony voices at the same interval cannot hang a note");
+        {
+            // The regression: a duplicate {note, channel} inside one step is not a doubled
+            // attack, it is a hung note. Both hits land at the same offset, so the second goes
+            // down emitHit's tie branch and writes a note-off at `on - 1` - before the first
+            // one's note-on. Downstream that leaves ArpMerge's refcount pinned above zero and
+            // the pitch is never released. Every note-on a step emits must have its own
+            // note-off, and no pitch may be opened twice in one step.
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 7; // both voices on the same interval
+            mp.harmSemis[1] = 7;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+
+            // Walk the stream in order and count owners per pitch, the way ArpMerge does.
+            std::array<int, 128> refs {};
+            int maxRefs = 0;
+            for (auto& ev : collect(out))
+            {
+                if (ev.on)
+                {
+                    ++refs[(size_t) ev.note];
+                    maxRefs = juce::jmax(maxRefs, refs[(size_t) ev.note]);
+                }
+                else if (refs[(size_t) ev.note] > 0)
+                {
+                    --refs[(size_t) ev.note];
+                }
+            }
+            expectEquals(maxRefs, 1, "no pitch is ever opened twice over");
+
+            // Whatever is still open at the end is what the line is holding, and the engine
+            // must be able to let go of all of it.
+            juce::MidiBuffer flushed;
+            e.flushInto(flushed);
+            for (auto& ev : collect(flushed))
+                if (! ev.on && refs[(size_t) ev.note] > 0)
+                    --refs[(size_t) ev.note];
+            for (int n = 0; n < 128; ++n)
+                expectEquals(refs[(size_t) n], 0, "every note-on is released");
+        }
+
         // --- Per-step shapes, the fingered pair, and the Reset lane (2026-08-18) ----------
 
         beginTest("a Note lane step can name its own shape, and they share one walk");

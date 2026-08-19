@@ -469,8 +469,25 @@ private:
         const auto full = spanMax();
         if (full <= 0.0 || wheel.deltaY == 0.0f)
             return;
-        const double wanted = juce::jlimit(0.0, full,
-                                           span + (wheel.deltaY > 0 ? 1.0 : -1.0) * full * 0.05);
+
+        // **Scaled by the delta, and reversed when the OS says so.** This used to test only the
+        // sign and apply a flat twentieth of the sweep per event, which is right for a notched
+        // wheel and wrong for every smooth one: a precision touchpad, a tilt wheel or a
+        // free-spinning mouse emits dozens of sub-notch events per physical gesture, so one
+        // flick slammed the span from nothing to full and wrote a begin/endChangeGesture pair
+        // into the host for each event on the way. A notch reports |deltaY| of about 1, so
+        // multiplying keeps the notched feel identical and makes a tenth of a notch a tenth of
+        // a step. `isReversed` is the OS's natural-scrolling flag, which JUCE reports rather
+        // than applies - without it the tooltip's "up is more" is a lie on that setting.
+        double dy = (double) wheel.deltaY;
+        if (wheel.isReversed)
+            dy = -dy;
+        // A smooth device can report a great deal in one event when it is flung; a notch is the
+        // most one event may be worth, so a fling is fast rather than instantaneous.
+        const double notches = juce::jlimit(-1.0, 1.0, dy);
+        const double wanted = juce::jlimit(0.0, full, span + notches * full * 0.05);
+        if (std::abs(wanted - span) < 1.0e-9)
+            return; // already at the rail: no gesture, no automation write
         if (onSpanDragStart)
             onSpanDragStart();
         applySpan(wanted);

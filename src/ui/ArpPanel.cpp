@@ -41,9 +41,16 @@ namespace
     // logged twice already. Height is the cheap axis in this view.
     constexpr int arpRingPx = 8;
     constexpr int arpMacroKnobLine = arpMacroLine + 2 * arpRingPx;
-    // The harmony area's dropdown row (2026-08-19, second pass): a 26 px combo centred in it.
+    // The harmony area's dropdown row (2026-08-19, second pass): a 34 px combo centred in it.
     // Its chance knob sits below it at arpMacroLine, one column per voice.
-    constexpr int arpMacroHarmCombo = 30;
+    //
+    // 34, not the 26 it shipped at for a few hours. CLAUDE.md's floor is an invariant and names
+    // no exceptions ("a check box, a stepper's -/+ pair and a caption-row button are targets
+    // exactly as a TextButton is"), and this is a brand-new target on a card whose height budget
+    // was being rewritten in the same stroke, so the eight pixels were there for the asking. It
+    // is also the only route to the two-column interval popup, so a missed click here is a
+    // missed feature rather than a cosmetic annoyance.
+    constexpr int arpMacroHarmCombo = 38;
 
     // Show or hide a whole group of controls in one line. The parameter type is what makes it
     // work: a braced list of mixed component types cannot deduce its own element type, but it
@@ -1710,9 +1717,18 @@ void ArpPanel::MacroRow::HarmonyBox::showPopup()
         const auto text = getItemText(i);
         if (i > 0 && text.startsWith("+") && ! getItemText(i - 1).startsWith("+"))
             menu.addColumnBreak();
-        menu.addItem(getItemId(i), text, true, getItemId(i) == getSelectedId());
+        // isItemEnabled(i), never a hard-coded true: this is a ComboBox, and setItemEnabled is
+        // the ordinary way to grey a row (an interval the current mode cannot express, say).
+        // Overriding showPopup means every ComboBox API has to keep working through it, and a
+        // disabled row that stayed pickable would be a silent lie one call away.
+        menu.addItem(getItemId(i), text, isItemEnabled(i), getItemId(i) == getSelectedId());
     }
+    // The standard item height JUCE's own ComboBox::showPopup passes, so the popup's geometry
+    // tracks the box it belongs to rather than falling through to whatever the LookAndFeel
+    // happens to answer. Those agree today at the 34 px mouse-only height; this keeps them
+    // agreeing if either moves.
     menu.showMenuAsync(juce::PopupMenu::Options()
+                           .withStandardItemHeight(juce::jmax(34, getHeight()))
                            .withTargetComponent(this)
                            .withItemThatMustBeVisible(getSelectedId())
                            .withMinimumWidth(getWidth()),
@@ -2465,7 +2481,7 @@ void ArpPanel::MacroRow::resized()
                 harmKnobs.removeFromLeft(gap);
             }
             auto& box = harmBoxes[(size_t) s];
-            box.setBounds(comboCell.withSizeKeepingCentre(comboCell.getWidth(), 26));
+            box.setBounds(comboCell.withSizeKeepingCentre(comboCell.getWidth(), 34));
             auto& knob = harmChanceKnobs[(size_t) s];
             knob.setBounds(knobCol.withSizeKeepingCentre(52, knobCol.getHeight()));
             harmLabels[(size_t) (s * 2)].setBounds(box.getX(), harmHeads.getY(),

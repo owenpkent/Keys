@@ -1274,6 +1274,12 @@ private:
         // The chromatic share of the strays: none at 75, all of them at 100.
         if (amt > 75 && (int) ((h >> 7) % 100u) < (amt - 75) * 4)
             return juce::jlimit(0, 127, note + dir * (1 + (int) ((h >> 9) % 3u)));
+        // In scale, which is the middle zone's whole meaning - and note that with Scale set to
+        // **Chromatic** the mask is every pitch class, so "a scale degree or two" *is* one or
+        // two semitones and the middle zone reads as the chromatic one. That is the setting
+        // being honest rather than the zone leaking: there is no non-chromatic answer to
+        // "stay in the chromatic scale". The three zones are three zones under any scale that
+        // actually excludes something, which is every other entry in the list.
         return shiftByDegrees(note, dir * (1 + (int) ((h >> 9) % 2u)), p.scaleMask, p.rootPc);
     }
 
@@ -1632,10 +1638,29 @@ private:
         Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 3];
         int hitCount = 0;
         const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
+        // **One hit per pitch per channel per step, and that is a hard rule, not tidiness.**
+        // Two identical hits in one step are not a doubled note - they are a hung one. Both
+        // land at the same sample offset, so the second goes down emitHit's tie branch: it
+        // writes a note-off at `on - 1`, *before* the first one's note-on at `on`, and drops
+        // the first from active[]. MidiBuffer sorts by sample position, so ArpMerge then sees
+        // off, on, on and only one parked off - the refcount climbs to 2, the real note-off
+        // takes it to 1 rather than 0 and is suppressed, and the pitch is never released. It
+        // stays pinned above zero for the rest of the session, so every later hit on that
+        // pitch hangs too.
+        //
+        // Reachable without trying: set both harmony voices to the same interval, or give a
+        // chord-lane triad a + Perfect 5th voice, and C's fifth is the G already in the step.
+        // The harmony loop's own guard only ever caught a copy that clamped onto *its own*
+        // source. Deduping here covers every route into hits[] at once, which is where a rule
+        // about the whole step belongs.
         const auto addHit = [&](int note, float vel, int chan)
         {
+            const int n = juce::jlimit(0, 127, note);
+            for (int i = 0; i < hitCount; ++i)
+                if (hits[i].note == n && hits[i].chan == chan)
+                    return;
             if (hitCount < (int) (sizeof(hits) / sizeof(hits[0])))
-                hits[hitCount++] = { juce::jlimit(0, 127, note), vel, chan };
+                hits[hitCount++] = { n, vel, chan };
         };
         const auto place = [&](int note)
         {
