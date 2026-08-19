@@ -795,7 +795,16 @@ void ChordGenPanel::timerCallback()
     clearButton.setEnabled(tray.hasFilledCells());
     // It needs a card to send *and* a pad to send it to, so it greys on either being missing -
     // the same "say so without a tooltip" rule the three beside it follow.
-    toPadsButton.setEnabled(tray.hasFilledCells() && gen.pageHasEmptyPads());
+    //
+    // Through `onPageHasEmptyPad`, deliberately, and not `gen.pageHasEmptyPads()`: the commit
+    // this button guards runs tray.sendAllToPads() -> onSendToFirstEmpty ->
+    // ChordPads::firstEmptyPadOnPage(), so asking the brain its own separate question was two
+    // answers to one question that agree only by coincidence. Sharpen either definition - what
+    // a locked pad counts as, a page-offset fix - and the button goes live while the commit
+    // refuses, or greys while pads are free. ChordTray.cpp:342 already routes the empty-cell
+    // menu through this same hook for exactly this reason.
+    const bool padRoom = onPageHasEmptyPad ? onPageHasEmptyPad() : gen.pageHasEmptyPads();
+    toPadsButton.setEnabled(tray.hasFilledCells() && padRoom);
 
     // All three reference actions need a reference. An empty slot greys them rather than hiding
     // them, so the row still says what the box is for while it is empty.
