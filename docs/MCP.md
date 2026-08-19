@@ -74,6 +74,27 @@ the top of the band it plays at, whatever velocity the chord arrived with, and 0
 and `arpHumanVel` (0..127, how far under that level a hit may fall - the velocity half of
 Humanize, in the same units; `arpHumanize` is the timing half alone since 2026-08-02).
 
+Two more arrived on 2026-08-18, both defaulting to 0, which is the engine exactly as it was:
+`arpMutate` (0..100 - how far the line explores *other notes of the chord it is holding*; it can
+never reach a note that chord does not contain) and `arpMutateLock` (0..100 - how long it keeps
+what it finds: 0 redraws the variation every pass, 100 locks the first one for good). They took
+the CHANCE knob's place on the macro cards; `arpChance` itself is unchanged and still there.
+
+**A lane's shape is not a parameter and `set_params` cannot reach it.** Length, clock divider,
+on/off, loop window and direction are lane data in the arp tree - use `get_arp_pattern` and
+`set_arp_pattern`. Alongside `lengths` and `clockDivs`, those two now carry `on` (true/false),
+`loopFrom` / `reset` joined the lane list on 2026-08-18 (1 restarts the shape's walk on that step) and the
+`note` lane's range grew with it: -1 rests, 0 follows the line's Shape, 1..8 are fixed chord
+entries, 9..12 are Prev/Hi/Low/Random, and **13..20 are per-step shapes** (up, down, up/down,
+down/up, up & down, down & up, fingered bottom, fingered top, in that order). A script writing a
+note lane may now use any of them.
+
+`loopTo` (0-based and inclusive; `loopTo` past the lane's end means its end, and is
+reported clamped to the length so a captured window reads as the window you see) and `dir`
+(0 Up, 1 Down, 2 Up alt, 3 Down alt - the alt pair goes out and back without playing the turning
+points twice). All four are optional maps of lane name to value, and all four read back as the
+old behaviour when absent, so a pattern captured by an older script still applies cleanly.
+
 **Two retired velocity ids are still registered and read by nothing**: `arpVolume`, which
 `arpVelTrim` replaced on 2026-08-02, and `arpVelTrim` itself, which `arpVelLevel` replaced on
 2026-08-18 when Vel stopped being a bipolar percentage trim around "as played" and became MIDI
@@ -159,6 +180,39 @@ One `keys-mcp` shim serves Keys and Keys Host alike: it has no product filter. I
 the shim connects to whichever advertised itself most recently; pass `--port=N` to
 pin it to a specific instance's port instead (read the port from that instance's
 discovery file if you need to find it).
+
+## Restarting Keys does not break the bridge (2026-08-18)
+
+**This is the one thing to know about the shim.** Claude Code launches `keys-mcp` once,
+at the start of a session, and keeps that one process for hours. `run.py` closes and
+relaunches Keys on every build, and the in-plugin server takes a **new OS-assigned port
+each time**. So the socket underneath the shim dies constantly, and the shim has to
+survive it.
+
+It does now. A tool call arriving while it is disconnected re-reads the discovery
+directory and connects to whatever is running at that moment - the reconnect costs
+milliseconds and needs no handshake, because the server is stateless per request.
+
+**Before this it hung.** The shim connected once and then wrote into a dead socket
+forever, so a tool call got *no response at all* and the client sat on its idle timeout
+ - 30 minutes of looking exactly like a slow tool. If you ever see that again, it is not
+the plugin: check `%APPDATA%\OK Studio\mcp` for the live instance's port and talk to it
+directly to tell the two apart.
+
+Three more failure modes are closed with it, all of which used to be silence:
+
+- **Nothing running at all** - a call answers with a JSON-RPC error saying so, rather
+  than hanging. The shim also no longer exits when it finds no instance at startup; it
+  serves errors and connects when Keys appears, since the client only ever launches it
+  once and an exit would leave the session with no tools.
+- **A call in flight when Keys closes** - answered with an error. A write into a socket
+  whose peer has already gone can succeed, so "it sent" never meant "a reply is coming".
+- **Keys alive but wedged** - a blocked message thread answers nothing while its socket
+  stays open, so a watchdog answers after `--timeout-ms` (default 30 s). Every tool
+  handler runs on the message thread, so this is a real case, not a theoretical one.
+
+The fix is in the kit (`src/McpShimMain.cpp`), so every OK Studio plugin with a shim gets
+it; `tests/mcp_shim_reconnect.py` there pins all five cases and runs under ctest.
 
 ## Security
 

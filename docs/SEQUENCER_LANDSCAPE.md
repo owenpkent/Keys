@@ -44,7 +44,9 @@ built on it.
 
 ## The taxonomy
 
-Twelve archetypes. Keys is already six of them.
+Twelve archetypes. Keys was six of them when this was written on 2026-08-17 and is
+seven now: the shift register was built on 2026-08-18, and section 6 below is the record of
+what it became.
 
 | Archetype | Keys today |
 | --- | --- |
@@ -55,13 +57,13 @@ Twelve archetypes. Keys is already six of them.
 | Conditional trigger | **Partly.** `laneChain` is Elektron's PRE and PRE-not, and nothing else |
 | Chord memory per step | **Yes.** The Chord lane over the twelve slots |
 | Monophonic pitch sequencer | **No.** Spec'd in `docs/ACID_DESIGN.md`, unbuilt |
-| Shift register | **No.** |
-| Offline transform over a selection | **No.** Select exists; only Roll and Reset aim at it |
+| Shift register / randomness that hardens | **Yes**, as of 2026-08-18: MUTATE x LOCK |
+| Offline transform over a selection | **Partly.** Roll, Reset, Copy and Paste aim at Select (2026-08-18); Hapax's Flip and Curve do not exist |
 | Accumulator | **No.** Every lane is a fixed value the playhead reads |
 | Knob-driven generation | **No.** Keys generates *chords* this way, never *parts* |
 | Non-linear playback order | **No.** Shape walks a line, never a grid |
 
-The last six are the map. What follows is each one, grounded in the manual, with what it would
+The rest are the map. What follows is each one, grounded in the manual, with what it would
 cost here.
 
 ---
@@ -216,12 +218,23 @@ direction or another, not one that you can program precisely."* One knob does al
 - **3 or 9 o'clock:** *"slipping; looping but occasionally changing notes."*
 - **7 o'clock:** *"double locks into a repeating sequence twice as long as the 'length' setting."*
 
-That middle setting is the whole reason the module is famous, and it is the thing none of Keys'
-four randomnesses can do. Roll rerolls once and stops. Drift wanders and never settles. Rand is
-per-step. **Nothing in Keys wanders and then hardens.**
+That middle setting is the whole reason the module is famous, and it was the thing none of Keys'
+four randomnesses could do. Roll rerolls once and stops. Drift wanders and never settles. Rand is
+per-step. Nothing in Keys wandered and then hardened.
 
-**Cost:** the smallest on this page. A ring buffer of values the length of the lane, one
-probability knob deciding whether the value recycles or is replaced, and it feeds the Note lane.
+**Built 2026-08-18 as MUTATE x LOCK**, and this is the first thing on this page to move, so it is
+worth saying what changed on the way. It is not a ring buffer. A register carried between blocks
+would have been the second thing in `ArpEngine` that is not stateless from the playhead - the
+first, `laneChain`, remembers one bit and self-corrects within a step, and that is documented as
+the cheapest possible break of the rule rather than an invitation. So the variation is a **hash of
+(step, era)** instead: LOCK stretches an era, and at its top there is one era for good. Same three
+positions the knob above describes - random at the bottom, slipping in the middle, locked at the
+top - with a transport jump landing on the variation it would have walked to, which a register
+cannot promise.
+
+The other departure: it does **not** feed the Note lane. The module's randomness is voltage and can
+land anywhere; Keys' has to answer to a held chord, so MUTATE moves the run to another entry of the
+sequence built from that chord and can never leave it. The 7 o'clock "double lock" is not built.
 
 ## 7. Non-linear playback order (René)
 

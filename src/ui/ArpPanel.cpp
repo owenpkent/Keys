@@ -61,6 +61,63 @@ ArpPanel::LaneGrid::LaneGrid(KeysProcessor& p, ArpPanel& o, ArpEngine::Lane l, i
     okstudio::ui::makeMouseOnly(*this);
 }
 
+namespace
+{
+    // The cell a lane is reading right now, or -1 when the line is not running. The engine
+    // publishes the step index it last read a lane by; the arithmetic that turns that into a
+    // cell is the engine's own (ArpEngine::laneStepIndex), called here rather than copied, so
+    // a playhead cannot light a cell the engine did not look at.
+    // Cthulhu draws each per-step shape as a little contour of dashes rather than a word (its
+    // manual p24), and that is most of why its Note graph reads at a glance: the picture of an
+    // arpeggio going up *is* the instruction. Six dashes at these heights, 0 at the bottom.
+    // The pairs that differ only in whether the extremes repeat are drawn so you can see which
+    // is which - Up-Down turns at a single apex, Up & Down sits on its apex for two dashes.
+    const float shapeGlyphs[8][6] = {
+        { 0.00f, 0.20f, 0.40f, 0.60f, 0.80f, 1.00f }, // up
+        { 1.00f, 0.80f, 0.60f, 0.40f, 0.20f, 0.00f }, // down
+        { 0.00f, 0.50f, 1.00f, 0.50f, 0.00f, 0.50f }, // up/down, extremes once
+        { 1.00f, 0.50f, 0.00f, 0.50f, 1.00f, 0.50f }, // down/up, extremes once
+        { 0.00f, 0.50f, 1.00f, 1.00f, 0.50f, 0.00f }, // up and down, extremes twice
+        { 1.00f, 0.50f, 0.00f, 0.00f, 0.50f, 1.00f }, // down and up, extremes twice
+        { 1.00f, 0.00f, 0.50f, 0.00f, 1.00f, 0.00f }, // fingered bottom
+        { 0.00f, 1.00f, 0.50f, 1.00f, 0.00f, 1.00f }, // fingered top
+    };
+
+    void drawShapeGlyph(juce::Graphics& g, juce::Rectangle<float> box, int shapeIndex)
+    {
+        const auto* h = shapeGlyphs[(size_t) juce::jlimit(0, 7, shapeIndex)];
+        const float dashW = juce::jmax(2.0f, box.getWidth() / 7.5f);
+        const float dashH = juce::jmax(1.5f, box.getHeight() * 0.16f);
+        const float travel = juce::jmax(0.0f, box.getHeight() - dashH);
+        for (int i = 0; i < 6; ++i)
+        {
+            const float x = box.getX() + (box.getWidth() - dashW) * ((float) i / 5.0f);
+            const float y = box.getBottom() - dashH - travel * h[i];
+            g.fillRect(x, y, dashW, dashH);
+        }
+    }
+
+    int lanePlayhead(KeysProcessor& processor, int line, int lane)
+    {
+        const auto& eng = processor.arpLine(line);
+        const long long rel = eng.uiRelStep.load(std::memory_order_relaxed);
+        if (rel < 0)
+            return -1;
+        // A lane that is switched off has no playhead, for the same reason a stopped line has
+        // none: laneValue returns the lane's default and never reads a cell, so lighting a
+        // column would show the engine reading something it did not look at - the one thing
+        // this function exists to prevent.
+        if (eng.lanes.on[(size_t) lane].load(std::memory_order_relaxed) == 0)
+            return -1;
+        // Mute walks the Note lane's shape (see ArpEngine::laneValue): it is that lane's
+        // companion, and the MUTE strip is drawn against the Note lane's cells. Reading its
+        // own shape here would light a different column than the engine reads.
+        const int shapeLane = lane == ArpEngine::laneMute ? (int) ArpEngine::laneNote : lane;
+        return ArpEngine::laneStepIndex(rel, eng.uiOffset.load(std::memory_order_relaxed),
+                                        eng.lanes.shapeOf(shapeLane));
+    }
+} // namespace
+
 int ArpPanel::LaneGrid::currentLength() const
 {
     return juce::jlimit(1, ArpEngine::maxSteps,
@@ -144,6 +201,22 @@ void ArpPanel::LaneGrid::mouseUp(const juce::MouseEvent&)
     repaint();
 }
 
+juce::String ArpPanel::LaneGrid::noteNameFor(int value) const
+{
+    if (lane != ArpEngine::laneNote || value < 1 || value > 8)
+        return {}; // Prev / Hi / Low / Rnd name no fixed pitch, and neither does a rest
+
+    const auto& eng = processor.arpLine(owner.editLine());
+    const int n = eng.uiSeqCount.load(std::memory_order_relaxed);
+    if (n <= 0)
+        return {}; // nothing held: the index names nothing, so it stays a number
+
+    // The same wrap the engine applies to a fixed index (fireStep: `(noteVal - 1) % seqCount`),
+    // so a lane drawn past the end of a small chord says the note it will actually play.
+    const int pitch = eng.uiSeq[(size_t) ((value - 1) % n)].load(std::memory_order_relaxed);
+    return juce::MidiMessage::getMidiNoteName(pitch, true, true, 3);
+}
+
 juce::String ArpPanel::LaneGrid::cellText(int value) const
 {
     if (lane == ArpEngine::laneNote)
@@ -163,6 +236,8 @@ juce::String ArpPanel::LaneGrid::cellText(int value) const
             case ArpEngine::noteRnd:  return "R";
             default: break;
         }
+        if (value >= ArpEngine::noteShapeFirst && value <= ArpEngine::noteShapeLast)
+            return {}; // drawn as its contour instead; see drawShapeGlyph
     }
     // Harmony and Chord are off at zero rather than centred on it, so a row of noughts would
     // read as data where it means "nothing here". The dot the note lane already uses says it
@@ -185,6 +260,17 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
     const int length = currentLength();
     const float cellW = length > 0 ? b.getWidth() / (float) length : b.getWidth();
 
+    auto& lanes = processor.arpLine(owner.editLine()).lanes;
+    const auto shape = lanes.shapeOf((int) lane);
+    const int playhead = lanePlayhead(processor, owner.editLine(), (int) lane);
+    // The window the lane actually walks. Clamped here the same way the engine clamps it, and
+    // read back off the shape rather than the raw properties so the two cannot disagree about
+    // what a loopTo past the end means.
+    int loopFrom = juce::jlimit(0, length - 1, shape.loopFrom);
+    int loopTo = juce::jlimit(0, length - 1, shape.loopTo);
+    if (loopTo < loopFrom)
+        std::swap(loopFrom, loopTo);
+
     for (int i = 0; i < length; ++i)
     {
         const int value = juce::jlimit(loVal, hiVal,
@@ -196,33 +282,118 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
 
         const auto bar = cell.reduced(1.5f);
         const float frac = hiVal > loVal ? (float) (value - loVal) / (float) (hiVal - loVal) : 0.0f;
-        const auto filled = bar.withTop(bar.getBottom() - bar.getHeight() * frac);
-        if (filled.getHeight() > 0.5f)
+
+        // **The Note lane draws a marker at a height; every other lane draws a bar up to it**
+        // (2026-08-18, from Cthulhu's Note graph). The difference is what the value *means*: a
+        // Velocity of 120 is a magnitude and a column filled to 120 says so, but a Note of 5 is
+        // a name, and a column filled to 5 reads as "more than 4" - which is not a thing a
+        // chord entry can be. It is also what makes room for the shape glyphs: eight of the
+        // values up here are pictures, and a picture on top of a full-height fill is neither.
+        const bool markerLane = (lane == ArpEngine::laneNote);
+        juce::Rectangle<float> marker;
+        const bool isShape = value >= ArpEngine::noteShapeFirst && value <= ArpEngine::noteShapeLast;
+        if (markerLane)
         {
-            g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.55f), 0.0f, filled.getY(),
-                                skin::accentOf(*this).deep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
-            g.fillRect(filled);
-            g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
-            g.fillRect(filled.getX(), filled.getY(), filled.getWidth(), 1.5f);
+            // A shape marker is taller than a note marker, because it has to hold a picture
+            // rather than a digit - Cthulhu draws the contour *inside* the block, and dashes
+            // spilling out of the top and bottom of a slab read as noise rather than as a shape.
+            const float markerH = isShape ? juce::jmax(22.0f, bar.getHeight() * 0.26f)
+                                          : juce::jmax(9.0f, bar.getHeight() * 0.12f);
+            const float travel = juce::jmax(0.0f, bar.getHeight() - markerH);
+            marker = { bar.getX(), bar.getBottom() - markerH - travel * frac, bar.getWidth(), markerH };
+            if (value > ArpEngine::noteRest)
+            {
+                g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.7f), 0.0f, marker.getY(),
+                                    skin::accentOf(*this).deep.withAlpha(0.55f), 0.0f, marker.getBottom(), false });
+                g.fillRoundedRectangle(marker, 2.0f);
+                g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
+                g.fillRect(marker.getX() + 1.0f, marker.getY(), marker.getWidth() - 2.0f, 1.5f);
+            }
+        }
+        else
+        {
+            const auto filled = bar.withTop(bar.getBottom() - bar.getHeight() * frac);
+            if (filled.getHeight() > 0.5f)
+            {
+                g.setGradientFill({ skin::accentOf(*this).base.withAlpha(0.55f), 0.0f, filled.getY(),
+                                    skin::accentOf(*this).deep.withAlpha(0.4f), 0.0f, bar.getBottom(), false });
+                g.fillRect(filled);
+                g.setColour(skin::accentOf(*this).hot.withAlpha(0.9f));
+                g.fillRect(filled.getX(), filled.getY(), filled.getWidth(), 1.5f);
+            }
         }
 
-        const bool asDot = (lane == ArpEngine::laneNote && value == 0);
-        if (asDot)
+        const bool inLoop = i >= loopFrom && i <= loopTo;
+
+        // A shape value is drawn as its contour, inside the marker's own column rather than in
+        // the marker: the glyph needs vertical room to be a picture at all, and the marker is
+        // nine pixels tall.
+        if (markerLane && isShape)
         {
-            const float r = juce::jmin(6.0f, cell.getWidth() * 0.25f);
+            g.setColour(skin::text.withAlpha(0.95f));
+            drawShapeGlyph(g, marker.reduced(3.0f, 4.0f), value - ArpEngine::noteShapeFirst);
+        }
+        else if (lane == ArpEngine::laneNote && value == 0)
+        {
+            const float r = juce::jmin(5.0f, cell.getWidth() * 0.22f);
             g.setColour(skin::text);
-            g.fillEllipse(cell.getCentreX() - r, cell.getCentreY() - r, r * 2.0f, r * 2.0f);
+            g.fillEllipse(marker.getCentreX() - r, marker.getCentreY() - r, r * 2.0f, r * 2.0f);
         }
         else if (cell.getWidth() > 16.0f)
         {
-            const auto txt = cellText(value);
+            // The note name where there is room for one, the drawn number where there is not.
+            // A Note lane cell saying "3" is an index into a sorted chord nobody can see; the
+            // engine publishes what that index currently names, so the lane can say "E3".
+            const auto named = cell.getWidth() > 28.0f ? noteNameFor(value) : juce::String();
+            const auto txt = named.isNotEmpty() ? named : cellText(value);
             if (txt.isNotEmpty())
             {
                 g.setColour(lane == ArpEngine::laneNote && value == -1 ? skin::textFaint : skin::text);
-                g.setFont(skin::ui(11.0f));
-                g.drawText(txt, cell.toNearestInt(), juce::Justification::centred);
+                g.setFont(skin::ui(named.isNotEmpty() ? 10.0f : 11.0f));
+                // In the Note lane the text belongs *in* the marker, which is where the value
+                // is; everywhere else the bar is the value and the cell is where it reads.
+                g.drawText(txt, (markerLane ? marker.expanded(0.0f, 2.0f) : cell).toNearestInt(),
+                           juce::Justification::centred);
             }
         }
+
+        // Outside the loop window the cell is still drawn - it is still yours, and you can
+        // still edit it - but it is dimmed, because the difference between "a step you drew"
+        // and "a step that plays" is the whole point of having a window at all.
+        //
+        // **Last, over everything the cell drew.** It ran before the marker's contour and the
+        // note name, which are painted at full alpha, so an excluded step came out with bright
+        // text and a bright glyph sitting on a dimmed background - reading as brighter than the
+        // steps that actually play, which is the opposite of what the dim is for, and looking
+        // like a rendering fault rather than a state.
+        if (! inLoop)
+        {
+            g.setColour(skin::bgBot.withAlpha(0.55f));
+            g.fillRect(cell);
+        }
+    }
+
+    // The playhead, over the bars and under the selection. Its own column rather than a line:
+    // a hairline between two cells belongs to neither of them, and with per-lane lengths the
+    // question this answers is "which cell", not "how far along".
+    if (playhead >= 0 && playhead < length)
+    {
+        const auto col = juce::Rectangle<float>(b.getX() + cellW * (float) playhead, b.getY(),
+                                                cellW, b.getHeight());
+        g.setColour(skin::text.withAlpha(0.14f));
+        g.fillRect(col);
+        g.setColour(skin::text.withAlpha(0.75f));
+        g.fillRect(col.getX(), b.getY(), 1.5f, b.getHeight());
+        g.fillRect(col.getRight() - 1.5f, b.getY(), 1.5f, b.getHeight());
+    }
+
+    // A lane that is switched off keeps its drawing on screen and stops claiming to be heard.
+    // Scrimmed rather than emptied, and never disabled: you draw on a lane before switching it
+    // on at least as often as after, and a disabled component takes no mouse events at all.
+    if (lanes.on[(size_t) lane].load(std::memory_order_relaxed) == 0)
+    {
+        g.setColour(skin::bgBot.withAlpha(0.62f));
+        g.fillRect(b);
     }
 
     g.setColour(juce::Colours::black.withAlpha(0.5f));
@@ -279,6 +450,30 @@ ArpPanel::MuteRow::MuteRow(KeysProcessor& p, const ArpPanel& o) : processor(p), 
 // at step 20 of a 32-step pattern would be read back modulo 8 and silence the wrong step. It
 // has no tab and no STEPS control, so there is nowhere for a user to set it and nothing to
 // gain from letting it differ.
+void ArpPanel::LaneTab::paintButton(juce::Graphics& g, bool over, bool down)
+{
+    juce::TextButton::paintButton(g, over, down);
+
+    const auto b = getLocalBounds().toFloat();
+    // A dot in the top-right corner when the lane holds anything but its default. Kirnu's own
+    // "this control has input values" mark, and it is what makes eleven hidden lanes readable
+    // without opening them: the tabs with a dot are the ones doing something.
+    if (laneHasData)
+    {
+        const float r = 2.5f;
+        g.setColour(skin::accentOf(*this).hot.withAlpha(laneOn ? 0.95f : 0.4f));
+        g.fillEllipse(b.getRight() - 7.0f - r, b.getY() + 6.0f, r * 2.0f, r * 2.0f);
+    }
+
+    // Struck through when the lane is switched off, rather than greyed: the tab still has to
+    // be readable and clickable - switching a lane back on means selecting it first.
+    if (! laneOn)
+    {
+        g.setColour(skin::textFaint);
+        g.fillRect(b.getX() + 8.0f, b.getCentreY() - 0.5f, b.getWidth() - 16.0f, 1.0f);
+    }
+}
+
 int ArpPanel::MuteRow::currentLength() const
 {
     auto& lanes = processor.arpLine(owner.editLine()).lanes;
@@ -326,6 +521,108 @@ void ArpPanel::MuteRow::mouseDrag(const juce::MouseEvent& e)
         applyAtX(e.position.x);
 }
 
+// --- LoopBar -------------------------------------------------------------------------------
+
+ArpPanel::LoopBar::LoopBar(KeysProcessor& p, const ArpPanel& o) : processor(p), owner(o)
+{
+    okstudio::ui::makeMouseOnly(*this);
+    setTitle("Lane loop");
+    setTooltip("The steps this lane walks. Click to move the nearer end, or drag it.");
+}
+
+int ArpPanel::LoopBar::stepAtX(float x) const
+{
+    auto& lanes = processor.arpLine(owner.editLine()).lanes;
+    const int len = juce::jlimit(1, ArpEngine::maxSteps,
+                                 lanes.length[(size_t) owner.selectedLaneIndex()].load(std::memory_order_relaxed));
+    const float cellW = (float) getWidth() / (float) len;
+    return juce::jlimit(0, len - 1, (int) (x / juce::jmax(1.0f, cellW)));
+}
+
+void ArpPanel::LoopBar::moveNearestHandle(float x)
+{
+    auto& lanes = processor.arpLine(owner.editLine()).lanes;
+    const auto li = (size_t) owner.selectedLaneIndex();
+    const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[li].load(std::memory_order_relaxed));
+    const int step = stepAtX(x);
+    const int from = juce::jlimit(0, len - 1, lanes.loopFrom[li].load(std::memory_order_relaxed));
+    const int to = juce::jlimit(0, len - 1, lanes.loopTo[li].load(std::memory_order_relaxed));
+
+    // Kirnu moves the far handle with the right button when the click lands inside the window
+    // (its manual p11). Keys cannot: right-click-only paths are a closed list. The nearer
+    // handle, always, is the whole rule here - inside the window it shrinks, outside it grows,
+    // and either way one left click is the entire gesture.
+    if (grabbed < 0)
+        grabbed = std::abs(step - from) <= std::abs(step - to) ? 0 : 1;
+
+    const int newFrom = grabbed == 0 ? juce::jmin(step, to) : from;
+    const int newTo   = grabbed == 0 ? to : juce::jmax(step, from);
+
+    // **Written to every lane when Link is on**, the way nudgeLength and cycleClockDiv already
+    // are. Link on means the lanes share one grid, and a window is part of which grid that is -
+    // enforceLinkedLengths copies the Note lane's window over all of them on the 10 Hz tick, so
+    // a drag on any other lane's bar was undone within 100 ms and 12 of the 13 tabbed lanes had
+    // a control that visibly did nothing. Link off is polymeter and is left alone, as ever.
+    const bool linked = processor.apvts.getRawParameterValue(
+                            owner.paramId(KeysProcessor::apLinkLanes))->load() > 0.5f;
+    const int lo = linked ? 0 : (int) li;
+    const int hi = linked ? ArpEngine::numLanes - 1 : (int) li;
+    for (int i = lo; i <= hi; ++i)
+    {
+        lanes.loopFrom[(size_t) i].store(newFrom, std::memory_order_relaxed);
+        lanes.loopTo[(size_t) i].store(newTo, std::memory_order_relaxed);
+    }
+    repaint();
+    if (auto* g = getParentComponent())
+        g->repaint(); // the grid dims what the window leaves out
+}
+
+void ArpPanel::LoopBar::mouseDown(const juce::MouseEvent& e)
+{
+    grabbed = -1;
+    // The press is the whole gesture's undo entry, the same rule LaneGrid and MuteRow follow -
+    // a drag along the bar would otherwise be one entry per step crossed. It has to push at
+    // all because loopFrom/loopTo ride the arp tree, so arpToTree() snapshots them: without an
+    // entry of its own, a window drag was silently reverted by the *next* Undo, which the user
+    // aimed at whatever they had drawn before it.
+    processor.pushUndo("Loop window", KeysProcessor::UndoScope::arp);
+    moveNearestHandle(e.position.x);
+}
+
+void ArpPanel::LoopBar::mouseDrag(const juce::MouseEvent& e) { moveNearestHandle(e.position.x); }
+
+void ArpPanel::LoopBar::paint(juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat();
+    auto& lanes = processor.arpLine(owner.editLine()).lanes;
+    const auto li = (size_t) owner.selectedLaneIndex();
+    const int len = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[li].load(std::memory_order_relaxed));
+    const float cellW = b.getWidth() / (float) len;
+    int from = juce::jlimit(0, len - 1, lanes.loopFrom[li].load(std::memory_order_relaxed));
+    int to = juce::jlimit(0, len - 1, lanes.loopTo[li].load(std::memory_order_relaxed));
+    if (to < from)
+        std::swap(from, to);
+
+    g.setColour(skin::well);
+    g.fillRect(b);
+
+    const auto a = skin::accentOf(*this);
+    const auto span = juce::Rectangle<float>(b.getX() + cellW * (float) from, b.getY(),
+                                             cellW * (float) (to - from + 1), b.getHeight());
+    g.setColour(a.base.withAlpha(0.55f));
+    g.fillRect(span.reduced(0.0f, 4.0f));
+    // The ends, drawn full height so the window has two grabbable-looking edges rather than one
+    // bar that happens to stop somewhere.
+    g.setColour(a.hot.withAlpha(0.95f));
+    g.fillRect(span.getX(), b.getY(), 2.0f, b.getHeight());
+    g.fillRect(span.getRight() - 2.0f, b.getY(), 2.0f, b.getHeight());
+
+    // Cell divisions, so the bar reads against the grid above it rather than as a free slider.
+    g.setColour(juce::Colours::white.withAlpha(0.06f));
+    for (int i = 1; i < len; ++i)
+        g.drawVerticalLine((int) (b.getX() + cellW * (float) i), b.getY(), b.getBottom());
+}
+
 void ArpPanel::MuteRow::paint(juce::Graphics& g)
 {
     const auto b = getLocalBounds().toFloat();
@@ -361,6 +658,17 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
             g.setFont(skin::ui(11.0f));
             g.drawText("X", cell.toNearestInt(), juce::Justification::centred);
         }
+    }
+
+    // The Note lane's playhead, since this strip is the Note lane's companion and reads at the
+    // Note lane's length. Drawn as an underline rather than the grid's column: these cells are
+    // rounded pills with gaps between them, and a filled column would land on the gaps too.
+    const int playhead = lanePlayhead(processor, owner.editLine(), (int) ArpEngine::laneNote);
+    if (playhead >= 0 && playhead < length)
+    {
+        g.setColour(skin::text.withAlpha(0.75f));
+        g.fillRect(b.getX() + cellW * (float) playhead + 2.0f, b.getBottom() - 2.0f,
+                   cellW - 4.0f, 2.0f);
     }
 }
 
@@ -554,14 +862,15 @@ void ArpPanel::setEditLine(int line, bool leaveMacroView)
     repaint();
 }
 
-void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::String& name, int loVal, int hiVal)
+void ArpPanel::buildLaneRow(LaneRow& row, ArpEngine::Lane lane, const juce::String& name)
 {
+    const auto r = ArpEngine::laneRange((int) lane);
     row.tab.setButtonText(name);
     row.tab.onClick = [this, lane] { selectLane((int) lane); };
     row.hasTab = true;
     addAndMakeVisible(row.tab);
 
-    row.grid = std::make_unique<LaneGrid>(processor, *this, lane, loVal, hiVal);
+    row.grid = std::make_unique<LaneGrid>(processor, *this, lane, r.lo, r.hi);
     addChildComponent(*row.grid); // only the selected lane's grid is ever visible
 }
 
@@ -582,6 +891,8 @@ void ArpPanel::selectLane(int lane)
     const bool voiceOn = patternMode() && selectedLane == (int) ArpEngine::laneHarmony;
     voiceButton.setVisible(voiceOn);
     refreshVoiceButton();
+    if (loopBar != nullptr)
+        loopBar->repaint(); // it reads the selected lane, and its bounds do not move
     applyPageVisibility(); // this only ever turns things on; the page has the last word
     resized();
 }
@@ -636,12 +947,22 @@ void ArpPanel::enforceLinkedLengths()
                                  lanes.length[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
     const int div = juce::jlimit(0, 2,
                                  lanes.clockDiv[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed));
+    // The loop window travels with the length (2026-08-18), and the direction deliberately does
+    // not. Link on means the lanes share one grid, and a window is part of which grid that is;
+    // a *direction* is how a lane walks the grid it shares, and two lanes crossing the same
+    // eight steps in opposite directions is the point of having a direction at all.
+    const int from = lanes.loopFrom[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed);
+    const int to = lanes.loopTo[(size_t) ArpEngine::laneNote].load(std::memory_order_relaxed);
     for (int l = 0; l < ArpEngine::numLanes; ++l)
     {
         if (lanes.length[(size_t) l].load(std::memory_order_relaxed) != len)
             lanes.length[(size_t) l].store(len, std::memory_order_relaxed);
         if (lanes.clockDiv[(size_t) l].load(std::memory_order_relaxed) != div)
             lanes.clockDiv[(size_t) l].store(div, std::memory_order_relaxed);
+        if (lanes.loopFrom[(size_t) l].load(std::memory_order_relaxed) != from)
+            lanes.loopFrom[(size_t) l].store(from, std::memory_order_relaxed);
+        if (lanes.loopTo[(size_t) l].load(std::memory_order_relaxed) != to)
+            lanes.loopTo[(size_t) l].store(to, std::memory_order_relaxed);
     }
 }
 
@@ -653,6 +974,130 @@ void ArpPanel::refreshLaneReadouts()
     stepsReadout.setText(juce::String(len), juce::dontSendNotification);
     const int div = juce::jlimit(0, 2, processor.arpLine(editedLine).lanes.clockDiv[li].load(std::memory_order_relaxed));
     speedButton.setButtonText(clockDivNames[div]);
+    refreshLaneStrip();
+}
+
+// The lane strip, and the marks on all twelve tabs. Both are derived from the lanes rather
+// than cached against a click, so a session load, an undo and a slot launch all land here
+// without any of them having to know the strip exists.
+void ArpPanel::refreshLaneStrip()
+{
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    const auto li = (size_t) selectedLane;
+
+    const bool on = lanes.on[li].load(std::memory_order_relaxed) != 0;
+    laneOnButton.setToggleState(on, juce::dontSendNotification);
+    laneOnButton.setButtonText(on ? "On" : "Off");
+
+    // One entry per LaneDir, pinned to the enum. Every other name table in this file that
+    // shadows an enum carries the same assert (SlotCard::shapeNames, ArpEngine's shape names):
+    // the index below is clamped to numLaneDirs - 1, so appending a direction without adding a
+    // name here reads one past the end of this array and hands the result to setText.
+    static const char* dirNames[] = { "Up", "Down", "Up alt", "Down alt" };
+    static_assert(std::size(dirNames) == (size_t) ArpEngine::numLaneDirs,
+                  "every LaneDir needs a name in dirNames");
+    const int d = juce::jlimit(0, (int) ArpEngine::numLaneDirs - 1, lanes.dir[li].load(std::memory_order_relaxed));
+    dirReadout.setText(dirNames[d], juce::dontSendNotification);
+
+    for (int l = 0; l < ArpEngine::numLanes; ++l)
+    {
+        auto& tab = laneRows[(size_t) l].tab;
+        if (! laneRows[(size_t) l].hasTab)
+            continue;
+        // "Has data" is measured over the lane's own length, not over all 32 cells: steps past
+        // the end are not played and a tab that lit for them would mark every lane that had
+        // ever been longer than it is now.
+        const int len2 = juce::jlimit(1, ArpEngine::maxSteps, lanes.length[(size_t) l].load(std::memory_order_relaxed));
+        bool has = false;
+        for (int st = 0; st < len2 && ! has; ++st)
+            has = lanes.value[(size_t) l][(size_t) st].load(std::memory_order_relaxed) != ArpEngine::laneDefaults[l];
+        const bool lOn = lanes.on[(size_t) l].load(std::memory_order_relaxed) != 0;
+        if (tab.laneHasData != has || tab.laneOn != lOn)
+        {
+            tab.laneHasData = has;
+            tab.laneOn = lOn;
+            tab.repaint();
+        }
+    }
+
+    refreshStepTools();
+}
+
+void ArpPanel::refreshStepTools()
+{
+    // Paste is the only one of the three that can be dead: nothing copied yet, or copied from
+    // a lane that means something else. Kirnu's rule, and it is not pedantry - a Velocity lane
+    // pasted into Note would read as chord indices and play a melody nobody wrote.
+    pasteStepsButton.setEnabled(stepClipboardLane == selectedLane && ! stepClipboard.empty());
+}
+
+void ArpPanel::toggleLaneOn()
+{
+    KeysProcessor::UndoGesture gesture { processor, "Lane on/off", KeysProcessor::UndoScope::arp };
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    const auto li = (size_t) selectedLane;
+    lanes.on[li].store(lanes.on[li].load(std::memory_order_relaxed) != 0 ? 0 : 1, std::memory_order_relaxed);
+    refreshLaneStrip();
+    if (auto& grid = laneRows[li].grid)
+        grid->repaint();
+}
+
+// The span both of these act on: the Select span, or the whole lane when nothing is marked.
+// The same rule Roll and Reset follow, which is what keeps Select one idea aimed by four
+// buttons rather than a mode each of them has to be explained against.
+static void laneSpan(const ArpEngine::Lanes& lanes, int lane, int selFrom, int selTo,
+                     int& lo, int& hi)
+{
+    const int len = juce::jlimit(1, ArpEngine::maxSteps,
+                                 lanes.length[(size_t) lane].load(std::memory_order_relaxed));
+    lo = selFrom < 0 ? 0 : juce::jlimit(0, len - 1, selFrom);
+    hi = selTo < 0 ? len - 1 : juce::jlimit(lo, len - 1, selTo);
+}
+
+void ArpPanel::copySteps()
+{
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    int lo = 0, hi = 0;
+    laneSpan(lanes, selectedLane, selFrom, selTo, lo, hi);
+    stepClipboard.clear();
+    for (int s = lo; s <= hi; ++s)
+        stepClipboard.push_back(lanes.value[(size_t) selectedLane][(size_t) s].load(std::memory_order_relaxed));
+    stepClipboardLane = selectedLane;
+    refreshStepTools();
+}
+
+void ArpPanel::pasteSteps()
+{
+    if (stepClipboardLane != selectedLane || stepClipboard.empty())
+        return;
+
+    processor.pushUndo("Paste steps", KeysProcessor::UndoScope::arp);
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    int lo = 0, hi = 0;
+    laneSpan(lanes, selectedLane, selFrom, selTo, lo, hi);
+    // Tiled rather than truncated: copying two steps and pasting them over eight is how a
+    // figure gets repeated, and it is the only reading under which a clipboard shorter than
+    // its target does something useful instead of leaving a hole.
+    for (int s = lo; s <= hi; ++s)
+        lanes.value[(size_t) selectedLane][(size_t) s]
+            .store(stepClipboard[(size_t) ((s - lo) % (int) stepClipboard.size())], std::memory_order_relaxed);
+
+    refreshLaneReadouts();
+    if (auto& g = laneRows[(size_t) selectedLane].grid)
+        g->repaint();
+}
+
+void ArpPanel::nudgeLaneDir(int delta)
+{
+    KeysProcessor::UndoGesture gesture { processor, "Lane direction", KeysProcessor::UndoScope::arp };
+    auto& lanes = processor.arpLine(editedLine).lanes;
+    const auto li = (size_t) selectedLane;
+    const int n = (int) ArpEngine::numLaneDirs;
+    // Wraps, like the strum direction and unlike the rate steppers: four values with no scale
+    // to them are a ring, and stopping at the ends leaves two of them one-sided.
+    const int d = ((lanes.dir[li].load(std::memory_order_relaxed) + delta) % n + n) % n;
+    lanes.dir[li].store(d, std::memory_order_relaxed);
+    refreshLaneStrip();
 }
 
 bool ArpPanel::patternMode() const
@@ -746,21 +1191,24 @@ void ArpPanel::refreshShape()
                     &rampSlider, &rampTimeSlider, &humanSlider, &humanVelSlider, &offsetLabel,
                     &rampLabel, &rampTimeLabel, &humanLabel, &humanVelLabel,
                     &driftSlider, &driftLabel }, ! macroView);
-    // The STEPS group is the only part of the band that belongs to the step editor, so it
-    // is the only part that goes with it.
-    for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &stepsLabel, &speedLabel, &stepsReadout, &stepsMinus, &stepsPlus, &speedButton, &linkButton })
-        c->setVisible(pattern);
-    groups[2].visible = pattern;
 
     // Voice rides the STEPS group's own gate plus the Harmony lane; see selectLane() for the
     // other half of this condition. Roll is not lane-contextual - it acts on whichever lane is
     // showing - so it follows the step editor alone.
     const bool voiceOn = pattern && selectedLane == (int) ArpEngine::laneHarmony;
     voiceButton.setVisible(voiceOn);
+    // The tools, and the lane strip beside them - Steps, Speed and Link included, since they
+    // moved off the band on 2026-08-18. All of it belongs to the step editor and so all of it
+    // follows Pattern shape, which is the one gate they have always shared.
     for (juce::Component* c : std::initializer_list<juce::Component*> {
-             &rollButton, &resetButton, &selectButton, &rollMinus, &rollReadout, &rollPlus })
+             &rollButton, &resetButton, &selectButton, &rollMinus, &rollReadout, &rollPlus,
+             &copyStepsButton, &pasteStepsButton,
+             &laneOnButton, &dirLabel, &dirPrev, &dirReadout, &dirNext,
+             &stepsLabel, &speedLabel, &stepsReadout, &stepsMinus, &stepsPlus, &speedButton,
+             &linkButton })
         c->setVisible(pattern);
+    if (loopBar != nullptr)
+        loopBar->setVisible(pattern);
 
     // The slot row stays on both per-line shapes. Launching a chord through "Up" is as much
     // a thing you do as launching one through an edited pattern, and hiding the row was what
@@ -1189,8 +1637,17 @@ namespace
           "fighting for the same register." },
         { KeysProcessor::apGate, "GATE",
           "How much of each step this line's notes fill. Short gates let another line through." },
-        { KeysProcessor::apChance, "CHANCE",
-          "How often a step fires at all. Thin one line out and the other two show through." },
+        // MUTATE and LOCK replaced CHANCE here on 2026-08-18 (Owen: "explore the chance knob
+        // being a drift instead where it explores other patterns and notes... could be multiple
+        // knobs. want notes. mutations"). Chance lost nothing by it: it is still a step lane and
+        // still has its own slider in the Play page's PLAYBACK group, which is where a control
+        // you set once and leave belongs. These two are the ones you sit and turn.
+        { KeysProcessor::apMutate, "MUTATE",
+          "How far this line explores other notes of the chord you are holding. It can only "
+          "ever reach another note of that chord, so it wanders without going out of key." },
+        { KeysProcessor::apMutateLock, "LOCK",
+          "How long it keeps what it finds. Left, a new variation every time round; right, the "
+          "first one it finds repeats for good. In between it holds an idea, then moves on." },
         { KeysProcessor::apSwing, "SWING",
           "Shifts this line's offbeats late (right) or early (left). The quickest way to stop "
           "two lines landing on top of each other." },
@@ -1325,7 +1782,7 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
 
     shapeBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up", "Up & Down", "Down & Up",
                            "As Played", "Reversed", "Random", "Random Other", "Random Once",
-                           "Chord" }, 1);
+                           "Chord", "Fingered Bottom", "Fingered Top" }, 1);
     shapeBox.addItem("Pattern", ArpEngine::numDirections + 1);
     shapeBox.onChange = [this] { applyShape(); };
     shapeBox.setTitle("Macro shape " + letter);
@@ -1978,7 +2435,8 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
     // the end of this array.
     static const char* shapeNames[] = { "Up", "Down", "Up-Dn", "Dn-Up",
                                         "Up&Dn", "Dn&Up", "Played", "Rev",
-                                        "Rnd", "Rnd-O", "Rnd-1", "Chord", "Pattern" };
+                                        "Rnd", "Rnd-O", "Rnd-1", "Chord",
+                                        "Fing-B", "Fing-T", "Pattern" };
     static_assert(sizeof(shapeNames) / sizeof(shapeNames[0]) == ArpEngine::numDirections + 1,
                   "every shape needs a card label, plus Pattern");
     static const char* rateNames[] = { "16 bar", "8 bar", "4 bar", "2 bar", "1 bar",
@@ -2117,7 +2575,8 @@ void ArpPanel::buildControls()
     // so a click too many on the shape before it cannot throw the step editor open.
     shapeBox.addItemList({ "Up", "Down", "Up-Down", "Down-Up",
                            "Up & Down", "Down & Up", "As Played", "Reversed",
-                           "Random", "Random Other", "Random Once", "Chord" }, 1);
+                           "Random", "Random Other", "Random Once", "Chord",
+                           "Fingered Bottom", "Fingered Top" }, 1);
     shapeBox.addItem("Pattern", ArpEngine::numDirections + 1);
     shapeBox.onChange = [this] { applyShapeChoice(); };
     shapeBox.setTooltip("A shape arpeggiates the held chord. \"Pattern\" opens the step editor.");
@@ -2261,39 +2720,85 @@ void ArpPanel::buildControls()
     addAndMakeVisible(retrigBox);
 
     // The ten lanes, in ArpEngine::Lane order. The original six first:
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note",
-                 ArpEngine::noteRest, ArpEngine::noteRnd);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave", -3, 3);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity", 10, 200);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate", 5, 200);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet", 1, 4);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneNote], ArpEngine::laneNote, "Note");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneOctave], ArpEngine::laneOctave, "Octave");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet");
     // "Chance", not "Prob" (2026-08-14). The knob on the Play page is called CHANCE and the two
     // multiply together, so one word for one idea: a lane at 60 under a knob at 100 fires six
     // times in ten. Owen asked for per-step odds to be findable, and two names for the same
     // thing in two places is most of why they were not.
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance", 0, 100);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance");
     // The 2026-07-30 four. "Prob" above shortened with them: ten tabs share the width six
     // used to, and "Probability" is the only old label that will not fit at that size.
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose", -7, 7);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late", 0, 90);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony", 0, 7);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord", 0, 12);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneTranspose], ArpEngine::laneTranspose, "Transpose");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneLate], ArpEngine::laneLate, "Late");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneHarmony], ArpEngine::laneHarmony, "Harmony");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChord], ArpEngine::laneChord, "Chord");
     // Rand gets a tab; Mute deliberately does not - the MUTE row under the grid has always been
     // its editor, and a tab as well would be two ways to draw one lane.
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand", -8, 8);
-    buildLaneRow(laneRows[(size_t) ArpEngine::laneChain], ArpEngine::laneChain, "Chain", 0, 2);
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneRand], ArpEngine::laneRand, "Rand");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneChain], ArpEngine::laneChain, "Chain");
+    buildLaneRow(laneRows[(size_t) ArpEngine::laneReset], ArpEngine::laneReset, "Reset");
     laneRows[(size_t) ArpEngine::laneNote].tab.setTooltip(
-        "Which note of the held chord this step plays. X rests, a blank follows the Shape, "
-        "1-8 pick a fixed one, and P/H/L/R are Prev, Highest, Lowest and Random - those four "
-        "ask the chord a question, so they keep meaning the same thing when it changes.");
+        "Which note of the held chord this step plays. Drag up through the whole vocabulary: "
+        "X rests, a dot follows the line's Shape, 1-8 pick a fixed note, P/H/L/R are Prev, "
+        "Highest, Lowest and Random, and the eight little contours above those are shapes this "
+        "step runs on its own - up, down, up/down, down/up, up & down, down & up, and fingered "
+        "low and high. Shapes share one walk, so four steps of Up then four of Down comes back "
+        "down the line it went up rather than starting over.");
     laneRows[(size_t) ArpEngine::laneChain].tab.setTooltip(
         "Play this step only on a condition: 0 always, 1 only if the step before it sounded, "
         "2 only if it did not. Chance says maybe; this says only if.");
+    laneRows[(size_t) ArpEngine::laneReset].tab.setTooltip(
+        "Restart the shape's walk on this step, so it plays the note the walk starts on again. "
+        "Cthulhu's Position Reset. It restarts the walk, not the lanes - everything else keeps "
+        "running, so a reset every other step keeps an Up shape on its first two notes.");
 
     styleLabel(muteRowLabel, "Mute");
     addAndMakeVisible(muteRowLabel);
     muteRow = std::make_unique<MuteRow>(processor, *this);
     addAndMakeVisible(*muteRow);
+    loopBar = std::make_unique<LoopBar>(processor, *this);
+    addAndMakeVisible(*loopBar);
+
+    // The lane strip: what this lane *is*, on the page you draw it on.
+    laneOnButton.setClickingTogglesState(false); // the lane's own flag drives the lit state
+    laneOnButton.onClick = [this] { toggleLaneOn(); };
+    laneOnButton.setTooltip("Switch this lane off without losing what you drew. Off, the lane "
+                            "keeps its drawing and the engine reads its default instead.");
+    laneOnButton.setTitle("Lane on");
+    addAndMakeVisible(laneOnButton);
+
+    styleLabel(dirLabel, "Dir");
+    addAndMakeVisible(dirLabel);
+    dirReadout.setJustificationType(juce::Justification::centred);
+    dirReadout.setFont(juce::Font(juce::FontOptions(13.0f)));
+    addAndMakeVisible(dirReadout);
+    dirPrev.onClick = [this] { nudgeLaneDir(-1); };
+    dirNext.onClick = [this] { nudgeLaneDir(1); };
+    dirPrev.setTooltip("Which way this lane walks its loop: Up, Down, or either of those and "
+                       "back again. Two lanes crossing the same steps in opposite directions "
+                       "is what stops a pattern repeating itself.");
+    dirNext.setTooltip(dirPrev.getTooltip());
+    dirPrev.setTitle("Lane direction back");
+    dirNext.setTitle("Lane direction forward");
+    addAndMakeVisible(dirPrev);
+    addAndMakeVisible(dirNext);
+
+    // Kirnu's remaining palette tools. Each acts on the Select span, or on the whole lane when
+    // nothing is selected - the same rule Roll and Reset already follow, so Select stays one
+    // idea aimed by five buttons rather than a mode three of them need explaining against.
+    copyStepsButton.onClick = [this] { copySteps(); };
+    pasteStepsButton.onClick = [this] { pasteSteps(); };
+    copyStepsButton.setTooltip("Copy the selected steps of this lane, or all of them.");
+    pasteStepsButton.setTooltip("Paste them back, tiled across the selected steps - two copied "
+                                "steps fill eight. Only into the same lane, as in Kirnu.");
+    copyStepsButton.setTitle("Copy steps");
+    pasteStepsButton.setTitle("Paste steps");
+    addAndMakeVisible(copyStepsButton);
+    addAndMakeVisible(pasteStepsButton);
 
     // One length and one speed control, for whichever lane is showing, finally with
     // room to say what they are. Both were previously repeated once per lane, unlabelled.
@@ -2551,7 +3056,6 @@ void ArpPanel::buildPageLists()
         &tupletLabel, &tupletBox, &dotButton,
         &swingLabel, &swingSlider, &gateLabel, &gateSlider, &chanceLabel, &chanceSlider,
         &retrigLabel, &retrigBox, &keysBandButton, &latchButton, &anchorButton,
-        &stepsLabel, &stepsMinus, &stepsReadout, &stepsPlus, &speedLabel, &speedButton, &linkButton,
         &octavesLabel, &octavesSlider, &distanceLabel, &distanceBox, &offsetLabel, &offsetSlider,
         &rampLabel, &rampSlider, &rampTimeLabel, &rampTimeSlider,
         &humanLabel, &humanSlider, &humanVelLabel, &humanVelSlider,
@@ -2580,9 +3084,15 @@ void ArpPanel::buildPageLists()
 
     pageSteps = { &muteRowLabel, &voiceButton,
                   &rollButton, &resetButton, &selectButton,
-                  &rollMinus, &rollReadout, &rollPlus };
+                  &rollMinus, &rollReadout, &rollPlus,
+                  &copyStepsButton, &pasteStepsButton,
+                  &laneOnButton, &dirLabel, &dirPrev, &dirReadout, &dirNext,
+                  &stepsLabel, &stepsMinus, &stepsReadout, &stepsPlus,
+                  &speedLabel, &speedButton, &linkButton };
     if (muteRow != nullptr)
         pageSteps.push_back(muteRow.get());
+    if (loopBar != nullptr)
+        pageSteps.push_back(loopBar.get());
     for (auto& lr : laneRows)
     {
         pageSteps.push_back(&lr.tab);
@@ -2774,7 +3284,14 @@ void ArpPanel::timerCallback()
     // lane existed loads that lane at ArpPattern's default 8 while its neighbours are at 16 or
     // 32, and the ARP section may well be folded when it lands - so gating this on being on
     // screen would leave the repair waiting for the user to open the panel.
-    refreshLaneReadouts();
+    //
+    // **The repair only, not the readout.** This was refreshLaneReadouts(), which also runs
+    // refreshLaneStrip() - a walk of all fourteen lanes across up to 32 cells each, plus button
+    // text, toggle states, the Dir readout and Paste enablement - for controls that are not on
+    // screen. That is exactly the per-tick cost the gate three lines below refuses to pay, and
+    // it was being paid above it. The readout runs under the gate now, with the rest of the
+    // display work.
+    enforceLinkedLengths();
 
     // Everything below here is display. The panel keeps existing while its section is folded
     // and while it sits in a closed detached window, and refreshing controls nobody can see
@@ -2788,10 +3305,9 @@ void ArpPanel::timerCallback()
     refreshRateMode(); // ... and arpRateFree, which decides what the dial is even measuring
     refreshTuplet();   // ... and arpTuplet, which has no attachment to hear it change
     refreshRetrig();
-    // No second refreshLaneReadouts() here: the one above the isShowing() gate already ran this
-    // tick, and having both meant enforceLinkedLengths walked all thirteen lanes twice and both
-    // readouts were written twice, per tick, in a pass whose whole point is removing per-tick
-    // cost.
+    // The readout and the lane strip, on screen only. Above the gate there is just the length
+    // repair, which is the one part of this that has to run while the panel is hidden.
+    refreshLaneReadouts();
     refreshPatternButtons();
     if (! patternMode())
         return; // nothing of the step editor is on screen to repaint
@@ -2801,6 +3317,8 @@ void ArpPanel::timerCallback()
         grid->repaint();
     if (muteRow != nullptr)
         muteRow->repaint();
+    if (loopBar != nullptr)
+        loopBar->repaint();
 }
 
 void ArpPanel::mouseDown(const juce::MouseEvent&)
@@ -2879,7 +3397,10 @@ namespace
     // and the window stops resizing between them at all.
     // + the lane-tools strip (34 + 6), added 2026-08-14 when twelve tabs stopped fitting
     // beside the buttons. arpDeepH is a max over these, so the deep view grew once and stopped.
-    constexpr int arpPageStepsH = 12 + (34 + 6) + (34 + 6) + (140 + 6) + (14 + 2) + 32 + 12; // 298
+    // 12 top, the lane tabs, the lane strip (Steps/Speed/Link/On/Dir, 2026-08-18), the tools
+    // row, the grid, the loop bar hard under it, then the MUTE caption and its strip.
+    constexpr int arpPageStepsH = 12 + (34 + 6) + (34 + 6) + (34 + 6)
+                                + (140 + 4) + (16 + 6) + (14 + 2) + 32 + 12; // 358
     constexpr int arpPageSlotsH = 12 + (arpSlotsH + 8) + 34 + 12;                  // 124
     constexpr int arpPageSetupH = 12 + (arpBandH + 8) + arpBand2H + 12;            // 208
     // The one height a *deep view* is, whichever of its three pages is up. Written as a max
@@ -2910,7 +3431,11 @@ namespace
     // ~50 px spare in each of its two rows (its widest control is a 150 px cell with a 120 px
     // floor), and none out of PLAYBACK, whose second row is the one place on the band with
     // nothing left to give - see the note beside Retrigger below.
-    constexpr int groupWeights[3] = { 40, 42, 18 };
+    // Two groups, not three. STEPS left the band on 2026-08-18 for the Draw page, where the
+    // lane it measures is actually drawn - changing how long a lane runs used to mean leaving
+    // the page you were drawing it on. Its 18 points go back to the two that stayed rather
+    // than being left as a gap, which is what the band's own weights are for.
+    constexpr int groupWeights[2] = { 48, 52 };
     // FEEL took 4 points off SPREAD on 2026-08-02, when Humanize split into two sliders and
     // the group went from three to four of them: at the editor's minimum width 56% left the
     // fourth slider ~5 px under its 120 px floor, and SPREAD still fits its three cells
@@ -3136,16 +3661,12 @@ void ArpPanel::resized()
         area.removeFromTop(12);
     if (wantSetup)
     {
-        const int gaps = 2 * 10;
-        const int usable = band.getWidth() - gaps;
-        const int total = groupWeights[0] + groupWeights[1] + groupWeights[2];
-        for (int i = 0; i < 3; ++i)
-        {
-            const int w = i == 2 ? band.getWidth() : usable * groupWeights[i] / total;
-            groups[(size_t) i].bounds = band.removeFromLeft(w);
-            if (i < 2)
-                band.removeFromLeft(10);
-        }
+        const int usable = band.getWidth() - 10;
+        const int total = groupWeights[0] + groupWeights[1];
+        groups[0].bounds = band.removeFromLeft(usable * groupWeights[0] / total);
+        band.removeFromLeft(10);
+        groups[1].bounds = band;
+        groups[2].bounds = {}; // STEPS is on the Draw page now
         const int usable2 = band2.getWidth() - 10;
         const int total2 = group2Weights[0] + group2Weights[1];
         groups[3].bounds = band2.removeFromLeft(usable2 * group2Weights[0] / total2);
@@ -3153,14 +3674,12 @@ void ArpPanel::resized()
         groups[4].bounds = band2;
         groups[0].caption = "Pattern";
         groups[1].caption = "Playback";
-        groups[2].caption = "Steps";
+
         groups[3].caption = "Spread";
         groups[4].caption = "Feel";
         for (int i = 0; i < (int) groups.size(); ++i)
             groups[(size_t) i].visible = true;
-        // ...except STEPS, which belongs to the step editor and follows Shape. Restoring it
-        // unconditionally drew an empty ruled box beside the band on every plain shape.
-        groups[2].visible = patternMode();
+        groups[2].visible = false; // STEPS is a Draw-page strip now, not a band group
     }
 
     // Inside a group: past the caption rule, then two rows of controls, or the full height
@@ -3307,26 +3826,6 @@ void ArpPanel::resized()
         cell(row, juce::jmax(120, row.getWidth()), driftLabel, driftSlider);
     }
 
-    // STEPS: the step editor's own length/speed pair, so it sits with the editor it drives
-    // rather than floating under the grid where it used to. Two rows again as of 2026-08-14:
-    // Voice had a third here for one day and moved to the lane-tab row on the Steps page,
-    // which costs no height and puts it beside the Harmony lane it is contextual on.
-    {
-        juce::Rectangle<int> rowA, rowB;
-        splitRows(groupInner(groups[2].bounds), rowA, rowB);
-        auto stepsCell = rowA.removeFromLeft(juce::jlimit(120, 150, rowA.getWidth()));
-        stepsLabel.setBounds(stepsCell.removeFromTop(14));
-        stepsCell = stepsCell.withSizeKeepingCentre(stepsCell.getWidth(), juce::jmin(stepsCell.getHeight(), 28));
-        stepsMinus.setBounds(stepsCell.removeFromLeft(34));
-        stepsPlus.setBounds(stepsCell.removeFromRight(34));
-        stepsReadout.setBounds(stepsCell);
-        auto speedCell = rowB.removeFromLeft(64);
-        rowB.removeFromLeft(8);
-        speedLabel.setBounds(speedCell.removeFromTop(14));
-        speedButton.setBounds(speedCell.withSizeKeepingCentre(speedCell.getWidth(),
-                                                              juce::jmin(speedCell.getHeight(), 28)));
-        linkButton.setBounds(rowB.withTrimmedTop(14));
-    }
 
     // --- SLOTS page: the twelve cards, the action row, and either strip ------------
     // Not the macro view, since 2026-08-02: the slots and the action row belong to the
@@ -3437,7 +3936,15 @@ void ArpPanel::resized()
     // logged twice (2026-08-01, 2026-08-02) and paid for a third time here. Height is the cheap
     // axis on this page and 34 px buys every tab its full width back: twelve now get ~99 px
     // each against a 70 px floor.
-    const int tabW = juce::jmax(70, (tabsRow.getWidth() - 11 * 4) / 12);
+    // Counted, not hard-coded (2026-08-18). This was `(width - 11*4) / 12` with the twelve
+    // written in, so appending the Reset lane laid its tab out at four pixels wide - the same
+    // invisible starvation the Chain lane caused when it made twelve, one row lower down. Any
+    // lane appended from here divides the row correctly on the day it arrives.
+    int tabCount = 0;
+    for (const auto& lr : laneRows)
+        if (lr.hasTab)
+            ++tabCount;
+    const int tabW = juce::jmax(70, (tabsRow.getWidth() - juce::jmax(0, tabCount - 1) * 4) / juce::jmax(1, tabCount));
     for (auto& lr : laneRows)
     {
         if (! lr.hasTab)
@@ -3446,10 +3953,33 @@ void ArpPanel::resized()
         tabsRow.removeFromLeft(4);
     }
 
+    // The lane strip: what the selected lane *is*, on the page it is drawn on. Steps, Speed
+    // and Link came off the Setup page's band for this (2026-08-18) - they are per-lane
+    // controls, and having them a page away meant changing a lane's length was a trip out of
+    // the editor and back. On/Off and Dir are new beside them, and the four belong together:
+    // between them they say how long this lane is, how fast it advances, and which way.
+    auto laneRow = area.removeFromTop(34);
+    area.removeFromTop(6);
+    laneOnButton.setBounds(laneRow.removeFromLeft(64));
+    laneRow.removeFromLeft(10);
+    stepsLabel.setBounds(laneRow.removeFromLeft(46));
+    stepsMinus.setBounds(laneRow.removeFromLeft(34));
+    stepsReadout.setBounds(laneRow.removeFromLeft(44));
+    stepsPlus.setBounds(laneRow.removeFromLeft(34));
+    laneRow.removeFromLeft(10);
+    speedLabel.setBounds(laneRow.removeFromLeft(52));
+    speedButton.setBounds(laneRow.removeFromLeft(58));
+    laneRow.removeFromLeft(10);
+    dirLabel.setBounds(laneRow.removeFromLeft(34));
+    dirPrev.setBounds(laneRow.removeFromLeft(34));
+    dirReadout.setBounds(laneRow.removeFromLeft(72));
+    dirNext.setBounds(laneRow.removeFromLeft(34));
+    linkButton.setBounds(laneRow.removeFromRight(70)); // Link is about all of them, so it sits apart
+
     // The lane tools, left to right, in the order you reach for them: mark a span, then put it
-    // back or roll it. Voice sits at the right end, away from the three, because it is the one
-    // control here that edits the *sound* rather than the drawing - and it only appears at all
-    // with the Harmony lane up.
+    // back, roll it, or take a copy of it. Voice sits at the right end, away from the rest,
+    // because it is the one control here that edits the *sound* rather than the drawing - and
+    // it only appears at all with the Harmony lane up.
     auto toolsRow = area.removeFromTop(34);
     area.removeFromTop(6);
     selectButton.setBounds(toolsRow.removeFromLeft(84));
@@ -3461,13 +3991,24 @@ void ArpPanel::resized()
     rollMinus.setBounds(toolsRow.removeFromLeft(34));
     rollReadout.setBounds(toolsRow.removeFromLeft(52));
     rollPlus.setBounds(toolsRow.removeFromLeft(34));
+    toolsRow.removeFromLeft(12);
+    copyStepsButton.setBounds(toolsRow.removeFromLeft(72));
+    toolsRow.removeFromLeft(6);
+    pasteStepsButton.setBounds(toolsRow.removeFromLeft(72));
     voiceButton.setBounds(toolsRow.removeFromRight(112));
 
     auto gridArea = area.removeFromTop(140);
-    area.removeFromTop(6);
+    area.removeFromTop(4);
     for (auto& lr : laneRows)
         if (lr.grid != nullptr)
             lr.grid->setBounds(gridArea); // all share the slot; only one is visible
+
+    // The loop bar, directly under the grid and off the same rectangle, so a window lands on
+    // the steps it is drawn over. Same rule the MUTE strip already follows and for the same
+    // reason: a gutter on one and not the other silently slides every cell off its step.
+    if (loopBar != nullptr)
+        loopBar->setBounds(area.removeFromTop(16));
+    area.removeFromTop(6);
 
     // The mute strip divides its own width into the same step count the grid does, so it
     // only reads as "the steps above, muted" while the two share an origin and a width.

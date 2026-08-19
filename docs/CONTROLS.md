@@ -742,14 +742,15 @@ holds:
 | **Details** | opens that line's deep view - the band, and the step editor on Pattern shape. The only way there from this view (2026-08-02, seventh pass); A and B on the Arp bar used to do it and are that line's On switch now instead |
 | **Oct** | transposes that line's whole run up or down, centred at zero. (The upward-only stacking *range*, `arpOctaves`, is on the line's own Details view beside Distance - "how far does it reach" is a different question from "how high does it sit") |
 | **Gate** | how much of each step its notes fill. Short gates let the other line through |
-| **Chance** | how often a step fires at all. Thin one line out and the other shows through |
+| **Mutate** | how far this line explores **other notes of the chord you are holding**. At zero it plays what you set up; turn it up and the run starts landing on different notes of that chord. It can only ever reach a note the chord already contains, so there is no setting at which it goes out of key or plays something you did not put there |
+| **Lock** | how long it keeps what Mutate finds. Hard left, a new variation every time round. Hard right, the first one it lands on repeats for good - so you can turn Mutate up, listen until something catches, and turn Lock up to keep it. In between it holds an idea for a while and then moves on. Nothing happens here while Mutate is at zero |
 | **Swing** | shifts its offbeats late or early. The quickest way to stop two lines landing on top of each other |
 | **Offset** | starts its pattern from a different foot. Two lines on the same rate and different offsets are out of phase rather than in unison |
 | **Vel** | how loud that line plays, as **MIDI velocity, 0-127** (2026-08-18, Owen on the old readout: "still wrong", having just asked for velocity ranges to span 0-127). A **range knob**: the face is the hardest a hit ever lands, the ring is Humanize Velocity - how far under that a hit can randomly fall, in the same units - so the two read as one band, `54-100`, the same shape the pads' own Humanize knob has. At 0 the line is silent. It was a bipolar *percentage* trim around "as played" until then, which put percentages on a control called Vel and produced readouts like `-31 ~20`: numbers that look like velocities and are not. What the change costs is a line following the velocity of the chord fed to it, which with one mouse was already a constant - every chord Keys fires leaves at the pads' own Humanize velocity. The Velocity lane, the ramp and Drift still shape it exactly as before; only the base moved. The **lamp** switches Humanize Velocity on and off, remembering the amount while it's off - Vel's own zero means *silent*, so no position of the face can double as an off switch the way H.Time's zero means "no wander" |
 | **H.Time** | nudges each hit a little late, at random. At 0 the line is dead on the grid. A **range knob**: the knob is the most it ever nudges, and the ring around it is how far under that a hit can fall. Drag the little dial at its top left — or anywhere on the ring — to open and close it. Wide open it draws from nothing, which is what this did before it had a ring; closed it is a fixed nudge with no randomness left. Turn the knob and the whole range moves with it |
 | the chord | what that line is holding, or `...` while a quantized launch is waiting |
 
-Seven knobs, not eight since Vel absorbed H.Vel's own knob on 2026-08-17, a rate with its three modifiers, a shape, Dot/Tuplet/Anchor and Details: every
+Eight knobs (seven between 2026-08-17, when Vel absorbed H.Vel's own knob, and 2026-08-18, when Chance became Mutate and Lock - Chance itself is still on the Play page, and is still a step lane), a rate with its three modifiers, a shape, Dot/Tuplet/Anchor and Details: every
 setting a regular arpeggiator has, both lines deep, on one screen. Latch, **Play** and Chain
 still exist per line, just not on this card - Latch and Play live on that line's own Details
 view (the band), Chain on its action row under the twelve slots. The card's own On switch is
@@ -889,8 +890,17 @@ which is what makes it read as the fourth view rather than a third letter beside
 
 ### The step editor (Draw page, Shape -> Pattern)
 
-Twelve lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. A readout
+Thirteen lanes, shown **one at a time** through the tabs: pick a tab, edit that lane. (Mute is a
+fourteenth and has no tab of its own - the MUTE row under the grid is its editor.) A readout
 follows the cursor. Nothing needs a modifier, a double-click or the keyboard.
+
+**A moving column shows where the line is**, in the grid and under the Mute row. Each lane has its
+own length, its own speed and its own loop, so each one is somewhere different - that column is the
+only thing on the page that can tell you where.
+
+**The tabs say what is in the lanes you cannot see.** A small dot on a tab means that lane holds
+something other than its default; a line struck through it means the lane is switched off. Eleven
+of the twelve are hidden at any moment, and these are how you find the one doing the damage.
 
 **A drag edits the step it started on, and only that one.** Move up and down to set the value;
 sideways travel is ignored, so a hand drifting on its way to a height cannot rewrite the
@@ -899,7 +909,7 @@ there the value is a toggle and a swipe genuinely means "all of these".
 
 | Lane | Range | Meaning |
 |------|-------|---------|
-| **Note** | rest, follow, 1-8, P/H/L/R | Which note of the held chord this step plays. `X` rests, the dot follows the shape, 1-8 pick a fixed one. **P** repeats whatever last sounded, **H** and **L** take the highest and lowest note of the chord, **R** picks any of them - those four ask the chord a question rather than counting into it, so they keep meaning the same thing when the chord changes. |
+| **Note** | rest, follow, 1-8, P/H/L/R, 8 shapes | Which note of the held chord this step plays, drawn as a marker at a height rather than a filled bar - the value is a *name*, not an amount. `X` rests, the dot follows the line's Shape, 1-8 pick a fixed note. **P** repeats whatever last sounded, **H** and **L** take the highest and lowest note of the chord, **R** picks any of them - those four ask the chord a question rather than counting into it, so they keep meaning the same thing when the chord changes. Above them, **eight little contours are shapes this step runs on its own**: up, down, up/down, down/up, up & down, down & up, and fingered low and high. See below. |
 | **Octave** | -3 - +3 | Octaves added to this step. |
 | **Velocity** | 10-200% | Scales the velocity you played at. |
 | **Gate** | 5-200% | Note length as a share of the step. Over 100% ties into the next step. |
@@ -911,24 +921,85 @@ there the value is a toggle and a swipe genuinely means "all of these".
 | **Chord** | 1-12, or off | This step plays the chord stored in that **arp slot** instead of a note of what you are holding. Draw four of them across a lane and the arp plays a progression on its own. Off (the dot) is a normal step, and a slot with no chord in it is left alone rather than silenced. |
 | **Rand** | -8 - +8 | How far this step's note selection may stray, and which way. Drawn per step, so step 3 can be locked and step 7 wide open. Only acts on a fixed 1-8; a step following the shape is left to walk. |
 | **Chain** | 0, 1, 2 | Play this step only on a condition. `0` always, `1` only if the step before it sounded, `2` only if it did not. Chance says *maybe*; this says *only if*. |
+| **Reset** | 0, 1 | Restart the shape's walk on this step, so it plays the note the walk starts on again - which is the chord's first note at Offset 0, and the note Offset starts the walk on otherwise, since Offset is part of where the walk begins. Restarts the walk and nothing else — every lane keeps running, so a reset every other step keeps an Up shape on its first two notes for ever. |
+
+### Shapes inside the Note lane
+
+The top eight values of the Note lane are **shapes**, drawn as little contours instead of numbers,
+and they are the difference between a lane of note numbers and an arpeggiator you draw. Each one
+means "run this shape on this step":
+
+| Contour | Shape | What it does |
+|---|---|---|
+| rising dashes | **up** | next note up the chord |
+| falling dashes | **down** | next note down |
+| single peak | **up/down** | up then back down, each extreme sounding once |
+| single trough | **down/up** | the mirror of it |
+| flat peak | **up & down** | up then down, both extremes sounding *twice* |
+| flat trough | **down & up** | the mirror of that |
+| alternating low | **fingered low** | every second note is the chord's lowest |
+| alternating high | **fingered high** | every second note is the chord's highest |
+
+**They all share one walk.** Draw four steps of *up* and then four of *down* and the run comes back
+down the line it went up, rather than starting over - which is what makes mixing them musical
+rather than jumpy. Put a fixed note or two among them and you have a melody that still follows
+whatever chord you feed it.
+
+Fingered low and high are also available as the line's own Shape on the Play page, alongside Up,
+Down and the rest.
 
 The **Mute** row under the grid silences individual steps **without disturbing their values**,
 so you can take a step out and put it back unchanged. It is its own lane as of 2026-08-14 - it
 used to overwrite the Note lane, which destroyed whatever the step held. A Note of `X` is still
 a *drawn* rest, which is a different thing and still there.
 
-### Select, Reset and Roll (the lane tools)
+### The lane strip: On, Steps, Speed, Dir and Link
 
-Their own strip under the lane tabs, acting on the lane you are looking at.
+Directly under the tabs, and everything on it describes **the lane you are looking at**.
+
+**On** switches the lane off without losing it. An off lane keeps every value you drew and the arp
+reads its default instead, so you can take Velocity out of the part, hear it without, and put it
+back untouched. This is the difference between it and Reset, which flattens the lane for good.
+
+**Steps** and **Speed** set the lane's length and its clock divider. They were on the Play page
+until 2026-08-18, which meant leaving the page you were drawing on to change the length of what you
+were drawing.
+
+**Dir** is which way the lane walks its loop: **Up**, **Down**, **Up alt** and **Down alt** (out and
+back, without playing the turning point twice). It is per lane and it is not shared by Link, which
+is the point of it: put the Note lane on Up and the Octave lane on Down over the same eight steps
+and the two never line up the same way twice, with nothing random involved.
+
+**Link** on (the default) means every lane shares one length, one speed and one loop window - the
+simple case, where a pattern is just "sixteen steps". Off is polymeter: each lane keeps its own.
+
+### The loop bar
+
+The thin bar directly under the grid is that lane's **loop window** - the steps it actually walks.
+Click anywhere on it to move the nearer end, or drag. Steps left outside the window stay exactly as
+you drew them and draw dimmed, so shortening a loop is something you can undo by eye.
+
+A four-step window inside a sixteen-step lane is the fastest way to get a figure that repeats while
+everything around it does not, and with Link off you can give every lane a different one.
+
+### Select, Reset, Roll, Copy and Paste (the lane tools)
+
+Their own strip under the lane strip, acting on the lane you are looking at.
 
 **Roll** rerolls that lane, straying from what is drawn by the amount beside it - a nudge at
 20%, a uniform scramble at 100. **Reset** puts the lane back to its default across its whole
 length, which is the way back from a roll you did not want; there is no undo anywhere in Keys.
 
 **Select** turns the drag into a span: with it lit, dragging on the grid marks steps instead of
-drawing on them, and Roll and Reset narrow to that span. Click it again to go back to drawing,
-which also drops the span. It is a mode rather than a modifier because the mouse-only contract
-has no Alt-drag to offer.
+drawing on them, and Roll, Reset, Copy and Paste all narrow to that span. Click it again to go back
+to drawing, which also drops the span. It is a mode rather than a modifier because the mouse-only
+contract has no Alt-drag to offer.
+
+**Copy** and **Paste** take the selected steps and put them back somewhere else in the same lane -
+or across the whole lane, if nothing is selected. Paste **repeats** what it holds to fill what you
+selected, so copying two steps and pasting them over eight gives you the pair four times. Paste is
+grey until there is something copied from *this* lane: pasting a Velocity lane into Note would be
+read as chord numbers and would play a melody you did not write.
 
 **Voice** sits at the right end of the same strip, but only while the **Harmony** tab is
 selected - it is the panel's one control that depends on which lane you are looking at.
@@ -937,12 +1008,7 @@ step plays. Click it for "Voice: Sub" and that voice plays the subharmonic serie
 same note instead, an undertone rather than an overtone. Best heard with Scale Lock off, since
 it deliberately leaves the key.
 
-### Lane lengths, and Link
-
-**Steps** and **Speed** on the Play page set the length and clock divider of the lane you are
-editing. **Link** on (the default) means every lane shares one length - the simple case, where
-a pattern is just "sixteen steps". Off is polymeter: each lane keeps its own, and lanes of
-different lengths drift against each other.
+### Keeping the lanes in step
 
 With Link on the lanes are kept in step continuously, not only when you nudge - a lane added by
 an update arrives at its own default and would otherwise draw a different number of cells than
