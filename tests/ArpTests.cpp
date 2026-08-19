@@ -1033,17 +1033,25 @@ public:
                 expectWithinAbsoluteError(timingOnly[i], base[i], 0.005f,
                                           "full H.TIME leaves every velocity alone");
 
-            // The ring is in velocity units too: at 40 below a level of 100, every hit lands
-            // somewhere in 60..100 and never above the knob.
-            const auto ringed = velsWith(0, 40, 100);
-            bool sawQuieter = false;
+            // The ring is in velocity units too, and it reaches **either side of the level**
+            // since 2026-08-19 (Owen, on the halo: "should be equal from center"): 40 around a
+            // level of 60 is a band of 20..100, and both halves of it actually get used.
+            const auto ringed = velsWith(0, 40, 60);
+            bool sawQuieter = false, sawLouder = false;
             for (const float v : ringed)
             {
-                expect(v <= 100.0f / 127.0f + 0.005f, "the ring only ever shaves, never louder");
-                expect(v >= 60.0f / 127.0f - 0.012f, "and never further than the ring reaches");
-                sawQuieter = sawQuieter || v < 100.0f / 127.0f - 0.005f;
+                expect(v <= 100.0f / 127.0f + 0.012f, "never further above the level than the ring");
+                expect(v >= 20.0f / 127.0f - 0.012f, "and never further below it");
+                sawQuieter = sawQuieter || v < 60.0f / 127.0f - 0.005f;
+                sawLouder = sawLouder || v > 60.0f / 127.0f + 0.005f;
             }
-            expect(sawQuieter, "a ring of 40 actually moved something");
+            expect(sawQuieter && sawLouder, "a ring of 40 lands on both sides of the level");
+
+            // Equal from centre at the rails too: a level of 120 leaves only 7 of room above,
+            // so the band is 113..127 however wide the ring is turned.
+            for (const float v : velsWith(0, 40, 120))
+                expect(v >= 113.0f / 127.0f - 0.012f && v <= 1.0f + 0.005f,
+                       "at the rail the band stays equal, not lopsided");
 
             // The bottom of the band is taken literally now: no 0.05 audibility floor lifting it,
             // because the level *is* the velocity and a band drawn low is meant to be quiet. The
@@ -1165,14 +1173,14 @@ public:
             expectWithinAbsoluteError(period(syncTrip, 4), 4000, 2, "a triplet 1/16 is two thirds of one");
         }
 
-        beginTest("a Humanize range reaches back from the knob by its span");
+        beginTest("the Humanize knob is the centre of its range, and the ring reaches both ways");
         {
-            // 2026-08-03, the range knobs (Owen: "a serum style knob where you can set a range
-            // in the knob ... when the outer ring is enabled, moving the dial moves the outer
-            // ring with it"). Humanize was always "uniform between nothing and the knob"; the
-            // span says how far under the knob the draw may fall, so the knob stays the
-            // ceiling and the *range travels with it* - which is the half of this that has to
-            // be pinned, because it is the half that is easy to build the other way round.
+            // 2026-08-03 built the ring; 2026-08-19 centred it (Owen, on the halo: "moving the
+            // halo shouldn't move knob. should be equal from center"). The draw is the knob
+            // plus or minus the ring, equal on both sides, with the reach stopped where a rail
+            // is nearer - the knob itself on the low side, so a hit is never early, and 100
+            // less the knob on the high side, so the band never goes lopsided. The halves
+            // pinned here are the ones that are easy to build the other way round.
             const auto onsets = [&](int amount, int spanPct)
             {
                 auto sp = p;
@@ -1182,12 +1190,11 @@ public:
                 return onsetsOf(sp, clock, block, 12, steady);
             };
 
-            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - but
-            // the engine also caps a nudge at 40% of the gap to the next sub-hit, so the
-            // ceiling in force is min(1200, 2400) = 1200.
+            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - under
+            // the engine's 40% ordering cap at this rate, so 1200 is the scale in force.
             const auto closed = onsets(100, 0);
             expect(closed.size() >= 4, "the run has to fire before this proves anything");
-            // A span of zero collapses the range onto the knob: no randomness left, every hit
+            // A ring of zero collapses the range onto the knob: no randomness left, every hit
             // exactly 1200 late, so the gaps are all one step.
             for (size_t i = 1; i < closed.size(); ++i)
                 expectWithinAbsoluteError((double) (closed[i] - closed[i - 1]), 6000.0, 2.0,
@@ -1196,36 +1203,52 @@ public:
             expectWithinAbsoluteError((double) closed[0], 1200.0, 2.0,
                                       "every hit is a full 25 ms late");
 
-            // Wide open is the old behaviour: somewhere in 0..1200, and different draws.
-            const auto open = onsets(100, 100);
-            expect(open.size() >= 4);
-            expect(open != closed, "a full span still randomizes");
-            for (const auto o : open)
-                expect(o % 6000 <= 1201, "and never past the ceiling it always had");
+            // The knob at its top has no room above, so equal-from-centre means no room below
+            // either: a maxed knob is the same fixed offset whatever the ring says.
+            const auto maxed = onsets(100, 100);
+            expect(maxed.size() >= 4);
+            for (const auto o : maxed)
+                expectWithinAbsoluteError((double) (o % 6000), 1200.0, 2.0,
+                                          "at the rail the band has nowhere to open");
 
-            // **The range travels with the knob.** Halve the knob with the span closed and
-            // every hit lands at half the offset - the proof that the span is measured back
-            // from the knob rather than up from zero.
+            // Mid-knob, ring wide open: the full reach both ways, nothing early, up to 2x the
+            // knob late, and actually random.
+            const auto open = onsets(50, 100);
+            expect(open.size() >= 4);
+            expect(open != closed, "an open ring still randomizes");
+            bool sawBelow = false, sawAbove = false;
+            for (const auto o : open)
+            {
+                expect(o % 6000 <= 1201, "never past twice the knob");
+                sawBelow = sawBelow || (o % 6000) < 599;
+                sawAbove = sawAbove || (o % 6000) > 601;
+            }
+            expect(sawBelow && sawAbove, "the draw lands on both sides of the knob");
+
+            // **The range travels with the knob.** Halve the knob with the ring closed and
+            // every hit lands at half the offset - the proof that the range is measured from
+            // the knob rather than up from zero.
             const auto halfClosed = onsets(50, 0);
             expect(halfClosed.size() >= 4);
             expectWithinAbsoluteError((double) halfClosed[0], 600.0, 2.0,
                                       "the closed range moved with the dial");
 
-            // A span narrower than the knob is a floor under a draw: at least 30% of 25 ms.
-            const auto narrow = onsets(100, 70);
+            // A narrower ring is a narrower band either side of the knob: 50 +/- 20 is 30% to
+            // 70% of 25 ms, and nothing outside it.
+            const auto narrow = onsets(50, 20);
             expect(narrow.size() >= 4);
             for (const auto o : narrow)
             {
-                expect(o % 6000 >= 359, "every hit is at least as late as the range's bottom");
-                expect(o % 6000 <= 1201, "and no later than the knob");
+                expect(o % 6000 >= 359, "every hit is at least as late as the band's bottom");
+                expect(o % 6000 <= 841, "and no later than its top");
             }
 
-            // Humanize itself off means the span does nothing: there is no draw to put a
-            // bottom under, and a range that nudged on its own would make a knob at zero audible.
+            // Humanize itself off means the ring does nothing: there is no draw to open, and a
+            // ring that nudged on its own would make a knob at zero audible.
             const auto off = onsets(0, 0);
             expect(off.size() >= 4);
             expectWithinAbsoluteError((double) off[0], 0.0, 2.0,
-                                      "a closed range under a Humanize of zero is still zero");
+                                      "a closed ring under a Humanize of zero is still zero");
         }
 
         beginTest("the rate readout is the step length as a fraction of a bar");
@@ -2565,13 +2588,13 @@ public:
                 expectEquals(b[i].note, a[i].note, "same notes");
         }
 
-        beginTest("Mutate never leaves the held chord, at any amount");
+        beginTest("Mutate to 50 never leaves the held chord");
         {
-            // The whole justification for letting this touch the note at all: it moves the run
+            // The 2026-08-18 rule, kept for the knob's lower half: to 50, Mutate moves the run
             // to another entry of the sequence built from what is held, so every pitch it can
             // reach is one of them. Swept, because a reach that grows with the amount is just
-            // the sort of thing that falls off the end at 100 and nowhere else.
-            for (int amt = 10; amt <= 100; amt += 10)
+            // the sort of thing that falls off the end at the boundary and nowhere else.
+            for (int amt = 10; amt <= 50; amt += 10)
             {
                 ArpEngine e;
                 e.prepare(sr);
@@ -2585,6 +2608,58 @@ public:
                         expect(ev.note == 60 || ev.note == 64 || ev.note == 67,
                                "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
                                    + ", which is not in the held chord");
+            }
+        }
+
+        beginTest("Mutate past 50 strays in scale; only past 75 may it leave the scale");
+        {
+            // The 2026-08-19 zones (Owen: "higher values can go out of scale"). C major as the
+            // mask - the default 0xFFF is chromatic and would make "in scale" vacuous.
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            for (int amt = 55; amt <= 75; amt += 10)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = amt;
+                mp.rootPc = 0;
+                mp.scaleMask = cMajor;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        expect((cMajor >> (ev.note % 12)) & 1u,
+                               "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
+                                   + ", out of scale below the chromatic zone");
+            }
+            // At the top the strays are chromatic but still local: a stray is at most three
+            // semitones off a note the walk could have chosen, so nothing lands far from the
+            // chord. The bound is what pins the reach; scale membership is deliberately not
+            // asserted, because leaving the scale is the feature.
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 100;
+                mp.rootPc = 0;
+                mp.scaleMask = cMajor;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                bool leftScale = false;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                    {
+                        int nearest = 127;
+                        for (int c : { 60, 64, 67 })
+                            nearest = juce::jmin(nearest, std::abs(ev.note - c));
+                        expect(nearest <= 4, "Mutate 100 played " + juce::String(ev.note)
+                                                 + ", further than a stray can reach");
+                        leftScale = leftScale || (((cMajor >> (ev.note % 12)) & 1u) == 0);
+                    }
+                expect(leftScale, "at 100, over 32 steps, at least one stray left the scale");
             }
         }
 
@@ -2663,6 +2738,120 @@ public:
                 return -1;
             };
             expectEquals(noteAt(true), noteAt(false), "the same step plays the same note either way");
+        }
+
+        // --- The per-line harmony voices (2026-08-19, BigSky's shimmer list) --------------
+
+        beginTest("A harmony voice doubles every note at its interval; chance 0 is silence");
+        {
+            const auto run = [&](int semis, int chancePct)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.harmSemis[0] = semis;
+                mp.harmChance[0] = chancePct;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> ons;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        ons.push_back(ev.note);
+                return ons;
+            };
+
+            const auto plain = run(0, 100);
+            const auto octaveUp = run(12, 100);
+            expectEquals((int) octaveUp.size(), (int) plain.size() * 2,
+                         "at chance 100 every note carries its voice");
+            for (int n : octaveUp)
+                expect(n == 60 || n == 64 || n == 67 || n == 72 || n == 76 || n == 79,
+                       "harmony +12 played " + juce::String(n)
+                           + ", which is neither the chord nor its octave");
+
+            // Chance 0 is Off by another route, and Off must mean byte-identical.
+            const auto silent = run(12, 0);
+            expectEquals((int) silent.size(), (int) plain.size(), "chance 0 adds nothing");
+            for (size_t i = 0; i < silent.size() && i < plain.size(); ++i)
+                expectEquals(silent[i], plain[i], "chance 0 changes nothing");
+        }
+
+        beginTest("Both harmony voices stack, and a clamped voice is dropped, not doubled");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 12;
+            mp.harmSemis[1] = -12;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), out);
+            int ons = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    ++ons;
+            expectEquals(ons % 3, 0, "each step is the note and its two voices");
+            expect(ons >= 9, "two voices tripled the steps");
+
+            // A voice pushed past the MIDI range clamps onto its own source and is dropped -
+            // the subharmonic rule: a collapsed interval is a silence, not a doubled attack.
+            ArpEngine e2;
+            e2.prepare(sr);
+            auto mp2 = p;
+            mp2.harmSemis[0] = 24;
+            juce::MidiBuffer out2;
+            clock.ppq = 0.0;
+            e2.process(mp2, clock, block * 4, chordOn({ 120, 124 }), out2);
+            for (auto& ev : collect(out2))
+                if (ev.on)
+                    expect(ev.note == 120 || ev.note == 124 || ev.note == 127,
+                           "a clamped voice either lands clamped or not at all");
+        }
+
+        beginTest("Two harmony voices at the same interval cannot hang a note");
+        {
+            // The regression: a duplicate {note, channel} inside one step is not a doubled
+            // attack, it is a hung note. Both hits land at the same offset, so the second goes
+            // down emitHit's tie branch and writes a note-off at `on - 1` - before the first
+            // one's note-on. Downstream that leaves ArpMerge's refcount pinned above zero and
+            // the pitch is never released. Every note-on a step emits must have its own
+            // note-off, and no pitch may be opened twice in one step.
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 7; // both voices on the same interval
+            mp.harmSemis[1] = 7;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+
+            // Walk the stream in order and count owners per pitch, the way ArpMerge does.
+            std::array<int, 128> refs {};
+            int maxRefs = 0;
+            for (auto& ev : collect(out))
+            {
+                if (ev.on)
+                {
+                    ++refs[(size_t) ev.note];
+                    maxRefs = juce::jmax(maxRefs, refs[(size_t) ev.note]);
+                }
+                else if (refs[(size_t) ev.note] > 0)
+                {
+                    --refs[(size_t) ev.note];
+                }
+            }
+            expectEquals(maxRefs, 1, "no pitch is ever opened twice over");
+
+            // Whatever is still open at the end is what the line is holding, and the engine
+            // must be able to let go of all of it.
+            juce::MidiBuffer flushed;
+            e.flushInto(flushed);
+            for (auto& ev : collect(flushed))
+                if (! ev.on && refs[(size_t) ev.note] > 0)
+                    --refs[(size_t) ev.note];
+            for (int n = 0; n < 128; ++n)
+                expectEquals(refs[(size_t) n], 0, "every note-on is released");
         }
 
         // --- Per-step shapes, the fingered pair, and the Reset lane (2026-08-18) ----------

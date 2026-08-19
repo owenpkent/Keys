@@ -270,7 +270,10 @@ private:
     // which is what they shape. See the wireRange lambda in the editor's constructor.
     RangeKnob strumKnob, humanKnob;
     juce::Label strumHead, humanHead;
-    std::unique_ptr<SliderAtt> chordStrumAtt, humanizeVelAtt;
+    // No attachments for the two pad range knobs: their face is the band's *centre* since
+    // 2026-08-19, which is not a parameter - see wireRange in the constructor, and
+    // syncPadRangeKnobs() for the pull half.
+    void syncPadRangeKnobs();
     // The strum direction's `< >` pair, which replaced its combo on 2026-08-03. The caption
     // beside them reads the live direction, so there is no third control saying it.
     juce::TextButton strumDirPrev { "<" }, strumDirNext { ">" };
@@ -344,6 +347,12 @@ private:
 
     // Chord-pad page navigation, riding the Pads bar.
     std::array<juce::TextButton, KeysProcessor::numPadPages> pageButtons;
+    // The strip's own Play switch, beside them (2026-08-19, Owen: "I want a toggle above the
+    // keyboard to play notes... when I'm trying to drag a cord into the arpeggiator, it plays
+    // instead, and it stops everything"). Off, a pad click makes no sound and the strip is
+    // drag-only; see LayoutState::padsPlayOnClick for the whole story. A plain toggle rather
+    // than a parameter: it is a UI mode, like Light keys, and it lives in the layout tree.
+    juce::ToggleButton padsPlayButton { "Play" };
 
     // The generator's two bulk actions, riding the Pads bar. They are the fast path into
     // generation, and they are on a bar because a bar is 34 px that already exists: a control

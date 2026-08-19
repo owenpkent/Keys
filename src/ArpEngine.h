@@ -512,15 +512,18 @@ public:
         int velRamp = 0;          // -100..+100
         double rampBeats = 8.0;
         // "Played, not programmed", split into its two halves on 2026-08-02 (Owen: "maybe we
-        // could split it up into two knobs"). `humanize` nudges each hit late by up to 25 ms;
-        // `humanVel` takes up to 30% off its velocity - each scaled by its own knob, each a
-        // different random draw per hit. Before the split one value drove both, so a session
-        // saved then keeps its amount as the timing half and gets 0 for the velocity half.
-        int humanize = 0;         // 0..100, timing only - the *ceiling* of the random draw
-        // Velocity only, and in **MIDI velocity units** since 2026-08-18, not a percentage of a
-        // 30% shave: it is how far under `velLevel` a hit may fall, so the knob and its ring read
-        // as one 0-127 band. 0 is no wander, which is what it always meant.
-        int humanVel = 0;         // 0..127, velocity units below velLevel
+        // could split it up into two knobs"). `humanize` nudges each hit late; `humanVel`
+        // wanders its velocity - each scaled by its own knob, each a different random draw per
+        // hit. Before the split one value drove both, so a session saved then keeps its amount
+        // as the timing half and gets 0 for the velocity half. **Both knobs are the centre of
+        // their wander since 2026-08-19** (Owen, on the halo: "should be equal from center"):
+        // the draw lands either side of the knob, equally, with the reach stopped where a rail
+        // is nearer - see the two draws in fireStep for the exact arithmetic.
+        int humanize = 0;         // 0..100, timing only - the typical lateness, on the 25 ms scale
+        // Velocity only, in **MIDI velocity units** since 2026-08-18: how far either side of
+        // `velLevel` a hit may land, so the knob and its ring read as one 0-127 band. 0 is no
+        // wander, which is what it always meant.
+        int humanVel = 0;         // 0..127, velocity units either side of velLevel
         // The spans, appended 2026-08-03 with the range knobs (Owen: "a serum style knob where
         // you can set a range in the knob"). Each hit draws uniformly between `humanize - span`
         // and `humanize` instead of between zero and `humanize`, so the knob keeps meaning "the
@@ -545,9 +548,21 @@ public:
 
         // Mutate (2026-08-18): how far the run explores *other notes of the held chord*, and
         // how long it keeps what it finds. See `mutatedIndex`. Both 0 is the engine unchanged.
+        //
+        // Three zones since 2026-08-19 (Owen: "higher values can go out of scale"): to 50 the
+        // knob is exactly the 2026-08-18 control and cannot leave the chord; past 50 a mutated
+        // step may stray a scale degree or two off the chord note instead; past 75 some of
+        // those strays are chromatic semitones. See `mutatedPitch` for the second stage.
         int mutate = 0;     // 0..100
         int mutateLock = 0; // 0..100; 100 = the first variation found repeats for good
         int mutateSeed = 0; // the line index, so two lines never explore in lockstep
+        // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): an interval
+        // in semitones added to every note the step resolved - Mutate's stray included, so the
+        // voice follows the run - and how often it fires, rolled per step per voice off the
+        // same stateless hash Mutate draws from. 0 semitones is Off. Chromatic on purpose;
+        // the dropdown names intervals, not degrees (see the registration in PluginProcessor).
+        int harmSemis[2] = { 0, 0 };
+        int harmChance[2] = { 100, 100 };
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
         // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
@@ -1172,15 +1187,14 @@ private:
     // variation repeats for good. Deriving it from the step index rather than carrying a shift
     // register is what keeps this stateless from the playhead like everything else here bar
     // laneChain: a transport jump lands on the variation it would have walked to.
-    int mutatedIndex(const Params& p, int chosen, long long globalStep, int count) const noexcept
+    // The (step, era) cell both of Mutate's stages hash. One function so the index walk and
+    // the pitch stage below cannot disagree about when a variation changes: the pass is
+    // measured over the window the Note lane actually walks, not its length - a loop of four
+    // steps inside a lane of sixteen comes round every four, and a variation that changed
+    // every sixteen would be heard as changing in the wrong place - and Lock stretches the
+    // era for both at once.
+    void mutateCell(const Params& p, long long globalStep, int& stepOut, long long& eraOut) const noexcept
     {
-        const int amt = juce::jlimit(0, 100, p.mutate);
-        if (amt <= 0 || count <= 1)
-            return chosen;
-
-        // The pass is measured over the window the Note lane actually walks, not its length:
-        // a loop of four steps inside a lane of sixteen comes round every four, and a variation
-        // that changed every sixteen would be heard as changing in the wrong place.
         const auto sh = lanes.shapeOf(laneNote);
         const int len = juce::jlimit(1, maxSteps, sh.len);
         int from = juce::jlimit(0, len - 1, sh.loopFrom);
@@ -1202,9 +1216,18 @@ private:
         const long long pass = (k >= 0 ? k : k - span + 1) / span;
         const int lock = juce::jlimit(0, 100, p.mutateLock);
         // 0 -> a new era every pass; 99 -> one every ~62; 100 -> one era, ever.
-        const long long era = lock >= 100 ? 0 : pass / (1 + (long long) lock * lock / 160);
+        eraOut = lock >= 100 ? 0 : pass / (1 + (long long) lock * lock / 160);
+        stepOut = laneStepIndex(rel, p.offset, sh);
+    }
 
-        const int step = laneStepIndex(rel, p.offset, sh);
+    int mutatedIndex(const Params& p, int chosen, long long globalStep, int count) const noexcept
+    {
+        const int amt = juce::jlimit(0, 100, p.mutate);
+        if (amt <= 0 || count <= 1)
+            return chosen;
+
+        int step; long long era;
+        mutateCell(p, globalStep, step, era);
         const unsigned int h = hash32((unsigned int) step * 2654435761u
                                       ^ (unsigned int) (era * 40503u)
                                       ^ (unsigned int) (p.mutateSeed * 2246822519u));
@@ -1212,10 +1235,52 @@ private:
             return chosen; // this step keeps what it was given, this era
 
         // The reach is in chord entries, never in semitones - one step of it is one note of the
-        // chord - which is the whole reason this cannot leave the harmony.
+        // chord - which is why this stage cannot leave the harmony at any amount. Leaving it is
+        // mutatedPitch's job, and only past the knob's halfway point.
         const int reach = 1 + amt * 2 / 100; // 1..3 entries either side
         const int delta = (int) ((h >> 8) % (unsigned) (reach * 2 + 1)) - reach;
         return ((chosen + delta) % count + count) % count;
+    }
+
+    // **The out-of-scale half of Mutate** (2026-08-19, Owen: "I want a mutate knob, which
+    // effects the notes being played. higher values can go out of scale"). Three zones on the
+    // one knob: to 50 this stage does nothing and Mutate is exactly the 2026-08-18 control,
+    // confined to the held chord. Past 50 a step may land a scale degree or two away from the
+    // note the walk chose - in scale, out of chord. Past 75 a growing share of those strays
+    // are chromatic semitones, and by 100 all of them are.
+    //
+    // Applied to the *placed* pitch, after the index walk and after place(), so a step that
+    // strays still strays from the note the run actually reached - and before the per-line
+    // harmony voices, which follow it. It hashes the same (step, era) cell as mutatedIndex
+    // with a different salt, so Lock holds these variations exactly as it holds the index
+    // ones: a wander that hardens, out-of-scale notes included.
+    int mutatedPitch(const Params& p, int note, long long globalStep) const noexcept
+    {
+        const int amt = juce::jlimit(0, 100, p.mutate);
+        if (amt <= 50)
+            return note;
+
+        int step; long long era;
+        mutateCell(p, globalStep, step, era);
+        const unsigned int h = hash32((unsigned int) step * 3266489917u
+                                      ^ (unsigned int) (era * 668265263u)
+                                      ^ (unsigned int) (p.mutateSeed * 2246822519u)
+                                      ^ 0x9e3779b9u);
+        // How often a step leaves the chord at all: never at 50, every other step by 100.
+        if ((int) (h % 100u) >= amt - 50)
+            return note;
+
+        const int dir = ((h >> 14) & 1u) != 0 ? 1 : -1;
+        // The chromatic share of the strays: none at 75, all of them at 100.
+        if (amt > 75 && (int) ((h >> 7) % 100u) < (amt - 75) * 4)
+            return juce::jlimit(0, 127, note + dir * (1 + (int) ((h >> 9) % 3u)));
+        // In scale, which is the middle zone's whole meaning - and note that with Scale set to
+        // **Chromatic** the mask is every pitch class, so "a scale degree or two" *is* one or
+        // two semitones and the middle zone reads as the chromatic one. That is the setting
+        // being honest rather than the zone leaking: there is no non-chromatic answer to
+        // "stay in the chromatic scale". The three zones are three zones under any scale that
+        // actually excludes something, which is every other entry in the list.
+        return shiftByDegrees(note, dir * (1 + (int) ((h >> 9) % 2u)), p.scaleMask, p.rootPc);
     }
 
     // Walk `degrees` scale steps from `note`, using the mask of in-scale pitch classes. A
@@ -1546,29 +1611,62 @@ private:
         // than 40% of the gap to the next sub-hit. Unbounded, a 25 ms nudge at a fast ratchet
         // could carry one sub-hit past the next, and two hits of one pitch arriving out of
         // order is exactly the shape emitHit's close-what-you-land-on rule cannot survive.
-        const int maxLate = p.humanize > 0
-                          ? (int) juce::jmin(0.025 * sr * (juce::jlimit(0, 100, p.humanize) / 100.0),
+        // **The knob is the centre of the wander since 2026-08-19** (Owen, on the halo:
+        // "should be equal from center"): the draw is humanize +/- the ring, equal both
+        // sides, and the reach stops where a rail is nearer - h itself, so the floor never
+        // goes early (below zero late), and 100-h, so the band stays equal rather than
+        // lopsided against the ceiling. A ring at its default 100 therefore reads [0, 2h]:
+        // the knob is the typical lateness, which is what a centre means. The 40% guard is
+        // unchanged and still owns note ordering.
+        const int hTime = juce::jlimit(0, 100, p.humanize);
+        const int hReach = juce::jmin(juce::jlimit(0, 100, p.humanizeSpan),
+                                      juce::jmin(hTime, 100 - hTime));
+        const int maxLate = hTime > 0
+                          ? (int) juce::jmin(0.025 * sr * ((hTime + hReach) / 100.0),
                                              subLen * 0.4)
                           : 0;
-        // The floor is the knob less the span, so it travels with the knob. It rides the same
-        // 25 ms scale and the same 40% guard by being clamped to what the ceiling already
-        // survived: it can never push a hit further than maxLate, so the ordering rule above
-        // holds whatever the two parameters say - either can be automated past the other.
-        const int humanFloor = juce::jmax(0, juce::jlimit(0, 100, p.humanize)
-                                                 - juce::jlimit(0, 100, p.humanizeSpan));
-        const int minLate = juce::jlimit(0, maxLate, (int) (0.025 * sr * (humanFloor / 100.0)));
+        const int minLate = juce::jlimit(0, maxLate,
+                                         (int) (0.025 * sr * ((hTime - hReach) / 100.0)));
 
         // Resolve the step into pitches once, before the ratchet loop repeats them. Three
         // lanes fold in here, and all three want the note *after* the sequence walk has
         // chosen one, not instead of it.
         struct Hit { int note; float vel; int chan; };
-        Hit hits[maxHeld * 8 + ChordTable::maxNotes];
+        // Three times the base capacity: each of the line's two harmony voices can add a copy
+        // of every base hit (2026-08-19). addHit drops on overflow rather than writing past
+        // the end, as ever.
+        // Value-initialised. Only the first `hitCount` entries are ever read, and addHit is the
+        // only writer, so the tail is dead either way - but the dedup scan below reads
+        // hits[i].note for i < hitCount, and cppcheck cannot prove those were written, so the
+        // CI gate treats it as an uninitialised read. Zeroing about 5 KB once per *fired step*
+        // is immaterial next to what the rest of fireStep does, and it costs no allocation and
+        // no lock, so the audio-thread rule is untouched. Well-defined beats provably-unread.
+        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 3] {};
         int hitCount = 0;
         const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
+        // **One hit per pitch per channel per step, and that is a hard rule, not tidiness.**
+        // Two identical hits in one step are not a doubled note - they are a hung one. Both
+        // land at the same sample offset, so the second goes down emitHit's tie branch: it
+        // writes a note-off at `on - 1`, *before* the first one's note-on at `on`, and drops
+        // the first from active[]. MidiBuffer sorts by sample position, so ArpMerge then sees
+        // off, on, on and only one parked off - the refcount climbs to 2, the real note-off
+        // takes it to 1 rather than 0 and is suppressed, and the pitch is never released. It
+        // stays pinned above zero for the rest of the session, so every later hit on that
+        // pitch hangs too.
+        //
+        // Reachable without trying: set both harmony voices to the same interval, or give a
+        // chord-lane triad a + Perfect 5th voice, and C's fifth is the G already in the step.
+        // The harmony loop's own guard only ever caught a copy that clamped onto *its own*
+        // source. Deduping here covers every route into hits[] at once, which is where a rule
+        // about the whole step belongs.
         const auto addHit = [&](int note, float vel, int chan)
         {
+            const int n = juce::jlimit(0, 127, note);
+            for (int i = 0; i < hitCount; ++i)
+                if (hits[i].note == n && hits[i].chan == chan)
+                    return;
             if (hitCount < (int) (sizeof(hits) / sizeof(hits[0])))
-                hits[hitCount++] = { juce::jlimit(0, 127, note), vel, chan };
+                hits[hitCount++] = { n, vel, chan };
         };
         const auto place = [&](int note)
         {
@@ -1601,7 +1699,13 @@ private:
                 const int idx = juce::jlimit(0, seqCount - 1, playIdx[k]);
                 const auto& entry = seq[(size_t) idx];
                 const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
-                addHit(place(src.note + entry.semitoneOffset), src.velocity * velScale, src.channel);
+                // Mutate's pitch stage lands here, on the placed note (2026-08-19): past the
+                // knob's halfway point a step may stray off the chord note the walk chose -
+                // in scale first, chromatic at the top. Resolved once, so the subharmonic
+                // voice below offsets from the note actually played rather than the one that
+                // was aimed at.
+                const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset), globalStep);
+                addHit(played, src.velocity * velScale, src.channel);
 
                 // Harmony: a second voice, in one of two modes (harmonyMode, 2026-08-14).
                 // Mode 0, the original: this many chord tones above the one just played,
@@ -1617,9 +1721,8 @@ private:
                     // clamping collapses it onto the note it was meant to harmonize: a wrapped
                     // low note would read as a new attack rather than a silence.
                     static constexpr int kSubharmonicSemis[8] = { 0, -12, -19, -24, -28, -31, -34, -36 };
-                    const int playedRaw = place(src.note + entry.semitoneOffset);
-                    const int playedClamped = juce::jlimit(0, 127, playedRaw);
-                    const int subClamped = juce::jlimit(0, 127, playedRaw + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
+                    const int playedClamped = juce::jlimit(0, 127, played);
+                    const int subClamped = juce::jlimit(0, 127, played + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
                     if (subClamped != playedClamped)
                         addHit(subClamped, src.velocity * velScale, src.channel);
                 }
@@ -1630,6 +1733,39 @@ private:
                     const auto& hSrc = held[(size_t) juce::jlimit(0, heldCount - 1, hEntry.heldIndex)];
                     addHit(place(hSrc.note + hEntry.semitoneOffset + 12 * (h / seqCount)),
                            hSrc.velocity * velScale, hSrc.channel);
+                }
+            }
+        }
+
+        // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): each adds
+        // its interval to every hit the step resolved - chord-lane steps included, and
+        // Mutate's stray included, since the voice reads the hits rather than re-deriving
+        // them. The chance is rolled per step per voice, a hash of the step so a transport
+        // jump lands on the same answer (stateless, the mutatedIndex rule); salted by the
+        // voice index and by mutateSeed, so a voice's two slots - and two lines at the same
+        // setting - never gate in lockstep. A hit that clamps onto its own source is dropped,
+        // not doubled: a collapsed interval is a silence, the subharmonic rule above.
+        {
+            const int baseHits = hitCount;
+            for (int s = 0; s < 2; ++s)
+            {
+                const int semis = juce::jlimit(-48, 48, p.harmSemis[s]);
+                const int chancePct = juce::jlimit(0, 100, p.harmChance[s]);
+                if (semis == 0 || chancePct <= 0)
+                    continue;
+                if (chancePct < 100)
+                {
+                    const unsigned int h = hash32((unsigned int) (long long) globalStep * 2654435761u
+                                                  ^ (unsigned int) (s + 1) * 40503u
+                                                  ^ (unsigned int) (p.mutateSeed * 2246822519u));
+                    if ((int) (h % 100u) >= chancePct)
+                        continue;
+                }
+                for (int k = 0; k < baseHits; ++k)
+                {
+                    const int target = juce::jlimit(0, 127, hits[k].note + semis);
+                    if (target != hits[k].note)
+                        addHit(target, hits[k].vel, hits[k].chan);
                 }
             }
         }
@@ -1663,27 +1799,31 @@ private:
                 // the ramp and Drift all still shape it exactly as they did - only the *base*
                 // moved from the incoming chord to the knob. See Params::velLevel.
                 float vel = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
-                // Late and quieter, never early and never louder: a nudge that can also
-                // rush is what Swing is for, and a velocity that can also rise makes an
-                // edited Velocity lane mean less than it says. Two knobs since 2026-08-02
-                // (humanize is the timing, humanVel the velocity), so each half only runs
-                // when its own knob is up.
+                // Late, never early: a nudge that can rush the grid is what Swing is for,
+                // and an early hit would need to fire before the step it belongs to. Both
+                // wanders are centred on their knob since 2026-08-19 - the draw lands either
+                // side of it, equally - so "never louder" retired with the halo redesign:
+                // the level is the band's middle now, not its top. Two knobs since
+                // 2026-08-02 (humanize is the timing, humanVel the velocity), so each half
+                // only runs when its own knob is up.
                 if (maxLate > 0)
                     on += minLate + (int) (rng() % (unsigned) (maxLate - minLate + 1));
                 if (p.humanVel > 0)
                 {
-                    // How far under the level this hit falls, in **MIDI velocity units** since
-                    // 2026-08-18 - the knob and its ring are one 0-127 band now, so the amount
-                    // subtracted has to be in the band's own units rather than a percentage of a
-                    // 30% shave. Uniform between the floor and the ceiling, exactly as before;
-                    // with the span at its default 100 the floor sits at the knob itself, which
-                    // is what makes the whole reach available.
-                    const int reach = juce::jlimit(0, 127, p.humanVel);
-                    const int reachMin = juce::jmax(0, reach - juce::jlimit(0, 100, p.humanVelSpan)
-                                                              * reach / 100);
+                    // In **MIDI velocity units** since 2026-08-18, and **either side of the
+                    // level** since 2026-08-19 (Owen, on the halo: "should be equal from
+                    // center"): the knob is the band's centre, the ring is how far a hit may
+                    // land above or below it, uniform across the band. The reach stops where
+                    // a rail is nearer - the level itself, or 127 less it - so the band stays
+                    // equal on both sides rather than piling up against an end. humanVelSpan,
+                    // the ring's own former sub-span, is pinned at its default by the UI and
+                    // no longer read: a centred band has no ceiling for a sub-span to hang
+                    // from.
+                    const int level = juce::jlimit(0, 127, p.velLevel);
+                    const int reach = juce::jmin(juce::jlimit(0, 127, p.humanVel),
+                                                 juce::jmin(level, 127 - level));
                     const double u = (double) (rng() % 1000u) / 1000.0;
-                    const double units = (double) reachMin + u * (double) (reach - reachMin);
-                    vel -= (float) (units / 127.0) * velScale;
+                    vel += (float) ((2.0 * u - 1.0) * (double) reach / 127.0) * velScale;
                 }
                 // The 0.05 floor protects programmed dynamics: a Velocity lane at 0 or a
                 // hard H.VEL draw must stay audible rather than turn into a note-off. The

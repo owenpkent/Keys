@@ -303,6 +303,39 @@ public:
             expectWithinAbsoluteError(paramOf(h.processor, rateId), 5.0f, 0.01f,
                                       "the saved rate came back");
         }
+
+        beginTest("every UI line, switched on and listening, arpeggiates the keys");
+        {
+            // Processor-level, deliberately: ArpTests proves one engine works, and the bug this
+            // is for is the routing around it - a line whose queue, parameter cache or lift is
+            // wired to the wrong index plays nothing while its engine passes every test it has
+            // (2026-08-19, Owen: "line b isn't working"). One line at a time, so a line that
+            // only sounds because a neighbour's routing leaks into it fails rather than passes.
+            for (int line = 0; line < KeysProcessor::uiArpLines; ++line)
+            {
+                Host h;
+                h.processor.prepareToPlay(48000.0, 512);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+
+                juce::AudioBuffer<float> audio(2, 512);
+                int ons = 0;
+                for (int blk = 0; blk < 40; ++blk) // ~0.4 s: several 1/16 steps at any default
+                {
+                    juce::MidiBuffer midi;
+                    if (blk == 0)
+                        for (int note : { 60, 64, 67 })
+                            midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+                    h.processor.processBlock(audio, midi);
+                    for (const auto meta : midi)
+                        if (meta.getMessage().isNoteOn())
+                            ++ons;
+                }
+                expect(ons >= 3, "line " + juce::String::charToString(
+                                     (juce::juce_wchar) ('A' + line))
+                                     + " played " + juce::String(ons) + " notes");
+            }
+        }
     }
 };
 

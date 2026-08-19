@@ -43,8 +43,14 @@ namespace keys
 //     whole margin drags the span too** - every pixel of this component the face does not
 //     cover, corners included. The satellite is the affordance; the margin is the forgiveness.
 //   - No negative span. Serum flips the halo's hue for an inverted depth; there is nothing for
-//     a range to invert into, so the span is unsigned and `Direction` picks which side of the
-//     value it reaches instead.
+//     a range to invert into, so the span is unsigned.
+//
+// **The knob is the band's centre and the halo reaches equally both ways** (2026-08-19, Owen:
+// "moving the halo shouldn't move knob. should be equal from center"). The halo drag touches
+// only the span; the face never moves under it, and the band is value +/- reach on both sides
+// always - so a side that runs out of travel stops the other side too (`reach()`), rather than
+// letting the band go lopsided at the rails. The band opened downward from the face for its
+// first sixteen days, which read as "lower the floor" rather than "more range".
 //
 // The span is not a parameter this class owns. It comes in with setSpan() and goes out through
 // the three callbacks, so the consumer keeps the parameter, the gesture brackets and the undo
@@ -56,11 +62,6 @@ class RangeKnob : public juce::Component,
                   public juce::SettableTooltipClient
 {
 public:
-    // Which way the span reaches from the face's value. `below` suits a control whose knob is
-    // a maximum and whose range opens downward - Keys' Humanize, where the knob is the most a
-    // random draw ever does. `above` is Serum's own direction, for a knob that is a floor.
-    enum class Direction { below, above };
-
     RangeKnob()
     {
         addAndMakeVisible(knob);
@@ -91,7 +92,6 @@ public:
     juce::Component& spanHandle() { return handle; }
     void setSpanTooltip(const juce::String& t) { handle.setTooltip(t); }
 
-    void setDirection(Direction d) { direction = d; repaint(); }
 
     // The widest the span may open, in the face's own units. **Defaults to the face's own
     // full travel**, which is the right answer whenever the ring is a span *of the face's
@@ -131,18 +131,21 @@ public:
     }
     double getSpan() const { return span; }
 
-    // The two ends the span and the value work out to, clamped into the face's range. This is
-    // what the consumer's engine should reproduce, and what the readout says.
-    double rangeLo() const
+    // How far the band actually reaches either side of the value: the span, until a rail is
+    // nearer. One number for both sides on purpose - "equal from center" is the contract, so
+    // a side that runs out of travel stops the other side too, and the band never goes
+    // lopsided against an end of the face's range.
+    double reach() const
     {
-        return direction == Direction::below ? juce::jmax(knob.getMinimum(), knob.getValue() - span)
-                                             : knob.getValue();
+        const double room = juce::jmin(knob.getValue() - knob.getMinimum(),
+                                       knob.getMaximum() - knob.getValue());
+        return juce::jmax(0.0, juce::jmin(span, room));
     }
-    double rangeHi() const
-    {
-        return direction == Direction::below ? knob.getValue()
-                                             : juce::jmin(knob.getMaximum(), knob.getValue() + span);
-    }
+
+    // The two ends the span and the value work out to. This is what the consumer's engine
+    // should reproduce, and what the readout says.
+    double rangeLo() const { return knob.getValue() - reach(); }
+    double rangeHi() const { return knob.getValue() + reach(); }
 
     std::function<void(double)> onSpanChanged;
     std::function<void()> onSpanDragStart, onSpanDragEnd;
@@ -267,8 +270,13 @@ public:
         // is off, there's still a range appearance"). An unlit lamp over a range arc was the
         // control saying two things at once, and the arc is the louder of the two.
         const auto from = switchedOff() ? lo : rangeLo();
-        const auto t = hi > lo ? juce::jlimit(0.0, 1.0, (from - lo) / (hi - lo)) : 0.0;
-        knob.getProperties().set(skin::arcFromProperty, t);
+        const auto to = switchedOff() ? knob.getValue() : rangeHi();
+        const auto norm = [lo, hi](double v)
+        { return hi > lo ? juce::jlimit(0.0, 1.0, (v - lo) / (hi - lo)) : 0.0; };
+        knob.getProperties().set(skin::arcFromProperty, norm(from));
+        // The high half of the band sits past the pointer, which an end-at-value arc cannot
+        // light - skin::arcToProperty is what reaches it (2026-08-19).
+        knob.getProperties().set(skin::arcToProperty, norm(to));
         knob.repaint();
     }
 
@@ -280,12 +288,20 @@ public:
         repaint();
     }
 
+    // Whether the halo gesture is open, for a consumer's timer that syncs the knob from
+    // parameters: pulling mid-gesture would yank the band out from under the hand.
+    bool spanDragging() const { return dragging; }
+
     // Every press that reaches this component missed the face and missed the satellite, and
     // everything that is neither of those is the ring. No radius test: a corner press is a
     // ring press, on purpose - this is the forgiveness that replaces Serum's Alt+drag.
     void mouseDown(const juce::MouseEvent& e) override { beginSpanDrag(e); }
     void mouseDrag(const juce::MouseEvent& e) override { dragSpan(e); }
     void mouseUp(const juce::MouseEvent&) override { endSpanDrag(); }
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        wheelSpan(w);
+    }
 
 private:
     // The satellite. A component of its own so it sits above the face in z-order and takes the
@@ -317,6 +333,10 @@ private:
                 owner.setOn(! owner.isOn());
                 owner.repaint();
             }
+        }
+        void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+        {
+            owner.wheelSpan(w);
         }
         RangeKnob& owner;
         bool moved = false;
@@ -420,13 +440,59 @@ private:
                                            dragStartSpan
                                                + (double) (dragStartY - (float) e.getScreenPosition().y)
                                                      * (full / 300.0));
-        if (std::abs(wanted - span) < 1.0e-9)
+        applySpan(wanted);
+    }
+
+    // The halo writes the span and nothing else (2026-08-19, Owen: "moving the halo shouldn't
+    // move knob. should be equal from center"): the face is the band's centre and stays put
+    // under this gesture. It carried half of every span change for one build - the band
+    // opened around its centre by moving both the top and the floor - and the moving pointer
+    // was exactly the part that was not asked for.
+    void applySpan(double wantedSpan)
+    {
+        if (std::abs(wantedSpan - span) < 1.0e-9)
             return;
-        span = wanted;
+        span = wantedSpan;
         syncArcOrigin();
         if (onSpanChanged)
             onSpanChanged(span);
         repaint();
+    }
+
+    // The wheel on the halo or the ring margin, because a drag is a drag and the mouse has a
+    // wheel: up is more, one notch is a twentieth of the full sweep. Each event is its own
+    // bracketed gesture, the same shape a stepper click is.
+    void wheelSpan(const juce::MouseWheelDetails& wheel)
+    {
+        if (! isEnabled() || dragging)
+            return;
+        const auto full = spanMax();
+        if (full <= 0.0 || wheel.deltaY == 0.0f)
+            return;
+
+        // **Scaled by the delta, and reversed when the OS says so.** This used to test only the
+        // sign and apply a flat twentieth of the sweep per event, which is right for a notched
+        // wheel and wrong for every smooth one: a precision touchpad, a tilt wheel or a
+        // free-spinning mouse emits dozens of sub-notch events per physical gesture, so one
+        // flick slammed the span from nothing to full and wrote a begin/endChangeGesture pair
+        // into the host for each event on the way. A notch reports |deltaY| of about 1, so
+        // multiplying keeps the notched feel identical and makes a tenth of a notch a tenth of
+        // a step. `isReversed` is the OS's natural-scrolling flag, which JUCE reports rather
+        // than applies - without it the tooltip's "up is more" is a lie on that setting.
+        double dy = (double) wheel.deltaY;
+        if (wheel.isReversed)
+            dy = -dy;
+        // A smooth device can report a great deal in one event when it is flung; a notch is the
+        // most one event may be worth, so a fling is fast rather than instantaneous.
+        const double notches = juce::jlimit(-1.0, 1.0, dy);
+        const double wanted = juce::jlimit(0.0, full, span + notches * full * 0.05);
+        if (std::abs(wanted - span) < 1.0e-9)
+            return; // already at the rail: no gesture, no automation write
+        if (onSpanDragStart)
+            onSpanDragStart();
+        applySpan(wanted);
+        if (onSpanDragEnd)
+            onSpanDragEnd();
     }
 
     void endSpanDrag()
@@ -448,7 +514,6 @@ private:
     double span = 0.0;
     // <= 0 means "follow the face's own travel"; see setSpanMax for the case that needs it.
     double spanMaxOverride = -1.0;
-    Direction direction = Direction::below;
     int ring = 8;
     int readout = 15;
 

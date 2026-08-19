@@ -208,10 +208,10 @@ save it into your template (see above): after that, every new project already ha
 Keys track and the routing, and there is nothing to set up per song.
 
 Scale Lock, octave and velocity all apply to what is recorded, because Keys sends
-already-resolved notes. With either arp line lit (**A**, **B**), what lands is the
+already-resolved notes. With any arp line lit (**A**, **B**, **C**, **D**), what lands is the
 arpeggiated stream rather than the chord you clicked - the arp rewrites the note stream
-on its way out of the plugin, so the clip holds what you heard, both lines at once if
-both are running.
+on its way out of the plugin, so the clip holds what you heard, all the lines at once if
+more than one is running.
 
 ### REC: Keys records itself (for Keys Host, or one-track sets)
 
@@ -243,9 +243,9 @@ written to disk the moment you stopped.
 
 ### Channels, either way
 
-Each arp line can name its own **Channel** (Global, or 1–16). That is what makes two lines
-useful against a multitimbral rack: set A and B to different channels and one Keys drives
-three sounds. Live records all of it into the one clip, on the channels the lines sent it on;
+Each arp line can name its own **Channel** (Global, or 1–16). That is what makes four lines
+useful against a multitimbral rack: set A, B, C and D to different channels and one Keys drives
+four sounds. Live records all of it into the one clip, on the channels the lines sent it on;
 splitting it back out afterwards is a job for Live, not for Keys.
 
 ## Troubleshooting

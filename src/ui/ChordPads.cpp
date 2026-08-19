@@ -524,10 +524,13 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
-// A pad's card menu. Fourteen rows and two separators (2026-08-17: Copy chord, Paste chord and
-// Save chord as MIDI joined the first group, Owen: "need to be able to copy paste chords"),
-// which at the 34 px mouse-only item height (a separator is half that,
-// KeysLookAndFeel::getIdealPopupMenuItemSize) is 14 * 34 + 2 * 17 = 510 px. That budget is the
+// A pad's card menu. **Sixteen rows and two separators since 2026-08-19**, when uiArpLines went
+// to four and the Send to arp loop started emitting A, B, C and D (it was fourteen rows from
+// 2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the first group, Owen:
+// "need to be able to copy paste chords"). At the 34 px mouse-only item height (a separator is
+// half that, KeysLookAndFeel::getIdealPopupMenuItemSize) that is 16 * 34 + 2 * 17 = 578 px, up
+// from 510. **The row count is a function of uiArpLines now, so raising that raises this**: a
+// fifth line would make it 612. That budget is the
 // reason the three new rows landed flat in the existing first group rather than behind a
 // submenu: the menu hangs off a pad near the bottom of the window and grows *upwards*, and JUCE
 // answers one taller than the space it has by splitting it into columns or making it
@@ -647,8 +650,9 @@ void ChordPads::showPadMenu(int slot)
                      filled && onSendToArpLine != nullptr);
 
     // Bind this card to an arp slot, so launching that slot plays this chord through that
-    // slot's pattern. The other half of the "cards into the arp" pair: the two rows above hold a
-    // card in a line right now, this parks one in a slot for later.
+    // slot's pattern. The other half of the "cards into the arp" pair: the rows above - one per
+    // line, so four of them since 2026-08-19 - hold a card in a line right now, this parks one
+    // in a slot for later.
     juce::PopupMenu slots;
     for (int s = 0; s < KeysProcessor::numArpPatterns; ++s)
     {
@@ -906,7 +910,10 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     dragging = false;
     dragSource = cellAt(e.position);
 
-    if (processor.layout.padHoldToPlay)
+    // Both gates: hold mode owns the press, and the Pads bar's Play toggle (2026-08-19) can
+    // silence the whole click - a strip you are only dragging from should not be able to fire
+    // a chord on the way to the arpeggiator.
+    if (processor.layout.padHoldToPlay && processor.layout.padsPlayOnClick)
         startAudition(/*fixedLength*/ false);
     repaint();
 }
@@ -1100,7 +1107,13 @@ void ChordPads::mouseUp(const juce::MouseEvent&)
         // Which end of the click owns the sound. Holding: the press already fired it and letting
         // go is the release, so a stab is short and a lean is long. Otherwise the press was
         // silent and this is where the chord *starts*, with the 800 ms timer owning its note-off.
-        if (processor.layout.padHoldToPlay)
+        //
+        // Unless the Pads bar's **Play** toggle is off (2026-08-19, Owen: "when I'm trying to
+        // drag a cord into the arpeggiator, it plays instead, and it stops everything"): then
+        // neither end of a click makes a sound and the strip is drag-only. endAudition still
+        // runs, not startAudition, so a press that was sounding when the toggle flipped
+        // mid-gesture is released rather than left ringing.
+        if (! processor.layout.padsPlayOnClick || processor.layout.padHoldToPlay)
             endAudition();
         else
             startAudition(/*fixedLength*/ true);

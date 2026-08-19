@@ -192,6 +192,13 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     if (const auto* over = slider.getProperties().getVarPointer(skin::arcFromProperty))
         originPos = juce::jlimit(0.0f, 1.0f, (float) (double) *over);
     const float originAngle = rotaryStartAngle + originPos * (rotaryEndAngle - rotaryStartAngle);
+    // And where it ends: at the value, unless a RangeKnob says otherwise - its band reaches
+    // past the pointer on the high side (2026-08-19), and only the arc's own drawing can
+    // light that stretch, for exactly the halo-mask reason the origin override lives here.
+    float endPos = sliderPos;
+    if (const auto* over = slider.getProperties().getVarPointer(skin::arcToProperty))
+        endPos = juce::jlimit(0.0f, 1.0f, (float) (double) *over);
+    const float endAngle = rotaryStartAngle + endPos * (rotaryEndAngle - rotaryStartAngle);
 
     // Groove.
     juce::Path track;
@@ -210,11 +217,11 @@ void KeysLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     }
 
     // Value arc: halo, body, hot core.
-    if (std::abs(sliderPos - originPos) > 0.001f)
+    if (std::abs(endPos - originPos) > 0.001f)
     {
         juce::Path value;
         value.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f,
-                            juce::jmin(originAngle, angle), juce::jmax(originAngle, angle), true);
+                            juce::jmin(originAngle, endAngle), juce::jmax(originAngle, endAngle), true);
         g.setColour(accent().base.withAlpha(0.16f));
         g.strokePath(value, { lw * 2.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded });
         g.setColour(accent().base.withAlpha(0.55f));

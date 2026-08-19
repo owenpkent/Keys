@@ -5,6 +5,53 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: review pass on the four-arps round
+
+**Two harmony voices on the same interval hung a note for the rest of the session.** A duplicate
+pitch inside one step is not a doubled attack: both hits land at the same sample offset, so the
+second goes down `emitHit`'s tie branch, which writes a note-off at `on - 1` - *before* the first
+one's note-on. `MidiBuffer` sorts by sample position, so `ArpMerge` saw off, on, on with only one
+parked off, the refcount climbed to 2, and the real note-off took it to 1 rather than 0 and was
+suppressed. The pitch was never released and stayed pinned above zero, so every later hit on it
+hung too. Reachable without trying: both harmony dropdowns on one interval, or a + Perfect 5th
+voice over a chord-lane triad, where C's fifth is the G already in the step. The harmony loop's
+own guard only caught a copy that clamped onto its own source. `addHit` now refuses a duplicate
+`{note, channel}` outright, which covers every route into a step at once, and `ArpTests` pins it
+by walking the stream the way `ArpMerge` does and checking every note-on is released.
+
+**Strum and Humanize repainted forever and read half a unit wrong.** Their faces snap to whole
+units while the span stays continuous, so any halo drag storing a fractional reach into two
+integer parameters left the derived ends exactly 0.5 from the stored pair - and the sync's
+`< 0.5` test can never be satisfied by exactly 0.5. It re-pulled and repainted both knobs on
+every editor tick for the life of the session, with the readout permanently disagreeing with the
+parameters it mirrors. It compares what the ends round to now, still comparing the ends rather
+than the raw span so a latent span held back by a rail is still preserved.
+
+**The Pads bar's Play toggle disagreed with the session.** It reads `LayoutState`, which no
+attachment drives, so loading a set saved with Play off left the button ticked while the strip
+was actually drag-only - and the first click wrote the stale button state back over the loaded
+value, making the control do the opposite of its face. Both it and Light keys are pulled on the
+editor timer now, beside the range knobs, since a state restore has no hook of its own.
+
+**The harmony dropdowns were 26 px targets**, under the 34 px floor that CLAUDE.md states as an
+invariant with no exceptions. They are 34 now and the strip grew to fit them, which is the rule:
+give the cell the height the target needs rather than shrinking the target into the cell.
+
+**The mouse wheel on a range knob's halo fired a full step per event.** It tested only the sign of
+`deltaY`, so a precision touchpad or a free-spinning wheel slammed the span from nothing to full
+in one flick and wrote a begin/end gesture pair into the host for each of the dozens of sub-notch
+events on the way. It scales by the delta (capped at one notch per event) and honours the OS's
+natural-scrolling flag, without which the tooltip's "up is more" was wrong on that setting.
+
+Also: `HarmonyBox::showPopup` passes `isItemEnabled(i)` rather than a hard-coded `true` and hands
+the menu a standard item height, so ordinary `ComboBox` APIs keep working through the override;
+and three documented budgets were re-measured against the code rather than assumed. The editor's
+worst-case height is 1341, not 1223, and the macro view is now the tallest of them - it fits a
+1440p work area and does not fit a 1080p one, which is written down where the number lives. The
+card menu is sixteen rows and 578 px, not fourteen and 510, and its row count is a function of
+`uiArpLines`. The Pads bar's left group is 288, not 214, since the Play toggle took 74 px of it.
+
+
 ### Fixed: review pass on the step sequencer round
 
 **`set_arp_pattern` silently flattened the Note lane.** The MCP bridge kept its own hand-copied
@@ -93,6 +140,50 @@ duplicate comment block in `ChordGenPanel.h`, and the stale `followAim` document
 was re-measured: it had itemised a Compliance chip and a Mode combo that left the bar on
 2026-08-02 while never accounting for the 124 px Mode combo that came back. The real total is 752,
 not 858, and the floor never moved.
+
+### Added: four arpeggiators, each in its own colour, with harmony voices and a mutate that can leave the scale
+
+The 2026-08-19 pass, all four of Owen's asks in one round ("I want 4 arps. and each one should
+have a color. and I want new knobs, 2 harmony drop down like the photo. and each of those has a
+chance knob... and I want a mutate knob... higher values can go out of scale").
+
+- **Four arp lines, A to D.** Line D's `arp4*` parameters are appended the way B's and C's were,
+  so every earlier session opens sounding identical; line C, inert since 2026-08-02, is back on
+  screen with it. The All view is a **2x2 grid of cards** now - each card keeps the full width
+  the two-across layout gave it, and the panel takes the height, which is the cheap axis there.
+  The arp bar carries four letter switches.
+- **Each line has its own colour**: A cyan, B magenta, C amber, D lime. Worn by the card's frame,
+  fill and caption, by a stripe under the letter on the arp bar, and by the Draw grid's playhead,
+  so "which machine is this" has one answer everywhere. The marks are tinted, never the controls,
+  which is how the one-accent skin law survives it.
+- **Two harmony voices per line**, on each card: an interval dropdown (BigSky's shimmer list,
+  Off / -Octave up through +2 Octaves; the two cents rows cannot exist in MIDI and are dropped)
+  and a **chance knob** each, saying how often that voice fires. The intervals are chromatic on
+  purpose - a Major 3rd is four semitones whatever the scale says - and the voice follows the
+  note the run actually played, Mutate's strays included. New parameters `arp*Harm1/2` and
+  `arp*Harm1/2Chance`, appended, defaulting to Off / 100.
+- **Mutate reaches out of the scale at the top.** Three zones on the one knob: to 50 it is
+  exactly the 2026-08-18 control and cannot leave the held chord; past 50 a mutated step may
+  stray onto in-scale neighbours; past 75 a growing share of the strays are chromatic, out of
+  scale on purpose. LOCK holds the strays exactly as it holds the in-chord variations, so a
+  wander that found a wrong-note lick can keep it.
+- **The harmony dropdown opens as two columns**, Off and the descending intervals on the left,
+  the ascending ones on the right - the split BigSky's own panel draws for the same list, and
+  what "make harmony 2 columns" turned out to mean.
+- **A Play toggle on the Pads bar.** Off, clicking a chord card makes no sound and the strip is
+  drag-only: a press that meant to become a drag toward the arpeggiator can no longer fire a
+  chord and, with Exclusive on, choke every running line on the way past. Dragging, dropping
+  and the card menu are untouched; on is today's behaviour and the default, and the setting
+  rides the session like every layout choice.
+- **The range knobs' halo opens the band equally both ways around the knob, which stays put.**
+  The knob is the band's centre now: dragging the halo up widens the range on both sides at
+  once, down tightens it, and the knob itself never moves under the gesture. The lit arc shows
+  both halves, the reach stops where a rail is nearer (so the band never goes lopsided against
+  an end of the travel), and the mouse wheel over the halo or the ring nudges the range too. A
+  drag on the knob face still moves the whole band. Applies to VEL and H.TIME on the arp cards
+  and to the pads' Strum and Humanize - and the engines follow: VEL's hits and H.TIME's
+  lateness now wander either side of their knob rather than only below it, so the knob reads
+  as "typical", not "maximum".
 
 ### Added: the step sequencer says what it is doing, and the lanes stopped being one grid each
 
