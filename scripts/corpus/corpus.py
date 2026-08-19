@@ -27,6 +27,8 @@ import io
 import os
 import re
 import sys
+import time
+from contextlib import contextmanager
 
 import duckdb
 
@@ -84,9 +86,21 @@ def library_rows(path=LIB):
     return out
 
 
+@contextmanager
+def phase(label):
+    """Time one stage and say so. Without this, "it has been an hour" carries no information about
+    which of five stages is the slow one, and the answer was not the stage anyone guessed."""
+    t = time.perf_counter()
+    yield
+    print(f"  [{time.perf_counter() - t:7.1f}s] {label}")
+
+
 def connect():
     con = duckdb.connect()
-    con.execute("PRAGMA threads=8")
+    # 8 was a guess made before anything was measured, and on a 32-core box it left three quarters
+    # of the machine idle. Half the cores is the compromise: DuckDB's memory use rises with thread
+    # count, and this runs beside a DAW and a build.
+    con.execute(f"PRAGMA threads={max(4, (os.cpu_count() or 8) // 2)}")
     return con
 
 
@@ -143,12 +157,21 @@ def build_windows(con, lengths):
     """Every window of every needed length, as a shape key relative to its own first chord."""
     parts = []
     for n in lengths:
-        # list_slice is 1-based and inclusive; generate_series gives the start of each window.
+        # Window starts come from unnesting range() in the projection, NOT from joining the
+        # generate_series table function. generate_series is single-threaded in DuckDB, and joining
+        # it per song pinned this whole pipeline to one core: measured at exactly 1.00 of 32 for 100
+        # minutes on the full corpus, with no I/O and no memory pressure to explain it. Unnesting a
+        # list in the select list is an operator over the songs scan instead, so it parallelises with
+        # it. range() has an exclusive upper bound where generate_series is inclusive, hence the +2
+        # against the old +1; list_slice stays 1-based and inclusive.
         parts.append(f"""
-          SELECT s.id, s.sid, {n} AS n, g.p AS pos,
-                 list_slice(s.seq, g.p, g.p + {n} - 1) AS w
-          FROM songs s, generate_series(1, length(s.seq) - {n} + 1) AS g(p)
-          WHERE length(s.seq) >= {n}
+          SELECT id, sid, {n} AS n, pos, list_slice(seq, pos, pos + {n} - 1) AS w
+          FROM (
+            SELECT s.id, s.sid, s.seq,
+                   unnest(range(1, length(s.seq) - {n} + 2)) AS pos
+            FROM songs s
+            WHERE length(s.seq) >= {n}
+          )
         """)
     con.execute(f"""
       CREATE OR REPLACE TABLE win AS
@@ -268,13 +291,18 @@ def main():
         cmd_join_features(con)
         return 0
 
-    lengths = register_library(con)
-    build_songs(con, a.limit)
-    build_windows(con, lengths)
+    with phase("library"):
+        lengths = register_library(con)
+    with phase("songs"):
+        build_songs(con, a.limit)
+    with phase("windows"):
+        build_windows(con, lengths)
     if a.command in ("rank", "all"):
-        cmd_rank(con, lengths)
+        with phase("rank"):
+            cmd_rank(con, lengths)
     if a.command in ("moods", "all"):
-        cmd_moods(con)
+        with phase("moods"):
+            cmd_moods(con)
     return 0
 
 
