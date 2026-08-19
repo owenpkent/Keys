@@ -74,6 +74,45 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**Four arps, colours, harmony voices, and Mutate off the leash (2026-08-19).** Owen: *"I want 4
+arps. and each one should have a color. and I want new knobs, 2 harmony drop down like the photo
+[BigSky's shimmer interval list]. and each of those has a chance knob which effects the harmony
+probability. and I want a mutate knob, which effects the notes being played. higher values can go
+out of scale"* - then, asked, he picked the 2x2 grid, the one extended Mutate knob, harmony on the
+cards, and per-line colours. Everything here supersedes the older bullets it contradicts:
+
+- **`numArpLines` and `uiArpLines` are both 4.** Line D is `arp4*`, appended like B and C were, so
+  earlier sessions open sounding identical; line C came back on screen in the same stroke. The
+  "two lines" bullets below (2026-08-02) describe machinery that is all still true - only the
+  count moved, and it still lives in those two constants. The All view is a **2x2 grid of cards**:
+  two columns is load-bearing (a card's knob strip needs ~430 px), so more lines mean more rows,
+  never narrower cards. `arpMacroH` is two cards plus a row gap and the layout in
+  `ArpPanel::resized` walks rows of two.
+- **Each line has a colour**: `skin::lineAccent(line)` - A cyan (the accent Keys shipped with),
+  B magenta, C amber, D lime, the hexes reused from `accentChoices()`. Fixed, not
+  theme-following, because the job is telling four lines apart. Worn by the macro card's frame,
+  fill and caption, a stripe under the bar's letter switch, the deep view's LINE caption and the
+  Draw grid's playhead - the marks that say *which line*, never the controls, which is how the
+  one-cyan skin law bends without breaking.
+- **Two harmony voices per line** (`arp*Harm1/2` choice + `arp*Harm1/2Chance` int, appended,
+  Off/100 defaults): `KeysProcessor::harmonyChoices()` is BigSky's shimmer list minus its two
+  cents rows (MIDI cannot say ten cents), `harmonySemisFor` maps index to semitones, and the
+  engine takes plain semitones (`Params::harmSemis/harmChance`) so the table stays out of it.
+  In `fireStep` the voices copy the resolved hits - chord-lane steps and Mutate's strays
+  included - at their interval; the chance is rolled per step per voice off a stateless hash. A
+  voice that clamps onto its own source is dropped, the subharmonic rule. **Chromatic on
+  purpose**: the dropdown names intervals, which is what keeps this from being a third copy of
+  the Harmony lane's chord-tone counting. On each macro card: two combos with a chance knob
+  each, on their own strip under the knobs (`Macro harmony 1 A` / `Macro harmony 1 chance A`).
+- **Mutate has three zones, and past 50 the 2026-08-18 "cannot leave the held chord" claim no
+  longer holds - by Owen's own ask.** To 50 the knob is byte-identical to what shipped; past 50
+  `ArpEngine::mutatedPitch` (a second stage, applied to the placed pitch after the index walk)
+  may stray a scale degree or two off the chord note; past 75 a growing share of strays are
+  chromatic semitones, all of them by 100. Both stages hash the same (step, era) cell
+  (`mutateCell`, factored so they cannot disagree), so **Lock holds the out-of-scale finds
+  too** - a wrong-note lick the machine found can harden into the part. `ArpTests.cpp` pins the
+  zone boundaries: in-chord to 50, in-scale to 75, within four semitones of a chord tone always.
+
 **The step sequencer pass (2026-08-18, second round of that day).** Owen: *"a usability and
 functionality pass of the step sequencer. I wanna draw a lot of inspiration from [Kirnu Cream] and
 how you can make really interesting, melodic patterns, and it's very easy to understand. Right now,
@@ -183,10 +222,11 @@ further down; the ones it contradicts are marked where they sit.
   rule.** *"Drift changes how a step plays, never which note it plays"* still stands, and Mutate
   meets it rather than breaking it: the fear behind that rule was a machine wandering onto notes
   nobody aimed at, and `mutatedIndex` moves the run to a different entry of **the sequence already
-  built from the held chord**. Every note it can reach is a note that chord contains; there is no
-  setting at which it plays something you did not put there, only a different one of the ones you
-  did. The reach is in **chord entries, never semitones**, which is what makes that true at every
-  amount - `ArpTests.cpp` sweeps 10..100 against the held chord to pin it. `laneRand` is still the
+  built from the held chord**. Every note it can reach is a note that chord contains; the reach is
+  in **chord entries, never semitones**. (**True only to the knob's halfway point since
+  2026-08-19** - past 50 `mutatedPitch` may stray in scale, past 75 chromatically, by Owen's own
+  ask; see the round at the top of this section. `ArpTests.cpp` pins the zone boundaries instead
+  of the old 10..100 in-chord sweep.) `laneRand` is still the
   only thing allowed to change a note you *drew*, because you drew it there.
   **LOCK is the Turing Machine** (`docs/SEQUENCER_LANDSCAPE.md` ranked it as the one randomness Keys
   lacked): 0 redraws every pass, 100 is one era and the first variation repeats for good. It is a
@@ -360,7 +400,10 @@ what is no longer true lives here in one place:
   looked like a *logic* bug one component away. `progressionNumeral()` resolves numeral →
   `degree` → `degree` re-derived from `rootPc`, cased by the mode's per-degree quality, `?` last.
 - **Two arpeggiator lines, A and B** (2026-08-02, Owen: "I only wanna view two arpeggiators in
-  this window, and I wanna be able to drag a chord from below to each one"). Everything in the
+  this window, and I wanna be able to drag a chord from below to each one"). **Superseded
+  2026-08-19: both constants are 4 now** - see the round at the top of this section; the
+  count-lives-in-two-constants machinery this bullet describes is exactly what made that a
+  two-line change. Historical text follows. Everything in the
   bullet below still describes the machinery; what changed is the count, and it lives in one
   place. `numArpLines` stays **3** - the engines, the storage and the `arp3*` parameter ids are
   untouched, because dropping parameters from the layout is what breaks saved sessions -
@@ -1740,7 +1783,11 @@ Four things will bite otherwise:
   `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **eight again from 2026-08-18**:
   `Macro H.VEL A` retired on 2026-08-17 when Humanize Velocity folded into VEL's own ring (see
   the RangeKnob bullet above), and `Macro CHANCE A` was replaced the next day by `Macro MUTATE A`
-  and `Macro LOCK A`. Do not look for `Macro CHANCE A` or `Macro H.VEL A`. From 2026-08-03, H.TIME carries a *second* name for its ring,
+  and `Macro LOCK A`. Do not look for `Macro CHANCE A` or `Macro H.VEL A`. **The harmony strip
+  (2026-08-19)**: each card also answers to `Macro harmony 1 A` / `Macro harmony 2 A` (the
+  interval combos, reachable by current text like every combo) and `Macro harmony 1 chance A` /
+  `Macro harmony 2 chance A` (their knobs) - and every per-line name now comes in A through
+  **D**, since all four lines are on screen. From 2026-08-03, H.TIME carries a *second* name for its ring,
   `Macro H.TIME range A`, and a third for the satellite, `Macro H.TIME range handle A`, since
   face, ring and handle are three controls in one cell. **VEL gained the matching pair on
   2026-08-17**, `Macro VEL range A` / `Macro VEL range handle A` - ring and handle are plain

@@ -361,11 +361,15 @@ void ArpPanel::LaneGrid::paint(juce::Graphics& g)
     // question this answers is "which cell", not "how far along".
     if (playhead >= 0 && playhead < length)
     {
+        // In the edited line's own colour (2026-08-19): the playhead is the mark that says
+        // which machine is walking, so it wears the same tint as that line's card and its
+        // letter on the bar.
+        const auto ph = skin::lineAccent(owner.editLine()).base;
         const auto col = juce::Rectangle<float>(b.getX() + cellW * (float) playhead, b.getY(),
                                                 cellW, b.getHeight());
-        g.setColour(skin::text.withAlpha(0.14f));
+        g.setColour(ph.withAlpha(0.16f));
         g.fillRect(col);
-        g.setColour(skin::text.withAlpha(0.75f));
+        g.setColour(ph.withAlpha(0.85f));
         g.fillRect(col.getX(), b.getY(), 1.5f, b.getHeight());
         g.fillRect(col.getRight() - 1.5f, b.getY(), 1.5f, b.getHeight());
     }
@@ -630,7 +634,7 @@ void ArpPanel::MuteRow::paint(juce::Graphics& g)
     const int playhead = lanePlayhead(processor, owner.editLine(), (int) ArpEngine::laneNote);
     if (playhead >= 0 && playhead < length)
     {
-        g.setColour(skin::text.withAlpha(0.75f));
+        g.setColour(skin::lineAccent(owner.editLine()).base.withAlpha(0.85f));
         g.fillRect(b.getX() + cellW * (float) playhead + 2.0f, b.getBottom() - 2.0f,
                    cellW - 4.0f, 2.0f);
     }
@@ -1601,8 +1605,10 @@ namespace
         // still has its own slider in the Play page's PLAYBACK group, which is where a control
         // you set once and leave belongs. These two are the ones you sit and turn.
         { KeysProcessor::apMutate, "MUTATE",
-          "How far this line explores other notes of the chord you are holding. It can only "
-          "ever reach another note of that chord, so it wanders without going out of key." },
+          "How far this line explores away from what the run would have played. Up to halfway "
+          "it can only reach other notes of the chord you are holding; past halfway it starts "
+          "straying onto in-scale neighbours, and near the top some strays go fully chromatic "
+          "- out of scale on purpose." },
         { KeysProcessor::apMutateLock, "LOCK",
           "How long it keeps what it finds. Left, a new variation every time round; right, the "
           "first one it finds repeats for good. In between it holds an idea, then moves on." },
@@ -1925,6 +1931,41 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
             processor.apvts, id(macroKnobSpecs[(size_t) k].param), knob);
     }
 
+    // The two fixed harmony voices (2026-08-19, BigSky's shimmer list). The combo picks the
+    // interval, the knob beside it says how often that voice fires; both are ordinary
+    // attachments to this line's own appended parameters, bound for good like everything else
+    // on a card. The knob matches the strip above it - same rotary, same read-only readout -
+    // so the row reads as more of the card rather than a different instrument.
+    for (int s = 0; s < 2; ++s)
+    {
+        const auto v = juce::String(s + 1);
+        auto& box = harmBoxes[(size_t) s];
+        box.addItemList(KeysProcessor::harmonyChoices(), 1);
+        box.setTitle("Macro harmony " + v + " " + letter);
+        box.setTooltip("A fixed interval this line adds " + juce::String(s == 0 ? "as its first"
+                       : "as its second") + " harmony voice, above or below every note it "
+                       "plays. Off is silence; the list is chromatic on purpose, so a Major "
+                       "3rd is a Major 3rd whatever the scale says.");
+        addAndMakeVisible(box);
+        harmAtts[(size_t) s] = std::make_unique<ComboAtt>(
+            processor.apvts, id(s == 0 ? KeysProcessor::apHarm1 : KeysProcessor::apHarm2), box);
+
+        auto& knob = harmChanceKnobs[(size_t) s];
+        knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+        knob.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 52, 15);
+        knob.setTitle("Macro harmony " + v + " chance " + letter);
+        knob.setTooltip("How often harmony voice " + v + " actually fires, per step. 100 is "
+                        "every note, lower thins it into something that glints rather than "
+                        "doubles.");
+        addAndMakeVisible(knob);
+        harmChanceAtts[(size_t) s] = std::make_unique<SliderAtt>(
+            processor.apvts,
+            id(s == 0 ? KeysProcessor::apHarm1Chance : KeysProcessor::apHarm2Chance), knob);
+
+        heading(harmLabels[(size_t) (s * 2)], s == 0 ? "HARMONY 1" : "HARMONY 2");
+        heading(harmLabels[(size_t) (s * 2 + 1)], "CHANCE");
+    }
+
     chordLabel.setJustificationType(juce::Justification::centred);
     chordLabel.setFont(skin::uiSemi(13.0f));
     addAndMakeVisible(chordLabel);
@@ -2199,10 +2240,14 @@ void ArpPanel::MacroRow::paint(juce::Graphics& g)
     const auto font = skin::micro(9.5f).withExtraKerningFactor(0.16f);
     const auto textW = juce::GlyphArrangement::getStringWidth(font, caption);
 
-    g.setColour(juce::Colours::white.withAlpha(0.03f));
+    // The line's own colour (2026-08-19, Owen: "each one should have a color"), worn by the
+    // fill, the frame and the caption - the marks that say *which line* - and by nothing on
+    // the card that is a control, so the skin's one-accent law bends here rather than breaks.
+    const auto tint = skin::lineAccent(line).base;
+    g.setColour(tint.withAlpha(0.045f));
     g.fillRoundedRectangle(r.withTrimmedTop(capY - r.getY()), skin::radius);
 
-    g.setColour(juce::Colours::white.withAlpha(0.10f));
+    g.setColour(tint.withAlpha(0.38f));
     juce::Path frame;
     frame.startNewSubPath(r.getCentreX() - textW * 0.5f - 8.0f, capY);
     frame.lineTo(r.getX() + skin::radius, capY);
@@ -2217,7 +2262,7 @@ void ArpPanel::MacroRow::paint(juce::Graphics& g)
     g.strokePath(frame, juce::PathStrokeType(1.0f));
 
     g.setFont(font);
-    g.setColour(skin::textDim);
+    g.setColour(tint);
     g.drawText(caption, getLocalBounds().withHeight(12).withY((int) capY - 6),
                juce::Justification::centred);
 }
@@ -2313,6 +2358,31 @@ void ArpPanel::MacroRow::resized()
     { l.setBounds(c.getX(), headStrip.getY(), c.getWidth(), headStrip.getHeight()); };
     for (int k = 0; k < numKnobs; ++k)
         headFor(knobLabels[(size_t) k], knobCell(k));
+
+    // The harmony strip (2026-08-19): two interval combos, each with its chance knob to its
+    // right. The combos are the elastic cells and the knobs are reserved first, the standing
+    // rule; the headings are placed from the controls, the same one-source-of-truth move the
+    // knob headings above make.
+    const auto harmHeads = full.removeFromTop(arpMacroHeads);
+    auto harmRow = full.removeFromTop(arpMacroLine);
+    {
+        const int half = (harmRow.getWidth() - 12) / 2;
+        for (int s = 0; s < 2; ++s)
+        {
+            auto cell = s == 0 ? harmRow.removeFromLeft(half) : harmRow;
+            if (s == 0)
+                harmRow.removeFromLeft(12);
+            auto& knob = harmChanceKnobs[(size_t) s];
+            knob.setBounds(cell.removeFromRight(52));
+            cell.removeFromRight(6);
+            auto& box = harmBoxes[(size_t) s];
+            box.setBounds(cell.withSizeKeepingCentre(cell.getWidth(), 26));
+            harmLabels[(size_t) (s * 2)].setBounds(box.getX(), harmHeads.getY(),
+                                                   box.getWidth(), harmHeads.getHeight());
+            harmLabels[(size_t) (s * 2 + 1)].setBounds(knob.getX(), harmHeads.getY(),
+                                                       knob.getWidth(), harmHeads.getHeight());
+        }
+    }
 
     // The rate's modifiers keep their full 34 px hit height - they are targets, and wide
     // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
@@ -3314,15 +3384,23 @@ namespace
     // The knob line is arpMacroKnobLine, not arpMacroLine: it carries the two range knobs and
     // is a ring taller either side for them (2026-08-03). The top line, which has no rings on
     // it, is unchanged - two constants because the rows genuinely differ now.
+    // + the harmony strip (2026-08-19): its own heading row and a combo-and-knob line at the
+    // plain-row height, between the knobs and the rate's modifiers.
     constexpr int arpMacroCard = arpMacroCap + arpMacroHeads + arpMacroLine
-                                 + arpMacroHeads + arpMacroKnobLine + 2 + arpMacroMods + 6;
+                                 + arpMacroHeads + arpMacroKnobLine
+                                 + arpMacroHeads + arpMacroLine + 2 + arpMacroMods + 6;
     // The second 2026-08-02 pass (Owen: "we need to make the window shorter ... move the BPM
     // up into the title ... move the A B All into the title and remove everything on the
     // bottom"). The shared row is gone: the A/B/All tabs, the BPM cell and Quantize all sit
     // on one 34 px header strip inside the LINES frame, their captions inline rather than
     // above. The slot row and the action row left this view entirely - the slots belong to
     // the per-line tabs now - so the view is the header and the two rows, full stop.
-    constexpr int arpMacroH = arpMacroCard;
+    // Two rows of two cards since 2026-08-19 (Owen: "I want 4 arps"): the view is a 2x2 grid,
+    // so its height is two cards and the gap between the rows. Width was the reason - a card
+    // needs ~430 px for its knob strip, and four across would have pushed the floor far past
+    // 1320 - and height is the cheap axis in this view, as ever.
+    constexpr int arpMacroRowGap = 12;
+    constexpr int arpMacroH = 2 * arpMacroCard + arpMacroRowGap;
     constexpr int arpShapeH = 12 + (arpBandH + 8) + (arpBand2H + 12) + (arpSlotsH + 8) + 34 + 12;
     // The gap under the block. The outer `reduced(12)` is shared with the band and Pattern
     // views, and this height has to agree with resized() exactly or the panel is the wrong
@@ -3517,7 +3595,7 @@ void ArpPanel::paint(juce::Graphics& g)
     {
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + editedLine));
         g.setFont(skin::micro(9.5f).withExtraKerningFactor(0.16f));
-        g.setColour(skin::textDim);
+        g.setColour(skin::lineAccent(editedLine).base); // the line's own colour, 2026-08-19
         g.drawText("LINE " + letter, b.withHeight(12.0f).withTrimmedRight(10.0f).toNearestInt(),
                    juce::Justification::centredRight);
     }
@@ -3577,19 +3655,27 @@ void ArpPanel::resized()
         for (auto& grp : groups)
             grp.visible = false;
 
-        // The cards, side by side. Column count follows uiArpLines; at three, a column would
-        // be ~300 px and eight 38 px knobs need ~350, so bringing line C back means giving
-        // this layout a knob-width rethink, not just raising the constant.
-        auto cardsArea = block.removeFromTop(arpMacroCard);
+        // The cards, a 2x2 grid since 2026-08-19 (Owen: "I want 4 arps"). Two columns is
+        // load-bearing: a card's knob strip needs ~430 px, so a column is always half the
+        // panel and more lines mean more *rows* - height is the cheap axis in this view,
+        // width the expensive one, and this is that rule as arithmetic.
+        auto cardsArea = block.removeFromTop(arpMacroH);
         const int cardGap = 12;
-        const int cols = juce::jmax(1, KeysProcessor::uiArpLines);
-        const int colW = (cardsArea.getWidth() - cardGap * (cols - 1)) / cols;
-        for (auto& row : macroRows)
+        const int cols = 2;
+        const int rows = (juce::jmax(1, KeysProcessor::uiArpLines) + cols - 1) / cols;
+        for (int rowIdx = 0; rowIdx < rows; ++rowIdx)
         {
-            if (row == nullptr)
-                continue;
-            row->setBounds(cardsArea.removeFromLeft(colW));
-            cardsArea.removeFromLeft(cardGap);
+            auto rowArea = cardsArea.removeFromTop(arpMacroCard);
+            cardsArea.removeFromTop(arpMacroRowGap);
+            const int colW = (rowArea.getWidth() - cardGap * (cols - 1)) / cols;
+            for (int c = 0; c < cols; ++c)
+            {
+                const int n = rowIdx * cols + c;
+                if (n >= (int) macroRows.size() || macroRows[(size_t) n] == nullptr)
+                    continue;
+                macroRows[(size_t) n]->setBounds(rowArea.removeFromLeft(colW));
+                rowArea.removeFromLeft(cardGap);
+            }
         }
     }
 

@@ -229,23 +229,24 @@ public:
     // "arpAnchor", "arpDirection", "arpOctaves", "arpSwing", "arpLatch",
     // "arpRetrigger"). Patterns A-H are message-thread snapshots of the lanes.
     //
-    // Three of them since 2026-08-01, so Keys can hold a polyrhythm: three independent
-    // arpeggiators at three rates, each with its own twelve slots, its own chord and its own
-    // chain. Line 0 is the arpeggiator that has always been here, down to its parameter IDs,
-    // and with lines 1 and 2 off nothing about it is different.
-    static constexpr int numArpLines = 3;
-    // How many of them the product actually has: **two**, by Owen's call on 2026-08-02 ("I only
-    // wanna view two arpeggiators in this window"). Three rows fit, but two fit *comfortably*,
-    // and the point of the view is dragging a chord card up from the strip below onto either
-    // line - a target you have to aim at is a target he cannot use.
+    // Three of them from 2026-08-01, **four** from 2026-08-19 (Owen: "I want 4 arps. and each
+    // one should have a color"): independent arpeggiators, each with its own rate, twelve
+    // slots, chord and chain. Line 0 is the arpeggiator that has always been here, down to its
+    // parameter IDs, and with the other lines off nothing about it is different. Line D's
+    // `arp4*` ids are appended the same way B's and C's were, so every earlier session opens
+    // sounding identical.
+    static constexpr int numArpLines = 4;
+    // How many of them the product actually shows. Two from 2026-08-02 ("I only wanna view two
+    // arpeggiators in this window") until 2026-08-19, when Owen asked for four and the macro
+    // view became a 2x2 grid of cards - each card keeps the full width two-across gave it, and
+    // height is the cheap axis in that view.
     //
-    // Two constants rather than one because line C's *parameters* stay registered. Dropping them
-    // from the layout is what breaks every saved session (the invariant in CLAUDE.md), so the
-    // storage, the engines and the `arp3*` ids all stay exactly where they were and nothing
-    // reaches them: `arpLineOn` answers false above this bound, which makes line C inert at the
-    // one place the audio stage asks, and the UI builds no chip, tab or row for it. Raising this
-    // back to `numArpLines` is all it takes to bring C back.
-    static constexpr int uiArpLines = 2;
+    // Two constants rather than one so the *parameters* and the UI can disagree safely:
+    // dropping parameters from the layout is what breaks every saved session (the invariant in
+    // CLAUDE.md), so a line the UI hides keeps its engine, storage and ids, and `arpLineOn`
+    // answers false above this bound - which makes a hidden line inert at the one place the
+    // audio stage asks.
+    static constexpr int uiArpLines = 4;
     static_assert(uiArpLines <= numArpLines, "the UI cannot show a line that has no engine");
     ArpEngine& arpLine(int line);
     const ArpEngine& arpLine(int line) const;
@@ -305,7 +306,15 @@ public:
                     // other side of it. Mutate is how far it explores *inside the held chord*;
                     // Lock is how long it keeps what it finds, the Turing Machine's own knob.
                     // Both default to 0, which is the arp exactly as it was without them.
-                    apMutate, apMutateLock, numArpParams };
+                    apMutate, apMutateLock,
+                    // Appended 2026-08-19 (Owen, holding up BigSky's shimmer list: "2 harmony
+                    // drop down like the photo. and each of those has a chance knob"). Two
+                    // fixed intervals per line, each a choice over harmonyChoices() (0 = Off),
+                    // each with its own 0..100 chance. Chromatic semitones on purpose - the
+                    // list names intervals, and a Major 3rd is four semitones whatever the
+                    // scale says - which is what makes this the shimmer control rather than a
+                    // third copy of the Harmony lane's chord-tone counting.
+                    apHarm1, apHarm1Chance, apHarm2, apHarm2Chance, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
@@ -322,6 +331,13 @@ public:
         return { "Straight", "Triplet", "5-tuplet", "7-tuplet", "9-tuplet" };
     }
     static int tupletFor(int choiceIndex);
+    // The per-line harmony interval list (2026-08-19): BigSky's shimmer intervals, minus its
+    // two cents rows, which MIDI semitones cannot say. One copy for the same reason as
+    // tupletChoices: the choice parameter, the combo and the semitone table below must agree
+    // by construction. Append only - the index is what a saved session stores.
+    static juce::StringArray harmonyChoices();
+    // The semitones a choice index means; 0 for Off.
+    static int harmonySemisFor(int choiceIndex);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
     float arpParam(int line, ArpParam which) const;
@@ -889,7 +905,7 @@ private:
     // there for the stuck-note this caused.
     static constexpr int panicTag = -1;     // cancelScheduledNotes only: cancel *everything*
     static constexpr int liveChordTag = -2; // the live "current chord" card
-    // One tag per arp line: -3, -4, -5. Separate tags rather than one, because each line's
+    // One tag per arp line: -3 down through -6. Separate tags rather than one, because each line's
     // hold is released independently and cancelScheduledNotes matches the exact tag - sharing
     // one would have letting go of line B drop line A's un-fired strum notes.
     static constexpr int arpChordTag = -3;

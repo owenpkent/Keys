@@ -545,9 +545,21 @@ public:
 
         // Mutate (2026-08-18): how far the run explores *other notes of the held chord*, and
         // how long it keeps what it finds. See `mutatedIndex`. Both 0 is the engine unchanged.
+        //
+        // Three zones since 2026-08-19 (Owen: "higher values can go out of scale"): to 50 the
+        // knob is exactly the 2026-08-18 control and cannot leave the chord; past 50 a mutated
+        // step may stray a scale degree or two off the chord note instead; past 75 some of
+        // those strays are chromatic semitones. See `mutatedPitch` for the second stage.
         int mutate = 0;     // 0..100
         int mutateLock = 0; // 0..100; 100 = the first variation found repeats for good
         int mutateSeed = 0; // the line index, so two lines never explore in lockstep
+        // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): an interval
+        // in semitones added to every note the step resolved - Mutate's stray included, so the
+        // voice follows the run - and how often it fires, rolled per step per voice off the
+        // same stateless hash Mutate draws from. 0 semitones is Off. Chromatic on purpose;
+        // the dropdown names intervals, not degrees (see the registration in PluginProcessor).
+        int harmSemis[2] = { 0, 0 };
+        int harmChance[2] = { 100, 100 };
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
         // and goes both ways (2026-08-02, Owen: "the octave should start in the middle so you
@@ -1155,15 +1167,14 @@ private:
     // variation repeats for good. Deriving it from the step index rather than carrying a shift
     // register is what keeps this stateless from the playhead like everything else here bar
     // laneChain: a transport jump lands on the variation it would have walked to.
-    int mutatedIndex(const Params& p, int chosen, long long globalStep, int count) const noexcept
+    // The (step, era) cell both of Mutate's stages hash. One function so the index walk and
+    // the pitch stage below cannot disagree about when a variation changes: the pass is
+    // measured over the window the Note lane actually walks, not its length - a loop of four
+    // steps inside a lane of sixteen comes round every four, and a variation that changed
+    // every sixteen would be heard as changing in the wrong place - and Lock stretches the
+    // era for both at once.
+    void mutateCell(const Params& p, long long globalStep, int& stepOut, long long& eraOut) const noexcept
     {
-        const int amt = juce::jlimit(0, 100, p.mutate);
-        if (amt <= 0 || count <= 1)
-            return chosen;
-
-        // The pass is measured over the window the Note lane actually walks, not its length:
-        // a loop of four steps inside a lane of sixteen comes round every four, and a variation
-        // that changed every sixteen would be heard as changing in the wrong place.
         const auto sh = lanes.shapeOf(laneNote);
         const int len = juce::jlimit(1, maxSteps, sh.len);
         int from = juce::jlimit(0, len - 1, sh.loopFrom);
@@ -1176,9 +1187,18 @@ private:
         const long long pass = (rel >= 0 ? rel : rel - span + 1) / span;
         const int lock = juce::jlimit(0, 100, p.mutateLock);
         // 0 -> a new era every pass; 99 -> one every ~62; 100 -> one era, ever.
-        const long long era = lock >= 100 ? 0 : pass / (1 + (long long) lock * lock / 160);
+        eraOut = lock >= 100 ? 0 : pass / (1 + (long long) lock * lock / 160);
+        stepOut = (int) ((rel % span + span) % span);
+    }
 
-        const int step = (int) ((rel % span + span) % span);
+    int mutatedIndex(const Params& p, int chosen, long long globalStep, int count) const noexcept
+    {
+        const int amt = juce::jlimit(0, 100, p.mutate);
+        if (amt <= 0 || count <= 1)
+            return chosen;
+
+        int step; long long era;
+        mutateCell(p, globalStep, step, era);
         const unsigned int h = hash32((unsigned int) step * 2654435761u
                                       ^ (unsigned int) (era * 40503u)
                                       ^ (unsigned int) (p.mutateSeed * 2246822519u));
@@ -1186,10 +1206,46 @@ private:
             return chosen; // this step keeps what it was given, this era
 
         // The reach is in chord entries, never in semitones - one step of it is one note of the
-        // chord - which is the whole reason this cannot leave the harmony.
+        // chord - which is why this stage cannot leave the harmony at any amount. Leaving it is
+        // mutatedPitch's job, and only past the knob's halfway point.
         const int reach = 1 + amt * 2 / 100; // 1..3 entries either side
         const int delta = (int) ((h >> 8) % (unsigned) (reach * 2 + 1)) - reach;
         return ((chosen + delta) % count + count) % count;
+    }
+
+    // **The out-of-scale half of Mutate** (2026-08-19, Owen: "I want a mutate knob, which
+    // effects the notes being played. higher values can go out of scale"). Three zones on the
+    // one knob: to 50 this stage does nothing and Mutate is exactly the 2026-08-18 control,
+    // confined to the held chord. Past 50 a step may land a scale degree or two away from the
+    // note the walk chose - in scale, out of chord. Past 75 a growing share of those strays
+    // are chromatic semitones, and by 100 all of them are.
+    //
+    // Applied to the *placed* pitch, after the index walk and after place(), so a step that
+    // strays still strays from the note the run actually reached - and before the per-line
+    // harmony voices, which follow it. It hashes the same (step, era) cell as mutatedIndex
+    // with a different salt, so Lock holds these variations exactly as it holds the index
+    // ones: a wander that hardens, out-of-scale notes included.
+    int mutatedPitch(const Params& p, int note, long long globalStep) const noexcept
+    {
+        const int amt = juce::jlimit(0, 100, p.mutate);
+        if (amt <= 50)
+            return note;
+
+        int step; long long era;
+        mutateCell(p, globalStep, step, era);
+        const unsigned int h = hash32((unsigned int) step * 3266489917u
+                                      ^ (unsigned int) (era * 668265263u)
+                                      ^ (unsigned int) (p.mutateSeed * 2246822519u)
+                                      ^ 0x9e3779b9u);
+        // How often a step leaves the chord at all: never at 50, every other step by 100.
+        if ((int) (h % 100u) >= amt - 50)
+            return note;
+
+        const int dir = ((h >> 14) & 1u) != 0 ? 1 : -1;
+        // The chromatic share of the strays: none at 75, all of them at 100.
+        if (amt > 75 && (int) ((h >> 7) % 100u) < (amt - 75) * 4)
+            return juce::jlimit(0, 127, note + dir * (1 + (int) ((h >> 9) % 3u)));
+        return shiftByDegrees(note, dir * (1 + (int) ((h >> 9) % 2u)), p.scaleMask, p.rootPc);
     }
 
     // Walk `degrees` scale steps from `note`, using the mask of in-scale pitch classes. A
@@ -1509,7 +1565,10 @@ private:
         // lanes fold in here, and all three want the note *after* the sequence walk has
         // chosen one, not instead of it.
         struct Hit { int note; float vel; int chan; };
-        Hit hits[maxHeld * 8 + ChordTable::maxNotes];
+        // Three times the base capacity: each of the line's two harmony voices can add a copy
+        // of every base hit (2026-08-19). addHit drops on overflow rather than writing past
+        // the end, as ever.
+        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 3];
         int hitCount = 0;
         const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
         const auto addHit = [&](int note, float vel, int chan)
@@ -1548,7 +1607,13 @@ private:
                 const int idx = juce::jlimit(0, seqCount - 1, playIdx[k]);
                 const auto& entry = seq[(size_t) idx];
                 const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
-                addHit(place(src.note + entry.semitoneOffset), src.velocity * velScale, src.channel);
+                // Mutate's pitch stage lands here, on the placed note (2026-08-19): past the
+                // knob's halfway point a step may stray off the chord note the walk chose -
+                // in scale first, chromatic at the top. Resolved once, so the subharmonic
+                // voice below offsets from the note actually played rather than the one that
+                // was aimed at.
+                const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset), globalStep);
+                addHit(played, src.velocity * velScale, src.channel);
 
                 // Harmony: a second voice, in one of two modes (harmonyMode, 2026-08-14).
                 // Mode 0, the original: this many chord tones above the one just played,
@@ -1564,9 +1629,8 @@ private:
                     // clamping collapses it onto the note it was meant to harmonize: a wrapped
                     // low note would read as a new attack rather than a silence.
                     static constexpr int kSubharmonicSemis[8] = { 0, -12, -19, -24, -28, -31, -34, -36 };
-                    const int playedRaw = place(src.note + entry.semitoneOffset);
-                    const int playedClamped = juce::jlimit(0, 127, playedRaw);
-                    const int subClamped = juce::jlimit(0, 127, playedRaw + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
+                    const int playedClamped = juce::jlimit(0, 127, played);
+                    const int subClamped = juce::jlimit(0, 127, played + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
                     if (subClamped != playedClamped)
                         addHit(subClamped, src.velocity * velScale, src.channel);
                 }
@@ -1577,6 +1641,39 @@ private:
                     const auto& hSrc = held[(size_t) juce::jlimit(0, heldCount - 1, hEntry.heldIndex)];
                     addHit(place(hSrc.note + hEntry.semitoneOffset + 12 * (h / seqCount)),
                            hSrc.velocity * velScale, hSrc.channel);
+                }
+            }
+        }
+
+        // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): each adds
+        // its interval to every hit the step resolved - chord-lane steps included, and
+        // Mutate's stray included, since the voice reads the hits rather than re-deriving
+        // them. The chance is rolled per step per voice, a hash of the step so a transport
+        // jump lands on the same answer (stateless, the mutatedIndex rule); salted by the
+        // voice index and by mutateSeed, so a voice's two slots - and two lines at the same
+        // setting - never gate in lockstep. A hit that clamps onto its own source is dropped,
+        // not doubled: a collapsed interval is a silence, the subharmonic rule above.
+        {
+            const int baseHits = hitCount;
+            for (int s = 0; s < 2; ++s)
+            {
+                const int semis = juce::jlimit(-48, 48, p.harmSemis[s]);
+                const int chancePct = juce::jlimit(0, 100, p.harmChance[s]);
+                if (semis == 0 || chancePct <= 0)
+                    continue;
+                if (chancePct < 100)
+                {
+                    const unsigned int h = hash32((unsigned int) (long long) globalStep * 2654435761u
+                                                  ^ (unsigned int) (s + 1) * 40503u
+                                                  ^ (unsigned int) (p.mutateSeed * 2246822519u));
+                    if ((int) (h % 100u) >= chancePct)
+                        continue;
+                }
+                for (int k = 0; k < baseHits; ++k)
+                {
+                    const int target = juce::jlimit(0, 127, hits[k].note + semis);
+                    if (target != hits[k].note)
+                        addHit(target, hits[k].vel, hits[k].chan);
                 }
             }
         }

@@ -275,6 +275,17 @@ public:
         juce::Slider& knobFace(int k);
         static bool isRangeKnob(int k) { return k == kHTime || k == kVel; }
         std::array<juce::Label, numKnobs> knobLabels;
+        // The two fixed harmony voices (2026-08-19, Owen holding up BigSky's shimmer list:
+        // "2 harmony drop down like the photo. and each of those has a chance knob"). An
+        // interval combo and a chance knob each, on their own strip between the knobs and the
+        // rate's modifiers - per card because Owen asked for them "in the arps", and a combo
+        // because "pick from a list" is a combo in Keys. Labels are HARMONY 1 / CHANCE /
+        // HARMONY 2 / CHANCE, in that order.
+        std::array<juce::ComboBox, 2> harmBoxes;
+        std::array<juce::Slider, 2> harmChanceKnobs;
+        std::array<juce::Label, 4> harmLabels;
+        std::array<std::unique_ptr<ComboAtt>, 2> harmAtts;
+        std::array<std::unique_ptr<SliderAtt>, 2> harmChanceAtts;
         // RATE and SHAPE, over the top line's two stepper groups (2026-08-02, Owen: "the
         // arrows to adjust certain parameters are not clear as to what they're adjusting"):
         // two flanked `< >` pairs side by side read as one puzzle without names above them.

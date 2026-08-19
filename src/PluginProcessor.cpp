@@ -504,10 +504,13 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     //
     // Drift above is forbidden to touch which note plays, and that rule is not being reversed
     // here - it is being met. The fear behind it was a machine wandering onto notes nobody
-    // aimed at, and **Mutate cannot leave the held chord**: it moves the run to a different
-    // note *of the chord you are holding*, so the worst it can do is pick a different voicing
-    // of what you already chose. `laneRand` is still the only thing allowed to change a note
-    // you drew, because you drew it there; this changes which note the *run* lands on.
+    // aimed at, and to the knob's halfway point **Mutate cannot leave the held chord**: it
+    // moves the run to a different note *of the chord you are holding*. Past halfway it can -
+    // in-scale neighbours first, chromatic near the top - and that is Owen's own ask
+    // (2026-08-19: "higher values can go out of scale"), a reach you dial into rather than a
+    // machine deciding for you; see ArpEngine::mutatedPitch for the zones. `laneRand` is still
+    // the only thing allowed to change a note you drew, because you drew it there; this
+    // changes which note the *run* lands on.
     //
     // Lock is the Turing Machine's own control (docs/SEQUENCER_LANDSCAPE.md ranks it as the
     // one randomness Keys lacks): at 0 the variation is redrawn every pass, at 100 the first
@@ -536,6 +539,26 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // that session at the loudness it was saved at.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelLevel"), 1 },
                                                    nm + " Velocity Level", 0, 127, 100));
+
+    // Two fixed harmony voices per line (2026-08-19, Owen holding up BigSky's shimmer
+    // interval list: "2 harmony drop down like the photo. and each of those has a chance knob
+    // which effects the harmony probability"). Each is an interval in semitones added to every
+    // note the line plays - the note Mutate actually landed on, so the voice follows the run -
+    // and a chance saying how often it fires, rolled per step per voice. Chromatic on purpose:
+    // the list names intervals, and a Major 3rd means four semitones whatever the scale says,
+    // which is what makes this the shimmer control rather than a third copy of the Harmony
+    // lane's chord-tone counting. Off and 100 is the engine exactly as it was, which is what
+    // makes the four safe to append.
+    for (int voice = 1; voice <= 2; ++voice)
+    {
+        const auto v = juce::String(voice);
+        layout.add(std::make_unique<AudioParameterChoice>(
+            ParameterID { id(("Harm" + v).toRawUTF8()), 1 },
+            nm + " Harmony " + v, harmonyChoices(), 0));
+        layout.add(std::make_unique<AudioParameterInt>(
+            ParameterID { id(("Harm" + v + "Chance").toRawUTF8()), 1 },
+            nm + " Harmony " + v + " Chance", 0, 100, 100));
+    }
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -544,6 +567,30 @@ int KeysProcessor::tupletFor(int choiceIndex)
 {
     static constexpr int values[] = { 0, 3, 5, 7, 9 };
     return values[(size_t) juce::jlimit(0, (int) (sizeof(values) / sizeof(values[0])) - 1, choiceIndex)];
+}
+
+// BigSky's shimmer list (the photo Owen held up), minus its two cents rows - MIDI semitones
+// cannot say ten cents. Ordered as the pedal orders it, descending intervals then ascending,
+// so anyone who knows the pedal reads this list as the same list. The two tables below must
+// agree entry for entry; the jassert in harmonySemisFor is what catches a miss.
+juce::StringArray KeysProcessor::harmonyChoices()
+{
+    return { "Off",
+             "- Octave",      "- Major 7th",  "- minor 7th", "- Major 6th",  "- minor 6th",
+             "- Perfect 5th", "- Tritone",    "- Perfect 4th", "- Major 3rd", "- minor 3rd",
+             "- Major 2nd",   "- minor 2nd",
+             "+ minor 2nd",   "+ Major 2nd",  "+ minor 3rd", "+ Major 3rd",  "+ Perfect 4th",
+             "+ Tritone",     "+ Perfect 5th", "+ minor 6th", "+ Major 6th", "+ minor 7th",
+             "+ Major 7th",   "+ Octave",     "+ Octave & 5th", "+ 2 Octaves" };
+}
+
+int KeysProcessor::harmonySemisFor(int choiceIndex)
+{
+    static constexpr int semis[] = { 0,
+                                     -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1,
+                                     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19, 24 };
+    jassert((int) std::size(semis) == harmonyChoices().size()); // the two lists drifted apart
+    return semis[(size_t) juce::jlimit(0, (int) std::size(semis) - 1, choiceIndex)];
 }
 
 // The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
@@ -556,7 +603,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate", "Chance", "Distance",
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
-        "Drift", "VelLevel", "Mutate", "MutateLock"
+        "Drift", "VelLevel", "Mutate", "MutateLock",
+        "Harm1", "Harm1Chance", "Harm2", "Harm2Chance"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -590,11 +638,12 @@ const ArpEngine& KeysProcessor::arpLine(int line) const
 bool KeysProcessor::arpLineOn(int line) const
 {
     // The one choke point for "does this line exist". A line the UI does not show has no way to
-    // be switched off either, so it must not be able to sound: a session saved while line C was
-    // running would otherwise arpeggiate forever with no control anywhere on screen. Answering
-    // false here makes it inert everywhere at once - runArpLines skips its engine and its keys,
-    // cardsFeedArp stops counting it, and the bar's Hold off greys correctly - while its stored
-    // parameter keeps whatever value it had, ready for the day uiArpLines goes back to three.
+    // be switched off either, so it must not be able to sound: a session saved while a hidden
+    // line was running would otherwise arpeggiate forever with no control anywhere on screen.
+    // Answering false here makes it inert everywhere at once - runArpLines skips its engine and
+    // its keys, cardsFeedArp stops counting it, and the bar's Hold off greys correctly - while
+    // its stored parameter keeps whatever value it had. All four lines show today (2026-08-19),
+    // so the guard is only the range check; it stays because uiArpLines can move again.
     if (line < 0 || line >= uiArpLines)
         return false;
     return apvts.getRawParameterValue(arpParamId(line, "On"))->load() > 0.5f;
@@ -1910,6 +1959,13 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.mutate = (int) arpParam(n, apMutate);
         ap.mutateLock = (int) arpParam(n, apMutateLock);
         ap.mutateSeed = n; // so two lines at the same Mutate never explore in lockstep
+        // The two fixed harmony voices, handed over as semitones: the choice index means
+        // nothing to the engine, and keeping the interval table out of it is the same
+        // decision as the scale mask below.
+        ap.harmSemis[0] = harmonySemisFor((int) arpParam(n, apHarm1));
+        ap.harmChance[0] = (int) arpParam(n, apHarm1Chance);
+        ap.harmSemis[1] = harmonySemisFor((int) arpParam(n, apHarm2));
+        ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;

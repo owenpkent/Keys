@@ -2565,13 +2565,13 @@ public:
                 expectEquals(b[i].note, a[i].note, "same notes");
         }
 
-        beginTest("Mutate never leaves the held chord, at any amount");
+        beginTest("Mutate to 50 never leaves the held chord");
         {
-            // The whole justification for letting this touch the note at all: it moves the run
+            // The 2026-08-18 rule, kept for the knob's lower half: to 50, Mutate moves the run
             // to another entry of the sequence built from what is held, so every pitch it can
             // reach is one of them. Swept, because a reach that grows with the amount is just
-            // the sort of thing that falls off the end at 100 and nowhere else.
-            for (int amt = 10; amt <= 100; amt += 10)
+            // the sort of thing that falls off the end at the boundary and nowhere else.
+            for (int amt = 10; amt <= 50; amt += 10)
             {
                 ArpEngine e;
                 e.prepare(sr);
@@ -2585,6 +2585,58 @@ public:
                         expect(ev.note == 60 || ev.note == 64 || ev.note == 67,
                                "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
                                    + ", which is not in the held chord");
+            }
+        }
+
+        beginTest("Mutate past 50 strays in scale; only past 75 may it leave the scale");
+        {
+            // The 2026-08-19 zones (Owen: "higher values can go out of scale"). C major as the
+            // mask - the default 0xFFF is chromatic and would make "in scale" vacuous.
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            for (int amt = 55; amt <= 75; amt += 10)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = amt;
+                mp.rootPc = 0;
+                mp.scaleMask = cMajor;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        expect((cMajor >> (ev.note % 12)) & 1u,
+                               "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
+                                   + ", out of scale below the chromatic zone");
+            }
+            // At the top the strays are chromatic but still local: a stray is at most three
+            // semitones off a note the walk could have chosen, so nothing lands far from the
+            // chord. The bound is what pins the reach; scale membership is deliberately not
+            // asserted, because leaving the scale is the feature.
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.mutate = 100;
+                mp.rootPc = 0;
+                mp.scaleMask = cMajor;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                bool leftScale = false;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                    {
+                        int nearest = 127;
+                        for (int c : { 60, 64, 67 })
+                            nearest = juce::jmin(nearest, std::abs(ev.note - c));
+                        expect(nearest <= 4, "Mutate 100 played " + juce::String(ev.note)
+                                                 + ", further than a stray can reach");
+                        leftScale = leftScale || (((cMajor >> (ev.note % 12)) & 1u) == 0);
+                    }
+                expect(leftScale, "at 100, over 32 steps, at least one stray left the scale");
             }
         }
 
@@ -2663,6 +2715,75 @@ public:
                 return -1;
             };
             expectEquals(noteAt(true), noteAt(false), "the same step plays the same note either way");
+        }
+
+        // --- The per-line harmony voices (2026-08-19, BigSky's shimmer list) --------------
+
+        beginTest("A harmony voice doubles every note at its interval; chance 0 is silence");
+        {
+            const auto run = [&](int semis, int chancePct)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.harmSemis[0] = semis;
+                mp.harmChance[0] = chancePct;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+                std::vector<int> ons;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        ons.push_back(ev.note);
+                return ons;
+            };
+
+            const auto plain = run(0, 100);
+            const auto octaveUp = run(12, 100);
+            expectEquals((int) octaveUp.size(), (int) plain.size() * 2,
+                         "at chance 100 every note carries its voice");
+            for (int n : octaveUp)
+                expect(n == 60 || n == 64 || n == 67 || n == 72 || n == 76 || n == 79,
+                       "harmony +12 played " + juce::String(n)
+                           + ", which is neither the chord nor its octave");
+
+            // Chance 0 is Off by another route, and Off must mean byte-identical.
+            const auto silent = run(12, 0);
+            expectEquals((int) silent.size(), (int) plain.size(), "chance 0 adds nothing");
+            for (size_t i = 0; i < silent.size() && i < plain.size(); ++i)
+                expectEquals(silent[i], plain[i], "chance 0 changes nothing");
+        }
+
+        beginTest("Both harmony voices stack, and a clamped voice is dropped, not doubled");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 12;
+            mp.harmSemis[1] = -12;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 4, chordOn({ 60, 64, 67 }), out);
+            int ons = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    ++ons;
+            expectEquals(ons % 3, 0, "each step is the note and its two voices");
+            expect(ons >= 9, "two voices tripled the steps");
+
+            // A voice pushed past the MIDI range clamps onto its own source and is dropped -
+            // the subharmonic rule: a collapsed interval is a silence, not a doubled attack.
+            ArpEngine e2;
+            e2.prepare(sr);
+            auto mp2 = p;
+            mp2.harmSemis[0] = 24;
+            juce::MidiBuffer out2;
+            clock.ppq = 0.0;
+            e2.process(mp2, clock, block * 4, chordOn({ 120, 124 }), out2);
+            for (auto& ev : collect(out2))
+                if (ev.on)
+                    expect(ev.note == 120 || ev.note == 124 || ev.note == 127,
+                           "a clamped voice either lands clamped or not at all");
         }
 
         // --- Per-step shapes, the fingered pair, and the Reset lane (2026-08-18) ----------

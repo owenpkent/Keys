@@ -672,16 +672,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         auto tab = std::make_unique<ArpBarTab>(*this, n);
         const auto letter = juce::String::charToString((juce::juce_wchar) ('A' + n));
         tab->setTooltip("Arpeggiator line " + letter + ". Lit, it arpeggiates what you play "
-                        "and whatever chord card you send it. Two lines at two rates is the "
-                        "polyrhythm; Hold off, at the end of this bar, lets both go. Drop a "
-                        "chord card here to hand it to line " + letter + " whether it is on "
-                        "or off.");
+                        "and whatever chord card you send it. Four lines at four rates is the "
+                        "polyrhythm; Hold off, at the end of this bar, lets them all go. The "
+                        "stripe is line " + letter + "'s own colour, the same one its card "
+                        "wears. Drop a chord card here to hand it to line " + letter
+                        + " whether it is on or off.");
         addAndMakeVisible(*tab); // never hides - see syncSectionControls
         arpBarTabs[(size_t) n] = std::move(tab);
     }
     arpBarAllTab = std::make_unique<ArpBarTab>(*this, -1);
-    arpBarAllTab->setTooltip("Both lines side by side, one card each: the view for building a "
-                             "polyrhythm. The letters beside it are where you go deep on one.");
+    arpBarAllTab->setTooltip("All four lines, one card each in two rows: the view for building "
+                             "a polyrhythm. The letters beside it are where you go deep on one.");
     arpBarAllTab->onClick = [this]
     {
         if (arpPanel != nullptr)
@@ -1094,6 +1095,16 @@ KeysEditor::ArpBarTab::ArpBarTab(KeysEditor& o, int n)
 void KeysEditor::ArpBarTab::paintButton(juce::Graphics& g, bool over, bool down)
 {
     juce::TextButton::paintButton(g, over, down);
+    // The line's own colour (2026-08-19), as an underline rather than a repaint of the chip:
+    // the toggle's lit state still reads exactly as every other bar chip's does, and the
+    // stripe is the mark that says which card below is this letter's. Brighter while the
+    // line is on, present either way so the letters name their colours even at rest.
+    if (line >= 0)
+    {
+        g.setColour(skin::lineAccent(line).base.withAlpha(getToggleState() ? 0.95f : 0.40f));
+        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(7.0f, 0.0f)
+                                   .removeFromBottom(3.0f), 1.5f);
+    }
     if (dropTarget)
     {
         g.setColour(skin::accentOf(*this).base);

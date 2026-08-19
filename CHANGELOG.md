@@ -5,6 +5,33 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: four arpeggiators, each in its own colour, with harmony voices and a mutate that can leave the scale
+
+The 2026-08-19 pass, all four of Owen's asks in one round ("I want 4 arps. and each one should
+have a color. and I want new knobs, 2 harmony drop down like the photo. and each of those has a
+chance knob... and I want a mutate knob... higher values can go out of scale").
+
+- **Four arp lines, A to D.** Line D's `arp4*` parameters are appended the way B's and C's were,
+  so every earlier session opens sounding identical; line C, inert since 2026-08-02, is back on
+  screen with it. The All view is a **2x2 grid of cards** now - each card keeps the full width
+  the two-across layout gave it, and the panel takes the height, which is the cheap axis there.
+  The arp bar carries four letter switches.
+- **Each line has its own colour**: A cyan, B magenta, C amber, D lime. Worn by the card's frame,
+  fill and caption, by a stripe under the letter on the arp bar, and by the Draw grid's playhead,
+  so "which machine is this" has one answer everywhere. The marks are tinted, never the controls,
+  which is how the one-accent skin law survives it.
+- **Two harmony voices per line**, on each card: an interval dropdown (BigSky's shimmer list,
+  Off / -Octave up through +2 Octaves; the two cents rows cannot exist in MIDI and are dropped)
+  and a **chance knob** each, saying how often that voice fires. The intervals are chromatic on
+  purpose - a Major 3rd is four semitones whatever the scale says - and the voice follows the
+  note the run actually played, Mutate's strays included. New parameters `arp*Harm1/2` and
+  `arp*Harm1/2Chance`, appended, defaulting to Off / 100.
+- **Mutate reaches out of the scale at the top.** Three zones on the one knob: to 50 it is
+  exactly the 2026-08-18 control and cannot leave the held chord; past 50 a mutated step may
+  stray onto in-scale neighbours; past 75 a growing share of the strays are chromatic, out of
+  scale on purpose. LOCK holds the strays exactly as it holds the in-chord variations, so a
+  wander that found a wrong-note lick can keep it.
+
 ### Added: the step sequencer says what it is doing, and the lanes stopped being one grid each
 
 A usability and functionality pass over the Draw page, drawn from Kirnu Cream's manual. The page
