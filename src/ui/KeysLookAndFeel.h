@@ -131,6 +131,11 @@ namespace skin
     // stretch is its range. Named here rather than spelled out at both ends, since a typo in
     // one of two string literals would fail silently by simply never matching.
     inline const juce::Identifier arcFromProperty { "okArcFrom" };
+    // Its twin: where the lit arc *ends*, instead of at the value. RangeKnob sets both since
+    // the band became symmetric around the face (2026-08-19, Owen: "should be equal from
+    // center") - the arc has to reach past the pointer on the high side, which no end-at-value
+    // arc can.
+    inline const juce::Identifier arcToProperty { "okArcTo" };
     constexpr float panelRadius = 8.0f;  // panels / modules
 
     // Segoe UI keeps the panel crisp on Windows (the shipping target) and falls

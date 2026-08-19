@@ -1033,17 +1033,25 @@ public:
                 expectWithinAbsoluteError(timingOnly[i], base[i], 0.005f,
                                           "full H.TIME leaves every velocity alone");
 
-            // The ring is in velocity units too: at 40 below a level of 100, every hit lands
-            // somewhere in 60..100 and never above the knob.
-            const auto ringed = velsWith(0, 40, 100);
-            bool sawQuieter = false;
+            // The ring is in velocity units too, and it reaches **either side of the level**
+            // since 2026-08-19 (Owen, on the halo: "should be equal from center"): 40 around a
+            // level of 60 is a band of 20..100, and both halves of it actually get used.
+            const auto ringed = velsWith(0, 40, 60);
+            bool sawQuieter = false, sawLouder = false;
             for (const float v : ringed)
             {
-                expect(v <= 100.0f / 127.0f + 0.005f, "the ring only ever shaves, never louder");
-                expect(v >= 60.0f / 127.0f - 0.012f, "and never further than the ring reaches");
-                sawQuieter = sawQuieter || v < 100.0f / 127.0f - 0.005f;
+                expect(v <= 100.0f / 127.0f + 0.012f, "never further above the level than the ring");
+                expect(v >= 20.0f / 127.0f - 0.012f, "and never further below it");
+                sawQuieter = sawQuieter || v < 60.0f / 127.0f - 0.005f;
+                sawLouder = sawLouder || v > 60.0f / 127.0f + 0.005f;
             }
-            expect(sawQuieter, "a ring of 40 actually moved something");
+            expect(sawQuieter && sawLouder, "a ring of 40 lands on both sides of the level");
+
+            // Equal from centre at the rails too: a level of 120 leaves only 7 of room above,
+            // so the band is 113..127 however wide the ring is turned.
+            for (const float v : velsWith(0, 40, 120))
+                expect(v >= 113.0f / 127.0f - 0.012f && v <= 1.0f + 0.005f,
+                       "at the rail the band stays equal, not lopsided");
 
             // The bottom of the band is taken literally now: no 0.05 audibility floor lifting it,
             // because the level *is* the velocity and a band drawn low is meant to be quiet. The
@@ -1165,14 +1173,14 @@ public:
             expectWithinAbsoluteError(period(syncTrip, 4), 4000, 2, "a triplet 1/16 is two thirds of one");
         }
 
-        beginTest("a Humanize range reaches back from the knob by its span");
+        beginTest("the Humanize knob is the centre of its range, and the ring reaches both ways");
         {
-            // 2026-08-03, the range knobs (Owen: "a serum style knob where you can set a range
-            // in the knob ... when the outer ring is enabled, moving the dial moves the outer
-            // ring with it"). Humanize was always "uniform between nothing and the knob"; the
-            // span says how far under the knob the draw may fall, so the knob stays the
-            // ceiling and the *range travels with it* - which is the half of this that has to
-            // be pinned, because it is the half that is easy to build the other way round.
+            // 2026-08-03 built the ring; 2026-08-19 centred it (Owen, on the halo: "moving the
+            // halo shouldn't move knob. should be equal from center"). The draw is the knob
+            // plus or minus the ring, equal on both sides, with the reach stopped where a rail
+            // is nearer - the knob itself on the low side, so a hit is never early, and 100
+            // less the knob on the high side, so the band never goes lopsided. The halves
+            // pinned here are the ones that are easy to build the other way round.
             const auto onsets = [&](int amount, int spanPct)
             {
                 auto sp = p;
@@ -1182,12 +1190,11 @@ public:
                 return onsetsOf(sp, clock, block, 12, steady);
             };
 
-            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - but
-            // the engine also caps a nudge at 40% of the gap to the next sub-hit, so the
-            // ceiling in force is min(1200, 2400) = 1200.
+            // A 1/16 is 6000 samples here, and Humanize at 100 is 25 ms = 1200 samples - under
+            // the engine's 40% ordering cap at this rate, so 1200 is the scale in force.
             const auto closed = onsets(100, 0);
             expect(closed.size() >= 4, "the run has to fire before this proves anything");
-            // A span of zero collapses the range onto the knob: no randomness left, every hit
+            // A ring of zero collapses the range onto the knob: no randomness left, every hit
             // exactly 1200 late, so the gaps are all one step.
             for (size_t i = 1; i < closed.size(); ++i)
                 expectWithinAbsoluteError((double) (closed[i] - closed[i - 1]), 6000.0, 2.0,
@@ -1196,36 +1203,52 @@ public:
             expectWithinAbsoluteError((double) closed[0], 1200.0, 2.0,
                                       "every hit is a full 25 ms late");
 
-            // Wide open is the old behaviour: somewhere in 0..1200, and different draws.
-            const auto open = onsets(100, 100);
-            expect(open.size() >= 4);
-            expect(open != closed, "a full span still randomizes");
-            for (const auto o : open)
-                expect(o % 6000 <= 1201, "and never past the ceiling it always had");
+            // The knob at its top has no room above, so equal-from-centre means no room below
+            // either: a maxed knob is the same fixed offset whatever the ring says.
+            const auto maxed = onsets(100, 100);
+            expect(maxed.size() >= 4);
+            for (const auto o : maxed)
+                expectWithinAbsoluteError((double) (o % 6000), 1200.0, 2.0,
+                                          "at the rail the band has nowhere to open");
 
-            // **The range travels with the knob.** Halve the knob with the span closed and
-            // every hit lands at half the offset - the proof that the span is measured back
-            // from the knob rather than up from zero.
+            // Mid-knob, ring wide open: the full reach both ways, nothing early, up to 2x the
+            // knob late, and actually random.
+            const auto open = onsets(50, 100);
+            expect(open.size() >= 4);
+            expect(open != closed, "an open ring still randomizes");
+            bool sawBelow = false, sawAbove = false;
+            for (const auto o : open)
+            {
+                expect(o % 6000 <= 1201, "never past twice the knob");
+                sawBelow = sawBelow || (o % 6000) < 599;
+                sawAbove = sawAbove || (o % 6000) > 601;
+            }
+            expect(sawBelow && sawAbove, "the draw lands on both sides of the knob");
+
+            // **The range travels with the knob.** Halve the knob with the ring closed and
+            // every hit lands at half the offset - the proof that the range is measured from
+            // the knob rather than up from zero.
             const auto halfClosed = onsets(50, 0);
             expect(halfClosed.size() >= 4);
             expectWithinAbsoluteError((double) halfClosed[0], 600.0, 2.0,
                                       "the closed range moved with the dial");
 
-            // A span narrower than the knob is a floor under a draw: at least 30% of 25 ms.
-            const auto narrow = onsets(100, 70);
+            // A narrower ring is a narrower band either side of the knob: 50 +/- 20 is 30% to
+            // 70% of 25 ms, and nothing outside it.
+            const auto narrow = onsets(50, 20);
             expect(narrow.size() >= 4);
             for (const auto o : narrow)
             {
-                expect(o % 6000 >= 359, "every hit is at least as late as the range's bottom");
-                expect(o % 6000 <= 1201, "and no later than the knob");
+                expect(o % 6000 >= 359, "every hit is at least as late as the band's bottom");
+                expect(o % 6000 <= 841, "and no later than its top");
             }
 
-            // Humanize itself off means the span does nothing: there is no draw to put a
-            // bottom under, and a range that nudged on its own would make a knob at zero audible.
+            // Humanize itself off means the ring does nothing: there is no draw to open, and a
+            // ring that nudged on its own would make a knob at zero audible.
             const auto off = onsets(0, 0);
             expect(off.size() >= 4);
             expectWithinAbsoluteError((double) off[0], 0.0, 2.0,
-                                      "a closed range under a Humanize of zero is still zero");
+                                      "a closed ring under a Humanize of zero is still zero");
         }
 
         beginTest("the rate readout is the step length as a fraction of a bar");

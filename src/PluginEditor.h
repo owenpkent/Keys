@@ -270,7 +270,10 @@ private:
     // which is what they shape. See the wireRange lambda in the editor's constructor.
     RangeKnob strumKnob, humanKnob;
     juce::Label strumHead, humanHead;
-    std::unique_ptr<SliderAtt> chordStrumAtt, humanizeVelAtt;
+    // No attachments for the two pad range knobs: their face is the band's *centre* since
+    // 2026-08-19, which is not a parameter - see wireRange in the constructor, and
+    // syncPadRangeKnobs() for the pull half.
+    void syncPadRangeKnobs();
     // The strum direction's `< >` pair, which replaced its combo on 2026-08-03. The caption
     // beside them reads the live direction, so there is no third control saying it.
     juce::TextButton strumDirPrev { "<" }, strumDirNext { ">" };

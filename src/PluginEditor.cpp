@@ -298,13 +298,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // Humanize on the Pads bar - and both belong to what a chord *pad* does, which is where
     // they now sit: in the two columns the grid gave up going from sixteen pads to twelve.
     //
-    // Each is stored as a low/high pair, so the face attaches to the **high** and the low is
-    // written by hand from `rangeLo()` - on a span drag *and* on a face move, because the range
-    // travels with the knob and a low that stayed put would silently widen it.
+    // Each is stored as a low/high pair, and **the face is the pair's centre since 2026-08-19**
+    // (Owen, on the halo: "moving the halo shouldn't move knob. should be equal from center").
+    // A centre is not a parameter, so no attachment can bind the face: it and the span are set
+    // from the pair here, both ends are pushed back on every change - a face move slides the
+    // whole band, a halo move opens it equally both ways - and syncPadRangeKnobs() re-pulls
+    // when the pair changes under us (a session load). The parameters keep meaning what they
+    // always meant, which is what keeps the engine and every saved session untouched.
     const auto wireRange = [this](RangeKnob& rk, juce::Label& head, const juce::String& name,
                                   const juce::String& loId, const juce::String& hiId,
                                   double lo, double hi, const juce::String& unit,
-                                  std::unique_ptr<SliderAtt>& att, const juce::String& tip)
+                                  const juce::String& tip)
     {
         styleLabel(head, name);
         padsHolder.addAndMakeVisible(head);
@@ -314,41 +318,46 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         rk.setTitle(name + " range");
         rk.setTooltip(tip);
         rk.spanHandle().setTitle(name + " range handle");
-        rk.setSpanTooltip("Drag up to open the range, down to close it - it opens both ways "
-                          "around its middle, and the wheel works too. Closed is a fixed "
-                          "value; open, every chord draws a new one inside it.");
+        rk.setSpanTooltip("Drag up to open the range, down to close it - it opens equally "
+                          "both ways around the knob, which stays put. The wheel works too. "
+                          "Closed is a fixed value; open, every chord draws a new one inside "
+                          "it.");
         rk.textFromRange = [unit](double a, double b)
         { return juce::String((int) a) + "-" + juce::String((int) b) + unit; };
-        att = std::make_unique<SliderAtt>(processor.apvts, hiId, rk.face());
-        rk.setSpan(processor.apvts.getRawParameterValue(hiId)->load()
-                   - processor.apvts.getRawParameterValue(loId)->load());
-        const auto pushLow = [this, &rk, loId] { writeParam(loId.toRawUTF8(), rk.rangeLo()); };
-        rk.onValueChanged = pushLow;
-        rk.onSpanChanged = [pushLow](double) { pushLow(); };
-        rk.onSpanDragStart = [this, loId]
+        const auto loV = (double) processor.apvts.getRawParameterValue(loId)->load();
+        const auto hiV = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        rk.face().setValue((loV + hiV) * 0.5, juce::dontSendNotification);
+        rk.setSpan((hiV - loV) * 0.5);
+        const auto pushBoth = [this, &rk, loId, hiId]
         {
-            if (auto* p = processor.apvts.getParameter(loId))
-                p->beginChangeGesture();
+            writeParam(loId.toRawUTF8(), rk.rangeLo());
+            writeParam(hiId.toRawUTF8(), rk.rangeHi());
         };
-        rk.onSpanDragEnd = [this, loId]
+        rk.onValueChanged = pushBoth;
+        rk.onSpanChanged = [pushBoth](double) { pushBoth(); };
+        const auto gesture = [this, loId, hiId](bool begin)
         {
-            if (auto* p = processor.apvts.getParameter(loId))
-                p->endChangeGesture();
+            for (const auto& id : { loId, hiId })
+                if (auto* p = processor.apvts.getParameter(id))
+                    begin ? p->beginChangeGesture() : p->endChangeGesture();
         };
+        rk.onSpanDragStart = [gesture] { gesture(true); };
+        rk.onSpanDragEnd = [gesture] { gesture(false); };
+        // The face writes parameters too now and has no attachment to bracket its drags.
+        rk.face().onDragStart = [gesture] { gesture(true); };
+        rk.face().onDragEnd = [gesture] { gesture(false); };
         padsHolder.addAndMakeVisible(rk);
     };
 
     wireRange(strumKnob, strumHead, "Strum", "chordStrum", "chordStrumMax", 0.0, 200.0, " ms",
-              chordStrumAtt,
-              "How long a chord takes to rake, in milliseconds. The knob is the longest it "
-              "ever takes and the ring is how far under that it can fall, so every chord "
+              "How long a chord takes to rake, in milliseconds. The knob is the middle of the "
+              "band and the ring is how far either side of it a chord may land, so every chord "
               "strums at its own speed instead of sounding stamped out. Closed is a fixed "
               "rake; at zero the chord lands all at once.");
     wireRange(humanKnob, humanHead, "Humanize", "humanizeVelMin", "humanizeVelMax", 0.0, 127.0, "",
-              humanizeVelAtt,
-              "Velocity. The knob is the hardest a note ever lands and the ring is how far "
-              "under that it can fall, so a part stops sounding typed in. Closed is one fixed "
-              "velocity for everything.");
+              "Velocity. The knob is the middle of the band and the ring is how far either "
+              "side of it a note may land, so a part stops sounding typed in. Closed is one "
+              "fixed velocity for everything.");
     // **The lamp is the switch** (2026-08-03, Owen: "clicking the blue satellite button should
     // turn on or off the feature. And then I don't think we need the humanized check mark
     // anymore"). Humanize had a tick box; it is gone, and the lamp says lit-or-not instead,
@@ -1048,6 +1057,30 @@ void KeysEditor::writeParam(const char* paramID, double value)
         if (std::abs(param->getValue() - norm) > 1.0e-6f)
             param->setValueNotifyingHost(norm);
     }
+}
+
+// The pull half of the pad range knobs' hand wiring (see wireRange): their face is the band's
+// centre, which no attachment can bind, so a session load or an automation write lands here on
+// the editor's timer. Pulled only when the stored pair disagrees with the knob's own derived
+// ends - pushing our derived ends back through unconditionally would erase the latent span a
+// rail is holding back - and never mid-gesture, which would yank the band out from under the
+// hand.
+void KeysEditor::syncPadRangeKnobs()
+{
+    const auto sync = [this](RangeKnob& rk, const char* loId, const char* hiId)
+    {
+        if (rk.spanDragging() || rk.face().isMouseButtonDown())
+            return;
+        const double lo = (double) processor.apvts.getRawParameterValue(loId)->load();
+        const double hi = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        if (std::abs(lo - rk.rangeLo()) < 0.5 && std::abs(hi - rk.rangeHi()) < 0.5)
+            return;
+        rk.face().setValue((lo + hi) * 0.5, juce::dontSendNotification);
+        rk.setSpan((hi - lo) * 0.5);
+        rk.refresh();
+    };
+    sync(strumKnob, "chordStrum", "chordStrumMax");
+    sync(humanKnob, "humanizeVelMin", "humanizeVelMax");
 }
 
 void KeysEditor::refreshSectionPanels()
@@ -2298,6 +2331,8 @@ void KeysEditor::timerCallback()
     refreshTakeControls();
 
     refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
+
+    syncPadRangeKnobs(); // cheap: early-outs unless the stored pair changed under the knob
 
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());

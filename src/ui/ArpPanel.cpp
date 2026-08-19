@@ -1634,10 +1634,10 @@ namespace
         // arrived - percentages on a control called VEL, beside a pads knob that had just become
         // an absolute 0-127 band. One quantity, one unit, one number you can read.
         { KeysProcessor::apVelLevel, "VEL",
-          "This line's velocity, 0-127. The knob is the hardest a hit ever lands and the ring is "
-          "how far under that it can fall, so the two read as one band - the same as the pads' "
-          "own Humanize knob. At 0 the line is silent. The way to balance two lines against each "
-          "other without playing one of them softer." },
+          "This line's velocity, 0-127. The knob is the middle of the band and the ring is how "
+          "far either side of it a hit can land, so the two read as one band - the same as the "
+          "pads' own Humanize knob. At 0 the line is silent. The way to balance two lines "
+          "against each other without playing one of them softer." },
         // HUMAN split into its halves on 2026-08-02 (Owen: "maybe we could split it up into
         // two knobs"), so timing and dynamics randomize independently. H.VEL, the velocity
         // half, moved onto VEL's own ring above; only the timing half is still its own knob.
@@ -1794,14 +1794,15 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                 // merge (the parameter's own default), and pinning it is what keeps that true
                 // with one fewer number on screen. The engine reads both parameters exactly
                 // as it always did; only the card stops exposing the span as its own control.
-                rk.setTooltip("This line's velocity band, 0-127: the knob is the hardest a hit "
-                              "ever lands and the ring is how far under that it can fall, by a "
-                              "different amount every time. Click the little dial at the top "
-                              "left to switch Humanize Velocity on or off; drag it, or anywhere "
-                              "on the ring, to set how far it reaches.");
+                rk.setTooltip("This line's velocity band, 0-127: the knob is the middle of the "
+                              "band and the ring is how far either side of it a hit can land, "
+                              "by a different amount every time. Click the little dial at the "
+                              "top left to switch Humanize Velocity on or off; drag it, or "
+                              "anywhere on the ring, to set how far it reaches.");
                 rk.setSpanTooltip("Drag up for a wider velocity band, down for a tighter one - "
-                                  "it opens both ways around its middle, and the wheel works "
-                                  "too. Click to switch Humanize Velocity on or off.");
+                                  "it opens equally both ways around the knob, which stays "
+                                  "put. The wheel works too. Click to switch Humanize Velocity "
+                                  "on or off.");
                 // **The plain lo-hi readout, same as every other range knob** (2026-08-18). It
                 // read "level ~reach" while the face was a bipolar trim and the ring a percentage
                 // of shave: two different quantities in two different units, which no two-number
@@ -1877,14 +1878,15 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
             }
             else // kHTime
             {
-                rk.setTooltip("The knob is the most this ever does; the ring around it is how far "
-                              "under that a hit can fall. Drag the little dial at the top left - or "
-                              "anywhere on the ring - to open and close it. Wide open, every hit is "
-                              "drawn from nothing up to the knob, which is what this did before it "
-                              "had a ring; close it and every hit gets at least that much, with the "
-                              "variation on top. Turn the knob and the whole range moves with it.");
+                rk.setTooltip("The knob is the typical lateness; the ring around it is how far "
+                              "either side of that a hit can land. Drag the little dial at the "
+                              "top left - or anywhere on the ring - to open and close it. Wide "
+                              "open, hits wander from dead on the grid to twice the knob; "
+                              "closed, every hit is exactly that late. Turn the knob and the "
+                              "whole range moves with it.");
                 rk.setSpanTooltip("Drag up to open this knob's range, down to close it - it "
-                                  "opens both ways around its middle, and the wheel works too.");
+                                  "opens equally both ways around the knob, which stays put. "
+                                  "The wheel works too.");
                 // Both ends in one readout, in the knob's own units - a range that only shows one
                 // of its ends is the readout problem the arp rate had this morning.
                 rk.textFromRange = [](double lo, double hi)

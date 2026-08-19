@@ -512,15 +512,18 @@ public:
         int velRamp = 0;          // -100..+100
         double rampBeats = 8.0;
         // "Played, not programmed", split into its two halves on 2026-08-02 (Owen: "maybe we
-        // could split it up into two knobs"). `humanize` nudges each hit late by up to 25 ms;
-        // `humanVel` takes up to 30% off its velocity - each scaled by its own knob, each a
-        // different random draw per hit. Before the split one value drove both, so a session
-        // saved then keeps its amount as the timing half and gets 0 for the velocity half.
-        int humanize = 0;         // 0..100, timing only - the *ceiling* of the random draw
-        // Velocity only, and in **MIDI velocity units** since 2026-08-18, not a percentage of a
-        // 30% shave: it is how far under `velLevel` a hit may fall, so the knob and its ring read
-        // as one 0-127 band. 0 is no wander, which is what it always meant.
-        int humanVel = 0;         // 0..127, velocity units below velLevel
+        // could split it up into two knobs"). `humanize` nudges each hit late; `humanVel`
+        // wanders its velocity - each scaled by its own knob, each a different random draw per
+        // hit. Before the split one value drove both, so a session saved then keeps its amount
+        // as the timing half and gets 0 for the velocity half. **Both knobs are the centre of
+        // their wander since 2026-08-19** (Owen, on the halo: "should be equal from center"):
+        // the draw lands either side of the knob, equally, with the reach stopped where a rail
+        // is nearer - see the two draws in fireStep for the exact arithmetic.
+        int humanize = 0;         // 0..100, timing only - the typical lateness, on the 25 ms scale
+        // Velocity only, in **MIDI velocity units** since 2026-08-18: how far either side of
+        // `velLevel` a hit may land, so the knob and its ring read as one 0-127 band. 0 is no
+        // wander, which is what it always meant.
+        int humanVel = 0;         // 0..127, velocity units either side of velLevel
         // The spans, appended 2026-08-03 with the range knobs (Owen: "a serum style knob where
         // you can set a range in the knob"). Each hit draws uniformly between `humanize - span`
         // and `humanize` instead of between zero and `humanize`, so the knob keeps meaning "the
@@ -1549,17 +1552,22 @@ private:
         // than 40% of the gap to the next sub-hit. Unbounded, a 25 ms nudge at a fast ratchet
         // could carry one sub-hit past the next, and two hits of one pitch arriving out of
         // order is exactly the shape emitHit's close-what-you-land-on rule cannot survive.
-        const int maxLate = p.humanize > 0
-                          ? (int) juce::jmin(0.025 * sr * (juce::jlimit(0, 100, p.humanize) / 100.0),
+        // **The knob is the centre of the wander since 2026-08-19** (Owen, on the halo:
+        // "should be equal from center"): the draw is humanize +/- the ring, equal both
+        // sides, and the reach stops where a rail is nearer - h itself, so the floor never
+        // goes early (below zero late), and 100-h, so the band stays equal rather than
+        // lopsided against the ceiling. A ring at its default 100 therefore reads [0, 2h]:
+        // the knob is the typical lateness, which is what a centre means. The 40% guard is
+        // unchanged and still owns note ordering.
+        const int hTime = juce::jlimit(0, 100, p.humanize);
+        const int hReach = juce::jmin(juce::jlimit(0, 100, p.humanizeSpan),
+                                      juce::jmin(hTime, 100 - hTime));
+        const int maxLate = hTime > 0
+                          ? (int) juce::jmin(0.025 * sr * ((hTime + hReach) / 100.0),
                                              subLen * 0.4)
                           : 0;
-        // The floor is the knob less the span, so it travels with the knob. It rides the same
-        // 25 ms scale and the same 40% guard by being clamped to what the ceiling already
-        // survived: it can never push a hit further than maxLate, so the ordering rule above
-        // holds whatever the two parameters say - either can be automated past the other.
-        const int humanFloor = juce::jmax(0, juce::jlimit(0, 100, p.humanize)
-                                                 - juce::jlimit(0, 100, p.humanizeSpan));
-        const int minLate = juce::jlimit(0, maxLate, (int) (0.025 * sr * (humanFloor / 100.0)));
+        const int minLate = juce::jlimit(0, maxLate,
+                                         (int) (0.025 * sr * ((hTime - hReach) / 100.0)));
 
         // Resolve the step into pitches once, before the ratchet loop repeats them. Three
         // lanes fold in here, and all three want the note *after* the sequence walk has
@@ -1707,27 +1715,31 @@ private:
                 // the ramp and Drift all still shape it exactly as they did - only the *base*
                 // moved from the incoming chord to the knob. See Params::velLevel.
                 float vel = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
-                // Late and quieter, never early and never louder: a nudge that can also
-                // rush is what Swing is for, and a velocity that can also rise makes an
-                // edited Velocity lane mean less than it says. Two knobs since 2026-08-02
-                // (humanize is the timing, humanVel the velocity), so each half only runs
-                // when its own knob is up.
+                // Late, never early: a nudge that can rush the grid is what Swing is for,
+                // and an early hit would need to fire before the step it belongs to. Both
+                // wanders are centred on their knob since 2026-08-19 - the draw lands either
+                // side of it, equally - so "never louder" retired with the halo redesign:
+                // the level is the band's middle now, not its top. Two knobs since
+                // 2026-08-02 (humanize is the timing, humanVel the velocity), so each half
+                // only runs when its own knob is up.
                 if (maxLate > 0)
                     on += minLate + (int) (rng() % (unsigned) (maxLate - minLate + 1));
                 if (p.humanVel > 0)
                 {
-                    // How far under the level this hit falls, in **MIDI velocity units** since
-                    // 2026-08-18 - the knob and its ring are one 0-127 band now, so the amount
-                    // subtracted has to be in the band's own units rather than a percentage of a
-                    // 30% shave. Uniform between the floor and the ceiling, exactly as before;
-                    // with the span at its default 100 the floor sits at the knob itself, which
-                    // is what makes the whole reach available.
-                    const int reach = juce::jlimit(0, 127, p.humanVel);
-                    const int reachMin = juce::jmax(0, reach - juce::jlimit(0, 100, p.humanVelSpan)
-                                                              * reach / 100);
+                    // In **MIDI velocity units** since 2026-08-18, and **either side of the
+                    // level** since 2026-08-19 (Owen, on the halo: "should be equal from
+                    // center"): the knob is the band's centre, the ring is how far a hit may
+                    // land above or below it, uniform across the band. The reach stops where
+                    // a rail is nearer - the level itself, or 127 less it - so the band stays
+                    // equal on both sides rather than piling up against an end. humanVelSpan,
+                    // the ring's own former sub-span, is pinned at its default by the UI and
+                    // no longer read: a centred band has no ceiling for a sub-span to hang
+                    // from.
+                    const int level = juce::jlimit(0, 127, p.velLevel);
+                    const int reach = juce::jmin(juce::jlimit(0, 127, p.humanVel),
+                                                 juce::jmin(level, 127 - level));
                     const double u = (double) (rng() % 1000u) / 1000.0;
-                    const double units = (double) reachMin + u * (double) (reach - reachMin);
-                    vel -= (float) (units / 127.0) * velScale;
+                    vel += (float) ((2.0 * u - 1.0) * (double) reach / 127.0) * velScale;
                 }
                 // The 0.05 floor protects programmed dynamics: a Velocity lane at 0 or a
                 // hard H.VEL draw must stay audible rather than turn into a note-off. The

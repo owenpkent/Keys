@@ -104,6 +104,19 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   purpose**: the dropdown names intervals, which is what keeps this from being a third copy of
   the Harmony lane's chord-tone counting. On each macro card: two combos with a chance knob
   each, on their own strip under the knobs (`Macro harmony 1 A` / `Macro harmony 1 chance A`).
+- **The RangeKnob's face is the band's centre, and the halo only ever writes the span**
+  (2026-08-19, two corrections in one afternoon: "it should expand in both directions. up is
+  more", then "moving the halo shouldn't move knob. should be equal from center"). The band is
+  value +/- reach with `reach()` stopping where a rail is nearer, so it is *equal on both
+  sides always* - that is the contract, not a clamp artefact. The lit arc spans both halves
+  through `skin::arcToProperty`, arcFromProperty's new twin. The engines follow: VEL's hits
+  and H.TIME's lateness wander either side of their knob (H.TIME still never early relative to
+  the grid - the low rail is zero-late), `arpHumanVelSpan` is no longer read by the engine at
+  all, and the pads' Strum/Humanize faces lost their SliderAttachment - a centre is not a
+  parameter, so KeysEditor::wireRange pushes both ends by hand and syncPadRangeKnobs() pulls
+  on the timer. **The 2026-08-18 "never louder" claim and every "the knob is the ceiling"
+  phrasing below are history**; "never early" stands. The wheel works on the halo and ring,
+  up is more.
 - **Mutate has three zones, and past 50 the 2026-08-18 "cannot leave the held chord" claim no
   longer holds - by Owen's own ask.** To 50 the knob is byte-identical to what shipped; past 50
   `ArpEngine::mutatedPitch` (a second stage, applied to the placed pitch after the index walk)
