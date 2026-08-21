@@ -2845,6 +2845,78 @@ public:
 
         // --- The per-line harmony voices (2026-08-19, BigSky's shimmer list) --------------
 
+        beginTest("a harmony voice may name two pitches, and they share one chance roll");
+        {
+            // 2026-08-21, Owen: "in the harmony, when you select octave plus fifth, it looks
+            // like it only just does octave". Every entry in the shimmer list names a single
+            // interval except one, and that one says "&": "+ Octave & 5th" is an octave *and* a
+            // fifth, two notes off each note harmonised. The engine read it as a compound
+            // interval instead - one note 19 semitones up - so it played one note where its
+            // name promises two, and 19 is a different pitch from either of them.
+            //
+            // The list itself lives in KeysProcessor, so which entry carries which intervals is
+            // pinned in StateTests where a processor is at hand. This is the engine half: a
+            // voice with a second interval sounds both, and does so under one roll.
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.harmSemis[0] = 12; // the octave...
+            mp.harmSemisB[0] = 7; // ...and the fifth, from the one slot
+            mp.harmChance[0] = 100;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 8, chordOn({ 60, 64, 67 }), out);
+
+            std::set<int> seen;
+            int ons = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                {
+                    seen.insert(ev.note);
+                    ++ons;
+                }
+            expect(seen.count(72) + seen.count(76) + seen.count(79) > 0, "the octave voice sounded");
+            expect(seen.count(67) + seen.count(71) + seen.count(74) > 0, "the fifth voice sounded");
+
+            // One voice, one roll: three hits a step, never two. A slot that half-fired would be
+            // the same bug wearing the chance knob.
+            const auto plainRun = [&]
+            {
+                ArpEngine e2;
+                e2.prepare(sr);
+                auto mp2 = p;
+                juce::MidiBuffer o2;
+                clock.ppq = 0.0;
+                e2.process(mp2, clock, block * 8, chordOn({ 60, 64, 67 }), o2);
+                int n = 0;
+                for (auto& ev : collect(o2))
+                    if (ev.on)
+                        ++n;
+                return n;
+            }();
+            expectEquals(ons, plainRun * 3, "every step carried its note plus both of the voice's");
+
+            // A second interval of 0 is the other twenty-six entries, and must be untouched.
+            const auto count = [&](int semisB)
+            {
+                ArpEngine e3;
+                e3.prepare(sr);
+                auto mp3 = p;
+                mp3.harmSemis[0] = 12;
+                mp3.harmSemisB[0] = semisB;
+                mp3.harmChance[0] = 100;
+                juce::MidiBuffer o3;
+                clock.ppq = 0.0;
+                e3.process(mp3, clock, block * 8, chordOn({ 60, 64, 67 }), o3);
+                int n = 0;
+                for (auto& ev : collect(o3))
+                    if (ev.on)
+                        ++n;
+                return n;
+            };
+            expectEquals(count(0), plainRun * 2, "a one-interval voice still doubles and no more");
+        }
+
         beginTest("A harmony voice doubles every note at its interval; chance 0 is silence");
         {
             const auto run = [&](int semis, int chancePct)

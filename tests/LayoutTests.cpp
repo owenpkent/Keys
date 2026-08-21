@@ -12,6 +12,7 @@
 
 #include "../src/PluginProcessor.h"
 #include "../src/ui/ArpPanel.h"
+#include "../src/ui/KeysLookAndFeel.h"
 #include <juce_events/juce_events.h>
 
 namespace keys::tests
@@ -68,6 +69,40 @@ public:
 
     void runTest() override
     {
+        beginTest("every popup row is sized wide enough to draw its own text");
+        {
+            // Written on 2026-08-21 while chasing Owen's "when you select octave plus fifth,
+            // it looks like it only just does octave", on the theory that the *row* was
+            // ellipsising and he was reading a truncated label.
+            //
+            // **It was not.** This passed the moment it was written, which is what sent the
+            // hunt on to the semitone table, where the bug actually was - "+ Octave & 5th"
+            // names two intervals and the engine was playing one. Kept anyway, because the
+            // trap it rules out is real and has bitten this codebase once already:
+            // getIdealPopupMenuItemSize measures with Font::getStringWidthFloat, which
+            // CLAUDE.md records as under-measuring - it is what drew the chord library's
+            // `iim7` as `iim`. drawPopupMenuItem then draws into area.reduced(26, 0) with
+            // ellipses on, so any shortfall past the 10 px of slack comes off the end of the
+            // longest row in the menu, and the text simply ends early with nothing to say so.
+            //
+            // A rule over the whole list rather than one string: it is the *next* long entry
+            // appended to any menu that this is here to catch.
+            KeysLookAndFeel lnf;
+            const auto font = lnf.getPopupMenuFont();
+            for (const auto& text : KeysProcessor::harmonyChoices())
+            {
+                int w = 0, h = 0;
+                lnf.getIdealPopupMenuItemSize(text, false, 34, w, h);
+                juce::GlyphArrangement ga;
+                ga.addLineOfText(font, text, 0.0f, 0.0f);
+                const float drawn = ga.getBoundingBox(0, -1, true).getRight();
+                expect((float) w >= drawn + 52.0f,
+                       "the popup row \"" + text + "\" is " + juce::String(w)
+                           + " px wide but needs " + juce::String((int) std::ceil(drawn + 52.0f))
+                           + " to draw its text inside its own gutters, so it ellipsises");
+            }
+        }
+
         beginTest("no visible control is starved, in any view or page");
         {
             // The rule the Chain tab broke by being laid out at zero width, and the Shape

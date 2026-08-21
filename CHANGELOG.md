@@ -5,6 +5,45 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: "Octave & 5th" plays an octave and a fifth
+
+Owen: *"in the harmony, when you select octave plus fifth, it looks like it only just does
+octave."*
+
+Every entry in the harmony dropdown names a single interval except one, and that one says
+**&**. `harmonySemisFor` read it as a compound interval - a single note 19 semitones up -
+so the entry played one note where its name promises two, and that one note was neither of
+the two it names. The ampersand had been the promise all along.
+
+A voice may now carry a second interval (`Params::harmSemisB`, `harmonySemisSecondFor`),
+and "+ Octave & 5th" is the only entry that has one: 12 and 7. It stays **one voice**, so
+both pitches sit inside its slot's single chance roll and either both fire or neither - a
+slot that half-fired would be the same bug wearing the chance knob. Every other entry is
+untouched, which a sweep in `StateTests` now pins, along with the rule that no entry past
+Off may name nothing.
+
+### Added: a dice on each arp card, and a Shape dropdown that knows when to stop
+
+Owen: *"the shape of the arpeggiator drop down doesn't need to be so big. Make it smaller.
+And I use the random ones a lot, and I'd like to have a dice button when those are active
+nearby to regenerate their pattern."*
+
+- **The Shape combo is capped at 170 px.** It was the one elastic control on the card's top
+  row, so on any window wider than the editor's floor it swallowed everything left over -
+  about 540 px to hold "Fingered Bottom", the longest of its fifteen names. A narrow window
+  still shrinks it exactly as before; this is a ceiling, not a size.
+- **A dice sits beside it**, in part of the width that freed up. One click deals that line a
+  new **Random Once** order. That shape shuffles the held chord once and then walks the
+  shuffle, which is what makes it a pattern rather than a coin flip - and until now the only
+  ways to deal it again were to change the chord or restart the line.
+- **It greys outside Random Once.** Random and Random Other draw a fresh note every step and
+  have no stored order for a dice to deal again, so a button that stayed lit on them would
+  promise something it cannot do. Its cell is reserved on every shape, so nothing on the row
+  moves as you page through them.
+- The reroll is a counter the UI bumps and `runArpLines` matches, so every write to engine
+  state stays on the audio thread. A counter rather than a flag: two clicks inside one block
+  are two rerolls, where a flag would silently be one.
+
 ### Added: a single note is a chord card
 
 Owen: *"I also like to allow one note to show up in the chord pad and the chord preview."*

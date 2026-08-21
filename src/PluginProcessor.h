@@ -359,7 +359,14 @@ public:
     // by construction. Append only - the index is what a saved session stores.
     static juce::StringArray harmonyChoices();
     // The semitones a choice index means; 0 for Off.
+    // Deal this line's Random Once shape a new order. Message thread; the audio thread picks
+    // it up on its next block. Harmless on any other shape, which is why the dice greys rather
+    // than this refusing.
+    void rerollArpRandom(int line);
     static int harmonySemisFor(int choiceIndex);
+    // The second interval an entry carries, 0 for none. Only "+ Octave & 5th" has one; see
+    // the definition for why the ampersand is load-bearing.
+    static int harmonySemisSecondFor(int choiceIndex);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
     float arpParam(int line, ArpParam which) const;
@@ -1191,6 +1198,15 @@ private:
         juce::String chordName;
         int launchedSlot = -1;      // arp slot whose chord is held, or -1
         int padSlot = -1;           // chord pad whose chord is held, or -1
+
+        // **The dice** (2026-08-21). Bumped on the message thread by the editor, read and
+        // matched on the audio thread by runArpLines, which is what keeps every write to the
+        // engine's own `permDirty` on the audio thread where the rest of its state lives. A
+        // counter rather than a flag: two clicks in one block are two rerolls, and a flag would
+        // silently be one. Wrapping is harmless - all the audio thread asks is whether it
+        // changed.
+        std::atomic<int> rerollRequest { 0 };
+        int rerollSeen = 0;         // audio thread only
 
         bool chainOn = false;       // message thread
         int chainIndex = -1;        // message thread: the slot currently playing

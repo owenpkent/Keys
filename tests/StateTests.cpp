@@ -378,6 +378,34 @@ public:
                                       "the saved rate came back");
         }
 
+        beginTest("only \"Octave & 5th\" carries two intervals, and it carries the right two");
+        {
+            // 2026-08-21, Owen: "when you select octave plus fifth, it looks like it only just
+            // does octave". The ampersand has always been the promise; the engine was reading it
+            // as a compound interval of 19 semitones - one note, and not either of the two named.
+            //
+            // Swept rather than spot-checked because the second table is a column of zeroes with
+            // a single 7 in it, which is exactly the shape of table that acquires a typo nobody
+            // can hear. The three lists are indexed by the same choice and must grow together.
+            const auto choices = KeysProcessor::harmonyChoices();
+            const int idx = choices.indexOf("+ Octave & 5th");
+            expect(idx > 0, "the list still has the entry this test is about");
+            expectEquals(KeysProcessor::harmonySemisFor(idx), 12, "its first interval is the octave");
+            expectEquals(KeysProcessor::harmonySemisSecondFor(idx), 7, "...and its second is the fifth");
+
+            for (int i = 0; i < choices.size(); ++i)
+            {
+                if (i != idx)
+                    expectEquals(KeysProcessor::harmonySemisSecondFor(i), 0,
+                                 choices[i] + " should carry exactly one interval");
+                // Off is silence, and every other entry has to name something, or a row in the
+                // list would be a no-op with nothing on screen to say so.
+                if (i > 0)
+                    expect(KeysProcessor::harmonySemisFor(i) != 0,
+                           choices[i] + " should name an interval");
+            }
+        }
+
         beginTest("a one-note chord is a pad, and the generator can be asked for one");
         {
             // 2026-08-21, Owen: "I also like to allow one note to show up in the chord pad and

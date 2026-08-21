@@ -245,6 +245,7 @@ public:
         // exists because the readout depends on three parameters and is bound to one. Cached,
         // since it runs off the 10 Hz timer.
         void refreshTuplet();
+        void refreshDice();
         // The dial's readout, reinstalled after every attachment swap - see ArpPanel's.
         void installRateText();
         // Rate is one knob over two parameters and two units, exactly as the band's is: which
@@ -281,6 +282,23 @@ public:
         juce::TextButton detailsButton { "Details" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
+
+        // **The dice** (2026-08-21, Owen: "I use the random ones a lot, and I'd like to have a
+        // dice button when those are active nearby to regenerate their pattern"). Drawn rather
+        // than lettered or iconned: the same self-drawn-chrome rule SectionBar's fold chevron
+        // and the settings gear follow, and there is no word for this that fits in 34 px.
+        //
+        // It greys outside Random Once instead of vanishing. Random and Random Other draw fresh
+        // every step and have no stored order for a dice to deal again, so a button that stayed
+        // lit on them would promise something it cannot do - and the house rule is that a
+        // control which would reflow its neighbours greys rather than disappears. Its cell is
+        // reserved on every shape for exactly that reason.
+        struct DiceButton : juce::Button
+        {
+            DiceButton() : juce::Button("dice") {}
+            void paintButton(juce::Graphics&, bool highlighted, bool down) override;
+        };
+        DiceButton diceButton;
         // Five of the seven are plain rotaries. H.TIME and VEL are RangeKnobs, because each
         // of them is a random draw and a draw has two ends (2026-08-03) - `ranges` holds one
         // for those two indices and nullptr for the rest, and `knobFace()` is what everything

@@ -122,6 +122,19 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   purpose**: the dropdown names intervals, which is what keeps this from being a third copy of
   the Harmony lane's chord-tone counting. On each macro card: two combos with a chance knob
   each, on their own strip under the knobs (`Macro harmony 1 A` / `Macro harmony 1 chance A`).
+- **"+ Octave & 5th" names two intervals and plays two notes** (fixed 2026-08-21, Owen: "in the
+  harmony, when you select octave plus fifth, it looks like it only just does octave"). Every
+  other entry in the list names one interval; that one says **&**, and `harmonySemisFor` read it
+  as a *compound* interval instead - a single note 19 semitones up, which is neither of the two
+  it names. `Params::harmSemisB` and `KeysProcessor::harmonySemisSecondFor` give a slot a second
+  interval, 0 for the twenty-six entries that have none. **It stays one voice**: both pitches sit
+  inside that slot's single chance roll, because a slot that half-fired would be the same bug
+  wearing the chance knob. **There are three index-parallel tables now, not two** - `harmonyChoices`,
+  `harmonySemisFor`, `harmonySemisSecondFor` - and appending to one means appending to all three;
+  the `jassert` in each is what catches a miss, and `StateTests` sweeps the whole list for the
+  second table being zero everywhere else and for no entry past Off naming nothing. The lesson is
+  the older one restated: **the label was right and the implementation was reading it wrong**, and
+  nothing on screen could show that, because both readings put *something* plausible in the air.
 - **"Make harmony 2 columns" meant the dropdown's own popup** (2026-08-19; a first reading put
   the card's controls in two columns, and Owen, shown the menu: "still one column"). The
   harmony combo opens as two columns, descending intervals left and ascending right, BigSky's
@@ -1505,6 +1518,30 @@ what is no longer true lives here in one place:
   whenever both lines were in the same rate mode. `refreshRateMode()` early-outs on an unchanged
   mode and the dial's attachment lives there rather than in `buildAttachments()`, so it was the
   one control that never rebound; `lastRateFree = -1` before the call forces the swap.
+- **The Shape combo is capped, and the dice lives in what that freed** (2026-08-21, Owen: "the
+  shape of the arpeggiator drop down doesn't need to be so big. Make it smaller. And I use the
+  random ones a lot, and I'd like to have a dice button when those are active nearby to
+  regenerate their pattern"). Shape was the **one elastic control** on the card's top row, which
+  is correct at the editor's floor and absurd above it: on Owen's window it took about 540 px to
+  hold "Fingered Bottom", the longest of its fifteen names. `arpMacroShapeMaxW` (170) is a
+  **ceiling, not a size** - a narrow window still shrinks it exactly as before, so the
+  reserve-the-fixed-thing-first rule is untouched and the row still solves at the floor.
+  **The dice deals this line's Random Once a new order**, and that is the whole feature:
+  `ArpEngine::rerollRandomOrder()` sets `permDirty`, and the next step reshuffles. **It leaves
+  `dirCursor` alone** - the cursor is the phase of the walk, so zeroing it would jolt the line
+  back to the top of its bar as well as changing the order, and only one of those was asked for.
+  **It greys outside Random Once**, because Random and Random Other draw fresh every step and
+  have no stored order to deal again; a lit button there would promise what it cannot do. Its
+  cell is reserved on every shape so the row never reflows, and `MacroRow::refreshDice()` is the
+  one place that rule is written - called from `applyShape` (the instant the combo moves) and
+  from `refresh` (every other route: a host lane, a session load, MCP, the steppers).
+  **The reroll crosses threads as a counter, not a flag**: `ArpLine::rerollRequest` is bumped on
+  the message thread and matched against `rerollSeen` in `runArpLines`, so every write to engine
+  state stays on the audio thread, and two clicks inside one block are two rerolls where a flag
+  would silently be one. **Placed beside the shape group with a 14 px gap**, not pinned to the
+  right end of the row: pinned right it sat 250 px from the thing it acts on and read as
+  unrelated, and Owen asked for it "nearby". The gap is wider than the 6 px inside the shape
+  group, which is what stops it reading as a third stepper.
 - **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip -
   now Tuplet - and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
   window width, so two more 34 px targets in it would have driven the eight knobs under the
@@ -2076,6 +2113,10 @@ Four things will bite otherwise:
   further up, hit again on 2026-08-14 - a five-line UIA script is the way past it. The macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or a tab:
   `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
+  `Macro reroll A` (the dice, 2026-08-21 - it is a plain
+  `juce::Button` and does offer an InvokePattern, but it is **disabled on every shape but Random
+  Once**, and a disabled control is absent from the UIA tree entirely, so "element not found" is
+  the expected answer there rather than evidence it is missing),
   `Macro dot A` / `Macro tuplet A` / `Macro anchor A` (`Macro trip A` until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual

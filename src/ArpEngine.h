@@ -577,6 +577,18 @@ public:
         // same stateless hash Mutate draws from. 0 semitones is Off. Chromatic on purpose;
         // the dropdown names intervals, not degrees (see the registration in PluginProcessor).
         int harmSemis[2] = { 0, 0 };
+        // **A voice may be two pitches** (2026-08-21, Owen: "in the harmony, when you select
+        // octave plus fifth, it looks like it only just does octave"). Every entry in the
+        // shimmer list names one interval bar one, and that one says "&": "+ Octave & 5th" is
+        // an octave *and* a fifth, two notes, which is how the pedal's own list reads it. The
+        // engine had it as a single compound interval of 19 semitones - an octave plus a fifth
+        // measured from the note rather than two voices off it - so the entry played one note
+        // where its name promises two.
+        //
+        // A second interval per slot rather than a third and fourth voice: this is still one
+        // voice, so it shares its slot's chance roll and either both pitches fire or neither.
+        // 0 means the slot has only its first interval, which is every other entry in the list.
+        int harmSemisB[2] = { 0, 0 };
         int harmChance[2] = { 100, 100 };
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
@@ -767,6 +779,24 @@ public:
         freePhaseBeats = 0.0;
         havePrevPpq = false;
     }
+
+    // **Deal Random Once a new order** (2026-08-21, Owen: "I use the random ones a lot, and I'd
+    // like to have a dice button when those are active nearby to regenerate their pattern").
+    //
+    // The whole feature is this one bit. Random Once shuffles the sequence into `perm` and then
+    // walks it, rebuilding only when the chord changes or the line restarts - which is exactly
+    // what makes it a *pattern* rather than a coin flip, and exactly why it needed a way to be
+    // dealt again without disturbing anything else.
+    //
+    // The cursor is deliberately left alone: it is the phase of the walk, so zeroing it here
+    // would jolt the line back to the top of its bar as well as changing the order, and only
+    // one of those two things was asked for. Random and Random Other draw fresh every step and
+    // have no stored order at all, so this does nothing for them - which is why the button that
+    // calls it greys outside Random Once rather than lying about what it can do.
+    //
+    // Called from the audio thread only (runArpLines, off an atomic the UI bumps), so it can
+    // touch permDirty directly rather than being another atomic on this engine.
+    void rerollRandomOrder() noexcept { permDirty = true; }
 
     void hardReset()
     {
@@ -1806,11 +1836,18 @@ private:
                     if ((int) (h % 100u) >= chancePct)
                         continue;
                 }
-                for (int k = 0; k < baseHits; ++k)
+                // Both of the slot's intervals, inside the one chance roll above: a voice that
+                // names two pitches is one voice, so it must not half-fire.
+                for (const int iv : { semis, juce::jlimit(-48, 48, p.harmSemisB[s]) })
                 {
-                    const int target = juce::jlimit(0, 127, hits[k].note + semis);
-                    if (target != hits[k].note)
-                        addHit(target, hits[k].vel, hits[k].chan);
+                    if (iv == 0)
+                        continue;
+                    for (int k = 0; k < baseHits; ++k)
+                    {
+                        const int target = juce::jlimit(0, 127, hits[k].note + iv);
+                        if (target != hits[k].note)
+                            addHit(target, hits[k].vel, hits[k].chan);
+                    }
                 }
             }
         }

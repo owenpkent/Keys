@@ -34,6 +34,11 @@ namespace
     constexpr int arpMacroCap = 18;
     constexpr int arpMacroMods = 34;
     constexpr int arpMacroHeads = 11;
+    // The widest the Shape combo is allowed to get (2026-08-21). "Fingered Bottom" is the
+    // longest of the fifteen entries and measures about 105 px in the popup font, so this is
+    // that plus its chevron, its own insets and room to spare - and it is a *cap*, so a narrow
+    // window still shrinks it exactly as before rather than being held to this.
+    constexpr int arpMacroShapeMaxW = 170;
     // The ring a RangeKnob draws around its face, and therefore what the knob row is taller
     // than the row above it by (2026-08-03). The row grows rather than the faces shrinking:
     // squeezing a ring out of the space the knob already had would have taken those two under
@@ -1826,6 +1831,33 @@ void ArpPanel::MacroRow::HarmonyBox::showPopup()
                        });
 }
 
+// A die showing five, which is the face that reads at this size: four corners and a centre stay
+// distinct where six pips smear into two columns and three reads as a diagonal smudge. Drawn
+// from the button's own bounds so it tracks the 34 px cell rather than carrying a magic size.
+void ArpPanel::MacroRow::DiceButton::paintButton(juce::Graphics& g, bool highlighted, bool down)
+{
+    const auto r = getLocalBounds().toFloat().reduced(5.0f);
+    const bool live = isEnabled();
+    const auto ink = live ? (highlighted ? skin::text : skin::textDim) : skin::textFaint;
+
+    if (live && (highlighted || down))
+    {
+        g.setColour(skin::accentOf(*this).base.withAlpha(down ? 0.22f : 0.12f));
+        g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 4.0f);
+    }
+
+    g.setColour(ink);
+    g.drawRoundedRectangle(r, 3.0f, 1.4f);
+
+    const float pip = juce::jmax(1.6f, r.getWidth() * 0.11f);
+    const float ox = r.getWidth() * 0.26f, oy = r.getHeight() * 0.26f;
+    const auto c = r.getCentre();
+    for (auto p : { juce::Point<float>(c.x - ox, c.y - oy), juce::Point<float>(c.x + ox, c.y - oy),
+                    c,
+                    juce::Point<float>(c.x - ox, c.y + oy), juce::Point<float>(c.x + ox, c.y + oy) })
+        g.fillEllipse(juce::Rectangle<float>(pip * 2.0f, pip * 2.0f).withCentre(p));
+}
+
 ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p), line(n)
 {
     okstudio::ui::makeMouseOnly(*this);
@@ -1936,6 +1968,17 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
     shapeNext.onClick = [this] { stepShape(1); };
     for (auto* b : { &shapePrev, &shapeNext })
         addAndMakeVisible(*b);
+
+    // The dice deals this line's Random Once shape a new order. It writes no parameter - the
+    // order is engine state, not something a session stores - so there is no attachment and no
+    // gesture to bracket; it is one call, and the audio thread picks it up on its next block.
+    diceButton.setTitle("Macro reroll " + letter);
+    diceButton.setTooltip("Deal this line a new random order. Only Random Once has an order to "
+                          "deal again - Random and Random Other draw a fresh note every step, "
+                          "so there is nothing stored for this to change.");
+    diceButton.onClick = [this] { processor.rerollArpRandom(line); };
+    addAndMakeVisible(diceButton);
+    refreshDice(); // so a card built on a Random Once session opens with it live
 
     // The settings a regular arpeggiator has, as the skin's machined rotary - the same
     // knob the band above draws the same parameters with (Owen, 2026-08-01: "what other knobs
@@ -2265,6 +2308,23 @@ void ArpPanel::MacroRow::applyShape()
             *dir = chosen;
             dir->endChangeGesture();
         }
+    refreshDice();
+}
+
+// Only Random Once has a stored order for the dice to deal again (2026-08-21). Random and
+// Random Other draw a fresh note every step, and every other shape is a walk with no randomness
+// in it at all - so on those the button greys rather than vanishing, which keeps the row from
+// reflowing under the mouse and keeps the dice discoverable when you do land on the shape.
+//
+// One method rather than the test written twice: applyShape calls it the instant the combo
+// moves (the 10 Hz refresh would otherwise leave the button a tick behind the shape it belongs
+// to) and refresh calls it for every other route a shape can change - a host lane, a session
+// load, an MCP client, the steppers.
+void ArpPanel::MacroRow::refreshDice()
+{
+    const bool canDeal = shapeBox.getSelectedItemIndex() == (int) ArpEngine::Direction::randomOnce;
+    if (diceButton.isEnabled() != canDeal)
+        diceButton.setEnabled(canDeal); // repaints itself; guarded so the timer does not churn
 }
 
 void ArpPanel::MacroRow::stepShape(int delta)
@@ -2343,6 +2403,7 @@ void ArpPanel::MacroRow::refresh()
                                : juce::jlimit(0, ArpEngine::numDirections - 1, dir);
     if (shapeBox.getSelectedItemIndex() != wanted)
         shapeBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
+    refreshDice();
 
     // What this line is holding, and whether something is on its way. A launch waiting on a
     // quantize boundary says so, because otherwise the click looks like it did nothing.
@@ -2498,11 +2559,36 @@ void ArpPanel::MacroRow::resized()
         // Shape's steppers are reserved before its combo takes the rest: they are targets
         // and it is a readout, the same reserve-the-fixed-thing-first ordering the old
         // single-line layout paid for twice (see the 2026-08-02 entries in CLAUDE.md).
+        //
+        // **The combo is capped now** (2026-08-21, Owen: "the shape of the arpeggiator drop
+        // down doesn't need to be so big. Make it smaller"). It was the one elastic control on
+        // this line, so on any window wider than the floor it swallowed everything the row had
+        // left - about 540 px on Owen's screen to hold "Fingered Bottom", the longest of the
+        // fifteen names. `arpMacroShapeMaxW` is that name with room around it; past that the
+        // row simply ends, and the slack sits at the right where the dice is rather than
+        // stretching a readout that has nothing more to say.
+        //
+        // The dice's own cell comes out first and on every shape, greyed or not: reserve the
+        // fixed thing before the elastic one takes the rest, and never let a control appear or
+        // vanish under the mouse.
+        // The dice's own cell comes out of the row first and on every shape, greyed or not:
+        // reserve the fixed thing before the elastic one takes the rest, and never let a
+        // control appear or vanish under the mouse. It is *placed* after the shape group
+        // rather than at the far end of the row - Owen asked for it "nearby", and pinned right
+        // it sat a clear 250 px from the thing it acts on, reading as unrelated to it. The 14
+        // px gap is wider than the 6 px between the shape's own parts, which is what keeps it
+        // from being mistaken for a third stepper. Whatever the row has left over then falls
+        // at the end, where empty space costs nothing.
+        const int diceW = 34;
         shapePrev.setBounds(centred(r.removeFromLeft(26)));
         r.removeFromLeft(6);
-        shapeNext.setBounds(centred(r.removeFromRight(26)));
-        r.removeFromRight(6);
-        shapeBox.setBounds(centred(r));
+        const int shapeW = juce::jmin(arpMacroShapeMaxW,
+                                      juce::jmax(0, r.getWidth() - 26 - 6 - 14 - diceW));
+        shapeBox.setBounds(centred(r.removeFromLeft(shapeW)));
+        r.removeFromLeft(6);
+        shapeNext.setBounds(centred(r.removeFromLeft(26)));
+        r.removeFromLeft(14);
+        diceButton.setBounds(centred(r.removeFromLeft(diceW)));
     }
     // The RATE / SHAPE names span their whole group, steppers included, so the arrows can
     // only be read as belonging to the word above them. Placed from the controls, as ever.

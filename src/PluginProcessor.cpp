@@ -628,7 +628,29 @@ int KeysProcessor::harmonySemisFor(int choiceIndex)
 {
     static constexpr int semis[] = { 0,
                                      -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1,
-                                     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19, 24 };
+                                     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 24 };
+    jassert((int) std::size(semis) == harmonyChoices().size()); // the two lists drifted apart
+    return semis[(size_t) juce::jlimit(0, (int) std::size(semis) - 1, choiceIndex)];
+}
+
+// The **second** interval a voice may carry, 0 for none (2026-08-21, Owen: "when you select
+// octave plus fifth, it looks like it only just does octave").
+//
+// Every entry in the shimmer list names a single interval except one, and that one says "&".
+// "+ Octave & 5th" is an octave *and* a fifth - two notes off the note being harmonised, which
+// is what the pedal's list means and what the ampersand has said here all along. It was read as
+// a compound interval instead, a single note 19 semitones up, so the entry played one note
+// where its name promises two. The table above now says 12 for it and this one says 7.
+//
+// A second interval per slot rather than two more voices: it is still one voice, so it shares
+// its slot's chance roll and either both pitches fire or neither. **Both tables are indexed by
+// harmonyChoices() and all three must grow together** - the jassert in each is what catches a
+// miss, and appending is the only safe direction, as ever for a choice list.
+int KeysProcessor::harmonySemisSecondFor(int choiceIndex)
+{
+    static constexpr int semis[] = { 0,
+                                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0 };
     jassert((int) std::size(semis) == harmonyChoices().size()); // the two lists drifted apart
     return semis[(size_t) juce::jlimit(0, (int) std::size(semis) - 1, choiceIndex)];
 }
@@ -1866,6 +1888,17 @@ void mergeArpOut(juce::MidiBuffer& dest, const juce::MidiBuffer& src, int channe
 
 // Audio thread. One line's worth of engine parameters, read through the cached pointers so
 // nothing here builds a string or takes a lock.
+// The dice on a line's macro card (2026-08-21, Owen: "I use the random ones a lot, and I'd like
+// to have a dice button when those are active nearby to regenerate their pattern"). All it does
+// is bump a counter; runArpLines below notices and asks that engine for a new order, so nothing
+// on the message thread ever writes engine state. See ArpEngine::rerollRandomOrder.
+void KeysProcessor::rerollArpRandom(int line)
+{
+    if (line < 0 || line >= numArpLines)
+        return;
+    lines[(size_t) line].rerollRequest.fetch_add(1, std::memory_order_relaxed);
+}
+
 void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
 {
     // Which lines want the keys you play. A line that is off gets nothing: its input still
@@ -2012,8 +2045,10 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // nothing to the engine, and keeping the interval table out of it is the same
         // decision as the scale mask below.
         ap.harmSemis[0] = harmonySemisFor((int) arpParam(n, apHarm1));
+        ap.harmSemisB[0] = harmonySemisSecondFor((int) arpParam(n, apHarm1));
         ap.harmChance[0] = (int) arpParam(n, apHarm1Chance);
         ap.harmSemis[1] = harmonySemisFor((int) arpParam(n, apHarm2));
+        ap.harmSemisB[1] = harmonySemisSecondFor((int) arpParam(n, apHarm2));
         ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
         ap.stray = (int) arpParam(n, apStray);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
@@ -2101,6 +2136,16 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.fallbackBpm = (double) apvts.getRawParameterValue("bpm")->load();
         // Tempo Sync: off pins every line to fallbackBpm above even with the host rolling.
         ap.followHost = apvts.getRawParameterValue("bpmSync")->load() > 0.5f;
+
+        // The dice, picked up here so every write to the engine's own state stays on this
+        // thread (2026-08-21). Compared rather than tested-and-cleared: the counter is the
+        // message thread's alone to write, this side only ever asks whether it moved, and two
+        // clicks inside one block are two rerolls rather than one lost.
+        if (const int req = l.rerollRequest.load(std::memory_order_relaxed); req != l.rerollSeen)
+        {
+            l.rerollSeen = req;
+            l.engine.rerollRandomOrder();
+        }
 
         // The engine's input is this line's buffer alone, never the merged stream: that is the
         // whole of the routing. Its output goes into midi with everything the other lines and
