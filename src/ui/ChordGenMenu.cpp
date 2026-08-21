@@ -208,8 +208,14 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
         if (c.notes.empty())
             continue;
 
-        // Unticked means the range is not a constraint at all, so the roll spans the whole 2..11
-        // the parameter can express rather than whatever the two steppers happen to read.
+        // Unticked means the range is not a constraint at all, so the roll spans 2..11 rather
+        // than whatever the two steppers happen to read.
+        //
+        // **Deliberately not 1..11, even though the parameter has reached down to 1 since
+        // 2026-08-21.** Unticked is "roll me a chord", and a generator that hands back a bare
+        // note one time in eleven is not answering that - it reads as the tray having failed.
+        // A single note is something you *ask* for, which is what the steppers are for, so the
+        // floor stays where the roll is useful and the ceiling of the parameter is what moved.
         const int want = freeNotes ? 2 + rng.nextInt(10)
                                    : minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
         std::sort(c.notes.begin(), c.notes.end());

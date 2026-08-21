@@ -614,7 +614,7 @@ rows were bare names with `>` between them.
 | **Mode** | Y | Feeds every source except Markov, which has no scale in it at all - see below |
 | **Brightness** | - | Sweeps the seven diatonic modes bright to dark: Lydian, Major, Mixolydian, Dorian, Minor, Phrygian, Locrian - the circle-of-fifths ordering. A **view onto Mode**, not a second parameter; greys and holds its last position when Mode is one of the off-axis scales (harmonic minor, melodic minor, blues, the two pentatonics) |
 | **Lean** | - | -100 to 100, 0 = neutral. Moves generated chords' **thirds** major or minor whatever the mode. The size is the *probability* a given chord gets pushed, not how far - only the third ever moves |
-| **Notes** | Y | A range, 2 to 11 notes (steppers, not a slider - a slider is a drag target). Below 3 you get dyads; above 5 the stack keeps climbing in thirds **through the mode**, so 11 is a chord covering every degree and still in the key |
+| **Notes** | Y | A range, **1** to 11 notes (steppers, not a slider - a slider is a drag target). 1 gives bare single notes (2026-08-21), 2 gives dyads; above 5 the stack keeps climbing in thirds **through the mode**, so 11 is a chord covering every degree and still in the key |
 | **Inversions** | Y | **Root**, **1st**, **2nd**, **3rd** tick boxes. **Replaces** the rotation a chord arrived in rather than compounding with it - root position first, then invert - so ticking only Root gives root position even from a source that had already inverted one |
 | **Octave** | Y | A range (steppers), which register the generated chords may land in |
 | **Scale Compliance** | Y | Algorithmic only: how adventurous the chords are. At 100% every note stays in the key. Lower it and the generator borrows from related modes, then reaches for secondary dominants, then for anything at all |
@@ -635,7 +635,7 @@ kinds of box that looked identical, gates that did not line up, and too many of 
 four inversion ticks beside it, it says what it does without a tooltip, and every one is the same
 shape wherever it sits. On **SET** the setting constrains generation; on **ROLL** the generator
 rolls that choice itself - a rolling Key
-wanders, an unticked Notes range rolls anywhere in 2 to 11. **Key and Mode roll once per
+wanders, an unticked Notes range rolls anywhere in 2 to 11 - **not 1**, even though the steppers reach it: unticked means "roll me a chord", and a bare note one time in eleven reads as the tray having failed rather than as an answer. A single note is something you ask for. **Key and Mode roll once per
 generation, not per chord**, because every source takes a single root and mode for a whole
 batch (a circle walk, a chain step, a progression transposed), and a free Mode picks only from
 the seven diatonic modes. **Lock Influence, Smooth Voicing and Lean have no box**: each already

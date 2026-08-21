@@ -378,6 +378,35 @@ public:
                                       "the saved rate came back");
         }
 
+        beginTest("a one-note chord is a pad, and the generator can be asked for one");
+        {
+            // 2026-08-21, Owen: "I also like to allow one note to show up in the chord pad and
+            // the chord preview". The *storage* never minded - setChordPad takes whatever it is
+            // given, and the undo tests above have been filling pads with a single note since
+            // 2026-08-14 - so the two things worth pinning are the two that did mind.
+            Host h;
+
+            // One: it survives a save and a load like any other pad. A single note being
+            // written but not read back would be the quiet half of this failing.
+            h.processor.setChordPad(5, { 48 }, "C");
+            juce::MemoryBlock block;
+            h.processor.getStateInformation(block);
+            h.processor.clearChordPad(5);
+            h.processor.setStateInformation(block.getData(), (int) block.getSize());
+            expectEquals((int) h.processor.chordPad(5).notes.size(), 1, "the one-note pad came back");
+            expectEquals(h.processor.chordPad(5).notes.front(), 48, "...with its note");
+
+            // Two: the generator's note-count range reaches 1. This is the parameter the UI
+            // gate was really made of - the steppers take their range from the attachment, so
+            // a floor of 2 here is a floor of 2 on screen, and it is exactly the sort of bound
+            // that gets "tidied" back to what the surrounding code assumes.
+            const auto* minParam = h.processor.apvts.getParameter("genNotesMin");
+            expect(minParam != nullptr, "genNotesMin exists");
+            if (minParam != nullptr)
+                expectEquals((int) minParam->convertFrom0to1(0.0f), 1,
+                             "the fewest-notes stepper goes down to a single note");
+        }
+
         beginTest("a pad remembers which progression it is a step of");
         {
             // The two fields added on 2026-08-18, and the reason they are worth a test of their

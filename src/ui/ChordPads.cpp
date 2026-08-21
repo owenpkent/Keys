@@ -19,7 +19,24 @@ namespace
     constexpr float kRadius = 6.0f;
     constexpr float kSaveW = 38.0f; // the edit tick's strip at the right end of a pad
     constexpr float kNoteLineH = 11.0f; // the note list under the chord name, on every card
-    bool isChord(const std::vector<int>& n) { return n.size() >= 2; }
+    // **A single note is a card** (2026-08-21, Owen: "I also like to allow one note to show up
+    // in the chord pad and the chord preview"). This was `n.size() >= 2` and was the only thing
+    // standing between a held note and a pad: with one key down the live card read "hold a
+    // chord", could not be pressed and - because an empty card is not draggable - could not be
+    // carried onto a pad at all. Nothing downstream ever needed two. `chords::detect` already
+    // names a lone pitch class by its note name, `applyInversion` and `applySpread` return a
+    // one-note chord unchanged, and the arp builds a one-entry sequence from it, so this is a
+    // gate that was refusing something the rest of Keys could already do.
+    //
+    // The name is what changed with it: this asks whether there is anything here to show, play
+    // or drag, which is a different question from whether the notes form a chord. Bass lines,
+    // pedal tones and single-note stabs are all things you want on a pad.
+    bool hasNotes(const std::vector<int>& n) { return ! n.empty(); }
+
+    // Whether the *voicing* walk has anything to walk. Two notes, genuinely: a voicing moves
+    // notes about within a chord, and one note has nowhere to go. This is the half of the old
+    // `isChord` that was actually asking about chords, kept under a name that says so.
+    bool canRevoice(const std::vector<int>& n) { return n.size() >= 2; }
 
     bool onKeyboard(const std::vector<int>& notes)
     {
@@ -296,7 +313,7 @@ bool ChordPads::sendChordToFirstEmptyPad(const KeysProcessor::ChordPad& pad)
 bool ChordPads::sourceIsDraggable() const
 {
     if (dragSource == -2)
-        return isChord(currentNotes);
+        return hasNotes(currentNotes);
     if (dragSource >= 0)
         return ! processor.chordPad(dragSource).notes.empty();
     return false;
@@ -323,7 +340,7 @@ void ChordPads::paint(juce::Graphics& g)
     // recall gesture (drop to pull that pad's chord back for editing).
     {
         const auto b = cardBounds();
-        const bool has = isChord(currentNotes);
+        const bool has = hasNotes(currentNotes);
         const bool recallHover = dropCell == -2;
 
         g.setColour(juce::Colours::black.withAlpha(0.4f));
@@ -721,10 +738,12 @@ void ChordPads::showPadMenu(int slot)
     menu.addSeparator();
     menu.addItem(4, "Octave down", ! editing && ! down.empty());
     menu.addItem(5, "Octave up", ! editing && ! up.empty());
-    // isChord on the *result* as well as the source: a card holding nothing but a doubled pitch
-    // class collapses to one note in root position, and a one-note pad is not a chord card.
+    // canRevoice on the *result* as well as the source: a card holding nothing but a doubled
+    // pitch class collapses to one note in root position, and one note has no voicings to walk.
+    // A one-note pad is perfectly legal since 2026-08-21 - it just has nothing for this row to
+    // do, which is why the row greys rather than the pad being refused.
     menu.addItem(6, voicingItem,
-                 ! editing && isChord(pad.notes) && isChord(revoiced) && onKeyboard(revoiced)
+                 ! editing && canRevoice(pad.notes) && canRevoice(revoiced) && onKeyboard(revoiced)
                      && sortedCopy(revoiced) != sortedCopy(pad.notes));
 
     // Whatever else can act on this pad right now: the generator adds New chord and the
@@ -912,7 +931,7 @@ void ChordPads::nextPadVoicing(int slot)
     const int rootPc = padRootPc(slot);
     const auto base = chordgen::rootPosition(notes, rootPc);
     const auto next = chordgen::applyVoicing(base, chordgen::voicingOf(notes, rootPc) + 1);
-    if (isChord(next) && onKeyboard(next)) // matches the menu item's own enable test
+    if (canRevoice(next) && onKeyboard(next)) // matches the menu item's own enable test
         rewritePadChord(slot, next);
 }
 
@@ -1031,7 +1050,7 @@ void ChordPads::startAudition(bool fixedLength)
         processor.pressChordPad(dragSource);
         playing = dragSource;
     }
-    else if (dragSource == -2 && isChord(currentNotes))
+    else if (dragSource == -2 && hasNotes(currentNotes))
     {
         // The live card plays too, and the same way: it fires the chord you are holding as one
         // strummed, humanized gesture the way a pad plays it, so two cards on one strip must not

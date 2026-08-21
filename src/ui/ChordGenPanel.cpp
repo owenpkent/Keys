@@ -275,7 +275,9 @@ void ChordGenPanel::buildControls()
         addAndMakeVisible(*sl);
     }
     notesMinSlider.setTitle("Fewest notes per chord");
-    notesMinSlider.setTooltip("The fewest notes a generated chord may have. 2 gives dyads.");
+    notesMinSlider.setTooltip("The fewest notes a generated chord may have. 2 gives dyads, "
+                              "and 1 gives bare single notes - useful for bass lines and "
+                              "pedal tones.");
     notesMaxSlider.setTitle("Most notes per chord");
     notesMaxSlider.setTooltip("The most a generated chord may have. Above 5 the stack keeps "
                               "climbing in thirds through the mode, so 11 covers every degree.");

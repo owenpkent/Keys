@@ -5,6 +5,34 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a single note is a chord card
+
+Owen: *"I also like to allow one note to show up in the chord pad and the chord preview."*
+
+One line was refusing it. `ChordPads`' own `isChord` answered `notes.size() >= 2`, and it
+gated three things at once: the live card **named** a held note only from two up (one key
+down read "hold a chord"), the card could not be **pressed**, and - because an empty card is
+not draggable - a single note could not be **carried onto a pad** at all.
+
+Nothing downstream ever needed two. `chords::detect` already names a lone pitch class by its
+note name, `applyInversion` and `applySpread` both return a one-note chord unchanged,
+`fitVoicing`'s shrink already guarded `want >= 1`, `setChordPad` has always stored whatever
+it was handed, and the arp builds a one-entry sequence quite happily. It was a gate refusing
+something the rest of Keys could already do.
+
+- The predicate split in two, because it was asking two questions under one name. **`hasNotes`**
+  - is there anything here to show, play or drag - is what the live card, its press and its drag
+  now use. **`canRevoice`** keeps the real two-note requirement, and is what the **Next voicing**
+  row greys on: a voicing moves notes about within a chord, and one note has nowhere to go. A
+  one-note pad is legal; that row just has nothing to do with it.
+- The generator's **Notes** range now starts at **1** rather than 2, so single notes can be asked
+  for deliberately - bass lines, pedal tones, single-note stabs. Widening the bottom of an int
+  parameter is safe where reordering a choice list is not: every value a saved session could hold
+  is still in range, and the 3/4 defaults are untouched.
+- **An unticked Notes range still rolls 2..11, not 1..11.** Unticked means "roll me a chord", and
+  a generator handing back a bare note one time in eleven reads as the tray having failed rather
+  than as an answer. A single note is something you ask for.
+
 ### Changed: Mutate stays inside your chord, and the strays get a knob of their own
 
 Owen: *"the mutate doesn't really work the way I want ... it's adding additional notes in

@@ -201,8 +201,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // became a pair for the same reason: one octave puts sixteen chords in one register, and a
     // range lets a page breathe. Nothing enforces min <= max here, because a parameter cannot see
     // its sibling; the reader swaps them (see `noteCountRange` / `octaveRange`).
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 2, 11, 3));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 2, 11, 4));
+    // **From 1, not 2, since 2026-08-21** (Owen: "I also like to allow one note to show up in
+    // the chord pad and the chord preview"). Widening the bottom of an existing int parameter is
+    // safe in a way that reordering a choice list is not: a saved session stores the value, every
+    // value it could have stored is still in range, and the defaults below are untouched. Nothing
+    // downstream needed two - fitVoicing's shrink already guarded `want >= 1`, and applyInversion
+    // and applySpread both return a one-note chord unchanged.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 1, 11, 3));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 1, 11, 4));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctaveMax", 1 }, "Octave Max", 2, 6, 4));
 
     // Lean the chords major or minor, whatever brain made them and whatever mode they are in.
