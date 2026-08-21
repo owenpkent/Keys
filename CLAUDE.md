@@ -652,9 +652,12 @@ what is no longer true lives here in one place:
   bass lines, pedal tones, stabs. Widening the bottom of an int parameter is safe in a way
   reordering a choice list is not (the `genSource` rule): every value a saved session could hold
   is still in range, and the 3/4 defaults are untouched.
-  **An unticked Notes range still rolls 2..11 and deliberately not 1..11.** Unticked means "roll
-  me a chord", and a bare note one time in eleven reads as the tray having failed rather than as
-  an answer. `StateTests` pins both halves - a one-note pad round-tripping, and the parameter's
+  **An unticked Notes range rolls 1..11 as well**, so the tray turns up the odd single note among
+  its sixteen. This was built the other way first, on the reading that a bare note would read as
+  the tray having failed; Owen overruled it the same day, and the general rule is his: **an
+  unticked gate rolls the whole range its parameter can express**, never a hand-picked sub-range,
+  or the tick box stops meaning "you decide" and starts meaning "you decide, within limits nobody
+  wrote down". `StateTests` pins both halves - a one-note pad round-tripping, and the parameter's
   floor - because a bound like that is exactly what gets tidied back to what the code around it
   assumes.
 - **Every filled chord card carries its roman numeral in the top-left corner** (2026-08-18, Owen:

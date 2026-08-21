@@ -29,9 +29,13 @@ something the rest of Keys could already do.
   for deliberately - bass lines, pedal tones, single-note stabs. Widening the bottom of an int
   parameter is safe where reordering a choice list is not: every value a saved session could hold
   is still in range, and the 3/4 defaults are untouched.
-- **An unticked Notes range still rolls 2..11, not 1..11.** Unticked means "roll me a chord", and
-  a generator handing back a bare note one time in eleven reads as the tray having failed rather
-  than as an answer. A single note is something you ask for.
+- **An unticked Notes range rolls 1..11 too**, so the tray turns up the odd single note among its
+  sixteen candidates. This went the other way first, on the reading that a bare note would read as
+  the tray having failed; Owen's call, and the right one - a tray is candidates you sample and drag
+  the good ones out of, so a page with the odd pedal tone in it is a better spread than a page with
+  none. It also restores the rule that was there before: **an unticked gate rolls the whole range
+  its parameter can express**, never a hand-picked sub-range, or the tick box stops meaning "you
+  decide" and starts meaning "you decide, within limits nobody wrote down".
 
 ### Changed: Mutate stays inside your chord, and the strays get a knob of their own
 

@@ -208,15 +208,19 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
         if (c.notes.empty())
             continue;
 
-        // Unticked means the range is not a constraint at all, so the roll spans 2..11 rather
-        // than whatever the two steppers happen to read.
+        // Unticked means the range is not a constraint at all, so the roll spans the whole
+        // 1..11 the parameter can express rather than whatever the two steppers happen to read.
         //
-        // **Deliberately not 1..11, even though the parameter has reached down to 1 since
-        // 2026-08-21.** Unticked is "roll me a chord", and a generator that hands back a bare
-        // note one time in eleven is not answering that - it reads as the tray having failed.
-        // A single note is something you *ask* for, which is what the steppers are for, so the
-        // floor stays where the roll is useful and the ceiling of the parameter is what moved.
-        const int want = freeNotes ? 2 + rng.nextInt(10)
+        // **1, not 2, since 2026-08-21** - Owen's call, made the same day the floor moved and
+        // against the first reading of it, which held that a bare note one time in eleven would
+        // read as the tray having failed. It does not: a tray is sixteen candidates you sample
+        // and drag the good ones out of, so a single note among them is one more thing on offer,
+        // and a page of chords with the odd pedal tone in it is a *better* spread than a page
+        // with none. The rule this restores is the one that was here before and is worth keeping
+        // stated: **an unticked gate rolls the whole range its parameter can express**, never a
+        // hand-picked sub-range, or the tick box stops meaning "you decide" and starts meaning
+        // "you decide, within limits nobody wrote down".
+        const int want = freeNotes ? 1 + rng.nextInt(11)
                                    : minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
         std::sort(c.notes.begin(), c.notes.end());
 
