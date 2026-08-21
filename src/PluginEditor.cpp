@@ -186,8 +186,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // the window's 38 px title bar and its 8 px of resizable border. 324, so 330.
     wire(secControls, controlsBar, lay.controls, lay.controlsDetached, lay.controlsDetachedBounds,
          "Controls", "Keys Controls", { 900, 330 }, { 980, 370 });
+    // The Arp window's floor is *asked for*, not written down (2026-08-21). It was 900, which
+    // the ninth macro knob had quietly outgrown - that knob was measured against the docked
+    // editor's ~614 px column and never against the ~420 px one this window gives, and JUCE
+    // answers a row that asks for more than it has by clamping, so H.TIME's face went to 16 px
+    // with nothing on screen to say why. Two of the deep pages were already starving a control
+    // apiece here before that, which is the more useful half of the finding: **a view drawn in
+    // two windows has two floors, and only the smaller one is ever tested by accident.**
+    //
+    // The 8 px is the window's resizable border, which the content does not get.
     wire(secArp, arpBar, lay.arp, lay.arpDetached, lay.arpDetachedBounds,
-         "Arp", "Keys Arpeggiator", { 900, 300 }, { 1100, 520 });
+         "Arp", "Keys Arpeggiator", { ArpPanel::minPanelWidth() + 8, 300 }, { 1100, 520 });
     wire(secPads, padsBar, lay.pads, lay.padsDetached, lay.padsDetachedBounds,
          "Pads", "Keys Chord Pads", { 620, 180 }, { 940, 300 });
     wire(secKeyboard, keyboardBar, lay.keyboard, lay.detached, lay.detachedBounds,

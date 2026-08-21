@@ -16,11 +16,19 @@ so the entry played one note where its name promises two, and that one note was 
 the two it names. The ampersand had been the promise all along.
 
 A voice may now carry a second interval (`Params::harmSemisB`, `harmonySemisSecondFor`),
-and "+ Octave & 5th" is the only entry that has one: 12 and 7. It stays **one voice**, so
-both pitches sit inside its slot's single chance roll and either both fire or neither - a
-slot that half-fired would be the same bug wearing the chance knob. Every other entry is
-untouched, which a sweep in `StateTests` now pins, along with the rule that no entry past
-Off may name nothing.
+and "+ Octave & 5th" is the only entry that has one: **12 and 19** - the octave, and the
+fifth above it. It stays **one voice**, so both pitches sit inside its slot's single chance
+roll and either both fire or neither - a slot that half-fired would be the same bug wearing
+the chance knob. Every other entry is untouched, which a sweep in `StateTests` now pins,
+along with the rule that no entry past Off may name nothing.
+
+The fifth is the one *above* the octave rather than the one below it, and the list itself is
+the argument: it is a single ascending ramp from "- Octave" to "+ 2 Octaves", and this entry
+sits between "+ Octave" and "+ 2 Octaves". Spelled 12-and-7 it would have reached *lower*
+than the plain "+ Octave" directly above it, so reading down the list would have made the
+shimmer go down - and the pair would have been an exact duplicate of two rows the list
+already has. `StateTests` now checks that ramp across the whole list rather than spot-checking
+this one entry, since a spot check only ever repeats whatever the table currently says.
 
 ### Added: a dice on each arp card, and a Shape dropdown that knows when to stop
 
@@ -30,8 +38,11 @@ nearby to regenerate their pattern."*
 
 - **The Shape combo is capped at 170 px.** It was the one elastic control on the card's top
   row, so on any window wider than the editor's floor it swallowed everything left over -
-  about 540 px to hold "Fingered Bottom", the longest of its fifteen names. A narrow window
-  still shrinks it exactly as before; this is a ceiling, not a size.
+  about 540 px to hold "Fingered Bottom", the longest of its fifteen names. This is a
+  ceiling, not a size, so above the floor the row simply stops giving it more. It is 48 px
+  narrower than before at the floor itself, though, because the dice's cell and its gap come
+  out of the same row - which is affordable only because the panel's minimum width is now
+  set by the knob strip below, and that is wider than this line needs.
 - **A dice sits beside it**, in part of the width that freed up. One click deals that line a
   new **Random Once** order. That shape shuffles the held chord once and then walks the
   shuffle, which is what makes it a pattern rather than a coin flip - and until now the only
@@ -41,8 +52,41 @@ nearby to regenerate their pattern."*
   promise something it cannot do. Its cell is reserved on every shape, so nothing on the row
   moves as you page through them.
 - The reroll is a counter the UI bumps and `runArpLines` matches, so every write to engine
-  state stays on the audio thread. A counter rather than a flag: two clicks inside one block
-  are two rerolls, where a flag would silently be one.
+  state stays on the audio thread, and each side writes only its own variable. Clicks
+  arriving inside one audio block coalesce into a single reroll, which is correct rather than
+  a loss: dealing twice before the next step is inaudible by construction.
+- The dice reads the Shape combo to decide its greying, and the combo is now seeded from the
+  line's own parameters when a card is built. It was not, so on a session saved in Random
+  Once the dice opened greyed and only came live on the panel's next 10 Hz tick.
+
+### Fixed: the arpeggiator's own window was too narrow for what is in it
+
+The macro view puts two cards side by side, and a card's knob strip is the widest thing in
+Keys for the window it occupies. The strip went to nine knobs when STRAY landed, and that
+was measured against the docked editor - where a card column is about 614 px - but not
+against the **detached** Arp window, whose 900 px minimum gives a column of 420 against a
+strip that asks for 422. JUCE answers a row asking for more than it has by clamping, and the
+shortfall all lands on the last cell, so H.TIME's face was drawn at 16 px with nothing on
+screen to say why.
+
+Two of the deep pages were already starving a control apiece at that width, before the ninth
+knob arrived - a band slider on Play and a lane tab on Draw. So the window's floor is now
+**asked for rather than written down**: `ArpPanel::minPanelWidth()` takes the larger of the
+macro view's requirement, which is derived from the knob count and moves on its own when a
+knob is added, and the deep pages', which is measured. `LayoutTests` sweeps every view at
+that width, so the measured half cannot rot.
+
+The general lesson, which is the part worth keeping: **a view that can be drawn in two
+windows has two floors, and only the smaller one is ever tested by accident.**
+
+### Fixed: Stray moved the whole chord instead of straying one note
+
+Stray's roll was hashed from the step alone, so under **Chord** shape - where one step sounds
+several notes - every note of the step drew the same answer and shifted the same way. A held
+C-E-G came out as a parallel D-F-A, which is the line changing key, not a step landing on a
+note outside your chord. The roll is now salted with which note of the step it is, so each
+strays on its own. **Lock is unaffected**: the cell is still (step, era) and the salt only
+picks a voice inside it, so a transport jump lands on the same answer note for note.
 
 ### Added: a single note is a chord card
 

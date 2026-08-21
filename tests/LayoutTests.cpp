@@ -36,10 +36,23 @@ namespace
         }
     };
 
-    // Owen's window, near enough: the editor's minimum width is 1280 and the arp panel gets all
-    // of it. Testing at the *floor* is the point - anything that fits here fits everywhere, and
-    // every starved-control bug this file exists for showed up first at the narrow end.
-    constexpr int panelW = 1280;
+    // Owen's window, near enough: the editor's minimum width is 1320 (it rose from 1280 when
+    // the settings gear joined the Controls bar on 2026-08-17) and the arp panel gets all of it.
+    constexpr int panelW = 1320;
+
+    // **And the narrow end is not there.** The arp section detaches into a window of its own,
+    // whose floor is `ArpPanel::minPanelWidth()` and whose content is that less the window's
+    // 8 px resizable border - a few hundred pixels under the docked case. Testing only the
+    // docked floor is what let the ninth macro knob land: it was measured against a ~614 px
+    // column and overflowed a ~420 px one, silently, because JUCE clamps a removeFromLeft to
+    // what is there and the row simply ate the shortfall from its last cell.
+    //
+    // Anything that fits here fits everywhere. That is the whole reason this file exists, and
+    // it only holds if "here" is genuinely the narrowest place the view is drawn. **This sweep
+    // is what maintains `arpDeepPageMinW`**, the half of that floor which is measured rather
+    // than derived: lower it and a band slider and a lane tab starve here, which is how the
+    // number was found in the first place.
+    const int detachedPanelW = ArpPanel::minPanelWidth();
 
     bool isTarget(const juce::Component& c)
     {
@@ -120,12 +133,15 @@ public:
                 { false, ArpPanel::Page::slots },
                 { false, ArpPanel::Page::steps },
             };
+            // Both floors: the docked editor's, and the detached Arp window's, which is the
+            // narrower of the two and the one nothing was checking.
+            for (const int w : { panelW, detachedPanelW })
             for (const auto& [macro, page] : views)
             {
                 panel.setMacroView(macro);
                 if (! macro)
                     panel.setPage(page);
-                panel.setSize(panelW, panel.preferredHeight());
+                panel.setSize(w, panel.preferredHeight());
 
                 juce::Array<juce::Component*> targets;
                 collectTargets(panel, targets);
@@ -133,11 +149,72 @@ public:
                 for (auto* t : targets)
                 {
                     const auto b = t->getBounds();
-                    const auto name = t->getTitle().isNotEmpty() ? t->getTitle() : t->getName();
+                    auto name = t->getTitle().isNotEmpty() ? t->getTitle() : t->getName();
+                    // An unnamed control reported as '' is a bug report with its subject line
+                    // removed. Fall back to its type and its ancestry, which is enough to find
+                    // it in the source in one search.
+                    if (name.isEmpty())
+                    {
+                        name = "<" + juce::String(typeid(*t).name()) + ">";
+                        for (auto* q = t->getParentComponent(); q != nullptr; q = q->getParentComponent())
+                            name += " in " + (q->getTitle().isNotEmpty() ? q->getTitle()
+                                              : q->getName().isNotEmpty() ? q->getName()
+                                              : juce::String(typeid(*q).name()));
+                    }
                     expect(b.getWidth() >= 20 && b.getHeight() >= 16,
                            "starved control '" + name + "' at " + b.toString()
-                               + (macro ? " (macro view)" : " (page " + juce::String((int) page) + ")"));
+                               + " (panel " + juce::String(w) + "px"
+                               + (macro ? ", macro view)" : ", page " + juce::String((int) page) + ")"));
                 }
+            }
+        }
+
+        beginTest("the macro knob strip is never clamped, at either window's floor");
+        {
+            // The starvation sweep above cannot catch this on its own and it is worth saying
+            // why, because the same hole will be there for the next control. Its floor is
+            // `width >= 20`, which a knob squeezed to 20 passes - and a *range* knob is wider
+            // than a plain one by its two rings, so the first cell to be eaten loses 16 px to
+            // ring before its face loses anything. H.TIME's face went to 16 px inside a cell
+            // that still measured 32 and the sweep waved it through.
+            //
+            // So this asks the question directly: does the row get the width its own
+            // arithmetic says it needs, or is JUCE clamping the difference away? Every knob at
+            // its documented floor, in a row that was handed exactly what it asked for.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+
+            // At `minMacroWidth()` as well as the docked floor: that is the width the macro
+            // view's own arithmetic says it needs, so it is the width that proves the
+            // derivation right. No window is actually that narrow - minPanelWidth() is wider,
+            // because the deep pages want more - but if this ever fails, the derivation and
+            // the layout have drifted apart, which is the thing worth hearing about.
+            for (const int w : { panelW, ArpPanel::minMacroWidth() })
+            {
+                panel.setSize(w, panel.preferredHeight());
+                juce::Array<juce::Component*> knobs;
+                collectTargets(panel, knobs);
+
+                int found = 0;
+                for (auto* t : knobs)
+                {
+                    const auto name = t->getTitle();
+                    if (! name.startsWith("Macro ") || dynamic_cast<juce::Slider*>(t) == nullptr)
+                        continue;
+                    if (name.contains("rate") || name.contains("harmony")) // not strip knobs
+                        continue;
+                    ++found;
+                    expect(t->getWidth() >= 34,
+                           "macro knob '" + name + "' is " + juce::String(t->getWidth())
+                               + " px wide at panel " + juce::String(w)
+                               + " px - under the mouse-only floor");
+                }
+                // Every knob on every card. If this drops, the filter above stopped matching
+                // and the loop is passing by finding nothing, which is the failure mode a
+                // name-matched sweep has and a hand-written list does not.
+                expectEquals(found, ArpPanel::MacroRow::numKnobs * KeysProcessor::uiArpLines,
+                             "every macro knob on every card was measured");
             }
         }
 

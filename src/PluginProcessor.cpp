@@ -629,6 +629,12 @@ int KeysProcessor::harmonySemisFor(int choiceIndex)
     static constexpr int semis[] = { 0,
                                      -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1,
                                      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 24 };
+    // The list is ordered by ascending interval, and entry 25 sits between "+ Octave" (12)
+    // and "+ 2 Octaves" (24), so its *pair* has to sit there too: 12 and 19, the octave and
+    // the fifth above it. It read 12 and 7 for an afternoon, which put the voice's lower
+    // pitch below the entry above it in the list - scanning down from "+ Octave" made the
+    // shimmer go *down* - and made the pair an exact duplicate of "+ Perfect 5th" plus
+    // "+ Octave", two rows the list already has.
     jassert((int) std::size(semis) == harmonyChoices().size()); // the two lists drifted apart
     return semis[(size_t) juce::jlimit(0, (int) std::size(semis) - 1, choiceIndex)];
 }
@@ -640,7 +646,11 @@ int KeysProcessor::harmonySemisFor(int choiceIndex)
 // "+ Octave & 5th" is an octave *and* a fifth - two notes off the note being harmonised, which
 // is what the pedal's list means and what the ampersand has said here all along. It was read as
 // a compound interval instead, a single note 19 semitones up, so the entry played one note
-// where its name promises two. The table above now says 12 for it and this one says 7.
+// where its name promises two. The table above says 12 for it and this one says 19 - **the
+// fifth is the one above the octave, not the one below it**, because the list is ordered by
+// ascending interval and this entry sits between "+ Octave" and "+ 2 Octaves". A 7 here would
+// spell the pair as notes the list already offers on two other rows, and would make the entry
+// reach *lower* than the one above it.
 //
 // A second interval per slot rather than two more voices: it is still one voice, so it shares
 // its slot's chance roll and either both pitches fire or neither. **Both tables are indexed by
@@ -650,7 +660,7 @@ int KeysProcessor::harmonySemisSecondFor(int choiceIndex)
 {
     static constexpr int semis[] = { 0,
                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0 };
+                                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19, 0 };
     jassert((int) std::size(semis) == harmonyChoices().size()); // the two lists drifted apart
     return semis[(size_t) juce::jlimit(0, (int) std::size(semis) - 1, choiceIndex)];
 }
@@ -2139,8 +2149,15 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
 
         // The dice, picked up here so every write to the engine's own state stays on this
         // thread (2026-08-21). Compared rather than tested-and-cleared: the counter is the
-        // message thread's alone to write, this side only ever asks whether it moved, and two
-        // clicks inside one block are two rerolls rather than one lost.
+        // message thread's alone to write and this side only ever asks whether it moved, so
+        // neither thread has to write the other's variable.
+        //
+        // **It does not mean two clicks in one block are two rerolls** - the comparison fires
+        // once however far the counter jumped, and it is right to. rerollRandomOrder() only
+        // sets permDirty, so it is idempotent: dealing twice before a step reads the order is
+        // indistinguishable from dealing once, and the second deal would be a shuffle nobody
+        // could ever hear. What the counter buys over a flag is only the single-writer split
+        // above.
         if (const int req = l.rerollRequest.load(std::memory_order_relaxed); req != l.rerollSeen)
         {
             l.rerollSeen = req;

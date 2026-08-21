@@ -59,6 +59,19 @@ public:
     int preferredHeight() const;
     std::function<void()> onPreferredHeightChanged;
 
+    // The narrowest this panel can be drawn without a control being starved, in the macro
+    // view - which is the default view and the widest-hungry one, because it puts two macro
+    // cards side by side. Static and public because the *windows* have to ask it: the editor
+    // floors itself well above this, but the detached Arp window has a minimum of its own and
+    // had been set by hand, so the ninth knob fitted the docked case and overflowed the
+    // detached one with nothing on screen to say so (2026-08-21).
+    static int minMacroWidth();
+
+    // The same question for the panel as a whole - the macro view's requirement against the
+    // deep pages', whichever is larger. This is the one a *window* wants; minMacroWidth() is
+    // exposed beside it because it is the derived half and the tests check it on its own.
+    static int minPanelWidth();
+
     // Which of the arpeggiator lines everything on this panel is editing: the band, the
     // step lanes, the twelve slots, Bars and Chain. One row of controls, the lines behind
     // it, chosen by the A/B/All tabs on the ARP section bar (editor-owned since 2026-08-02).
@@ -246,6 +259,11 @@ public:
         // since it runs off the 10 Hz timer.
         void refreshTuplet();
         void refreshDice();
+        // Point the Shape combo at what this line's parameters actually say. One reader,
+        // called from the constructor as well as from refresh(), because everything that
+        // keys off the combo's selection - the dice's greying above all - reads -1 until
+        // something selects an item, and addItemList selects nothing.
+        void syncShapeBox();
         // The dial's readout, reinstalled after every attachment swap - see ArpPanel's.
         void installRateText();
         // Rate is one knob over two parameters and two units, exactly as the band's is: which

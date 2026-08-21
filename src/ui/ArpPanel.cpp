@@ -36,8 +36,16 @@ namespace
     constexpr int arpMacroHeads = 11;
     // The widest the Shape combo is allowed to get (2026-08-21). "Fingered Bottom" is the
     // longest of the fifteen entries and measures about 105 px in the popup font, so this is
-    // that plus its chevron, its own insets and room to spare - and it is a *cap*, so a narrow
-    // window still shrinks it exactly as before rather than being held to this.
+    // that plus its chevron, its own insets and room to spare - and it is a *cap*, so above
+    // the floor the row simply stops giving the combo more.
+    //
+    // It is **not** true that a narrow window shrinks it exactly as it used to, and the
+    // comment said so for an afternoon: the dice's 34 px cell and its 14 px gap come out of
+    // the same row, so at any width where the cap is not biting, Shape is 48 px narrower than
+    // before. That is affordable only because `minMacroWidth()` guarantees the row enough
+    // width to seat the knob strip, which is wider than this line needs - so at the floor the
+    // combo still gets ~166 px, room for the longest name. Narrow the floor and this is the
+    // second thing that breaks, after the knobs.
     constexpr int arpMacroShapeMaxW = 170;
     // The ring a RangeKnob draws around its face, and therefore what the knob row is taller
     // than the row above it by (2026-08-03). The row grows rather than the faces shrinking:
@@ -46,6 +54,27 @@ namespace
     // logged twice already. Height is the cheap axis in this view.
     constexpr int arpRingPx = 8;
     constexpr int arpMacroKnobLine = arpMacroLine + 2 * arpRingPx;
+    // The narrowest a macro knob may be drawn, and therefore what sets the whole view's
+    // minimum width. It is over the 34 px mouse-only floor with a little to spare, which is
+    // the point: a knob at exactly 34 has no room for the ring inset a range knob adds.
+    // `ArpPanel::minMacroWidth()` below turns this into the panel width the view needs, so
+    // the floor and the layout are one number rather than two that can drift - which is
+    // exactly what happened when STRAY made the strip nine knobs and only the *docked* case
+    // was re-measured (2026-08-21).
+    constexpr int arpMacroKnobMinW = 38;
+    // The gap between the two cards in a row, and the insets the panel puts around them.
+    // Named because minMacroWidth() and resized() both need them and must agree.
+    constexpr int arpMacroCardGap = 12;
+    constexpr int arpMacroAreaInset = 12; // cardBounds().reduced(12) in resized()
+    constexpr int arpMacroCardInset = 8;  // getLocalBounds().reduced(8) in cardBounds()
+    constexpr int arpMacroRowInset = 10;  // getLocalBounds().reduced(10, 0) in MacroRow
+    // What the *deep* pages need, which is more than the macro view (2026-08-21). Measured
+    // rather than derived, and honestly so: the band groups share the width by weight and the
+    // lane tabs divide what is left by their count, so there is no clean sum to write here the
+    // way the knob strip has one - the number is where a Play-page band slider and a Draw-page
+    // lane tab stop being starved. `LayoutTests` sweeps every view at `minPanelWidth()` and is
+    // what keeps it true: lower this and those two starve again, which is how it was found.
+    constexpr int arpDeepPageMinW = 970;
     // The harmony area's dropdown row (2026-08-19, second pass): a 34 px combo centred in it.
     // Its chance knob sits below it at arpMacroLine, one column per voice.
     //
@@ -1833,7 +1862,14 @@ void ArpPanel::MacroRow::HarmonyBox::showPopup()
 
 // A die showing five, which is the face that reads at this size: four corners and a centre stay
 // distinct where six pips smear into two columns and three reads as a diagonal smudge. Drawn
-// from the button's own bounds so it tracks the 34 px cell rather than carrying a magic size.
+// from the button's own bounds rather than carrying a magic size, so it follows whatever cell
+// the row gives it.
+//
+// That cell is **34 x 26**, not 34 square: `centred` in MacroRow::resized fixes every control on
+// this line at 26 px tall, and the dice matching its neighbours is what keeps the row reading as
+// one row. So it is under CLAUDE.md's 34 px floor in one axis, exactly as the four steppers and
+// the two combos beside it have always been - a standing property of this line rather than
+// anything the dice introduced. Worth fixing, and worth fixing for the whole row at once.
 void ArpPanel::MacroRow::DiceButton::paintButton(juce::Graphics& g, bool highlighted, bool down)
 {
     const auto r = getLocalBounds().toFloat().reduced(5.0f);
@@ -1978,6 +2014,13 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                           "so there is nothing stored for this to change.");
     diceButton.onClick = [this] { processor.rerollArpRandom(line); };
     addAndMakeVisible(diceButton);
+    // Seed the combo *before* asking the dice about it. `addItemList` selects nothing and the
+    // shape has no attachment to seed it either (applyShape writes two parameters by hand), so
+    // the selection is -1 until something sets it - and refreshDice reading -1 opened the
+    // button greyed on a Random Once session, live only after the panel's first 10 Hz tick.
+    // The comment here claimed the opposite for an afternoon, which is the tell: a card built
+    // from a saved session must be *right* when it is built, not a hundred milliseconds later.
+    syncShapeBox();
     refreshDice(); // so a card built on a Random Once session opens with it live
 
     // The settings a regular arpeggiator has, as the skin's machined rotary - the same
@@ -2320,6 +2363,20 @@ void ArpPanel::MacroRow::applyShape()
 // moves (the 10 Hz refresh would otherwise leave the button a tick behind the shape it belongs
 // to) and refresh calls it for every other route a shape can change - a host lane, a session
 // load, an MCP client, the steppers.
+void ArpPanel::MacroRow::syncShapeBox()
+{
+    auto& apvts = processor.apvts;
+    const bool pattern = apvts.getRawParameterValue(
+                             KeysProcessor::arpParamId(line, KeysProcessor::apPattern))->load() > 0.5f;
+    const int dir = (int) apvts.getRawParameterValue(
+                        KeysProcessor::arpParamId(line, KeysProcessor::apDirection))->load();
+    // Pattern is the entry past the directions, which is why it is added separately above.
+    const int wanted = pattern ? ArpEngine::numDirections
+                               : juce::jlimit(0, ArpEngine::numDirections - 1, dir);
+    if (shapeBox.getSelectedItemIndex() != wanted)
+        shapeBox.setSelectedItemIndex(wanted, juce::dontSendNotification); // never re-enters applyShape
+}
+
 void ArpPanel::MacroRow::refreshDice()
 {
     const bool canDeal = shapeBox.getSelectedItemIndex() == (int) ArpEngine::Direction::randomOnce;
@@ -2395,14 +2452,7 @@ void ArpPanel::MacroRow::refresh()
                                                                      ? KeysProcessor::apHumanizeSpan
                                                                      : KeysProcessor::apHumanVel))
                             ->load());
-    const bool pattern = apvts.getRawParameterValue(
-                             KeysProcessor::arpParamId(line, KeysProcessor::apPattern))->load() > 0.5f;
-    const int dir = (int) apvts.getRawParameterValue(
-                        KeysProcessor::arpParamId(line, KeysProcessor::apDirection))->load();
-    const int wanted = pattern ? ArpEngine::numDirections
-                               : juce::jlimit(0, ArpEngine::numDirections - 1, dir);
-    if (shapeBox.getSelectedItemIndex() != wanted)
-        shapeBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
+    syncShapeBox();
     refreshDice();
 
     // What this line is holding, and whether something is on its way. A launch waiting on a
@@ -2568,9 +2618,6 @@ void ArpPanel::MacroRow::resized()
         // row simply ends, and the slack sits at the right where the dice is rather than
         // stretching a readout that has nothing more to say.
         //
-        // The dice's own cell comes out first and on every shape, greyed or not: reserve the
-        // fixed thing before the elastic one takes the rest, and never let a control appear or
-        // vanish under the mouse.
         // The dice's own cell comes out of the row first and on every shape, greyed or not:
         // reserve the fixed thing before the elastic one takes the rest, and never let a
         // control appear or vanish under the mouse. It is *placed* after the shape group
@@ -2599,18 +2646,25 @@ void ArpPanel::MacroRow::resized()
 
     const auto headStrip = full.removeFromTop(arpMacroHeads);
     auto knobLine = full.removeFromTop(arpMacroKnobLine);
-    // 38 keeps the card solvable at the editor's minimum width, where a column is ~430 px
-    // inside and seven knobs land at ~52 (eight landed at 48 before the VEL/H.VEL merge);
-    // they stop growing at 96 as before. **Nine since 2026-08-21**, when STRAY joined the
-    // row, and nine is what 38 was chosen to survive: 9*38 + the two rings + eight gaps is
-    // 422 of that 430, so the floor is met rather than approached, and every knob is still
-    // over the 34 px mouse-only minimum. A tenth would not fit and would have to buy the
-    // width rather than take it - raise the editor's floor, never starve the row. The two range knobs are `each` wide *plus their
-    // ring on both sides*, reserved out of the row here rather than taken off a neighbour
-    // later: the face inside a range knob is then exactly as wide as every plain one, so the
-    // row reads as seven knobs of one size with a ring round two of them, which is what it is.
+    // `arpMacroKnobMinW` keeps the card solvable at the *narrowest place this view is ever
+    // drawn*, and knobs stop growing at 96 as before. **Nine since 2026-08-21**, when STRAY
+    // joined the row: 9*38 + the two rings + eight gaps is 422 px, which is what
+    // `minMacroWidth()` is derived from, so the floor tracks the count instead of being a
+    // number somebody has to remember to re-measure.
+    //
+    // That is the lesson of the ninth knob rather than a note about it. The docked editor was
+    // re-measured and fitted fine (a column there is ~614 px); the **detached** Arp window was
+    // not, and its own 900 px minimum left a column of 420 - two pixels of clamp away from
+    // starving H.TIME's range knob to a 16 px face. A view that can be drawn in two windows has
+    // two floors, and the smaller one is the one that binds. A tenth knob must buy the width -
+    // raise the floors, never starve the row.
+    //
+    // The two range knobs are `each` wide *plus their ring on both sides*, reserved out of the
+    // row here rather than taken off a neighbour later: the face inside a range knob is then
+    // exactly as wide as every plain one, so the row reads as nine knobs of one size with a
+    // ring round two of them, which is what it is.
     const int rings = 2 * 2 * arpRingPx; // two range knobs, a ring either side of each
-    const int each = juce::jlimit(38, 96,
+    const int each = juce::jlimit(arpMacroKnobMinW, 96,
                                   (knobLine.getWidth() - rings - 6 * (numKnobs - 1)) / numKnobs);
     auto knobStrip = knobLine.removeFromLeft(each * numKnobs + rings + 6 * (numKnobs - 1));
     for (int k = 0; k < numKnobs; ++k)
@@ -3862,6 +3916,32 @@ void ArpPanel::setPage(Page p)
     repaint();
 }
 
+// The narrowest panel the macro view can be laid out in without starving something. Derived,
+// never chosen: it walks the same insets `resized()` and `MacroRow::resized()` do, so a knob
+// added to the strip moves this and every window that asks it, in one edit.
+//
+// Bottom up: nine knobs at their floor plus the two rings and eight gaps (422), the card's own
+// side insets, two cards and the gap between them, the panel's area inset and the card inset.
+// The knob strip is the binding line - the sub-row spends 416 of the same 422 and the top row
+// rather less - so this is the one requirement worth deriving.
+int ArpPanel::minMacroWidth()
+{
+    using MR = ArpPanel::MacroRow;
+    const int rings = 2 * 2 * arpRingPx;
+    const int strip = MR::numKnobs * arpMacroKnobMinW + rings + 6 * (MR::numKnobs - 1);
+    const int card = strip + 2 * arpMacroRowInset;
+    return 2 * card + arpMacroCardGap + 2 * arpMacroAreaInset + 2 * arpMacroCardInset;
+}
+
+// The narrowest the panel may be drawn in *any* view, which is what a window asks for. The two
+// halves are different kinds of number and are kept apart on purpose: the macro view's is
+// derived from the knob count and moves on its own the moment a knob is added, while the deep
+// pages' is measured and needs the test to keep it honest. Taking the larger is the whole of it.
+int ArpPanel::minPanelWidth()
+{
+    return juce::jmax(minMacroWidth(), arpDeepPageMinW);
+}
+
 juce::Rectangle<int> ArpPanel::cardBounds() const
 {
     // pageHeight(), not contentHeight(): the editor hands the panel the fixed height so the
@@ -3959,7 +4039,7 @@ void ArpPanel::resized()
         // width the expensive one, and this is that rule as arithmetic.
         const bool folded = processor.layout.arpMacroBottomFolded;
         auto cardsArea = block.removeFromTop(folded ? arpMacroFoldedH : arpMacroH);
-        const int cardGap = 12;
+        const int cardGap = arpMacroCardGap;
         const int cols = 2;
         const int rows = (juce::jmax(1, KeysProcessor::uiArpLines) + cols - 1) / cols;
         for (int rowIdx = 0; rowIdx < rows; ++rowIdx)

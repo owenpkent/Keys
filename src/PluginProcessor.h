@@ -1202,9 +1202,12 @@ private:
         // **The dice** (2026-08-21). Bumped on the message thread by the editor, read and
         // matched on the audio thread by runArpLines, which is what keeps every write to the
         // engine's own `permDirty` on the audio thread where the rest of its state lives. A
-        // counter rather than a flag: two clicks in one block are two rerolls, and a flag would
-        // silently be one. Wrapping is harmless - all the audio thread asks is whether it
-        // changed.
+        // counter rather than a flag so that each side writes only its own variable: the
+        // message thread bumps `rerollRequest` and never reads `rerollSeen`, the audio thread
+        // does the reverse. Wrapping is harmless - all the audio thread asks is whether it
+        // changed. Note that clicks arriving inside one block **coalesce into a single
+        // reroll**, which is correct rather than a loss: rerollRandomOrder() just sets
+        // permDirty, so a second deal before the next step is inaudible by construction.
         std::atomic<int> rerollRequest { 0 };
         int rerollSeen = 0;         // audio thread only
 

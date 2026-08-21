@@ -391,7 +391,8 @@ public:
             const int idx = choices.indexOf("+ Octave & 5th");
             expect(idx > 0, "the list still has the entry this test is about");
             expectEquals(KeysProcessor::harmonySemisFor(idx), 12, "its first interval is the octave");
-            expectEquals(KeysProcessor::harmonySemisSecondFor(idx), 7, "...and its second is the fifth");
+            expectEquals(KeysProcessor::harmonySemisSecondFor(idx), 19,
+                         "...and its second is the fifth *above* that octave");
 
             for (int i = 0; i < choices.size(); ++i)
             {
@@ -399,10 +400,47 @@ public:
                     expectEquals(KeysProcessor::harmonySemisSecondFor(i), 0,
                                  choices[i] + " should carry exactly one interval");
                 // Off is silence, and every other entry has to name something, or a row in the
-                // list would be a no-op with nothing on screen to say so.
+                // list would be a no-op with nothing on screen to say so. Either interval will
+                // do: the engine's gate tests both, so an entry spelled with only a second one
+                // would sound. Testing only the first would pin the workaround for a bug rather
+                // than the rule.
                 if (i > 0)
-                    expect(KeysProcessor::harmonySemisFor(i) != 0,
+                    expect(KeysProcessor::harmonySemisFor(i) != 0
+                               || KeysProcessor::harmonySemisSecondFor(i) != 0,
                            choices[i] + " should name an interval");
+            }
+        }
+
+        beginTest("the harmony list is ordered by interval, pairs included");
+        {
+            // **This is the test that would have caught it**, and the one above is not - the
+            // spot check only ever says whatever the table currently says, which is why the pair
+            // shipped as 12-and-7 with a green suite behind it.
+            //
+            // The list is one ascending ramp from "- Octave" to "+ 2 Octaves", and reading down
+            // it is how the control is used: each row is meant to shimmer a little higher than
+            // the row above. So an entry that names two pitches has to sit in that order *by
+            // both of them*. 12-and-7 put the pair's lower pitch below the plain "+ Octave"
+            // directly above it - scanning down the list made the shimmer go down - and spelled
+            // the entry as two rows the list already had. 12-and-19 is the only reading that
+            // keeps the ramp, which is the argument for it that does not depend on taste.
+            const auto choices = KeysProcessor::harmonyChoices();
+            const auto lowest = [](int i)
+            {
+                const int a = KeysProcessor::harmonySemisFor(i), b = KeysProcessor::harmonySemisSecondFor(i);
+                return b == 0 ? a : juce::jmin(a, b);
+            };
+            const auto highest = [](int i)
+            {
+                const int a = KeysProcessor::harmonySemisFor(i), b = KeysProcessor::harmonySemisSecondFor(i);
+                return b == 0 ? a : juce::jmax(a, b);
+            };
+            for (int i = 2; i < choices.size(); ++i) // from the second real entry; index 0 is Off
+            {
+                expect(highest(i) > highest(i - 1),
+                       choices[i] + " should reach higher than " + choices[i - 1]);
+                expect(lowest(i) >= lowest(i - 1),
+                       choices[i] + " should not reach below " + choices[i - 1]);
             }
         }
 
