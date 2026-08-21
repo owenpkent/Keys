@@ -36,6 +36,14 @@ DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\release
 OutputBaseFilename=KeysSetup-{#Version}
+
+; Branding. All three are generated from assets/Keys.svg by
+; installer/generate_brand.py and committed, so a build (and CI) never needs
+; Pillow - rerun the script only when the mark itself changes.
+SetupIconFile=..\assets\Keys.ico
+WizardStyle=modern
+WizardImageFile=..\installer\wizard_large.bmp
+WizardSmallImageFile=..\installer\wizard_small.bmp
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; If the DAW has Keys loaded, Inno's restart-manager page asks the user to close it.

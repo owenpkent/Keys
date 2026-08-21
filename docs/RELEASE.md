@@ -98,8 +98,18 @@ Plug in the EV token. **From a non-elevated shell**: SafeNet exposes the
 certificate to the user session only, so an elevated shell reports "OK Studio EV
 cert not available" even with the token in.
 
+**Double-click `release.py` in Explorer.** That is the whole step, and it has to
+be *your own* session rather than an agent's: once the token's cached PIN
+expires the SafeNet driver puts up a **GUI prompt**, a non-interactive build
+never shows it, and signtool returns `ERROR_CANCELLED` (`0x800704c7`) at once -
+which reads exactly like a cancelled PIN and is not one. `release.py` wraps the
+command below, then verifies what came out: fresh rather than left over from an
+earlier build, signed, reporting the version `CMakeLists.txt` claims, and with
+the branding files present.
+
 ```powershell
-.\build.ps1 -Installer
+.\build.ps1 -Installer          # what release.py runs
+py release.py --no-sign         # unsigned, to check layout and branding only
 ```
 
 `-Installer` implies signing (`-NoSign` overrides for an unsigned test build).
