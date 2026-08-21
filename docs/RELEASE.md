@@ -56,6 +56,28 @@ disagreed; nothing else can cause it.
 
 Edit `project(Keys VERSION x.y.z)` in `CMakeLists.txt`. Semver.
 
+**Then delete the stale version resources**, or the shipped binary reports the
+*previous* version in its Windows file properties:
+
+```powershell
+Remove-Item build\*_artefacts\JuceLibraryCode\*_resources.rc
+```
+
+JUCE writes `<Target>_resources.rc` (the `VS_VERSION_INFO` block) through juceaide
+at **build** time and then never rewrites it, so a version bump alone leaves a
+file dated from the last release still saying `FILEVERSION 0,1,0,0`. Re-running
+`cmake -B build` does not fix it; only regenerating the file does. Caught on
+2026-08-20 while cutting 0.2.0, on a binary that had already been signed.
+
+What makes it easy to miss is that **three of the four version surfaces were
+right**: `KEYS_VERSION` (which the updater and the About box read), the
+`moduleinfo.json` a VST3 host actually reads, and the installer's own asset name
+all came out 0.2.0. Only Explorer's Details tab disagreed. Check it explicitly:
+
+```powershell
+(Get-Item "build\Keys_artefacts\Release\VST3\Keys.vst3\Contents\x86_64-win\Keys.vst3").VersionInfo.FileVersion
+```
+
 ### 2. Stamp the changelog
 
 Move the `[Unreleased]` contents in `CHANGELOG.md` under a new
