@@ -693,6 +693,34 @@ The macro card's knob strip is **nine**, which is the width the 38 px knob floor
 survive: nine knobs plus the two rings and eight gaps is 422 px, so every knob clears the 34 px
 mouse-only floor in the docked editor. Note that is the *docked* case only - the detached Arp
 window is narrower and was not re-measured here.
+## [0.2.1] - 2026-08-20
+
+### Fixed: the installer never asked where to put the plug-in
+
+Owen, on the 0.2.0 installer: *"it didn't ask where to save the vst"*.
+
+`DisableDirPage=yes` meant the wizard went Welcome, License, Ready, with no say in the
+destination at all. That is defensible for a VST3, which has one canonical folder every host
+scans, right up until a DAW is pointed somewhere else - and Ableton's **VST3 Plug-In Custom
+Folder** is exactly that case, the one this machine has been using the whole time. An
+installer that cannot reach the folder your host actually scans is one that installs a
+plug-in you cannot load.
+
+There is now a **Select VST3 folder** page, defaulting to `{commoncf64}\VST3` with Browse
+alongside it, and the page's own text says to point Setup at a custom folder if the DAW uses
+one.
+
+**`{app}` changed meaning, and that is what makes this more than a one-line flag.** Until
+0.2.0 `{app}` *was* the bundle (`...\VST3\Keys.vst3`); it is now the VST3 **folder**, with
+`[Files]` appending `Keys.vst3` itself. So `UsePreviousAppDir` has to be **off**: Inno
+remembers a previous install's `{app}` and would otherwise hand 0.2.0's remembered bundle
+path to a rule that appends the bundle name again, installing to
+`...\VST3\Keys.vst3\Keys.vst3` - a path no host looks in, from an installer that reported
+success. `DirExistsWarning` is off for the same family of reason: the VST3 folder always
+already exists, so the "install to an existing folder anyway?" prompt would fire on the
+default path every time and train the user to click through it.
+
+
 
 ## [0.2.0] - 2026-08-20
 
