@@ -9,25 +9,31 @@ All notable changes to Keys are documented here. Format follows
 
 ### Added: Keys has a logo
 
-Owen: *"need logo"*, then, shown four concepts, *"c"*.
+Owen: *"need logo"*, then, shown twelve marks, *"10"*.
 
-A **K whose stem is a white key and whose upper arm carries the accent**. It is drawn
-entirely from `src/ui/KeysLookAndFeel.h` - obsidian tile, ivory key face, the one cyan - so
-the mark and the plugin are the same object rather than two things that happen to ship
-together. Of the four concepts it was the one that reads as a *family* mark: it will sit
-beside Undertow, Beatform and Contour without any of them having to agree on a motif, and it
-is the only one that would survive being printed in a single colour.
+**Three white keys, two black keys between them, and the middle one lit.** Keys is the
+played keyboard of the OK Studio line - you click a key and it sounds - so the mark is that
+gesture rather than the initial. It is drawn entirely from `src/ui/KeysLookAndFeel.h` -
+obsidian ground, ivory key faces, the one cyan - so the mark and the plugin are the same
+object rather than two things that happen to ship together.
 
-`assets/Keys.svg` is the master. `installer/generate_brand.py` draws the same twelve shapes
+A letter **K** was drawn first, in eight variations, and abandoned. It said *Keys* and
+nothing about a piano; the "white key" its stem was documented as was a rounded rectangle
+that nobody would ever read as one; and below 32 px it came out as a lowercase k.
+
+`assets/Keys.svg` is the master. `installer/generate_brand.py` draws the same six shapes
 with Pillow and emits everything else: `assets/Keys.ico` (16 through 256), the two Inno
 wizard bitmaps, and `assets/logo-1024.png`. **All of it is committed**, so a build - and CI -
 never needs Pillow; the script runs only when the mark itself changes.
 
-Two things the drawing had to get right that a vector renderer would have done for free.
-**Each icon frame is drawn at its own size** rather than downsampled from one 256, because
-the corner radius and the arm width are proportional and a resized 256 goes muddy at 16.
-And **round line caps are drawn as circles**, because Pillow has no round cap and without
-them the diagonal arms end in flat chops that read as broken strokes at icon sizes.
+Three things the drawing had to get right, and only the first is something a vector renderer
+would have done for free. **Each icon frame is drawn at its own size** rather than
+downsampled from one 256, because a resized 256 goes muddy at 16. **Keys are square at the
+shoulder and round at the foot** - Pillow rounds four corners or none, so the top pair is
+squared off by overdrawing - and that single detail is what separates a keyboard from three
+rounded bars. And **the block fills about 79% of the tile's width**, which is a legibility
+floor rather than a taste: drawn at half the width, three keys and two gaps across a 16 px
+icon put every gap under half a pixel and the keys blurred into one bar.
 
 ### Added: release.py, because signing cannot be automated from here
 

@@ -1,35 +1,70 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Keys">
   <title>Keys</title>
   <!--
-    The Keys mark. A K whose stem is a white key and whose upper arm carries the
-    accent, drawn entirely from src/ui/KeysLookAndFeel.h so the mark and the
-    plugin are the same object:
-      tile   #1c1f25 -> #0b0c0f   (bgTop / bgBot)
-      ivory  #ffffff -> #cdd3db   (text, shaded)
-      accent #35c4d7             (the one cyan)
+    The Keys mark: three white keys, two black keys between them, and the middle
+    one lit. Keys is the played keyboard of the OK Studio line - you click a key
+    and it sounds - so the mark is the gesture rather than the initial. A letter
+    K was tried first and abandoned: it said "Keys" and nothing about a piano,
+    and below 32 px it read as a lowercase k.
+
+    Drawn entirely from src/ui/KeysLookAndFeel.h so the mark and the plugin are
+    the same object:
+      ground #0e0f12              (skin::bgBot)
+      ivory  #ffffff -> #cdd3db   (a white key face, shaded)
+      black  #17181c -> #101216   (skin::bgTop -> skin::well)
+      lit    #35c4d7 -> #1b8496   (skin::cyanAccent base -> deep)
+
+    Geometry, all in the 256 viewBox. The block is 202 x 172 at (27, 42), so the
+    air is 27 either side and 42 top and bottom - centred, which the mark this
+    replaced was not (it had 60 px of air on the left against 78 on the right).
+      white keys  w 58, h 172, gap 14, at x = 27, 99, 171
+      black keys  w 34, h 104, centred on the two gaps at x = 75, 147
+
+    **The block is deliberately big in its tile.** It was drawn at half the tile
+    width first and that failed at 16 px for arithmetic rather than taste: three
+    keys and two gaps across 8 px of icon put every gap under half a pixel, so
+    the keys blurred into one bar. Filling ~79% of the width buys each gap most
+    of a pixel and is what makes the 16 px frame legible. It reads better large
+    as well - the airy version looked timid rather than restrained.
+
+    **Keys are square at the shoulder and round at the foot**, which is the one
+    detail that makes this read as a keyboard rather than three rounded bars: a
+    key is a lever seen end-on, and its front edge is the only part your finger
+    ever touches. Uniform rounding was drawn first and read as tiles. The
+    difference is invisible at 16 px and does all its work at 1024.
+
+    The black keys are 104 of the white keys' 172, near enough the 3:5 a real
+    keyboard uses, and they are drawn last so they sit *over* the white faces -
+    including over the lit one, which is what stops the accent reading as a
+    stripe painted between two keys rather than as a key that is lit.
 
     This file is the master. assets/Keys.ico, the installer wizard bitmaps and
     assets/logo-1024.png are all generated from the same geometry by
     installer/generate_brand.py - redraw here and regenerate, never the reverse.
   -->
   <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1c1f25"/>
-      <stop offset="1" stop-color="#0b0c0f"/>
-    </linearGradient>
     <linearGradient id="ivory" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff"/>
       <stop offset="1" stop-color="#cdd3db"/>
     </linearGradient>
+    <linearGradient id="lit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#35c4d7"/>
+      <stop offset="1" stop-color="#1b8496"/>
+    </linearGradient>
+    <linearGradient id="ebony" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17181c"/>
+      <stop offset="1" stop-color="#101216"/>
+    </linearGradient>
   </defs>
 
-  <rect width="256" height="256" rx="56" fill="url(#tile)"/>
+  <rect width="256" height="256" rx="56" fill="#0e0f12"/>
 
-  <!-- stem: a white key -->
-  <rect x="60" y="56" width="36" height="144" rx="8" fill="url(#ivory)"/>
+  <!-- white keys: square shoulders, 11 px foot -->
+  <path d="M27 42 H85 V203 A11 11 0 0 1 74 214 H38 A11 11 0 0 1 27 203 Z" fill="url(#ivory)"/>
+  <path d="M99 42 H157 V203 A11 11 0 0 1 146 214 H110 A11 11 0 0 1 99 203 Z" fill="url(#lit)"/>
+  <path d="M171 42 H229 V203 A11 11 0 0 1 218 214 H182 A11 11 0 0 1 171 203 Z" fill="url(#ivory)"/>
 
-  <!-- upper arm carries the accent; lower arm is drawn last so it sits on top
-       at the junction -->
-  <path d="M104 128 L178 62" stroke="#35c4d7" stroke-width="36" stroke-linecap="round" fill="none"/>
-  <path d="M104 128 L178 194" stroke="#e9ecf0" stroke-width="36" stroke-linecap="round" fill="none"/>
+  <!-- black keys last, so they sit over the faces including the lit one -->
+  <path d="M75 42 H109 V142 A4 4 0 0 1 105 146 H79 A4 4 0 0 1 75 142 Z" fill="url(#ebony)"/>
+  <path d="M147 42 H181 V142 A4 4 0 0 1 177 146 H151 A4 4 0 0 1 147 142 Z" fill="url(#ebony)"/>
 </svg>
