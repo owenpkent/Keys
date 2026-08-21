@@ -1857,7 +1857,12 @@ what is no longer true lives here in one place:
 - Parameter-layout changes break saved sessions — changelog loudly.
 - **Updater contract** lives in the kit (`docs/AUTO_UPDATE.md`): releases repo is
   `okstudio1/keys-releases`; assets named exactly `KeysSetup-<version>.exe`, tag
-  `v<version>`; every verification gate stays fail-closed.
+  `v<version>`; every verification gate stays fail-closed. **`docs/RELEASE.md` is the
+  checklist that keeps all four true** (2026-08-20), alpha-osk's pipeline adapted to a
+  JUCE plugin: bump `project(Keys VERSION)`, stamp the changelog, `build.ps1 -Installer`
+  with the eToken in from a non-elevated shell, Live load test, tag, then
+  `gh release create --repo okstudio1/keys-releases`. Every one of those contracts fails
+  *silently* when broken, which is why the doc leads with them rather than with the steps.
 
 ## Skin
 

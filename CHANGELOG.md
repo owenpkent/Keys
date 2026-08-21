@@ -5,6 +5,34 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-20
+
+### Added: a documented release pipeline, and the first build Keys has ever published
+
+Keys had every part of a release except the release. `build.ps1 -Installer` already
+produced a signed `release\KeysSetup-<version>.exe`, `installer/keys.iss` already took the
+version from `CMakeLists.txt`, and the in-plugin updater was already hard-pinned to
+`okstudio1/keys-releases` - but nothing had ever been tagged, nothing had ever been
+published, and no document said how. 0.1.0 was cut in the changelog on 2026-07-14 and got
+no further than a local installer.
+
+`docs/RELEASE.md` is the checklist, mirroring alpha-osk's pipeline and Beatform's JUCE
+adaptation of it. It leads with the four contracts rather than the steps, because **all
+four fail silently**: renaming the releases repo orphans every installed copy (they report
+"up to date" for ever instead of erroring), an asset not named exactly
+`KeysSetup-<version>.exe` is ignored by the updater without complaint, a tag that is not
+`v<version>` breaks the comparison against `KEYS_VERSION`, and a `gh release create`
+missing `--repo okstudio1/keys-releases` cheerfully publishes to the *source* repo where no
+updater will ever look. The one loud failure is publishing unsigned, since the updater's
+verification is fail-closed at every gate.
+
+`scripts/downloads.ps1` sums each release's asset download counts, alpha-osk's
+`scripts/downloads.py` in PowerShell. The repo is hard-coded rather than a parameter: it is
+the same pinned constant the updater, the checklist and this entry all carry, and a fifth
+place to state it is a fifth place for it to drift.
+
+
+
 ### Added: the All view's bottom row of arps collapses to a strip
 
 Owen: *"maybe you should be able to minimize bottom arps"*.
