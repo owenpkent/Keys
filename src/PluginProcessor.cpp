@@ -563,6 +563,27 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
             ParameterID { id(("Harm" + v + "Chance").toRawUTF8()), 1 },
             nm + " Harmony " + v + " Chance", 0, 100, 100));
     }
+
+    // **Stray** (2026-08-21, Owen: "the mutate doesn't really work the way I want ... it's
+    // adding additional notes in the arpeggiator ... it should just change the existing ones").
+    //
+    // Mutate carried this on its own upper half from 2026-08-19, and what Owen heard was
+    // exactly what that stage does: pitches arriving that are in no chord he played. The two
+    // halves were answering different questions - Mutate moves the run to another note of the
+    // chord you are holding, this puts a note somewhere you did not - and one dial could not
+    // offer the first without eventually forcing the second. So this is the second question,
+    // asked separately, and Mutate is confined to the chord at every setting again.
+    //
+    // Default **0**, which is off: no session that predates this parameter can acquire a note
+    // it was not already playing, and off is a position you can stay at while turning Mutate
+    // all the way up. Zero is its own off switch, so it takes no toggle beside it - the same
+    // reading that leaves Strum, Lock Influence and Lean without one.
+    //
+    // Its own two zones: to 50 a stray is an in-scale neighbour, past 50 a growing share are
+    // chromatic, all of them at 100. Lock still holds them, so a wrong note worth keeping
+    // hardens into the part exactly as a mutated one does.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Stray"), 1 },
+                                                   nm + " Stray", 0, 100, 0));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -608,7 +629,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
-        "Harm1", "Harm1Chance", "Harm2", "Harm2Chance"
+        "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
+        "Stray"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1978,6 +2000,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.harmChance[0] = (int) arpParam(n, apHarm1Chance);
         ap.harmSemis[1] = harmonySemisFor((int) arpParam(n, apHarm2));
         ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
+        ap.stray = (int) arpParam(n, apStray);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;

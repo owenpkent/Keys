@@ -5,6 +5,45 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: Mutate stays inside your chord, and the strays get a knob of their own
+
+Owen: *"the mutate doesn't really work the way I want ... it's adding additional notes in
+the arpeggiator ... it should just change the existing ones."*
+
+Mutate had carried two stages on one dial since 2026-08-19. Below halfway it moved the run
+to a **different note of the chord you are holding**; above halfway a second stage took the
+pitch that walk had chosen and shoved it **off the chord** - an in-scale neighbour first,
+then chromatic semitones near the top. Nothing was ever *added*: a step fires exactly as
+many notes at Mutate 100 as at 0, and `ArpTests.cpp` now pins that outright. What was
+arriving was pitches from no chord anyone played, which is what "additional notes" sounds
+like from the listening chair.
+
+The two halves were answering different questions - *explore this chord harder* and *leave
+this chord* - and one dial could not offer the first without eventually forcing the second.
+So they are two controls now:
+
+- **MUTATE** means one thing across its whole travel again: how often a step swaps for
+  another note of the held chord, and how far along that chord it reaches to find one. It
+  **cannot leave the chord at any setting**, which is the 2026-08-18 promise restored and
+  extended to the top of the dial. Its reach now grows the whole way up (one chord entry at
+  the bottom, four at the top) instead of widening only past 50, so the upper half buys
+  something rather than spending itself on strays. A saved session at Mutate 40 explores a
+  little further than it used to and still cannot play a note outside its chord.
+- **STRAY**, new, is the ninth knob on each macro card, sitting between MUTATE and LOCK so
+  the three read as one sentence: how hard it explores, how far outside it may go, how long
+  it keeps what it finds. **Zero is off and is the default**, so nothing that predates this
+  can acquire a note it was not already playing, and off is now a position you can *stay* at
+  while turning Mutate all the way up. Its own two zones: to 50 a stray is an in-scale
+  neighbour a degree or two away, past 50 a growing share are chromatic, all of them at 100.
+- **LOCK** is untouched and still holds both, because both stages hash the same (step, era)
+  cell. A wrong-note lick the machine finds still hardens into the part.
+
+`arpStray` appended per line (and `arp2Stray`, `arp3Stray`, `arp4Stray`), default 0. No
+migration: an absent parameter takes its default, and the default is the behaviour that
+predates the parameter. The macro card's knob strip is **nine**, which is the width 38 px
+was chosen to survive - nine knobs plus the two rings and eight gaps is 422 px of the 430 a
+column has at the editor's minimum width, so every knob clears the 34 px mouse-only floor.
+
 ## [0.2.0] - 2026-08-20
 
 ### Added: a documented release pipeline, and the first build Keys has ever published
