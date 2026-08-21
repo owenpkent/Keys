@@ -7,6 +7,42 @@ All notable changes to Keys are documented here. Format follows
 
 ## [0.2.1] - 2026-08-20
 
+### Added: Keys has a logo
+
+Owen: *"need logo"*, then, shown four concepts, *"c"*.
+
+A **K whose stem is a white key and whose upper arm carries the accent**. It is drawn
+entirely from `src/ui/KeysLookAndFeel.h` - obsidian tile, ivory key face, the one cyan - so
+the mark and the plugin are the same object rather than two things that happen to ship
+together. Of the four concepts it was the one that reads as a *family* mark: it will sit
+beside Undertow, Beatform and Contour without any of them having to agree on a motif, and it
+is the only one that would survive being printed in a single colour.
+
+`assets/Keys.svg` is the master. `installer/generate_brand.py` draws the same twelve shapes
+with Pillow and emits everything else: `assets/Keys.ico` (16 through 256), the two Inno
+wizard bitmaps, and `assets/logo-1024.png`. **All of it is committed**, so a build - and CI -
+never needs Pillow; the script runs only when the mark itself changes.
+
+Two things the drawing had to get right that a vector renderer would have done for free.
+**Each icon frame is drawn at its own size** rather than downsampled from one 256, because
+the corner radius and the arm width are proportional and a resized 256 goes muddy at 16.
+And **round line caps are drawn as circles**, because Pillow has no round cap and without
+them the diagonal arms end in flat chops that read as broken strokes at icon sizes.
+
+### Added: release.py, because signing cannot be automated from here
+
+The EV certificate lives on the SafeNet token, and once its cached PIN expires the driver
+puts up a **GUI prompt**. A build launched by an agent runs non-interactively, so that prompt
+is never shown and signtool returns `ERROR_CANCELLED` (`0x800704c7`) at once - which reads
+exactly like a cancelled PIN and is not one. Double-clicking `release.py` runs the same
+`build.ps1 -Installer` from a session that can show the dialog.
+
+It also **verifies what came out**, because "signature valid" has already been misleading
+once here: a correctly signed installer from an earlier build sat in `release/` looking
+publishable while missing the branding entirely. It checks the file is fresh rather than
+left over, that it is signed, that the binary's reported version matches `CMakeLists.txt`
+(the JUCE `resources.rc` trap), and that the branding files exist at all.
+
 ### Fixed: the installer never asked where to put the plug-in
 
 Owen, on the 0.2.0 installer: *"it didn't ask where to save the vst"*.

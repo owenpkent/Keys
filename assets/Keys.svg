@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Keys">
+  <title>Keys</title>
+  <!--
+    The Keys mark. A K whose stem is a white key and whose upper arm carries the
+    accent, drawn entirely from src/ui/KeysLookAndFeel.h so the mark and the
+    plugin are the same object:
+      tile   #1c1f25 -> #0b0c0f   (bgTop / bgBot)
+      ivory  #ffffff -> #cdd3db   (text, shaded)
+      accent #35c4d7             (the one cyan)
+
+    This file is the master. assets/Keys.ico, the installer wizard bitmaps and
+    assets/logo-1024.png are all generated from the same geometry by
+    installer/generate_brand.py - redraw here and regenerate, never the reverse.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1f25"/>
+      <stop offset="1" stop-color="#0b0c0f"/>
+    </linearGradient>
+    <linearGradient id="ivory" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#cdd3db"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="56" fill="url(#tile)"/>
+
+  <!-- stem: a white key -->
+  <rect x="60" y="56" width="36" height="144" rx="8" fill="url(#ivory)"/>
+
+  <!-- upper arm carries the accent; lower arm is drawn last so it sits on top
+       at the junction -->
+  <path d="M104 128 L178 62" stroke="#35c4d7" stroke-width="36" stroke-linecap="round" fill="none"/>
+  <path d="M104 128 L178 194" stroke="#e9ecf0" stroke-width="36" stroke-linecap="round" fill="none"/>
+</svg>
