@@ -5,6 +5,33 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: Play on the pads means press-and-hold
+
+Owen: *"When the play mode is checked on the pads, I want it to trigger as soon as you click on
+it and stay held until you let go."*
+
+With **Play** on, a chord pad fires the moment you press it and holds until you let go, so a stab
+is short and a lean is long - which is most of what a pad is for. It used to fire on the *release*
+for a fixed 800 ms, with press-and-hold available only as **Chord pads play while held** on the
+settings gear.
+
+**That tick is gone, because Play is what it did.** Two switches for one question is one switch
+too many, and a control called Play should play for as long as you are playing it.
+
+What the old default was protecting against is real, and is now Play's own job. Firing on the
+press means a press that turns out to be a *drag* has already choked the other chord sources, and
+with Exclusive on that reaches each arp line's held chord - which is exactly the report Play came
+out of. The answer is to switch **Play off** while you are dragging cards into the arpeggiator,
+which makes the strip drag-only and is the one gesture it was built for. Turning Exclusive off
+alongside it costs the drag nothing at all.
+
+Sustain and Latch are untouched: the release still goes through `releaseChordPad` /
+`releaseLiveChord`, so a pedalled chord keeps ringing exactly as before. The generator's audition
+tray keeps its own 800 ms - a tray card is a candidate you are sampling, a pad is an instrument
+you are playing, which was never the same question. With nothing on the strip on a clock any
+more, `ChordPads` is no longer a `juce::Timer`.
+
+
 ### Fixed: one harmony table instead of three that must agree
 
 `harmonyChoices()` and the two semitone tables were three parallel lists indexed by the same

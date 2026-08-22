@@ -164,9 +164,16 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   Owen: "I want a toggle above the keyboard to play notes... when I'm trying to drag a cord
   into the arpeggiator, it plays instead, and it stops everything"). Off, a pad click makes no
   sound - the strip is drag-only - so a fumbled drag toward the arp cannot fire a chord that
-  Exclusive turns into a full stop of the running lines. Both gates live in
-  `ChordPads::mouseDown` / `mouseUp` beside `padHoldToPlay`; the release path still calls
-  `endAudition`, never `startAudition`, so a toggle flipped mid-press cannot strand a note.
+  Exclusive turns into a full stop of the running lines. **On, it is hold-to-play**
+  (2026-08-22, Owen: *"when the play mode is checked on the pads, I want it to trigger as soon
+  as you click on it and stay held until you let go"*): the press fires and the release ends it,
+  so a stab is short and a lean is long. That was `padHoldToPlay`, a settings-gear tick, until
+  this toggle absorbed it - **two switches for one question**, and the second one could quietly
+  make Play mean something other than play. The one gate lives in `ChordPads::mouseDown`; the
+  release path calls `endAudition` **unconditionally**, never `startAudition`, so a toggle
+  flipped mid-press cannot strand a note. With nothing on the strip on a clock any more,
+  `ChordPads` is no longer a `juce::Timer` and `auditionMs` is gone from it - the generator's
+  tray keeps its own 800 ms, which was always a different question.
   The button hides with the Pads fold like the page buttons; accessible name
   `Pads play on click`, on-screen word "Play".
 - **The RangeKnob's face is the band's centre, and the halo only ever writes the span**
@@ -404,13 +411,18 @@ what is no longer true lives here in one place:
   two queues opened each pitch so its note-off follows it there: `noteRefs` counts owners across
   both, so a pitch can be opened by the keys and closed by a pad, and a release down the other
   queue would strand the note in a listening line's engine forever.
-- **A card sounds on release, and a drag makes no sound at all.** This reverses hold-to-play
-  (2026-08-16, still described below), and the reason is not the noise: firing a chord *chokes*
-  the other chord sources, and with Exclusive on that reaches each line's held chord - so a press
-  that turned out to be a drag had already stopped line A before the card moved. Silencing the
-  blurt on the drag does not put that back. **Settings gear -> Chord pads play while held**
-  (`LayoutState::padHoldToPlay`, default **off**) puts the press back for anyone who wants to lean
-  on a chord; turning Exclusive off alongside it is what makes the drag free.
+- **A card sounds on release, and a drag makes no sound at all.** **Superseded 2026-08-22** -
+  the press owns it again, and the Play toggle is what made that affordable; see the bullet above
+  and keep reading here for the reason the release ever won. Firing a chord *chokes* the other
+  chord sources, and with Exclusive on that reaches each line's held chord - so a press that
+  turned out to be a drag had already stopped line A before the card moved, and silencing the
+  blurt on the drag does not put that back. What changed is not that this stopped being true but
+  that there is now a switch whose whole job is it: **Play off makes the strip drag-only**, which
+  answers the drag case exactly, where a second tick only made the sounding half half-hearted for
+  everyone. Turning Exclusive off alongside it is what makes the drag free.
+  `LayoutState::padHoldToPlay` and the *Chord pads play while held* menu row are **deleted**; an
+  older session's stray property is ignored on load, which is all an unknown key in the layout
+  tree has ever cost - it carries no index anybody stores, unlike an APVTS parameter.
 - **A drag that lands on nothing is a cancelled drag.** Dropping a card where no target claimed it
   used to clear the pad. Too much of the window is neither the strip nor a target, and dragging
   *up* into the arpeggiator crosses the Pads bar on the way, so a near miss destroyed the chord.

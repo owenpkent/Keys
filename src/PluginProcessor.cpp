@@ -3610,7 +3610,6 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("holdVisualsOnSustain", layout.holdVisualsOnSustain, nullptr);
     tree.setProperty("dragWhileSustain", layout.dragWhileSustain, nullptr);
     tree.setProperty("sustainProposesChords", layout.sustainProposesChords, nullptr);
-    tree.setProperty("padHoldToPlay", layout.padHoldToPlay, nullptr);
     tree.setProperty("padsPlayOnClick", layout.padsPlayOnClick, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
@@ -3670,7 +3669,10 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.holdVisualsOnSustain = flag("holdVisualsOnSustain", true);
     layout.dragWhileSustain = flag("dragWhileSustain", true);
     layout.sustainProposesChords = flag("sustainProposesChords", false);
-    layout.padHoldToPlay = flag("padHoldToPlay", false);
+    // padHoldToPlay is retired (2026-08-22): the Pads bar's Play toggle is that behaviour now.
+    // An older session's property is simply ignored, which is what an unknown key in this tree
+    // has always cost - unlike an APVTS parameter, a layout property carries no index anybody
+    // stores, so dropping one needs no migration.
     layout.padsPlayOnClick = flag("padsPlayOnClick", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the

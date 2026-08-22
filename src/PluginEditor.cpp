@@ -1608,10 +1608,11 @@ void KeysEditor::showSettingsMenu()
     // piles up behind you. See LayoutState::dragWhileSustain, which kept the field name.
     menu.addItem(2002, "Sustained drag leaves a trail", true, processor.layout.dragWhileSustain);
     menu.addItem(2003, "Sustained notes propose chords", true, processor.layout.sustainProposesChords);
-    // Ticked, a pad sounds for as long as you hold it; unticked - the default - the press is
-    // silent and the release fires the chord for 800 ms. See LayoutState::padHoldToPlay for why
-    // the quiet press is the default, and ChordPads' own note for what each mode costs.
-    menu.addItem(2004, "Chord pads play while held", true, processor.layout.padHoldToPlay);
+    // *Chord pads play while held* was 2004 here from 2026-08-18 and is gone (2026-08-22): the
+    // Pads bar's **Play** toggle is that behaviour now, so the tick would have been a second
+    // switch answering one question - and the one that could quietly make Play mean something
+    // other than play. See LayoutState::padsPlayOnClick. 2004 is left unused rather than reused,
+    // since a stale id landing on a neighbour's row is a bug nobody would look for here.
     menu.addSeparator();
 
     // Greyed rather than missing when there is nothing to check: Keys Host never builds
@@ -1640,11 +1641,6 @@ void KeysEditor::showSettingsMenu()
                 break;
             case 2003:
                 e->processor.layout.sustainProposesChords = ! e->processor.layout.sustainProposesChords;
-                break;
-            case 2004:
-                // Nothing to repaint or rebuild: the flag is read at the moment a press or a
-                // release is handled, so the next click already obeys it.
-                e->processor.layout.padHoldToPlay = ! e->processor.layout.padHoldToPlay;
                 break;
             case 3001:
                 e->checkForUpdatesNow();
