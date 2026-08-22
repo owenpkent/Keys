@@ -420,7 +420,7 @@ old outer LINES box gone, since a frame around both was what made two arpeggiato
 (*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
 panel's width cannot hold what used to be one full-width row: a detented rate knob with `<`
 `>` and its Sync/Hz switch, and the shape with steppers of its own, under **RATE / SHAPE**
-micro-caps so the two stepper pairs read as belonging to their words; **eight knobs** under
+micro-caps so the two stepper pairs read as belonging to their words; **nine knobs** under
 their own headings - Oct, Gate, Mutate, Stray, Lock, Swing, Offset, Vel, H.Time (nine since
 2026-08-21, when Stray moved out of Mutate's upper half; eight before that, and seven for one day,
 2026-08-17 to 2026-08-18, when H.Vel folded into Vel's own ring - see below - before Chance

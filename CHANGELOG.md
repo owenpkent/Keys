@@ -38,11 +38,23 @@ So they are two controls now:
 - **LOCK** is untouched and still holds both, because both stages hash the same (step, era)
   cell. A wrong-note lick the machine finds still hardens into the part.
 
-`arpStray` appended per line (and `arp2Stray`, `arp3Stray`, `arp4Stray`), default 0. No
-migration: an absent parameter takes its default, and the default is the behaviour that
-predates the parameter. The macro card's knob strip is **nine**, which is the width 38 px
-was chosen to survive - nine knobs plus the two rings and eight gaps is 422 px of the 430 a
-column has at the editor's minimum width, so every knob clears the 34 px mouse-only floor.
+`arpStray` appended per line (and `arp2Stray`, `arp3Stray`, `arp4Stray`), default 0.
+
+**A migration, and it needs one for a two-day window rather than for the usual reason.** For
+every session saved before 2026-08-19 the default is the whole repair: Mutate could not leave
+the chord then either, so off reproduces what those sessions played. But between 2026-08-19
+and this change Mutate's *upper half* was this feature, so a session saved in those two days
+holds a Mutate above 50 that meant "and leave the chord" and a Stray that is simply absent -
+and 0 would open it strictly in-chord, a different part, with nothing on screen to say why.
+`migrateStray` folds that forward: `(mutate - 50) * 2`, which maps the old in-scale/chromatic
+boundary at 75 exactly onto Stray's own at 50. `apHarm1` is what dates the session, since the
+harmony voices landed in the same 2026-08-19 round - Harm1 present with Stray absent is that
+window and nothing else, so sessions older than it are left at the default they want.
+
+The macro card's knob strip is **nine**, which is the width the 38 px knob floor was chosen to
+survive: nine knobs plus the two rings and eight gaps is 422 px, so every knob clears the 34 px
+mouse-only floor in the docked editor. Note that is the *docked* case only - the detached Arp
+window is narrower and was not re-measured here.
 
 ## [0.2.0] - 2026-08-20
 

@@ -1260,7 +1260,10 @@ private:
         // one entry at the bottom, four at the top. Capped at the sequence, since reaching
         // further than the chord is long only wraps back onto notes nearer reaches already
         // offer, which reads as the knob doing less the higher it goes.
-        const int reach = juce::jmin(1 + amt * 3 / 100, juce::jmax(1, count - 1)); // 1..4
+        // `count - 1` needs no jmax: the early return above leaves count >= 2 here, so the
+        // cap is at least 1 by construction. Guarding it again would read as if a one-note
+        // sequence could reach this line, which is the one case that cannot.
+        const int reach = juce::jmin(1 + amt * 3 / 100, count - 1); // 1..4
         const int delta = (int) ((h >> 8) % (unsigned) (reach * 2 + 1)) - reach;
         return ((chosen + delta) % count + count) % count;
     }
@@ -1732,9 +1735,20 @@ private:
                 // Stray lands here, on the placed note (2026-08-19; its own knob from
                 // 2026-08-21): above zero a step may leave the chord note the walk chose -
                 // in scale first, chromatic at the top. It is the only stage that can, which
-                // is why Mutate above it is safe to turn up. Resolved once, so the subharmonic
-                // voice below offsets from the note actually played rather than the one that
-                // was aimed at.
+                // is why Mutate above it is safe to turn up.
+                //
+                // **The two harmony modes part here, on purpose.** The subharmonic voice
+                // (mode 1) offsets from `played`, the note actually sounding, because it is a
+                // fixed semitone interval and an interval measured from a note nobody heard
+                // is not the interval. The chord-tone voice (mode 0) counts from `idx`, the
+                // *un-strayed* index, because it counts sequence entries rather than
+                // semitones and that counting is the whole of what keeps it inside the chord
+                // - a strayed note is by definition not a chord tone, so "two chord tones
+                // above it" has no answer to give. So a straying step under mode 0 is one
+                // note off the chord against a harmony still in it, which is the reading that
+                // makes Stray a wrong note rather than a key change. Do not "fix" the mode-0
+                // branch to read `played`; that is what the line below deliberately does not
+                // do.
                 const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset), globalStep);
                 addHit(played, src.velocity * velScale, src.channel);
 

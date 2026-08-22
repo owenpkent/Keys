@@ -939,6 +939,15 @@ protected:
     // The Humanize spans, appended 2026-08-03. Absence is the tell and the default is the
     // repair; there is no older parameter to fold, unlike the two above.
     void migrateHumanSpans(const juce::ValueTree& root);
+    // Stray, appended 2026-08-21, and the one migration here whose absence tell is not enough
+    // on its own. Stray took over the out-of-chord stage that Mutate's upper half carried from
+    // 2026-08-19, so a session saved in that two-day window has a Mutate above 50 that *meant*
+    // straying and a Stray that is simply absent - and the parameter's own default is 0, which
+    // is off. Left alone it opens playing a different part, in-chord where it used to wander,
+    // with nothing on screen to say why. `apHarm1` is what dates the session: the harmony
+    // voices and Mutate's stray zones landed in the same 2026-08-19 round, so Harm1 present
+    // with Stray absent is exactly that window and nothing else.
+    void migrateStray(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);

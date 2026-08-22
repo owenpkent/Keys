@@ -2470,7 +2470,7 @@ void ArpPanel::MacroRow::resized()
 {
     // Three lines inside one card (2026-08-02, Owen: "having the arpeggiators parallel to
     // each other instead of one on top of the other"): what the line plays (On, rate,
-    // shape), the seven knobs under their own heading strip (eight until VEL absorbed H.VEL
+    // shape), the nine knobs under their own heading strip (seven when VEL absorbed H.VEL
     // as its own ring, 2026-08-17), and the rate's modifiers with the held chord. Stacked
     // *inside* the card because two cards now share the panel's width, and the old single
     // line needed more width than half the panel has. The heights here are
@@ -2579,7 +2579,7 @@ void ArpPanel::MacroRow::resized()
 
     // The rate's modifiers keep their full 34 px hit height - they are targets, and wide
     // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
-    // controls' worth of ambiguity in a card that already has eight unlabelled knobs. The
+    // controls' worth of ambiguity in a card that already has nine unlabelled knobs. The
     // held chord sits at the card's bottom-right corner, where a dropped card lands.
     full.removeFromTop(2);
     auto subRow = full.removeFromTop(arpMacroMods);

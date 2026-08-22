@@ -3107,6 +3107,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     migrateBpmSync(root);
     migrateTuplet(root);
     migrateHumanSpans(root);
+    migrateStray(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -3414,6 +3415,68 @@ void KeysProcessor::migrateHumanSpans(const juce::ValueTree& root)
                 if (auto* param = apvts.getParameter(wanted))
                     param->setValueNotifyingHost(param->getDefaultValue());
         }
+}
+
+void KeysProcessor::migrateStray(const juce::ValueTree& root)
+{
+    // The only migration here that has to *date* a session rather than just notice a hole.
+    //
+    // Stray is new on 2026-08-21, but the behaviour it carries is not: from 2026-08-19 the top
+    // half of the **Mutate** dial did this job, so a session saved in that two-day window holds
+    // a Mutate above 50 that meant "and leave the chord". Stray's default is 0 - off, chosen so
+    // that nothing predating the *knob* could acquire a note it was not already playing - and
+    // for those two days' sessions that default is wrong in the audible direction: the line
+    // opens strictly in-chord where it used to wander. A different part, silently.
+    //
+    // Absence alone cannot tell those sessions from the far larger set saved before 2026-08-19,
+    // where Mutate existed (2026-08-18) but never left the chord at any setting. Folding those
+    // forward would *add* strays nobody ever heard, which is the same bug pointing the other
+    // way. **`apHarm1` is the date stamp**: the two harmony voices and Mutate's stray zones
+    // landed together in the 2026-08-19 round, so `Harm1 present && Stray absent` is that
+    // window exactly, and `Harm1 absent` is a session that predates the behaviour entirely.
+    //
+    // The fold is exact rather than approximate, the migrateVelTrim standard. Old Mutate ran
+    // its stray stage over (50, 100] - in scale to 75, chromatic above - and Stray runs those
+    // same two zones over (0, 100] with its boundary at 50. So `(mutate - 50) * 2` maps 75 onto
+    // 50 and 100 onto 100: the zone boundary lands on the zone boundary and every setting in
+    // between keeps its share. Mutate itself is left alone - it now means what it always meant
+    // below 50, and its upper half reaches further inside the chord instead, which is a change
+    // this cannot undo and should not: the note count is identical either way.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto strayId = arpParamId(line, apStray);
+        const auto harmId = arpParamId(line, apHarm1);
+        bool sawStray = false, sawHarm = false;
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto pid = params.getChild(i).getProperty("id").toString();
+            if (pid == strayId) sawStray = true;
+            if (pid == harmId)  sawHarm = true;
+        }
+        if (sawStray)
+            continue; // the session names it, so whatever it says is what the user chose.
+
+        auto* stray = apvts.getParameter(strayId);
+        if (stray == nullptr)
+            continue;
+
+        // Absent, and predating the behaviour: the default is the repair. An absent parameter
+        // is not a reset (see migrateRateMode), so it has to be written explicitly.
+        if (! sawHarm)
+        {
+            stray->setValueNotifyingHost(stray->getDefaultValue());
+            continue;
+        }
+
+        // Absent, and inside the window: fold Mutate's own upper half forward.
+        const int mutate = (int) arpParam(line, apMutate);
+        const int folded = juce::jlimit(0, 100, (mutate - 50) * 2);
+        stray->setValueNotifyingHost(stray->convertTo0to1((float) folded));
+    }
 }
 
 juce::ValueTree KeysProcessor::layoutToTree() const

@@ -197,9 +197,12 @@ had been spending on them. This supersedes the three-zones bullet above it.
   how far outside it may go, how long it keeps what it finds. The `Knob` enum is UI indexing
   and nothing stores it, so inserting there is free; the *parameter* was appended, which is the
   order that is not free. **Nine is what the 38 px floor was chosen to survive**: 9 knobs plus
-  the two rings and eight gaps is 422 px of the ~430 a column has at the editor's minimum
-  width, so every knob still clears the 34 px mouse-only floor. **A tenth does not fit and must
-  buy the width** - raise the editor's floor, never starve the row. **Zero is its own off
+  the two rings and eight gaps is 422 px, so every knob still clears the 34 px mouse-only
+  floor. **Measure that against the narrowest window the view is drawn in, not the editor's
+  minimum** - a column in the docked editor is comfortably over 600 px at the 1320 px floor,
+  so the docked case is not the binding one and never was; the *detached* Arp window is, and
+  it was not re-measured when this knob was added. **A tenth must buy the width** - raise the
+  floor of every window that draws the view, never starve the row. **Zero is its own off
   switch**, so Stray takes no toggle beside it, the reading that already leaves Strum, Lock
   Influence and Lean without one.
 

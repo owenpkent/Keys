@@ -2725,13 +2725,25 @@ public:
             // number of hits whatever these two say - so what was heard was pitches off the
             // chord rather than extra ones. Both halves are worth holding: how many notes there
             // are is this test, and which pitches they may be is the two above.
-            const auto count = [&](int stray)
+            //
+            // **Three shapes, because one of them cannot see the failure.** Under Up a step
+            // resolves one hit whatever Stray does, so the count is equal by construction and
+            // the assertion proves nothing. The path where a stray genuinely *could* move the
+            // count is `addHit`'s (note, channel) dedupe: two hits that collided into one
+            // before straying need not collide afterwards. Chord shape and a Harmony lane are
+            // the two ways to put more than one hit in a step, so they are the two that carry
+            // the claim - Up is kept only to show the common case is covered too.
+            const auto count = [&](int stray, ArpEngine::Direction dir, int harmony)
             {
                 ArpEngine e;
                 e.prepare(sr);
+                if (harmony > 0)
+                    for (int st = 0; st < ArpEngine::maxSteps; ++st)
+                        e.lanes.value[ArpEngine::laneHarmony][(size_t) st].store(harmony);
                 auto mp = p;
                 mp.mutate = 100;
                 mp.stray = stray;
+                mp.direction = dir;
                 juce::MidiBuffer out;
                 clock.ppq = 0.0;
                 e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
@@ -2741,8 +2753,15 @@ public:
                         ++n;
                 return n;
             };
-            expectEquals(count(100), count(0),
+            using Dir = ArpEngine::Direction;
+            expectEquals(count(100, Dir::up, 0), count(0, Dir::up, 0),
                          "a straying line fires no more notes than a tame one");
+            expectEquals(count(100, Dir::chord, 0), count(0, Dir::chord, 0),
+                         "Chord shape: three hits a step, straying or not");
+            expectEquals(count(100, Dir::up, 2), count(0, Dir::up, 2),
+                         "a Harmony lane doubles the hits, and Stray does not change that");
+            expectEquals(count(100, Dir::chord, 2), count(0, Dir::chord, 2),
+                         "Chord shape and a Harmony lane together, still note for note");
         }
 
         beginTest("Lock at 100 repeats one variation; at 0 it keeps finding new ones");
