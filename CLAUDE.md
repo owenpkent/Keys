@@ -151,13 +151,60 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   phrasing below are history**; "never early" stands. The wheel works on the halo and ring,
   up is more.
 - **Mutate has three zones, and past 50 the 2026-08-18 "cannot leave the held chord" claim no
-  longer holds - by Owen's own ask.** To 50 the knob is byte-identical to what shipped; past 50
-  `ArpEngine::mutatedPitch` (a second stage, applied to the placed pitch after the index walk)
-  may stray a scale degree or two off the chord note; past 75 a growing share of strays are
-  chromatic semitones, all of them by 100. Both stages hash the same (step, era) cell
-  (`mutateCell`, factored so they cannot disagree), so **Lock holds the out-of-scale finds
-  too** - a wrong-note lick the machine found can harden into the part. `ArpTests.cpp` pins the
-  zone boundaries: in-chord to 50, in-scale to 75, within four semitones of a chord tone always.
+  longer holds - by Owen's own ask.** **Superseded 2026-08-21 by the entry below; the "three
+  zones" reading lasted two days and is history.** To 50 the knob was byte-identical to what
+  shipped; past 50 `ArpEngine::mutatedPitch` (a second stage, applied to the placed pitch after
+  the index walk) could stray a scale degree or two off the chord note; past 75 a growing share
+  of strays were chromatic semitones, all of them by 100. Both stages hash the same (step, era)
+  cell (`mutateCell`, factored so they cannot disagree), so **Lock holds the out-of-scale finds
+  too** - a wrong-note lick the machine found can harden into the part. That last sentence is
+  the only part of this bullet still true as written.
+
+**Mutate cannot leave the held chord again, and the strays have a knob (2026-08-21).** Owen:
+*"the mutate doesn't really work the way I want ... it's adding additional notes in the
+arpeggiator ... it should just change the existing ones"* - then, asked, he chose the strays kept
+behind a control of their own rather than deleted, with Mutate's travel rescaled to the reach it
+had been spending on them. This supersedes the three-zones bullet above it.
+
+- **Nothing was ever added, and the report was still right.** A step fires the same number of
+  hits at Mutate 100 as at 0 (`fireStep` resolves one hit per `playIdx` entry either way).
+  What arrived were *pitches belonging to no chord Owen had played*, which is what extra notes
+  sound like from the listening chair. `ArpTests.cpp` pins the count outright now, beside the
+  pitch-set tests, so the two halves of that claim cannot rot apart. **Reach for this
+  distinction before redesigning anything on a report of extra notes**: the per-line **harmony
+  voices** genuinely do add hits, and they are the other thing to rule out first.
+- **One dial was carrying two questions**, and that is the lesson rather than the change of
+  mind: `mutatedIndex` asks *how hard does the run explore this chord* (never leaves it, at any
+  setting) and `mutatedPitch` asks *may a step land outside the chord at all* (that is its
+  entire job). Folded onto one knob, you could not ask the first without eventually being
+  answered the second - "explore harder" had a ceiling at 50, above which it silently became a
+  different feature. **Off has to be a position you can stay at.**
+- **`mutatedPitch` reads `Params::stray`**, appended as `arpStray` (and `arp2/3/4Stray`),
+  **default 0**, so a session that predates it cannot acquire a note it was not already playing
+  and needs no migration. Its own two zones on its own travel: the knob is how often a step
+  leaves the chord (0 never, 100 every step), and past **50** a growing share of strays are
+  chromatic rather than in-scale, all of them at 100 - those thresholds sat at 50 and 75 of
+  *Mutate's* travel before. **Independent of Mutate on purpose**: Stray with Mutate at zero is
+  a plain Up run that occasionally plays a wrong note without its order changing, which was
+  unreachable while the two shared a dial. **Lock still holds both**, same `mutateCell`.
+- **Mutate's reach grows over the whole knob now**: `1 + amt * 3 / 100`, one chord entry to
+  four, where it was `1 + amt * 2 / 100` - one entry until 50 and three only at exactly 100,
+  because the upper half was spent elsewhere. **Capped at `count - 1`**, which is not tidying:
+  reaching further than the chord is long only wraps onto notes a nearer reach already offers,
+  so an uncapped reach reads as the knob doing *less* the higher it goes.
+- **STRAY is the ninth knob on the macro card, inserted between MUTATE and LOCK** rather than
+  appended to the row, so the three read left to right as one sentence - how hard it explores,
+  how far outside it may go, how long it keeps what it finds. The `Knob` enum is UI indexing
+  and nothing stores it, so inserting there is free; the *parameter* was appended, which is the
+  order that is not free. **Nine is what the 38 px floor was chosen to survive**: 9 knobs plus
+  the two rings and eight gaps is 422 px, so every knob still clears the 34 px mouse-only
+  floor. **Measure that against the narrowest window the view is drawn in, not the editor's
+  minimum** - a column in the docked editor is comfortably over 600 px at the 1320 px floor,
+  so the docked case is not the binding one and never was; the *detached* Arp window is, and
+  it was not re-measured when this knob was added. **A tenth must buy the width** - raise the
+  floor of every window that draws the view, never starve the row. **Zero is its own off
+  switch**, so Stray takes no toggle beside it, the reading that already leaves Strum, Lock
+  Influence and Lean without one.
 
 **The step sequencer pass (2026-08-18, second round of that day).** Owen: *"a usability and
 functionality pass of the step sequencer. I wanna draw a lot of inspiration from [Kirnu Cream] and
@@ -269,10 +316,11 @@ further down; the ones it contradicts are marked where they sit.
   meets it rather than breaking it: the fear behind that rule was a machine wandering onto notes
   nobody aimed at, and `mutatedIndex` moves the run to a different entry of **the sequence already
   built from the held chord**. Every note it can reach is a note that chord contains; the reach is
-  in **chord entries, never semitones**. (**True only to the knob's halfway point since
-  2026-08-19** - past 50 `mutatedPitch` may stray in scale, past 75 chromatically, by Owen's own
-  ask; see the round at the top of this section. `ArpTests.cpp` pins the zone boundaries instead
-  of the old 10..100 in-chord sweep.) `laneRand` is still the
+  in **chord entries, never semitones**. (**True again at every setting since 2026-08-21**, after two days
+  in which it held only to the knob's halfway point: `mutatedPitch` moved out to its own
+  parameter, `Stray`, defaulting to off - see the round at the top of this section.
+  `ArpTests.cpp` sweeps 10..100 for the in-chord claim once more, and pins Stray's own zones
+  separately.) `laneRand` is still the
   only thing allowed to change a note you *drew*, because you drew it there.
   **LOCK is the Turing Machine** (`docs/SEQUENCER_LANDSCAPE.md` ranked it as the one randomness Keys
   lacked): 0 redraws every pass, 100 is one era and the first variation repeats for good. It is a
@@ -2004,7 +2052,8 @@ Four things will bite otherwise:
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
   first-match caveat), and `Macro OCT A` / `Macro GATE A` /
-  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **eight again from 2026-08-18**:
+  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **nine from 2026-08-21**, when
+  `Macro STRAY A` joined the row between MUTATE and LOCK. It was eight from 2026-08-18:
   `Macro H.VEL A` retired on 2026-08-17 when Humanize Velocity folded into VEL's own ring (see
   the RangeKnob bullet above), and `Macro CHANCE A` was replaced the next day by `Macro MUTATE A`
   and `Macro LOCK A`. Do not look for `Macro CHANCE A` or `Macro H.VEL A`. **The harmony strip

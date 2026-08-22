@@ -227,7 +227,13 @@ public:
         // Eight again as of 2026-08-18: CHANCE became MUTATE and LOCK joined it. The strip was
         // eight until H.VEL folded into VEL's ring on 2026-08-17, so this is a width the row
         // has already carried - and the reserve-before-Shape rule below is what made that safe.
-        enum Knob { kOctShift = 0, kGate, kMutate, kLock, kSwing, kOffset, kVel, kHTime,
+        // **Nine from 2026-08-21**, STRAY between MUTATE and LOCK: the three read left to
+        // right as one sentence - how hard the run explores, how far outside the chord it may
+        // go, how long it keeps what it finds - which is why STRAY is inserted rather than
+        // appended to the end of the row. This enum is UI indexing and nothing stores it, so
+        // inserting here is free; the *parameter* was appended, which is the order that is
+        // not free (see KeysProcessor::apStray).
+        enum Knob { kOctShift = 0, kGate, kMutate, kStray, kLock, kSwing, kOffset, kVel, kHTime,
                     numKnobs };
 
     private:

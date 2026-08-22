@@ -1730,10 +1730,19 @@ namespace
         // still has its own slider in the Play page's PLAYBACK group, which is where a control
         // you set once and leave belongs. These two are the ones you sit and turn.
         { KeysProcessor::apMutate, "MUTATE",
-          "How far this line explores away from what the run would have played. Up to halfway "
-          "it can only reach other notes of the chord you are holding; past halfway it starts "
-          "straying onto in-scale neighbours, and near the top some strays go fully chromatic "
-          "- out of scale on purpose." },
+          "How often the run swaps a step for a different note of the chord you are holding, "
+          "and how far along the chord it reaches to find one. It never plays a note that is "
+          "not in your chord, at any setting - that is what STRAY beside it is for." },
+        // STRAY (2026-08-21) is Mutate's own upper half, moved out to a control of its own.
+        // Owen: "it's adding additional notes in the arpeggiator ... it should just change the
+        // existing ones" - the additional notes were this stage, reachable only by turning
+        // Mutate past halfway, so there was no way to explore the chord hard without them.
+        // Zero is off and is the default, which is what makes turning MUTATE up safe again.
+        { KeysProcessor::apStray, "STRAY",
+          "How often a step is allowed to land on a note that is not in your chord. At 0 - "
+          "where it starts - this line plays your chord and nothing else. Turned up, strays "
+          "are in-scale neighbours at first and go chromatic towards the top. LOCK holds them "
+          "like any other variation, so a wrong note worth keeping stays." },
         { KeysProcessor::apMutateLock, "LOCK",
           "How long it keeps what it finds. Left, a new variation every time round; right, the "
           "first one it finds repeats for good. In between it holds an idea, then moves on." },
@@ -1928,7 +1937,7 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
     for (auto* b : { &shapePrev, &shapeNext })
         addAndMakeVisible(*b);
 
-    // The seven settings a regular arpeggiator has, as the skin's machined rotary - the same
+    // The settings a regular arpeggiator has, as the skin's machined rotary - the same
     // knob the band above draws the same parameters with (Owen, 2026-08-01: "what other knobs
     // can we have? should be like regular arp settings").
     for (int k = 0; k < numKnobs; ++k)
@@ -2461,7 +2470,7 @@ void ArpPanel::MacroRow::resized()
 {
     // Three lines inside one card (2026-08-02, Owen: "having the arpeggiators parallel to
     // each other instead of one on top of the other"): what the line plays (On, rate,
-    // shape), the seven knobs under their own heading strip (eight until VEL absorbed H.VEL
+    // shape), the nine knobs under their own heading strip (seven when VEL absorbed H.VEL
     // as its own ring, 2026-08-17), and the rate's modifiers with the held chord. Stacked
     // *inside* the card because two cards now share the panel's width, and the old single
     // line needed more width than half the panel has. The heights here are
@@ -2506,7 +2515,11 @@ void ArpPanel::MacroRow::resized()
     auto knobLine = full.removeFromTop(arpMacroKnobLine);
     // 38 keeps the card solvable at the editor's minimum width, where a column is ~430 px
     // inside and seven knobs land at ~52 (eight landed at 48 before the VEL/H.VEL merge);
-    // they stop growing at 96 as before. The two range knobs are `each` wide *plus their
+    // they stop growing at 96 as before. **Nine since 2026-08-21**, when STRAY joined the
+    // row, and nine is what 38 was chosen to survive: 9*38 + the two rings + eight gaps is
+    // 422 of that 430, so the floor is met rather than approached, and every knob is still
+    // over the 34 px mouse-only minimum. A tenth would not fit and would have to buy the
+    // width rather than take it - raise the editor's floor, never starve the row. The two range knobs are `each` wide *plus their
     // ring on both sides*, reserved out of the row here rather than taken off a neighbour
     // later: the face inside a range knob is then exactly as wide as every plain one, so the
     // row reads as seven knobs of one size with a ring round two of them, which is what it is.
@@ -2566,7 +2579,7 @@ void ArpPanel::MacroRow::resized()
 
     // The rate's modifiers keep their full 34 px hit height - they are targets, and wide
     // enough for the word plus its tick, since a bare tick box beside "Dot" would be two
-    // controls' worth of ambiguity in a card that already has eight unlabelled knobs. The
+    // controls' worth of ambiguity in a card that already has nine unlabelled knobs. The
     // held chord sits at the card's bottom-right corner, where a dropped card lands.
     full.removeFromTop(2);
     auto subRow = full.removeFromTop(arpMacroMods);

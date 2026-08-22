@@ -128,7 +128,7 @@ count semitones and can land outside the scale entirely, which is what keeps a s
 sounding like BigSky's rather than like a second, quieter copy of the lane that already has that
 job.
 
-### Mutate: three zones, not one
+### Mutate: three zones, not one (superseded 2026-08-21 - see `## Mutate and Stray`)
 
 **Mutate off the leash is exactly what Owen asked the knob to become.** The 2026-08-18 build
 (`## Mutate and Lock`, below) is the first half and is unchanged over the knob's first fifty
@@ -420,8 +420,9 @@ old outer LINES box gone, since a frame around both was what made two arpeggiato
 (*"we need a bit more clear delineation"*). A card is three stacked lines, because half the
 panel's width cannot hold what used to be one full-width row: a detented rate knob with `<`
 `>` and its Sync/Hz switch, and the shape with steppers of its own, under **RATE / SHAPE**
-micro-caps so the two stepper pairs read as belonging to their words; **eight knobs** under
-their own headings - Oct, Gate, Mutate, Lock, Swing, Offset, Vel, H.Time (seven for one day,
+micro-caps so the two stepper pairs read as belonging to their words; **nine knobs** under
+their own headings - Oct, Gate, Mutate, Stray, Lock, Swing, Offset, Vel, H.Time (nine since
+2026-08-21, when Stray moved out of Mutate's upper half; eight before that, and seven for one day,
 2026-08-17 to 2026-08-18, when H.Vel folded into Vel's own ring - see below - before Chance
 split into Mutate and Lock the next day, restoring the strip to eight; see `## Mutate and Lock`
 and the 2026-08-19 section above), Vel and H.Time both being
@@ -1229,6 +1230,58 @@ Two duplicate-table bugs, both of the family this repo keeps logging:
 - The lane tab row divided its width by a hard-coded twelve, so appending Reset laid its tab out at
   four pixels - the identical starvation the Chain lane caused when it made twelve. `LayoutTests`
   caught this one before it was ever seen on screen, which is the argument for that test.
+
+## Mutate and Stray (2026-08-21)
+
+Owen: *"the mutate doesn't really work the way I want ... it's adding additional notes in the
+arpeggiator ... it should just change the existing ones."*
+
+**Nothing was being added, and the report was still right.** A step fires the same number of
+hits at Mutate 100 as at 0 - `fireStep` resolves one hit per `playIdx` entry either way, and
+`ArpTests.cpp` pins that with a count comparison so the claim cannot rot. What arrived were
+pitches belonging to no chord Owen had played, which is what extra notes sound like from the
+listening chair. That was `mutatedPitch`, the second stage added on 2026-08-19 and reachable
+only by turning Mutate past its halfway point.
+
+**The split is the lesson, not the change of mind.** One dial was carrying two questions:
+
+| | question | can it leave the chord? |
+|---|---|---|
+| `mutatedIndex` | how hard does the run explore *this* chord? | never, at any setting |
+| `mutatedPitch` | may a step land outside the chord at all? | that is its entire job |
+
+Folding them onto one knob meant you could not ask the first without eventually being
+answered the second - so "explore the chord harder" had a ceiling at 50, above which it
+became a different feature. Off has to be a position you can *stay* at, and it was not one.
+
+So `mutatedPitch` reads **`Params::stray`** now, its own parameter and its own knob:
+
+- **Mutate** is one meaning across 0..100: `mutatedIndex` alone, confined to the sequence
+  built from what is held. Its **reach** grows over the whole travel now (`1 + amt * 3 / 100`,
+  one chord entry to four, capped at the sequence length) where it used to be `1 + amt * 2 /
+  100` - one entry until 50 and three only at exactly 100, because the upper half was spent
+  elsewhere. Capping at `count - 1` matters: reaching further than the chord is long only
+  wraps onto notes a nearer reach already offers, which reads as the knob doing *less* the
+  higher it goes.
+- **Stray** is `mutatedPitch`, rescaled onto its own dial. The knob is how often a step
+  leaves the chord (0 never, 100 every step); its own upper half is where the strays turn
+  chromatic (`amt > 50`, all of them by 100) where those thresholds used to sit at 50 and 75
+  of Mutate's travel. **Default 0**, so no session that predates the parameter can acquire a
+  note it was not already playing.
+- **They are independent on purpose.** Stray with Mutate at zero is a plain Up run that
+  occasionally plays a wrong note without its order changing, which is a real thing to want
+  and was unreachable while the two shared a dial.
+- **Lock is untouched and still holds both**, because both stages hash the same (step, era)
+  cell through `mutateCell`. A wrong-note lick the machine finds still hardens into the part.
+
+**Zero is its own off switch**, so Stray takes no toggle beside it - the reading that already
+leaves Strum, Lock Influence and Lean without one.
+
+On screen it is the **ninth knob** on each macro card, inserted between MUTATE and LOCK
+rather than appended to the end of the row, so the three read left to right as one sentence:
+how hard the run explores, how far outside the chord it may go, how long it keeps what it
+finds. The `Knob` enum is UI indexing and nothing stores it, so inserting there is free; the
+**parameter** was appended, which is the order that is not free.
 
 ## Mutate and Lock (2026-08-18)
 

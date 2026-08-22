@@ -2588,13 +2588,15 @@ public:
                 expectEquals(b[i].note, a[i].note, "same notes");
         }
 
-        beginTest("Mutate to 50 never leaves the held chord");
+        beginTest("Mutate never leaves the held chord, at any setting");
         {
-            // The 2026-08-18 rule, kept for the knob's lower half: to 50, Mutate moves the run
-            // to another entry of the sequence built from what is held, so every pitch it can
-            // reach is one of them. Swept, because a reach that grows with the amount is just
-            // the sort of thing that falls off the end at the boundary and nowhere else.
-            for (int amt = 10; amt <= 50; amt += 10)
+            // **The whole knob, since 2026-08-21** (Owen: "it's adding additional notes in the
+            // arpeggiator ... it should just change the existing ones"). This swept to 50 only
+            // while the dial's upper half carried the out-of-chord stage; that stage is Stray's
+            // now, so the promise holds all the way to 100 and this test is what says so.
+            // Swept rather than sampled at the ends, because a reach that grows with the amount
+            // is exactly the sort of thing that falls off the end at one value and nowhere else.
+            for (int amt = 10; amt <= 100; amt += 10)
             {
                 ArpEngine e;
                 e.prepare(sr);
@@ -2611,18 +2613,71 @@ public:
             }
         }
 
-        beginTest("Mutate past 50 strays in scale; only past 75 may it leave the scale");
+        beginTest("Mutate's reach grows with the knob rather than only past halfway");
         {
-            // The 2026-08-19 zones (Owen: "higher values can go out of scale"). C major as the
-            // mask - the default 0xFFF is chromatic and would make "in scale" vacuous.
-            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
-                                          | (1u << 7) | (1u << 9) | (1u << 11);
-            for (int amt = 55; amt <= 75; amt += 10)
+            // What the top of the travel buys now that it is not spending itself on strays.
+            // Measured as *distinct* pitches reached over a fixed run from a wide chord: a
+            // reach of one entry can only ever touch the neighbours of what the walk chose, so
+            // a wider reach shows up as more of the chord being visited. Four octaves of triad,
+            // because over a plain three-note chord every reach past one wraps onto the same
+            // three notes and there is nothing left to measure.
+            const auto spread = [&](int amt)
             {
                 ArpEngine e;
                 e.prepare(sr);
                 auto mp = p;
                 mp.mutate = amt;
+                mp.usePattern = true; // a fixed base index, so the spread is Mutate's, not the walk's
+                for (int st = 0; st < 8; ++st)
+                    e.lanes.value[ArpEngine::laneNote][(size_t) st].store(6);
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 48,
+                          chordOn({ 48, 52, 55, 60, 64, 67, 72, 76, 79, 84, 88, 91 }), out);
+                std::set<int> seen;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        seen.insert(ev.note);
+                return (int) seen.size();
+            };
+            expect(spread(100) > spread(30),
+                   "the top of the knob visits more of the chord than the bottom does");
+        }
+
+        // --- Stray (2026-08-21) -----------------------------------------------------------
+
+        beginTest("Stray at 0 keeps every note in the chord, however high Mutate goes");
+        {
+            // The default, and the reason Mutate is safe to turn up again. A stronger claim
+            // than the Mutate sweep above: there this parameter was merely left at its default,
+            // here it is pinned at zero while its neighbour is at maximum.
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.mutate = 100;
+            mp.stray = 0;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+            for (auto& ev : collect(out))
+                if (ev.on)
+                    expect(ev.note == 60 || ev.note == 64 || ev.note == 67,
+                           "Stray 0 played " + juce::String(ev.note) + ", off the held chord");
+        }
+
+        beginTest("Stray to 50 stays in scale; only past 50 may it leave the scale");
+        {
+            // The 2026-08-19 zones, on their own knob and rescaled to its travel - they used to
+            // sit at 50 and 75 of Mutate's. C major as the mask: the default 0xFFF is chromatic
+            // and would make "in scale" vacuous.
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            for (int amt = 10; amt <= 50; amt += 10)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto mp = p;
+                mp.stray = amt;
                 mp.rootPc = 0;
                 mp.scaleMask = cMajor;
                 juce::MidiBuffer out;
@@ -2631,7 +2686,7 @@ public:
                 for (auto& ev : collect(out))
                     if (ev.on)
                         expect((cMajor >> (ev.note % 12)) & 1u,
-                               "Mutate " + juce::String(amt) + " played " + juce::String(ev.note)
+                               "Stray " + juce::String(amt) + " played " + juce::String(ev.note)
                                    + ", out of scale below the chromatic zone");
             }
             // At the top the strays are chromatic but still local: a stray is at most three
@@ -2642,7 +2697,7 @@ public:
                 ArpEngine e;
                 e.prepare(sr);
                 auto mp = p;
-                mp.mutate = 100;
+                mp.stray = 100;
                 mp.rootPc = 0;
                 mp.scaleMask = cMajor;
                 juce::MidiBuffer out;
@@ -2655,12 +2710,58 @@ public:
                         int nearest = 127;
                         for (int c : { 60, 64, 67 })
                             nearest = juce::jmin(nearest, std::abs(ev.note - c));
-                        expect(nearest <= 4, "Mutate 100 played " + juce::String(ev.note)
+                        expect(nearest <= 4, "Stray 100 played " + juce::String(ev.note)
                                                  + ", further than a stray can reach");
                         leftScale = leftScale || (((cMajor >> (ev.note % 12)) & 1u) == 0);
                     }
                 expect(leftScale, "at 100, over 32 steps, at least one stray left the scale");
             }
+        }
+
+        beginTest("Stray adds no note events, it only replaces them");
+        {
+            // The complaint the whole split came out of, pinned so it cannot come back: "it's
+            // adding additional notes in the arpeggiator". It never did - a step fires the same
+            // number of hits whatever these two say - so what was heard was pitches off the
+            // chord rather than extra ones. Both halves are worth holding: how many notes there
+            // are is this test, and which pitches they may be is the two above.
+            //
+            // **Three shapes, because one of them cannot see the failure.** Under Up a step
+            // resolves one hit whatever Stray does, so the count is equal by construction and
+            // the assertion proves nothing. The path where a stray genuinely *could* move the
+            // count is `addHit`'s (note, channel) dedupe: two hits that collided into one
+            // before straying need not collide afterwards. Chord shape and a Harmony lane are
+            // the two ways to put more than one hit in a step, so they are the two that carry
+            // the claim - Up is kept only to show the common case is covered too.
+            const auto count = [&](int stray, ArpEngine::Direction dir, int harmony)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                if (harmony > 0)
+                    for (int st = 0; st < ArpEngine::maxSteps; ++st)
+                        e.lanes.value[ArpEngine::laneHarmony][(size_t) st].store(harmony);
+                auto mp = p;
+                mp.mutate = 100;
+                mp.stray = stray;
+                mp.direction = dir;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(mp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+                int n = 0;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        ++n;
+                return n;
+            };
+            using Dir = ArpEngine::Direction;
+            expectEquals(count(100, Dir::up, 0), count(0, Dir::up, 0),
+                         "a straying line fires no more notes than a tame one");
+            expectEquals(count(100, Dir::chord, 0), count(0, Dir::chord, 0),
+                         "Chord shape: three hits a step, straying or not");
+            expectEquals(count(100, Dir::up, 2), count(0, Dir::up, 2),
+                         "a Harmony lane doubles the hits, and Stray does not change that");
+            expectEquals(count(100, Dir::chord, 2), count(0, Dir::chord, 2),
+                         "Chord shape and a Harmony lane together, still note for note");
         }
 
         beginTest("Lock at 100 repeats one variation; at 0 it keeps finding new ones");
@@ -2671,6 +2772,7 @@ public:
                 e.prepare(sr);
                 auto mp = p;
                 mp.mutate = 100;
+                mp.stray = 60; // Lock holds the out-of-chord finds too, not only the in-chord ones
                 mp.mutateLock = lock;
                 // A drawn Note lane, not the Up shape: the shape walk carries a cursor, so its
                 // base index has period 3 over a triad and is not a function of the step at all.
@@ -2715,6 +2817,7 @@ public:
                 e.prepare(sr);
                 auto mp = p;
                 mp.mutate = 80;
+                mp.stray = 60; // both stages hash the same cell, so this pins both of them
                 mp.mutateLock = 40;
                 mp.usePattern = true; // see the Lock test above for why the shape will not do
                 for (int st = 0; st < 8; ++st)

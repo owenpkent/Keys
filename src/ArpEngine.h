@@ -549,13 +549,28 @@ public:
         // Mutate (2026-08-18): how far the run explores *other notes of the held chord*, and
         // how long it keeps what it finds. See `mutatedIndex`. Both 0 is the engine unchanged.
         //
-        // Three zones since 2026-08-19 (Owen: "higher values can go out of scale"): to 50 the
-        // knob is exactly the 2026-08-18 control and cannot leave the chord; past 50 a mutated
-        // step may stray a scale degree or two off the chord note instead; past 75 some of
-        // those strays are chromatic semitones. See `mutatedPitch` for the second stage.
+        // **One meaning across the whole knob again since 2026-08-21** (Owen: "it's adding
+        // additional notes in the arpeggiator ... it should just change the existing ones").
+        // Mutate had carried two stages on one dial from 2026-08-19: an index walk inside the
+        // chord below 50 and, above it, a second stage that shoved the resolved pitch off the
+        // chord entirely. That second stage is what a listener hears as notes appearing that
+        // nobody put there, and it is a different question from the first - so it moved out to
+        // `stray` below, its own control, defaulting to off. Mutate cannot leave the held
+        // chord at any setting; what the top of its travel buys now is *reach*, in chord
+        // entries, which is the axis it never spent its upper half on.
         int mutate = 0;     // 0..100
         int mutateLock = 0; // 0..100; 100 = the first variation found repeats for good
         int mutateSeed = 0; // the line index, so two lines never explore in lockstep
+        // **Stray** (2026-08-21): how far a step is allowed to land *outside* the held chord,
+        // and the only thing in the engine that can put a pitch there without having been
+        // drawn on that step. 0 - the default, and what every session before it opens with -
+        // is the promise that the line plays your chord and nothing else. Two zones on its own
+        // travel: to 50 a stray is an in-scale neighbour a degree or two away, past 50 a
+        // growing share are chromatic semitones, all of them at 100. Independent of Mutate on
+        // purpose, so a plain Up run can pick up wrong notes without its order changing, but
+        // held by the same Lock: a wrong-note lick the machine finds can still harden into the
+        // part. See `mutatedPitch`.
+        int stray = 0;      // 0..100
         // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): an interval
         // in semitones added to every note the step resolved - Mutate's stray included, so the
         // voice follows the run - and how often it fires, rolled per step per voice off the
@@ -1235,19 +1250,37 @@ private:
             return chosen; // this step keeps what it was given, this era
 
         // The reach is in chord entries, never in semitones - one step of it is one note of the
-        // chord - which is why this stage cannot leave the harmony at any amount. Leaving it is
-        // mutatedPitch's job, and only past the knob's halfway point.
-        const int reach = 1 + amt * 2 / 100; // 1..3 entries either side
+        // chord - which is why this stage cannot leave the harmony at any amount. Leaving the
+        // chord is `mutatedPitch`'s job and Stray's alone.
+        //
+        // **Spread over the whole knob since 2026-08-21.** It used to be `1 + amt * 2 / 100`,
+        // which is one entry until 50 and three only at exactly 100 - because the dial's upper
+        // half was spent on the out-of-chord stage that has since moved to Stray. With that
+        // gone the reach is what the top of the travel is for, so it grows the whole way up:
+        // one entry at the bottom, four at the top. Capped at the sequence, since reaching
+        // further than the chord is long only wraps back onto notes nearer reaches already
+        // offer, which reads as the knob doing less the higher it goes.
+        // `count - 1` needs no jmax: the early return above leaves count >= 2 here, so the
+        // cap is at least 1 by construction. Guarding it again would read as if a one-note
+        // sequence could reach this line, which is the one case that cannot.
+        const int reach = juce::jmin(1 + amt * 3 / 100, count - 1); // 1..4
         const int delta = (int) ((h >> 8) % (unsigned) (reach * 2 + 1)) - reach;
         return ((chosen + delta) % count + count) % count;
     }
 
-    // **The out-of-scale half of Mutate** (2026-08-19, Owen: "I want a mutate knob, which
-    // effects the notes being played. higher values can go out of scale"). Three zones on the
-    // one knob: to 50 this stage does nothing and Mutate is exactly the 2026-08-18 control,
-    // confined to the held chord. Past 50 a step may land a scale degree or two away from the
-    // note the walk chose - in scale, out of chord. Past 75 a growing share of those strays
-    // are chromatic semitones, and by 100 all of them are.
+    // **Stray**: the one thing in the engine allowed to put a pitch outside the held chord
+    // (2026-08-19 as Mutate's upper half; its own control from 2026-08-21, Owen: "it's adding
+    // additional notes in the arpeggiator ... it should just change the existing ones").
+    //
+    // It was the top half of the Mutate dial for two days, and the split is the lesson rather
+    // than a change of mind: "explore the chord harder" and "leave the chord" are two
+    // questions, and folding them onto one knob meant you could not ask the first without
+    // eventually being answered the second. Off is now a position you can *stay* at, which is
+    // what makes the wander safe to turn up.
+    //
+    // Two zones on its own travel: to 50 a stray lands a scale degree or two from the note the
+    // walk chose - in scale, out of chord; past 50 a growing share are chromatic instead, all
+    // of them at 100. How *often* a step strays is the knob itself, so 100 is every step.
     //
     // Applied to the *placed* pitch, after the index walk and after place(), so a step that
     // strays still strays from the note the run actually reached - and before the per-line
@@ -1256,8 +1289,8 @@ private:
     // ones: a wander that hardens, out-of-scale notes included.
     int mutatedPitch(const Params& p, int note, long long globalStep) const noexcept
     {
-        const int amt = juce::jlimit(0, 100, p.mutate);
-        if (amt <= 50)
+        const int amt = juce::jlimit(0, 100, p.stray);
+        if (amt <= 0)
             return note;
 
         int step; long long era;
@@ -1266,19 +1299,19 @@ private:
                                       ^ (unsigned int) (era * 668265263u)
                                       ^ (unsigned int) (p.mutateSeed * 2246822519u)
                                       ^ 0x9e3779b9u);
-        // How often a step leaves the chord at all: never at 50, every other step by 100.
-        if ((int) (h % 100u) >= amt - 50)
+        // How often a step leaves the chord at all: never at 0, every step at 100.
+        if ((int) (h % 100u) >= amt)
             return note;
 
         const int dir = ((h >> 14) & 1u) != 0 ? 1 : -1;
-        // The chromatic share of the strays: none at 75, all of them at 100.
-        if (amt > 75 && (int) ((h >> 7) % 100u) < (amt - 75) * 4)
+        // The chromatic share of the strays: none at 50, all of them at 100.
+        if (amt > 50 && (int) ((h >> 7) % 100u) < (amt - 50) * 2)
             return juce::jlimit(0, 127, note + dir * (1 + (int) ((h >> 9) % 3u)));
-        // In scale, which is the middle zone's whole meaning - and note that with Scale set to
+        // In scale, which is the lower zone's whole meaning - and note that with Scale set to
         // **Chromatic** the mask is every pitch class, so "a scale degree or two" *is* one or
-        // two semitones and the middle zone reads as the chromatic one. That is the setting
+        // two semitones and the lower zone reads as the chromatic one. That is the setting
         // being honest rather than the zone leaking: there is no non-chromatic answer to
-        // "stay in the chromatic scale". The three zones are three zones under any scale that
+        // "stay in the chromatic scale". The two zones are two zones under any scale that
         // actually excludes something, which is every other entry in the list.
         return shiftByDegrees(note, dir * (1 + (int) ((h >> 9) % 2u)), p.scaleMask, p.rootPc);
     }
@@ -1699,11 +1732,23 @@ private:
                 const int idx = juce::jlimit(0, seqCount - 1, playIdx[k]);
                 const auto& entry = seq[(size_t) idx];
                 const auto& src = held[(size_t) juce::jlimit(0, heldCount - 1, entry.heldIndex)];
-                // Mutate's pitch stage lands here, on the placed note (2026-08-19): past the
-                // knob's halfway point a step may stray off the chord note the walk chose -
-                // in scale first, chromatic at the top. Resolved once, so the subharmonic
-                // voice below offsets from the note actually played rather than the one that
-                // was aimed at.
+                // Stray lands here, on the placed note (2026-08-19; its own knob from
+                // 2026-08-21): above zero a step may leave the chord note the walk chose -
+                // in scale first, chromatic at the top. It is the only stage that can, which
+                // is why Mutate above it is safe to turn up.
+                //
+                // **The two harmony modes part here, on purpose.** The subharmonic voice
+                // (mode 1) offsets from `played`, the note actually sounding, because it is a
+                // fixed semitone interval and an interval measured from a note nobody heard
+                // is not the interval. The chord-tone voice (mode 0) counts from `idx`, the
+                // *un-strayed* index, because it counts sequence entries rather than
+                // semitones and that counting is the whole of what keeps it inside the chord
+                // - a strayed note is by definition not a chord tone, so "two chord tones
+                // above it" has no answer to give. So a straying step under mode 0 is one
+                // note off the chord against a harmony still in it, which is the reading that
+                // makes Stray a wrong note rather than a key change. Do not "fix" the mode-0
+                // branch to read `played`; that is what the line below deliberately does not
+                // do.
                 const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset), globalStep);
                 addHit(played, src.velocity * velScale, src.channel);
 

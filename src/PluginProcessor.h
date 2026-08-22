@@ -327,7 +327,16 @@ public:
                     // list names intervals, and a Major 3rd is four semitones whatever the
                     // scale says - which is what makes this the shimmer control rather than a
                     // third copy of the Harmony lane's chord-tone counting.
-                    apHarm1, apHarm1Chance, apHarm2, apHarm2Chance, numArpParams };
+                    apHarm1, apHarm1Chance, apHarm2, apHarm2Chance,
+                    // Appended 2026-08-21 (Owen: "it's adding additional notes in the
+                    // arpeggiator ... it should just change the existing ones"). Mutate had
+                    // carried this on its own upper half since 2026-08-19; it is the only
+                    // thing in the engine that can play a pitch outside the held chord, which
+                    // is a different question from how hard the run explores inside it, so it
+                    // is a control of its own. Default 0 - off - so a session saved before it
+                    // opens playing the chord it was saved playing, and Mutate stops being
+                    // able to leave that chord at any setting. See ArpEngine's `mutatedPitch`.
+                    apStray, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
@@ -930,6 +939,15 @@ protected:
     // The Humanize spans, appended 2026-08-03. Absence is the tell and the default is the
     // repair; there is no older parameter to fold, unlike the two above.
     void migrateHumanSpans(const juce::ValueTree& root);
+    // Stray, appended 2026-08-21, and the one migration here whose absence tell is not enough
+    // on its own. Stray took over the out-of-chord stage that Mutate's upper half carried from
+    // 2026-08-19, so a session saved in that two-day window has a Mutate above 50 that *meant*
+    // straying and a Stray that is simply absent - and the parameter's own default is 0, which
+    // is off. Left alone it opens playing a different part, in-chord where it used to wander,
+    // with nothing on screen to say why. `apHarm1` is what dates the session: the harmony
+    // voices and Mutate's stray zones landed in the same 2026-08-19 round, so Harm1 present
+    // with Stray absent is exactly that window and nothing else.
+    void migrateStray(const juce::ValueTree& root);
 
     juce::ValueTree layoutToTree() const;
     void layoutFromTree(const juce::ValueTree& root);

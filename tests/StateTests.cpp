@@ -200,6 +200,80 @@ public:
                    "a saved off is not migrated over - the tell is absence, not value");
         }
 
+        beginTest("migrateStray dates the session before it decides what absence means");
+        {
+            // The one migration whose tell is two parameters rather than one. Stray's default
+            // is 0, which is the whole repair for a session saved before 2026-08-19 - Mutate
+            // could not leave the chord then - but the *wrong* answer for the two-day window
+            // when Mutate's upper half was this feature. `apHarm1` separates them: it landed
+            // in the same 2026-08-19 round, so present-with-Stray-absent is that window.
+            const auto strayId = KeysProcessor::arpParamId(0, KeysProcessor::apStray);
+            const auto harmId  = KeysProcessor::arpParamId(0, KeysProcessor::apHarm1);
+            const auto mutId   = KeysProcessor::arpParamId(0, KeysProcessor::apMutate);
+
+            // In the window: Harm1 present, Stray absent, Mutate 80. The old dial strayed over
+            // (50, 100], so 80 is 60% of the way into that stage - (80 - 50) * 2 = 60.
+            {
+                Host h;
+                setParam(h.processor, mutId, 80.0f);
+                setParam(h.processor, strayId, 25.0f); // a live value that must NOT survive
+                const auto block = stateWithout(h.processor, { strayId });
+                h.processor.setStateInformation(block.getData(), (int) block.getSize());
+                expectWithinAbsoluteError(paramOf(h.processor, strayId), 60.0f, 0.51f,
+                                          "a windowed session keeps the strays it was saved with");
+            }
+
+            // The zone boundary is the case worth pinning: old Mutate turned chromatic at 75,
+            // and Stray turns chromatic at 50, so 75 must land exactly on 50 or the two zones
+            // stop lining up and the fold is approximate rather than exact.
+            {
+                Host h;
+                setParam(h.processor, mutId, 75.0f);
+                const auto block = stateWithout(h.processor, { strayId });
+                h.processor.setStateInformation(block.getData(), (int) block.getSize());
+                expectWithinAbsoluteError(paramOf(h.processor, strayId), 50.0f, 0.51f,
+                                          "the in-scale/chromatic boundary maps onto its twin");
+            }
+
+            // Below the old halfway point there was no stray stage at all, so there is nothing
+            // to fold and the default is right even inside the window.
+            {
+                Host h;
+                setParam(h.processor, mutId, 30.0f);
+                setParam(h.processor, strayId, 90.0f);
+                const auto block = stateWithout(h.processor, { strayId });
+                h.processor.setStateInformation(block.getData(), (int) block.getSize());
+                expectWithinAbsoluteError(paramOf(h.processor, strayId), 0.0f, 0.51f,
+                                          "Mutate under 50 never strayed, so nothing folds forward");
+            }
+
+            // Predating the round entirely: Harm1 absent too. Mutate was in-chord at every
+            // setting then, so a high Mutate must NOT acquire strays it never had.
+            {
+                Host h;
+                setParam(h.processor, mutId, 100.0f);
+                setParam(h.processor, strayId, 90.0f);
+                const auto block = stateWithout(h.processor, { strayId, harmId });
+                h.processor.setStateInformation(block.getData(), (int) block.getSize());
+                expectWithinAbsoluteError(paramOf(h.processor, strayId), 0.0f, 0.51f,
+                                          "a pre-2026-08-19 session gains no stray it never played");
+            }
+
+            // Present and zero must survive: the tell is absence, not value - a user who turned
+            // Stray off on a high-Mutate line has to stay off. Same rule bpmSync's test pins.
+            {
+                Host h;
+                setParam(h.processor, mutId, 100.0f);
+                setParam(h.processor, strayId, 0.0f);
+                juce::MemoryBlock full;
+                h.processor.getStateInformation(full);
+                setParam(h.processor, strayId, 70.0f);
+                h.processor.setStateInformation(full.getData(), (int) full.getSize());
+                expectWithinAbsoluteError(paramOf(h.processor, strayId), 0.0f, 0.51f,
+                                          "a saved zero is not migrated over");
+            }
+        }
+
         beginTest("undo puts a cleared pad back, and redo takes it away again");
         {
             Host h;

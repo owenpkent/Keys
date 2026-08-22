@@ -563,6 +563,27 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
             ParameterID { id(("Harm" + v + "Chance").toRawUTF8()), 1 },
             nm + " Harmony " + v + " Chance", 0, 100, 100));
     }
+
+    // **Stray** (2026-08-21, Owen: "the mutate doesn't really work the way I want ... it's
+    // adding additional notes in the arpeggiator ... it should just change the existing ones").
+    //
+    // Mutate carried this on its own upper half from 2026-08-19, and what Owen heard was
+    // exactly what that stage does: pitches arriving that are in no chord he played. The two
+    // halves were answering different questions - Mutate moves the run to another note of the
+    // chord you are holding, this puts a note somewhere you did not - and one dial could not
+    // offer the first without eventually forcing the second. So this is the second question,
+    // asked separately, and Mutate is confined to the chord at every setting again.
+    //
+    // Default **0**, which is off: no session that predates this parameter can acquire a note
+    // it was not already playing, and off is a position you can stay at while turning Mutate
+    // all the way up. Zero is its own off switch, so it takes no toggle beside it - the same
+    // reading that leaves Strum, Lock Influence and Lean without one.
+    //
+    // Its own two zones: to 50 a stray is an in-scale neighbour, past 50 a growing share are
+    // chromatic, all of them at 100. Lock still holds them, so a wrong note worth keeping
+    // hardens into the part exactly as a mutated one does.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Stray"), 1 },
+                                                   nm + " Stray", 0, 100, 0));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -608,7 +629,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "Offset", "RetrigBars", "VelRamp", "RampBeats", "Humanize", "Keys", "Channel",
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
-        "Harm1", "Harm1Chance", "Harm2", "Harm2Chance"
+        "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
+        "Stray"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1978,6 +2000,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.harmChance[0] = (int) arpParam(n, apHarm1Chance);
         ap.harmSemis[1] = harmonySemisFor((int) arpParam(n, apHarm2));
         ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
+        ap.stray = (int) arpParam(n, apStray);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;
@@ -3084,6 +3107,7 @@ void KeysProcessor::restoreSharedState(const juce::ValueTree& root)
     migrateBpmSync(root);
     migrateTuplet(root);
     migrateHumanSpans(root);
+    migrateStray(root);
     chordPadsFromTree(root);
     arpFromTree(root);
     layoutFromTree(root);
@@ -3391,6 +3415,68 @@ void KeysProcessor::migrateHumanSpans(const juce::ValueTree& root)
                 if (auto* param = apvts.getParameter(wanted))
                     param->setValueNotifyingHost(param->getDefaultValue());
         }
+}
+
+void KeysProcessor::migrateStray(const juce::ValueTree& root)
+{
+    // The only migration here that has to *date* a session rather than just notice a hole.
+    //
+    // Stray is new on 2026-08-21, but the behaviour it carries is not: from 2026-08-19 the top
+    // half of the **Mutate** dial did this job, so a session saved in that two-day window holds
+    // a Mutate above 50 that meant "and leave the chord". Stray's default is 0 - off, chosen so
+    // that nothing predating the *knob* could acquire a note it was not already playing - and
+    // for those two days' sessions that default is wrong in the audible direction: the line
+    // opens strictly in-chord where it used to wander. A different part, silently.
+    //
+    // Absence alone cannot tell those sessions from the far larger set saved before 2026-08-19,
+    // where Mutate existed (2026-08-18) but never left the chord at any setting. Folding those
+    // forward would *add* strays nobody ever heard, which is the same bug pointing the other
+    // way. **`apHarm1` is the date stamp**: the two harmony voices and Mutate's stray zones
+    // landed together in the 2026-08-19 round, so `Harm1 present && Stray absent` is that
+    // window exactly, and `Harm1 absent` is a session that predates the behaviour entirely.
+    //
+    // The fold is exact rather than approximate, the migrateVelTrim standard. Old Mutate ran
+    // its stray stage over (50, 100] - in scale to 75, chromatic above - and Stray runs those
+    // same two zones over (0, 100] with its boundary at 50. So `(mutate - 50) * 2` maps 75 onto
+    // 50 and 100 onto 100: the zone boundary lands on the zone boundary and every setting in
+    // between keeps its share. Mutate itself is left alone - it now means what it always meant
+    // below 50, and its upper half reaches further inside the chord instead, which is a change
+    // this cannot undo and should not: the note count is identical either way.
+    const auto params = root.getChildWithName(apvts.state.getType());
+    if (! params.isValid())
+        return;
+
+    for (int line = 0; line < numArpLines; ++line)
+    {
+        const auto strayId = arpParamId(line, apStray);
+        const auto harmId = arpParamId(line, apHarm1);
+        bool sawStray = false, sawHarm = false;
+        for (int i = 0; i < params.getNumChildren(); ++i)
+        {
+            const auto pid = params.getChild(i).getProperty("id").toString();
+            if (pid == strayId) sawStray = true;
+            if (pid == harmId)  sawHarm = true;
+        }
+        if (sawStray)
+            continue; // the session names it, so whatever it says is what the user chose.
+
+        auto* stray = apvts.getParameter(strayId);
+        if (stray == nullptr)
+            continue;
+
+        // Absent, and predating the behaviour: the default is the repair. An absent parameter
+        // is not a reset (see migrateRateMode), so it has to be written explicitly.
+        if (! sawHarm)
+        {
+            stray->setValueNotifyingHost(stray->getDefaultValue());
+            continue;
+        }
+
+        // Absent, and inside the window: fold Mutate's own upper half forward.
+        const int mutate = (int) arpParam(line, apMutate);
+        const int folded = juce::jlimit(0, 100, (mutate - 50) * 2);
+        stray->setValueNotifyingHost(stray->convertTo0to1((float) folded));
+    }
 }
 
 juce::ValueTree KeysProcessor::layoutToTree() const
