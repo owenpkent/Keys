@@ -20,10 +20,20 @@ lines apart, and cyan mixed with magenta is a fifth colour belonging to neither.
 stable while the note is held, so a key never changes colour as lines come and go underneath it.
 
 Notes from every other source - your own clicks, a latch, a chord pad, the MIDI input, an MCP
-tool - keep the theme's accent exactly as before, so a colour on the keybed only ever means
-*which arp line is playing this*.
+tool - are drawn exactly as before: **cyan**, whatever the theme swatch says, which is what
+those keys have always been. Only the glow strokes around them follow the accent, as they
+always did. A first cut derived their gradients from the theme accent instead, which quietly
+changed the colour of your own presses on any non-default swatch.
+
+The honest limit, since the palette is meant to *mean* something: on the default cyan swatch a
+chord pad's key is the same colour as line A's, because line A **is** that cyan. B, C and D are
+unambiguous. So a colour says "an arp line, or the keybed's own" rather than "an arp line".
 
 Under it, `arpNoteOn` became `arpNoteLines`, a **bitmask per pitch with one bit per line**,
+updated with `fetch_or` / `fetch_and` rather than a load-modify-store, because `clearArpNotes()`
+writes zeroes from the *message* thread (All Off, a panic, the MCP tool) and a clear landing
+between a read and its write-back would resurrect other lines' bits for a pitch whose engines
+that same panic is about to flush - a key lit for the rest of the session. It
 which is also a small fix: two lines sounding one pitch used to share a single flag, so whichever
 released first put the key out while the other was still playing it. Each line clears only its
 own bit now. Within a line it is still a flag rather than a count - a line's two harmony voices

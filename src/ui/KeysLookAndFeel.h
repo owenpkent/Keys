@@ -113,64 +113,79 @@ namespace skin
         }
     }
 
-    // The four gradient stops a keybed key is painted with when it is lit, for one accent.
+    // The four gradient stops a keybed key is painted with when it is lit - one set for the
+    // key body, one for its front lip, and two more for a black key's body and raised face.
     // (2026-08-22, Owen: "new branch for each arp to play different colors on the keyboard" -
     // the keys the arp is playing wear the colour of the line playing them.)
     //
-    // These were four hard-coded cyan hexes in PianoKeyboard::paint, which is exactly the
+    // These were sixteen hard-coded cyan hexes in PianoKeyboard::paint, which is exactly the
     // per-file chrome the skin rule forbids, and they had to leave that file for a second
-    // colour to be possible at all. **Cyan keeps its shipped values byte for byte** rather
-    // than being re-derived - the same reasoning `cyanAccent` itself is written down rather
-    // than derived, since the keybed was tuned against these four and line A is the line Keys
-    // has always had. Every other accent is derived to sit in the same relationship: the top
-    // stop a touch brighter than the base, the bottom stop the accent's own `deep`.
+    // colour to be possible at all.
+    //
+    // **They hang off Accent rather than being four functions that each re-sniff for cyan.**
+    // The first cut was `keyLit(a)`, `keyLitLip(a)` ... each opening with the identical
+    // `if (a.base == cyanAccent.base)` branch: four copies of one decision, four chances to get
+    // the next one wrong, and a function guessing something its caller already knows. Carrying
+    // the sets on the Accent means the branch happens **once**, where an Accent is made -
+    // stated outright in `cyanAccent`, filled in by `derive()` for everything else.
     struct KeyLit
     {
         juce::Colour activeTop, activeBot, heldTop, heldBot;
     };
 
-    inline KeyLit keyLit(const Accent& a)
+    struct KeyLitSet
     {
-        if (a.base == cyanAccent.base)
-            return { juce::Colour(0xff8cebf7), juce::Colour(0xff1fa5ba),   // pressed
-                     juce::Colour(0xff59c9da), juce::Colour(0xff16808f) }; // held / arp-lit
-        return { a.base.brighter(0.55f), a.base.darker(0.25f),
-                 a.base.brighter(0.20f), a.deep };
-    }
-
-    // The lip under a lit key, the same split for the same reason.
-    struct KeyLitLip
-    {
-        juce::Colour activeTop, activeBot, heldTop, heldBot;
+        KeyLit body, lip, black, blackFace;
     };
 
-    inline KeyLitLip keyLitLip(const Accent& a)
+    // Cyan's are the values the keybed was tuned against and are kept **byte for byte** rather
+    // than re-derived - the same reasoning `cyanAccent` itself is written down rather than
+    // derived from a hue. Line A is the line Keys has always had, and every non-arp key still
+    // wears these too, so a wrong digit here is visible on every press in the product.
+    inline KeyLitSet cyanKeyLit()
     {
-        if (a.base == cyanAccent.base)
-            return { juce::Colour(0xff2ab6cb), juce::Colour(0xff1a90a2),
-                     juce::Colour(0xff1f9dae), juce::Colour(0xff137886) };
-        return { a.base.darker(0.10f), a.base.darker(0.35f),
-                 a.base.darker(0.25f), a.deep.darker(0.15f) };
+        return { { juce::Colour(0xff8cebf7), juce::Colour(0xff1fa5ba),    // body
+                   juce::Colour(0xff59c9da), juce::Colour(0xff16808f) },
+                 { juce::Colour(0xff2ab6cb), juce::Colour(0xff1a90a2),    // lip
+                   juce::Colour(0xff1f9dae), juce::Colour(0xff137886) },
+                 { juce::Colour(0xff20b0c6), juce::Colour(0xff0c4c57),    // black body
+                   juce::Colour(0xff189aad), juce::Colour(0xff0a3d46) },
+                 { juce::Colour(0xff4fd4e6), juce::Colour(0xff1793a6),    // black face
+                   juce::Colour(0xff2fb4c7), juce::Colour(0xff0f7280) } };
     }
 
-    // The black keys carry the same four-stop split twice over - the key body and the raised
-    // playing face on top of it - and the same cyan-stays-exact rule.
-    inline KeyLit keyLitBlack(const Accent& a)
+    // Every other accent sits in the same relationship to its base that cyan's do to theirs.
+    inline KeyLitSet deriveKeyLit(juce::Colour base, juce::Colour deep)
     {
-        if (a.base == cyanAccent.base)
-            return { juce::Colour(0xff20b0c6), juce::Colour(0xff0c4c57),
-                     juce::Colour(0xff189aad), juce::Colour(0xff0a3d46) };
-        return { a.base.darker(0.05f), a.deep.darker(0.45f),
-                 a.base.darker(0.20f), a.deep.darker(0.55f) };
+        return { { base.brighter(0.55f), base.darker(0.25f),
+                   base.brighter(0.20f), deep },
+                 { base.darker(0.10f), base.darker(0.35f),
+                   base.darker(0.25f), deep.darker(0.15f) },
+                 { base.darker(0.05f), deep.darker(0.45f),
+                   base.darker(0.20f), deep.darker(0.55f) },
+                 { base.brighter(0.35f), base.darker(0.15f),
+                   base.brighter(0.10f), deep.darker(0.10f) } };
     }
 
-    inline KeyLit keyLitBlackFace(const Accent& a)
+    // The gradients a lit key is drawn with: an arp line's own colour, or - for **everything
+    // that is not an arp line** - the cyan the keybed has always used.
+    //
+    // That -1 case is load-bearing and was wrong for a day. The first cut derived these from
+    // the *theme* accent, so on a non-cyan swatch your own presses changed colour: a real
+    // visual change nobody asked for, and one the changelog flatly denied ("keep the theme's
+    // accent exactly as before"). Before the per-line colours these gradients were hard-coded
+    // cyan whatever the theme said - only the glow strokes followed the accent, and they still
+    // do - so cyan is what "exactly as before" actually means here.
+    //
+    // The cost, stated rather than hidden: on the default cyan swatch a chord pad's key is the
+    // same colour as line A's, because line A *is* that cyan. B, C and D are unambiguous. A
+    // colour therefore means "an arp line, or the keybed's own" rather than "an arp line".
+    inline KeyLitSet keyLitFor(int line)
     {
-        if (a.base == cyanAccent.base)
-            return { juce::Colour(0xff4fd4e6), juce::Colour(0xff1793a6),
-                     juce::Colour(0xff2fb4c7), juce::Colour(0xff0f7280) };
-        return { a.base.brighter(0.35f), a.base.darker(0.15f),
-                 a.base.brighter(0.10f), a.deep.darker(0.10f) };
+        if (line < 0)
+            return cyanKeyLit();
+        const auto a = lineAccent(line);
+        return a.base == cyanAccent.base ? cyanKeyLit() : deriveKeyLit(a.base, a.deep);
     }
 
     // Brightened on 2026-08-01 (Owen: "hard to read some text. too dark"). `textDim` was

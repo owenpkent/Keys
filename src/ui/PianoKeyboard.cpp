@@ -178,9 +178,13 @@ void PianoKeyboard::paint(juce::Graphics& g)
             return { State::held, it->second };
         return { State::normal, -1 };
     };
-    // The accent a key is drawn in: the theme's, unless an arp line lit it.
+    // The **glow strokes** follow the theme accent for a non-arp key, exactly as they always
+    // have, and an arp line's own colour otherwise.
     const auto accentFor = [&ac](int line)
     { return line >= 0 ? skin::lineAccent(line) : ac; };
+    // The **body gradients** are a different question and the answer is not the same: before
+    // the per-line colours these were hard-coded cyan whatever the theme said, so a non-arp key
+    // stays cyan here rather than following the swatch. See skin::keyLitFor.
     const auto vGrad = [](juce::Colour a, juce::Colour b, float top, float bot)
     { return juce::ColourGradient(a, 0.0f, top, b, 0.0f, bot, false); };
 
@@ -195,17 +199,20 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const State s = st.state;
         const bool lit = s != State::normal;
         const bool dim = ! lit && ! inScale(k.note);
-        const auto ka = accentFor(st.line);
-        const auto kl = skin::keyLit(ka);
-
         juce::Path key;
         key.addRoundedRectangle(b.getX(), top, b.getWidth(), b.getHeight(),
                                 2.5f, 2.5f, false, false, true, true);
 
         // Ivory body, top-lit; lit keys go full accent.
+        // Derived only when the key is actually lit: this is the most expensive paint in the
+        // window, most keys are not lit, and under a non-cyan accent each set costs sixteen
+        // HSB round-trips that would be thrown away.
+        const auto ka = lit ? accentFor(st.line) : ac;
+        const auto kls = lit ? skin::keyLitFor(st.line) : skin::KeyLitSet {};
+
         juce::ColourGradient grad = vGrad(juce::Colour(0xfff4f6f8), juce::Colour(0xffd2d6db), top, bot);
-        if (s == State::active)      grad = vGrad(kl.activeTop, kl.activeBot, top, bot);
-        else if (s == State::held)   grad = vGrad(kl.heldTop, kl.heldBot, top, bot);
+        if (s == State::active)      grad = vGrad(kls.body.activeTop, kls.body.activeBot, top, bot);
+        else if (s == State::held)   grad = vGrad(kls.body.heldTop, kls.body.heldBot, top, bot);
         else if (dim)                grad = vGrad(juce::Colour(0xffc9cdd4), juce::Colour(0xff9ea4ad), top, bot);
         else                         grad.addColour(0.55, juce::Colour(0xffe9ecef));
         g.setGradientFill(grad);
@@ -220,10 +227,9 @@ void PianoKeyboard::paint(juce::Graphics& g)
         {
             juce::Graphics::ScopedSaveState clip(g);
             g.reduceClipRegion(key);
-            const auto lipC = skin::keyLitLip(ka);
             juce::Colour lipTop { 0xffdcdfe4 }, lipBot { 0xffc4c8cf };
-            if (s == State::active)      { lipTop = lipC.activeTop; lipBot = lipC.activeBot; }
-            else if (s == State::held)   { lipTop = lipC.heldTop;   lipBot = lipC.heldBot; }
+            if (s == State::active)      { lipTop = kls.lip.activeTop; lipBot = kls.lip.activeBot; }
+            else if (s == State::held)   { lipTop = kls.lip.heldTop;   lipBot = kls.lip.heldBot; }
             else if (dim)                { lipTop = juce::Colour(0xffb2b7bf); lipBot = juce::Colour(0xff9aa0a9); }
             g.setGradientFill(vGrad(lipTop, lipBot, bot - lipH, bot));
             g.fillRect(b.getX(), bot - lipH, b.getWidth(), lipH);
@@ -266,8 +272,8 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const State s = st.state;
         const bool lit = s != State::normal;
         const bool dim = ! lit && ! inScale(k.note);
-        const auto ka = accentFor(st.line);
-        const auto kb = skin::keyLitBlack(ka);
+        const auto ka = lit ? accentFor(st.line) : ac;
+        const auto kls = lit ? skin::keyLitFor(st.line) : skin::KeyLitSet {};
 
         // Two-pass drop shadow onto the whites.
         g.setColour(juce::Colours::black.withAlpha(0.30f));
@@ -276,8 +282,8 @@ void PianoKeyboard::paint(juce::Graphics& g)
         g.fillRoundedRectangle(b.translated(0.5f, 1.0f).expanded(0.5f, 0.0f), 3.0f);
 
         juce::ColourGradient grad = vGrad(juce::Colour(0xff33373e), juce::Colour(0xff0b0d0f), top, bot);
-        if (s == State::active)      grad = vGrad(kb.activeTop, kb.activeBot, top, bot);
-        else if (s == State::held)   grad = vGrad(kb.heldTop, kb.heldBot, top, bot);
+        if (s == State::active)      grad = vGrad(kls.black.activeTop, kls.black.activeBot, top, bot);
+        else if (s == State::held)   grad = vGrad(kls.black.heldTop, kls.black.heldBot, top, bot);
         else if (dim)                grad = vGrad(juce::Colour(0xff3c434c), juce::Colour(0xff151920), top, bot);
         else                         grad.addColour(0.5, juce::Colour(0xff191c20));
         g.setGradientFill(grad);
@@ -288,10 +294,9 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const float faceBot = top + b.getHeight() * 0.60f;
         const auto face = juce::Rectangle<float>(b.getX() + 1.6f, top + 1.0f,
                                                  b.getWidth() - 3.2f, faceBot - top - 1.0f);
-        const auto kf = skin::keyLitBlackFace(ka);
         juce::Colour faceTop { 0xff3f444c }, faceLow { 0xff23262b };
-        if (s == State::active)      { faceTop = kf.activeTop; faceLow = kf.activeBot; }
-        else if (s == State::held)   { faceTop = kf.heldTop;   faceLow = kf.heldBot; }
+        if (s == State::active)      { faceTop = kls.blackFace.activeTop; faceLow = kls.blackFace.activeBot; }
+        else if (s == State::held)   { faceTop = kls.blackFace.heldTop;   faceLow = kls.blackFace.heldBot; }
         else if (dim)                { faceTop = juce::Colour(0xff4a515b); faceLow = juce::Colour(0xff2a3037); }
         g.setGradientFill(vGrad(faceTop, faceLow, face.getY(), face.getBottom()));
         g.fillRoundedRectangle(face, 2.0f);

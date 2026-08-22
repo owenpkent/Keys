@@ -119,9 +119,19 @@ public:
     // a fifth colour belonging to neither. Answers -1 whenever `arpNoteLit` is false, Light keys
     // off included, so the two cannot disagree.
     int arpLitLine(int midiNote) const;
-    // Every line lighting it, as a bitmask. The two above are both derived from this; it is
-    // public for a surface that wants to show an overlap rather than resolve one.
-    unsigned int arpLitLines(int midiNote) const;
+    // Every line lighting it, as a bitmask. The two above are both derived from this, so the
+    // three cannot disagree about Light keys being off. **Named `...Mask` rather than
+    // `arpLitLines`**, which was one character from `arpLitLine` and returned something else
+    // entirely: `int line = processor.arpLitLines(n)` compiles, hands back 4 for line C, and
+    // `skin::lineAccent(4)` wraps that to line A. A slip that compiles and paints the wrong
+    // colour is worth a longer name.
+    unsigned int arpLitLineMask(int midiNote) const;
+    // Feed one line's output through the keybed-lights watcher, for tests. Two lines releasing
+    // the same pitch in a chosen order inside one block is not something a test can ask two real
+    // engines for, and the rule worth pinning - a line clears only its own bit - is about the
+    // storage rather than the scheduling. Named `...ForTest` because that is the only caller
+    // that should ever exist: the audio thread reaches `watchArpNotes` directly.
+    void watchArpNotesForTest(const juce::MidiBuffer& midi, int line) { watchArpNotes(midi, line); }
 
     // What the on-screen keybed should light, which is deliberately **not** the same question
     // as isNoteSounding. With Light keys on and a line running, the chord handed to that line

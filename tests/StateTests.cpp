@@ -579,6 +579,77 @@ public:
             }
         }
 
+        beginTest("two lines on one pitch: A wins the colour, and B keeps it lit");
+        {
+            // **The two claims the whole change rests on, and neither is reachable one line at
+            // a time** - with a single line running the mask has at most one bit, so the test
+            // above passes just as well against the shared bool this replaced, and against a
+            // highest-wins tie-break. This is the case that separates them.
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            h.processor.layout.arpLights = true;
+            for (int line : { 0, 1 })
+            {
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+                // Chord shape on both, so every step sounds the whole chord and the two lines
+                // are guaranteed to overlap on a pitch rather than happening to miss.
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apDirection),
+                         (float) (int) ArpEngine::Direction::chord);
+            }
+
+            juce::AudioBuffer<float> audio(2, 512);
+            bool sawBoth = false, wrongWinner = false;
+            for (int blk = 0; blk < 40 && ! sawBoth; ++blk)
+            {
+                juce::MidiBuffer midi;
+                if (blk == 0)
+                    for (int note : { 60, 64, 67 })
+                        midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+                h.processor.processBlock(audio, midi);
+
+                for (int n = 0; n < 128; ++n)
+                {
+                    const unsigned int mask = h.processor.arpLitLineMask(n);
+                    if ((mask & 0b11u) != 0b11u)
+                        continue; // not a pitch both lines are on
+                    sawBoth = true;
+                    // Lowest wins: A over B, so a key never changes colour as lines come and
+                    // go under it. Highest-wins would answer 1 here.
+                    if (h.processor.arpLitLine(n) != 0)
+                        wrongWinner = true;
+                }
+            }
+            expect(sawBoth, "the two lines overlapped on a pitch at all");
+            expect(! wrongWinner, "the lower line index owns the colour on every shared pitch");
+        }
+
+        beginTest("a line clearing its own bit does not put out a pitch another line holds");
+        {
+            // The artefact the bitmask retired: one flag per pitch meant two lines shared it,
+            // so whichever released first put the key out under the line still playing it.
+            // Driven at the mask directly rather than through two engines, because making two
+            // real lines release in a chosen order inside one block is not something a test can
+            // ask for - and the rule being pinned is about the storage, not the scheduling.
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            h.processor.layout.arpLights = true;
+
+            juce::MidiBuffer onA, onB, offA;
+            onA.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            onB.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            offA.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+
+            h.processor.watchArpNotesForTest(onA, 0);
+            h.processor.watchArpNotesForTest(onB, 1);
+            expectEquals((int) h.processor.arpLitLineMask(60), 0b11, "both lines hold pitch 60");
+
+            h.processor.watchArpNotesForTest(offA, 0);
+            expect(h.processor.arpNoteLit(60), "line A letting go leaves B's key lit");
+            expectEquals((int) h.processor.arpLitLineMask(60), 0b10, "and only B's bit is left");
+            expectEquals(h.processor.arpLitLine(60), 1, "so B now owns the colour");
+        }
+
         beginTest("Light keys off means no line is lighting anything");
         {
             // The gate is on the *reader*, so that one flag turns the whole feature off without
@@ -604,6 +675,24 @@ public:
                         ++lit;
             }
             expectEquals(lit, 0, "nothing is arp-lit while Light keys is off");
+
+            // **The control**, without which this passes just as well when the arp produced no
+            // notes at all - if apOn stopped taking effect, or processBlock stopped running the
+            // lines, `lit` would still be 0 and the gate would look proven when nothing was.
+            h.processor.layout.arpLights = true;
+            int litWithLights = 0;
+            for (int blk = 0; blk < 40; ++blk)
+            {
+                juce::MidiBuffer midi;
+                if (blk == 0)
+                    for (int note : { 60, 64, 67 })
+                        midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+                h.processor.processBlock(audio, midi);
+                for (int n = 0; n < 128; ++n)
+                    if (h.processor.arpNoteLit(n))
+                        ++litWithLights;
+            }
+            expect(litWithLights > 0, "...and the same run with Light keys on does light keys");
         }
 
         beginTest("every UI line, switched on and listening, arpeggiates the keys");

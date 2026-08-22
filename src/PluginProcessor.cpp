@@ -1387,7 +1387,7 @@ bool KeysProcessor::keybedLit(int midiNote) const
     return arpNoteLit(midiNote);
 }
 
-unsigned int KeysProcessor::arpLitLines(int midiNote) const
+unsigned int KeysProcessor::arpLitLineMask(int midiNote) const
 {
     if (midiNote < 0 || midiNote > 127 || ! layout.arpLights)
         return 0u;
@@ -1396,12 +1396,12 @@ unsigned int KeysProcessor::arpLitLines(int midiNote) const
 
 bool KeysProcessor::arpNoteLit(int midiNote) const
 {
-    return arpLitLines(midiNote) != 0u;
+    return arpLitLineMask(midiNote) != 0u;
 }
 
 int KeysProcessor::arpLitLine(int midiNote) const
 {
-    const unsigned int mask = arpLitLines(midiNote);
+    const unsigned int mask = arpLitLineMask(midiNote);
     if (mask == 0u)
         return -1;
     // Lowest set bit: A over B over C over D. Deterministic and stable while the note is held,
@@ -1424,9 +1424,10 @@ int KeysProcessor::arpLitLine(int midiNote) const
 // Each line clears only its own bit now. Within a line it is still a flag and not a count -
 // two harmony voices on one pitch, first note-off wins - the same trade at a smaller scope.
 //
-// Single-writer: `runArpLines` walks the lines in order on this thread, so no two calls race,
-// and the message thread only ever reads. The read-modify-write below is safe on that basis
-// rather than on the atomic being one.
+// `runArpLines` walks the lines in order on this thread, so no two *lines* race with each other
+// - but the message thread does more than read: `clearArpNotes()` writes zeroes from there. The
+// per-bit updates below are therefore atomic read-modify-writes rather than load-modify-stores;
+// see the note on `set` for what the difference buys.
 void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi, int line)
 {
     if (line < 0 || line >= numArpLines)
@@ -1438,12 +1439,18 @@ void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi, int line)
         if (note < 0 || note > 127)
             return;
         auto& cell = arpNoteLines[(size_t) note];
-        const unsigned int was = cell.load();
-        const unsigned int now = on ? (was | bit) : (was & ~bit);
-        if (now == was)
-            return;
-        cell.store(now);
-        changed = true;
+        // **fetch_or / fetch_and, not load-modify-store.** `clearArpNotes()` runs on the
+        // *message* thread - `allNotesOff()`, so the All Off chip, a panic and the MCP tool -
+        // and stores 0 into every cell. A read, a clear landing between, and a write back would
+        // resurrect the bits this line read a moment ago: bits belonging to *other* lines,
+        // whose engines the same panic is about to flush, so no further note-off for that pitch
+        // would ever arrive and the key would stay lit for the rest of the session. An atomic
+        // read-modify-write has no window for the clear to land in, so a clear can only be
+        // followed by a line setting its own bit for a note that genuinely is sounding.
+        //
+        // The previous value comes back from the same call, so `changed` costs no extra load.
+        const unsigned int was = on ? cell.fetch_or(bit) : cell.fetch_and(~bit);
+        changed = changed || (on ? (was & bit) == 0u : (was & bit) != 0u);
     };
 
     for (const auto meta : midi)

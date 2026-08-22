@@ -136,9 +136,14 @@ std::map<int, int> NoteSurface::externallySounding() const
         if (drawn < 0)
             continue;
         // -1 for anything that is not an arp line, which is what keeps a chord pad, the MIDI
-        // input and an MCP note painting in the theme's own accent exactly as they always have.
-        // Two output notes can map onto one drawn key (Scale Lock snapping a neighbour), so the
-        // lower line index wins here too, by the same rule and for the same reason.
+        // input and an MCP note painting exactly as they always have.
+        //
+        // Two output notes can map onto one drawn key - Scale Lock snaps an out-of-scale note
+        // onto a neighbour - so this has to pick. **Two rules, not one:** any arp line beats a
+        // non-arp source, and among arp lines the lower index wins. The first is the one worth
+        // saying out loud, since -1 sorts below every line index and "lowest wins" alone would
+        // imply the opposite. A key shared by a chord pad and line D paints lime: the arp is
+        // the thing that is moving, and the colour exists to show it moving.
         const int line = processor.arpLitLine(note);
         const auto it = out.find(drawn);
         if (it == out.end())
