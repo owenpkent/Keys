@@ -847,6 +847,15 @@ Slots with no chord are skipped. A pattern-only slot is a place to keep a rhythm
 of a progression, and walking through one would leave the previous chord ringing under a
 pattern that says nothing about it.
 
+**What it costs to load, and the three routes that exist.** Chain is one of three ways a
+sequence of chords reaches a line - the others being the Chord lane, at step resolution inside
+one pattern, and a clip on the track, which a line with Play on already arpeggiates. What none
+of the three has is a *loading* gesture: filling twelve slots is one drag per chord, and the
+library's 355 progressions, which know their own chord order, can reach the tray and the pads
+but not the slots. `docs/CHORD_SEQUENCE.md` (2026-08-21) is the survey of that gap, what Scaler,
+Cthulhu, Kirnu, Ripchord and Hapax each do about it, and five options for closing it. Proposed,
+unbuilt, awaiting Owen's pick.
+
 **The clock is split across two threads on purpose.** Counting bars belongs on the audio
 thread, the only place with a tempo (and the only place that can ask the host for a time
 signature - a bar is four beats only in four-four). Launching a slot cannot happen there: it

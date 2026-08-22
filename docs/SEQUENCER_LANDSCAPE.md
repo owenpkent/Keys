@@ -315,6 +315,11 @@ By what changes the instrument most for what it costs.
 
 The acid line from `docs/ACID_DESIGN.md` is not on this list because it is already spec'd and
 staged; it sits alongside as the second *kind* of line rather than as another idea for the first.
+`docs/CHORD_SEQUENCE.md` (2026-08-21) is not on it either, and for the opposite reason: it
+surveys a group of products this file does not cover at all, the *chord* plug-ins (Scaler,
+Cthulhu, Ripchord, InstaChord, Captain Chords) rather than the sequencers, and its finding is
+that Keys already has three of the four idioms they share. What it proposes is a loading
+gesture, not a sequencer archetype.
 
 Numbers 1 through 4 are each a day or less and none of them touches `ArpEngine`'s stateless-from-
 the-playhead rule. Number 5 touches it and the way through is written above. Number 6 is a week.
