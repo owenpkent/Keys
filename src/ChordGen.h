@@ -202,6 +202,17 @@ namespace keys::chordgen
         return out;
     }
 
+    // Whether the voicing walk has anything to walk. Two notes, genuinely: a voicing moves
+    // notes about within a chord, and one note has nowhere to go.
+    //
+    // It lives here rather than beside any one card because **three surfaces ask it** - the
+    // chord pads' menu, the audition tray's menu, and `nextVoicing` itself - and it was three
+    // bare `size() >= 2` / `size() < 2` spellings until 2026-08-21. That is the same shape as
+    // the `buildLaneRow`-versus-`laneRange` trap logged in CLAUDE.md: a rule copied to every
+    // site that needs it is a rule that will be widened at one of them. A grep for
+    // `canRevoice` has to find every place the question is asked.
+    inline bool canRevoice(const std::vector<int>& notes) { return notes.size() >= 2; }
+
     // How many arrangements the cycle has: root position, an inversion per note above the root,
     // and the spread.
     inline int voicingCount(int noteCount) { return juce::jmax(2, noteCount + 1); }

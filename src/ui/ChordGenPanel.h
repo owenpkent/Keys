@@ -150,7 +150,8 @@ private:
     // pool's property in the first place, and the generator now applies both as post-passes over
     // whatever any of the seven produced.
     //
-    // The 3/4/5 tick boxes became a min/max pair spanning 2 to 11. Below three you get dyads, and
+    // The 3/4/5 tick boxes became a min/max pair spanning 1 to 11 (2 to 11 until 2026-08-21, when
+    // the floor dropped so an unticked gate could roll a single note). Below three you get dyads, and
     // above five the stack keeps climbing in thirds through the mode. Three tick boxes could not
     // have carried ten values without becoming ten targets.
     juce::Label notesLabel, invLabel, octaveMaxLabel;

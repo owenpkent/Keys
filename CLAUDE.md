@@ -653,7 +653,7 @@ what is no longer true lives here in one place:
   reordering a choice list is not (the `genSource` rule): every value a saved session could hold
   is still in range, and the 3/4 defaults are untouched.
   **An unticked Notes range rolls 1..11 as well**, so the tray turns up the odd single note among
-  its sixteen. This was built the other way first, on the reading that a bare note would read as
+  its twelve. This was built the other way first, on the reading that a bare note would read as
   the tray having failed; Owen overruled it the same day, and the general rule is his: **an
   unticked gate rolls the whole range its parameter can express**, never a hand-picked sub-range,
   or the tick box stops meaning "you decide" and starts meaning "you decide, within limits nobody

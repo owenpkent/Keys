@@ -393,18 +393,29 @@ public:
             h.processor.getStateInformation(block);
             h.processor.clearChordPad(5);
             h.processor.setStateInformation(block.getData(), (int) block.getSize());
-            expectEquals((int) h.processor.chordPad(5).notes.size(), 1, "the one-note pad came back");
-            expectEquals(h.processor.chordPad(5).notes.front(), 48, "...with its note");
+            const auto& back = h.processor.chordPad(5).notes;
+            expectEquals((int) back.size(), 1, "the one-note pad came back");
+            // Guarded: expectEquals records a failure and keeps going, so an empty vector here
+            // would reach front() and take the whole runner down instead of reporting a test.
+            if (! back.empty())
+                expectEquals(back.front(), 48, "...with its note");
 
             // Two: the generator's note-count range reaches 1. This is the parameter the UI
             // gate was really made of - the steppers take their range from the attachment, so
             // a floor of 2 here is a floor of 2 on screen, and it is exactly the sort of bound
             // that gets "tidied" back to what the surrounding code assumes.
-            const auto* minParam = h.processor.apvts.getParameter("genNotesMin");
-            expect(minParam != nullptr, "genNotesMin exists");
-            if (minParam != nullptr)
-                expectEquals((int) minParam->convertFrom0to1(0.0f), 1,
-                             "the fewest-notes stepper goes down to a single note");
+            //
+            // **Both ends, because they moved together.** Restoring only genNotesMax to a floor
+            // of 2 would leave min=1/max=2 reading back as {1, 2} through noteCountRange's own
+            // swap, which a min-only check cannot see.
+            for (const auto* id : { "genNotesMin", "genNotesMax" })
+            {
+                const auto* param = h.processor.apvts.getParameter(id);
+                expect(param != nullptr, juce::String(id) + " exists");
+                if (param != nullptr)
+                    expectEquals((int) param->convertFrom0to1(0.0f), 1,
+                                 juce::String(id) + " goes down to a single note");
+            }
         }
 
         beginTest("a pad remembers which progression it is a step of");

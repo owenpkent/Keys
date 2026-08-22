@@ -635,7 +635,10 @@ kinds of box that looked identical, gates that did not line up, and too many of 
 four inversion ticks beside it, it says what it does without a tooltip, and every one is the same
 shape wherever it sits. On **SET** the setting constrains generation; on **ROLL** the generator
 rolls that choice itself - a rolling Key
-wanders, an unticked Notes range rolls anywhere in **1 to 11** - the whole range the steppers reach, single notes included (2026-08-21). An unticked gate rolls everything its parameter can express; a hand-picked sub-range would make the tick box mean "you decide, within limits nobody wrote down". **Key and Mode roll once per
+wanders, an unticked Notes range rolls anywhere in **1 to 11** - the whole range the steppers
+reach, single notes included (2026-08-21). An unticked gate rolls everything its parameter can
+express; a hand-picked sub-range would make the tick box mean "you decide, within limits nobody
+wrote down". **Key and Mode roll once per
 generation, not per chord**, because every source takes a single root and mode for a whole
 batch (a circle walk, a chain step, a progression transposed), and a free Mode picks only from
 the seven diatonic modes. **Lock Influence, Smooth Voicing and Lean have no box**: each already

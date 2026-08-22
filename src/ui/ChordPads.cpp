@@ -33,10 +33,9 @@ namespace
     // pedal tones and single-note stabs are all things you want on a pad.
     bool hasNotes(const std::vector<int>& n) { return ! n.empty(); }
 
-    // Whether the *voicing* walk has anything to walk. Two notes, genuinely: a voicing moves
-    // notes about within a chord, and one note has nowhere to go. This is the half of the old
-    // `isChord` that was actually asking about chords, kept under a name that says so.
-    bool canRevoice(const std::vector<int>& n) { return n.size() >= 2; }
+    // The half of the old `isChord` that was actually asking about chords. The rule itself is
+    // `chordgen::canRevoice`, beside the walk it gates, because the tray asks it too.
+    using chordgen::canRevoice;
 
     bool onKeyboard(const std::vector<int>& notes)
     {
@@ -293,7 +292,7 @@ int ChordPads::firstEmptyPadOnPage() const
 {
     const int offset = processor.padPageOffset();
     for (int v = 0; v < KeysProcessor::padsPerPage; ++v)
-        if (processor.chordPad(offset + v).notes.empty())
+        if (! hasNotes(processor.chordPad(offset + v).notes))
             return offset + v;
     return -1;
 }
@@ -315,7 +314,7 @@ bool ChordPads::sourceIsDraggable() const
     if (dragSource == -2)
         return hasNotes(currentNotes);
     if (dragSource >= 0)
-        return ! processor.chordPad(dragSource).notes.empty();
+        return hasNotes(processor.chordPad(dragSource).notes);
     return false;
 }
 
@@ -389,7 +388,7 @@ void ChordPads::paint(juce::Graphics& g)
         const int i = offset + v;
         const auto b = padBounds(v);
         const auto& pad = processor.chordPad(i);
-        const bool filled = ! pad.notes.empty();
+        const bool filled = hasNotes(pad.notes);
         const bool active = processor.chordPadActive(i);
         // Any drag can be offering this pad: one inside the strip, or a candidate dragged in
         // from the generator's tray in another window. They light the same, because to the pad
@@ -681,7 +680,7 @@ void ChordPads::showPadMenu(int slot)
 {
     const auto& pad = processor.chordPad(slot);
     const bool editing = slot == editingSlot;
-    const bool filled = ! pad.notes.empty();
+    const bool filled = hasNotes(pad.notes);
 
     juce::PopupMenu menu;
     menu.addItem(1, editing ? "Done editing" : "Edit on keyboard");

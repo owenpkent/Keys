@@ -51,7 +51,7 @@ namespace
     // this a single repeatable item rather than a submenu of named inversions.
     std::vector<int> nextVoicing(const std::vector<int>& notes)
     {
-        if (notes.size() < 2 || notes.front() + 12 > 127)
+        if (! chordgen::canRevoice(notes) || notes.front() + 12 > 127)
             return {};
         std::vector<int> out(notes.begin() + 1, notes.end());
         out.push_back(notes.front() + 12);
@@ -363,7 +363,7 @@ void ChordTray::showCardMenu(int index)
         m.addSeparator();
         m.addItem(4, "Octave down", seed.front() >= 12);
         m.addItem(5, "Octave up", seed.back() <= 115);
-        m.addItem(6, "Next voicing", seed.size() >= 2);
+        m.addItem(6, "Next voicing", chordgen::canRevoice(seed));
         m.addSeparator();
     }
     m.addItem(7, "New chord here");

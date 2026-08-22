@@ -213,7 +213,7 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
         //
         // **1, not 2, since 2026-08-21** - Owen's call, made the same day the floor moved and
         // against the first reading of it, which held that a bare note one time in eleven would
-        // read as the tray having failed. It does not: a tray is sixteen candidates you sample
+        // read as the tray having failed. It does not: a tray is twelve candidates you sample
         // and drag the good ones out of, so a single note among them is one more thing on offer,
         // and a page of chords with the odd pedal tone in it is a *better* spread than a page
         // with none. The rule this restores is the one that was here before and is worth keeping

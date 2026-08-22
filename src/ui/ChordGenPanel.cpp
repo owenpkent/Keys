@@ -263,15 +263,22 @@ void ChordGenPanel::buildControls()
     octaveAtt = std::make_unique<SliderAtt>(processor.apvts, "genOctave", octaveSlider);
 
     // Two steppers rather than a drag target: a slider is a *drag*, and these are the click-only
-    // path to every value between 2 and 11, the same reasoning the arp's rate steppers are built
-    // on. IncDecButtons gives a pair of 34 px targets plus a readout for free.
+    // path to every value the parameter can express, the same reasoning the arp's rate steppers
+    // are built on. IncDecButtons gives a pair of 34 px targets plus a readout for free.
+    //
+    // **No setRange here, deliberately.** It carried `setRange(2, 11, 1)` until 2026-08-21 and
+    // that was already a second copy of the parameter's own range - harmless only because the
+    // SliderAttachment built a few lines below overwrites it. When the floor moved to 1 the
+    // copy stopped agreeing, and the only thing standing between that and a stepper that
+    // clamps at 2 was the *order of two statements in this function*. The attachment is the
+    // one source: it reads `NormalisableRange` off the parameter, so the steppers follow a
+    // range change with no edit here at all.
     styleLabel(notesLabel, "Notes (min / max)");
     addAndMakeVisible(notesLabel);
     for (auto* sl : { &notesMinSlider, &notesMaxSlider })
     {
         sl->setSliderStyle(juce::Slider::IncDecButtons);
         sl->setTextBoxStyle(juce::Slider::TextBoxLeft, false, 34, 26);
-        sl->setRange(2, 11, 1);
         addAndMakeVisible(*sl);
     }
     notesMinSlider.setTitle("Fewest notes per chord");
