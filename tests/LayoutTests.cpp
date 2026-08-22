@@ -12,6 +12,7 @@
 
 #include "../src/PluginProcessor.h"
 #include "../src/ui/ArpPanel.h"
+#include "../src/ui/KeysLookAndFeel.h"
 #include <juce_events/juce_events.h>
 
 namespace keys::tests
@@ -35,10 +36,23 @@ namespace
         }
     };
 
-    // Owen's window, near enough: the editor's minimum width is 1280 and the arp panel gets all
-    // of it. Testing at the *floor* is the point - anything that fits here fits everywhere, and
-    // every starved-control bug this file exists for showed up first at the narrow end.
-    constexpr int panelW = 1280;
+    // Owen's window, near enough: the editor's minimum width is 1320 (it rose from 1280 when
+    // the settings gear joined the Controls bar on 2026-08-17) and the arp panel gets all of it.
+    constexpr int panelW = 1320;
+
+    // **And the narrow end is not there.** The arp section detaches into a window of its own,
+    // whose floor is `ArpPanel::minPanelWidth()` and whose content is that less the window's
+    // 8 px resizable border - a few hundred pixels under the docked case. Testing only the
+    // docked floor is what let the ninth macro knob land: it was measured against a ~614 px
+    // column and overflowed a ~420 px one, silently, because JUCE clamps a removeFromLeft to
+    // what is there and the row simply ate the shortfall from its last cell.
+    //
+    // Anything that fits here fits everywhere. That is the whole reason this file exists, and
+    // it only holds if "here" is genuinely the narrowest place the view is drawn. **This sweep
+    // is what maintains `arpDeepPageMinW`**, the half of that floor which is measured rather
+    // than derived: lower it and a band slider and a lane tab starve here, which is how the
+    // number was found in the first place.
+    const int detachedPanelW = ArpPanel::minPanelWidth();
 
     bool isTarget(const juce::Component& c)
     {
@@ -68,6 +82,48 @@ public:
 
     void runTest() override
     {
+        beginTest("every popup row is sized wide enough to draw its own text");
+        {
+            // Written on 2026-08-21 while chasing Owen's "when you select octave plus fifth,
+            // it looks like it only just does octave", on the theory that the *row* was
+            // ellipsising and he was reading a truncated label.
+            //
+            // **It was not.** This passed the moment it was written, which is what sent the
+            // hunt on to the semitone table, where the bug actually was - "+ Octave & 5th"
+            // names two intervals and the engine was playing one. Kept anyway, because the
+            // trap it rules out is real and has bitten this codebase once already:
+            // getIdealPopupMenuItemSize measures with Font::getStringWidthFloat, which
+            // CLAUDE.md records as under-measuring - it is what drew the chord library's
+            // `iim7` as `iim`. drawPopupMenuItem then draws into area.reduced(26, 0) with
+            // ellipses on, so any shortfall past the 10 px of slack comes off the end of the
+            // longest row in the menu, and the text simply ends early with nothing to say so.
+            //
+            // A rule over the whole list rather than one string: it is the *next* long entry
+            // appended to any menu that this is here to catch.
+            //
+            // The initialiser is needed even though no processor is: a LookAndFeel touches
+            // Desktop on the way out and the glyph work brings up the typeface cache, both
+            // DeletedAtShutdown singletons. Without a ScopedJuceInitialiser_GUI in scope they
+            // are created here and torn down at static destruction, which is a leak-detector
+            // assertion or a crash depending on which test ran first. Every other block in
+            // this file gets one through `Host`; this one has no processor, so it says so.
+            const juce::ScopedJuceInitialiser_GUI juceInit;
+            KeysLookAndFeel lnf;
+            const auto font = lnf.getPopupMenuFont();
+            for (const auto& text : KeysProcessor::harmonyChoices())
+            {
+                int w = 0, h = 0;
+                lnf.getIdealPopupMenuItemSize(text, false, 34, w, h);
+                juce::GlyphArrangement ga;
+                ga.addLineOfText(font, text, 0.0f, 0.0f);
+                const float drawn = ga.getBoundingBox(0, -1, true).getRight();
+                expect((float) w >= drawn + 52.0f,
+                       "the popup row \"" + text + "\" is " + juce::String(w)
+                           + " px wide but needs " + juce::String((int) std::ceil(drawn + 52.0f))
+                           + " to draw its text inside its own gutters, so it ellipsises");
+            }
+        }
+
         beginTest("no visible control is starved, in any view or page");
         {
             // The rule the Chain tab broke by being laid out at zero width, and the Shape
@@ -85,12 +141,15 @@ public:
                 { false, ArpPanel::Page::slots },
                 { false, ArpPanel::Page::steps },
             };
+            // Both floors: the docked editor's, and the detached Arp window's, which is the
+            // narrower of the two and the one nothing was checking.
+            for (const int w : { panelW, detachedPanelW })
             for (const auto& [macro, page] : views)
             {
                 panel.setMacroView(macro);
                 if (! macro)
                     panel.setPage(page);
-                panel.setSize(panelW, panel.preferredHeight());
+                panel.setSize(w, panel.preferredHeight());
 
                 juce::Array<juce::Component*> targets;
                 collectTargets(panel, targets);
@@ -98,11 +157,129 @@ public:
                 for (auto* t : targets)
                 {
                     const auto b = t->getBounds();
-                    const auto name = t->getTitle().isNotEmpty() ? t->getTitle() : t->getName();
+                    auto name = t->getTitle().isNotEmpty() ? t->getTitle() : t->getName();
+                    // An unnamed control reported as '' is a bug report with its subject line
+                    // removed. Fall back to its type and its ancestry, which is enough to find
+                    // it in the source in one search.
+                    if (name.isEmpty())
+                    {
+                        name = "<" + juce::String(typeid(*t).name()) + ">";
+                        for (auto* q = t->getParentComponent(); q != nullptr; q = q->getParentComponent())
+                            name += " in " + (q->getTitle().isNotEmpty() ? q->getTitle()
+                                              : q->getName().isNotEmpty() ? q->getName()
+                                              : juce::String(typeid(*q).name()));
+                    }
                     expect(b.getWidth() >= 20 && b.getHeight() >= 16,
                            "starved control '" + name + "' at " + b.toString()
-                               + (macro ? " (macro view)" : " (page " + juce::String((int) page) + ")"));
+                               + " (panel " + juce::String(w) + "px"
+                               + (macro ? ", macro view)" : ", page " + juce::String((int) page) + ")"));
                 }
+            }
+        }
+
+        beginTest("the macro knob strip is never clamped, at either window's floor");
+        {
+            // The starvation sweep above cannot catch this on its own and it is worth saying
+            // why, because the same hole will be there for the next control. Its floor is
+            // `width >= 20`, which a knob squeezed to 20 passes - and a *range* knob is wider
+            // than a plain one by its two rings, so the first cell to be eaten loses 16 px to
+            // ring before its face loses anything. H.TIME's face went to 16 px inside a cell
+            // that still measured 32 and the sweep waved it through.
+            //
+            // So this asks the question directly: does the row get the width its own
+            // arithmetic says it needs, or is JUCE clamping the difference away? Every knob at
+            // its documented floor, in a row that was handed exactly what it asked for.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+
+            // At `minMacroWidth()` as well as the docked floor: that is the width the macro
+            // view's own arithmetic says it needs, so it is the width that proves the
+            // derivation right. No window is actually that narrow - minPanelWidth() is wider,
+            // because the deep pages want more - but if this ever fails, the derivation and
+            // the layout have drifted apart, which is the thing worth hearing about.
+            for (const int w : { panelW, ArpPanel::minMacroWidth() })
+            {
+                panel.setSize(w, panel.preferredHeight());
+                juce::Array<juce::Component*> knobs;
+                collectTargets(panel, knobs);
+
+                int found = 0;
+                for (auto* t : knobs)
+                {
+                    const auto name = t->getTitle();
+                    if (! name.startsWith("Macro ") || dynamic_cast<juce::Slider*>(t) == nullptr)
+                        continue;
+                    if (name.contains("rate") || name.contains("harmony")) // not strip knobs
+                        continue;
+                    ++found;
+                    expect(t->getWidth() >= 34,
+                           "macro knob '" + name + "' is " + juce::String(t->getWidth())
+                               + " px wide at panel " + juce::String(w)
+                               + " px - under the mouse-only floor");
+                }
+                // Every knob on every card. If this drops, the filter above stopped matching
+                // and the loop is passing by finding nothing, which is the failure mode a
+                // name-matched sweep has and a hand-written list does not.
+                expectEquals(found, ArpPanel::MacroRow::numKnobs * KeysProcessor::uiArpLines,
+                             "every macro knob on every card was measured");
+            }
+        }
+
+        beginTest("the Shape combo can draw its longest name at either window's floor");
+        {
+            // The dice took 34 px plus a 14 px gap out of this row, and the comment beside
+            // arpMacroShapeMaxW asserted the combo "still gets ~166 px, room for the longest
+            // name". It gets 151 at minPanelWidth and less at minMacroWidth - the figure was
+            // carried over from before the dice and never re-derived. **So this measures it
+            // rather than restating it**, which is the only version of that claim that can
+            // stay true: a name appended to the shape list, or a control added to this row,
+            // moves the answer and nothing on screen says the label got shorter.
+            //
+            // A ComboBox draws its text into `getWidth() - 32` (label inset plus the arrow),
+            // and ellipsises silently past that.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+
+            KeysLookAndFeel lnf;
+            for (const int w : { panelW, ArpPanel::minPanelWidth() })
+            {
+                panel.setSize(w, panel.preferredHeight());
+                juce::Array<juce::Component*> all;
+                collectTargets(panel, all);
+
+                int found = 0;
+                for (auto* t : all)
+                {
+                    auto* box = dynamic_cast<juce::ComboBox*>(t);
+                    if (box == nullptr || ! t->getTitle().startsWith("Macro shape"))
+                        continue;
+                    ++found;
+
+                    const auto font = lnf.getComboBoxFont(*box);
+                    float widest = 0.0f;
+                    juce::String widestText;
+                    for (int i = 0; i < box->getNumItems(); ++i)
+                    {
+                        juce::GlyphArrangement ga;
+                        ga.addLineOfText(font, box->getItemText(i), 0.0f, 0.0f);
+                        const float drawn = ga.getBoundingBox(0, -1, true).getRight();
+                        if (drawn > widest)
+                        {
+                            widest = drawn;
+                            widestText = box->getItemText(i);
+                        }
+                    }
+                    expect((float) (box->getWidth() - 32) >= widest,
+                           "'" + t->getTitle() + "' is " + juce::String(box->getWidth())
+                               + " px at panel " + juce::String(w) + ", leaving "
+                               + juce::String(box->getWidth() - 32) + " px of text area for \""
+                               + widestText + "\", which needs "
+                               + juce::String((int) std::ceil(widest)) + " - it ellipsises");
+                }
+                expectEquals(found, KeysProcessor::uiArpLines,
+                             "every card's Shape combo was measured");
             }
         }
 

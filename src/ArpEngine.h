@@ -577,6 +577,18 @@ public:
         // same stateless hash Mutate draws from. 0 semitones is Off. Chromatic on purpose;
         // the dropdown names intervals, not degrees (see the registration in PluginProcessor).
         int harmSemis[2] = { 0, 0 };
+        // **A voice may be two pitches** (2026-08-21, Owen: "in the harmony, when you select
+        // octave plus fifth, it looks like it only just does octave"). Every entry in the
+        // shimmer list names one interval bar one, and that one says "&": "+ Octave & 5th" is
+        // an octave *and* a fifth, two notes, which is how the pedal's own list reads it. The
+        // engine had it as a single compound interval of 19 semitones - an octave plus a fifth
+        // measured from the note rather than two voices off it - so the entry played one note
+        // where its name promises two.
+        //
+        // A second interval per slot rather than a third and fourth voice: this is still one
+        // voice, so it shares its slot's chance roll and either both pitches fire or neither.
+        // 0 means the slot has only its first interval, which is every other entry in the list.
+        int harmSemisB[2] = { 0, 0 };
         int harmChance[2] = { 100, 100 };
         // Move the whole run up or down whole octaves. Distinct from `octaveRange`, which
         // *stacks* copies upward and can only widen: this transposes, so it is centred at 0
@@ -767,6 +779,24 @@ public:
         freePhaseBeats = 0.0;
         havePrevPpq = false;
     }
+
+    // **Deal Random Once a new order** (2026-08-21, Owen: "I use the random ones a lot, and I'd
+    // like to have a dice button when those are active nearby to regenerate their pattern").
+    //
+    // The whole feature is this one bit. Random Once shuffles the sequence into `perm` and then
+    // walks it, rebuilding only when the chord changes or the line restarts - which is exactly
+    // what makes it a *pattern* rather than a coin flip, and exactly why it needed a way to be
+    // dealt again without disturbing anything else.
+    //
+    // The cursor is deliberately left alone: it is the phase of the walk, so zeroing it here
+    // would jolt the line back to the top of its bar as well as changing the order, and only
+    // one of those two things was asked for. Random and Random Other draw fresh every step and
+    // have no stored order at all, so this does nothing for them - which is why the button that
+    // calls it greys outside Random Once rather than lying about what it can do.
+    //
+    // Called from the audio thread only (runArpLines, off an atomic the UI bumps), so it can
+    // touch permDirty directly rather than being another atomic on this engine.
+    void rerollRandomOrder() noexcept { permDirty = true; }
 
     void hardReset()
     {
@@ -1287,7 +1317,16 @@ private:
     // harmony voices, which follow it. It hashes the same (step, era) cell as mutatedIndex
     // with a different salt, so Lock holds these variations exactly as it holds the index
     // ones: a wander that hardens, out-of-scale notes included.
-    int mutatedPitch(const Params& p, int note, long long globalStep) const noexcept
+    // `hitIndex` is which of the step's notes this is, and it is load-bearing rather than
+    // tidiness (2026-08-21): a step under Chord shape resolves several hits and calls this once
+    // for each, so without it every note of the step drew the same roll - one direction, one
+    // degree count, applied to all of them. A held C-E-G came out as a parallel D-F-A, which is
+    // the line changing key, not "a step lands on a note outside your chord". Salted, each note
+    // strays on its own and the chord comes apart the way the knob's own description promises.
+    // Still stateless from the playhead and still inside one `mutateCell`, so **Lock holds these
+    // finds exactly as before**: the cell is (step, era) and the salt only picks a voice within
+    // it, so a transport jump lands on the same answer note for note.
+    int mutatedPitch(const Params& p, int note, long long globalStep, int hitIndex) const noexcept
     {
         const int amt = juce::jlimit(0, 100, p.stray);
         if (amt <= 0)
@@ -1298,6 +1337,16 @@ private:
         const unsigned int h = hash32((unsigned int) step * 3266489917u
                                       ^ (unsigned int) (era * 668265263u)
                                       ^ (unsigned int) (p.mutateSeed * 2246822519u)
+                                      // 0x85ebca6b, not the 2654435761 the other salts here
+                                      // use: that constant *is* 0x9e3779b1, one bit off the
+                                      // avalanche word on the next line, so at hitIndex 0 -
+                                      // every shape but Chord, i.e. almost every step - the
+                                      // two collapsed to 0x8 and the fixed term this hash was
+                                      // written to carry silently was not there. The two
+                                      // constants were picked independently and happened to be
+                                      // the same golden-ratio word. **Salts XORed against each
+                                      // other have to be checked, not just chosen.**
+                                      ^ (unsigned int) (hitIndex + 1) * 0x85ebca6bu
                                       ^ 0x9e3779b9u);
         // How often a step leaves the chord at all: never at 0, every step at 100.
         if ((int) (h % 100u) >= amt)
@@ -1665,16 +1714,24 @@ private:
         // lanes fold in here, and all three want the note *after* the sequence walk has
         // chosen one, not instead of it.
         struct Hit { int note; float vel; int chan; };
-        // Three times the base capacity: each of the line's two harmony voices can add a copy
-        // of every base hit (2026-08-19). addHit drops on overflow rather than writing past
-        // the end, as ever.
+        // Five times the base capacity: the line has two harmony voices and a voice may name
+        // **two** intervals (2026-08-19; the second interval 2026-08-21), so between them they
+        // can add four copies of every base hit. The comment said three while a voice could
+        // only add one copy each, and the number moved with it rather than being left to be
+        // rediscovered. In practice addHit dedups on (note, channel), so a step can hold at
+        // most 128 entries per channel and the ceiling is never the binding constraint - but
+        // the array is sized from what the writers can *attempt*, because the dedup is a
+        // property of the notes that happen to be held and the capacity must not be. addHit
+        // drops on overflow rather than writing past the end, as ever.
         // Value-initialised. Only the first `hitCount` entries are ever read, and addHit is the
         // only writer, so the tail is dead either way - but the dedup scan below reads
         // hits[i].note for i < hitCount, and cppcheck cannot prove those were written, so the
-        // CI gate treats it as an uninitialised read. Zeroing about 5 KB once per *fired step*
+        // CI gate treats it as an uninitialised read. Zeroing about 8 KB once per *fired step*
         // is immaterial next to what the rest of fireStep does, and it costs no allocation and
         // no lock, so the audio-thread rule is untouched. Well-defined beats provably-unread.
-        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 3] {};
+        // (680 entries at 12 bytes, up from 408 when the capacity was *3. Still immaterial, but
+        // it is the number to weigh if a third harmony voice is ever proposed.)
+        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 5] {};
         int hitCount = 0;
         const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
         // **One hit per pitch per channel per step, and that is a hard rule, not tidiness.**
@@ -1749,7 +1806,8 @@ private:
                 // makes Stray a wrong note rather than a key change. Do not "fix" the mode-0
                 // branch to read `played`; that is what the line below deliberately does not
                 // do.
-                const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset), globalStep);
+                const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset),
+                                                globalStep, k);
                 addHit(played, src.velocity * velScale, src.channel);
 
                 // Harmony: a second voice, in one of two modes (harmonyMode, 2026-08-14).
@@ -1795,8 +1853,14 @@ private:
             for (int s = 0; s < 2; ++s)
             {
                 const int semis = juce::jlimit(-48, 48, p.harmSemis[s]);
+                const int semisB = juce::jlimit(-48, 48, p.harmSemisB[s]);
                 const int chancePct = juce::jlimit(0, 100, p.harmChance[s]);
-                if (semis == 0 || chancePct <= 0)
+                // **Both intervals, not just the first.** A slot is silent only when it names
+                // no interval at all; testing `semis` alone would skip a slot whose first
+                // interval is 0 and whose second is not, and such an entry would register in
+                // all three parallel tables, pass every jassert, show up in the dropdown and
+                // play nothing - with no symptom anywhere to say why.
+                if ((semis == 0 && semisB == 0) || chancePct <= 0)
                     continue;
                 if (chancePct < 100)
                 {
@@ -1806,11 +1870,18 @@ private:
                     if ((int) (h % 100u) >= chancePct)
                         continue;
                 }
-                for (int k = 0; k < baseHits; ++k)
+                // Both of the slot's intervals, inside the one chance roll above: a voice that
+                // names two pitches is one voice, so it must not half-fire.
+                for (const int iv : { semis, semisB })
                 {
-                    const int target = juce::jlimit(0, 127, hits[k].note + semis);
-                    if (target != hits[k].note)
-                        addHit(target, hits[k].vel, hits[k].chan);
+                    if (iv == 0)
+                        continue;
+                    for (int k = 0; k < baseHits; ++k)
+                    {
+                        const int target = juce::jlimit(0, 127, hits[k].note + iv);
+                        if (target != hits[k].note)
+                            addHit(target, hits[k].vel, hits[k].chan);
+                    }
                 }
             }
         }

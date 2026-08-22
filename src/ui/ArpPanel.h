@@ -59,6 +59,22 @@ public:
     int preferredHeight() const;
     std::function<void()> onPreferredHeightChanged;
 
+    // The narrowest this panel can be drawn without a control being starved, in the macro
+    // view - which is the default view and the widest-hungry one, because it puts two macro
+    // cards side by side. Static and public because the *windows* have to ask it: the editor
+    // floors itself well above this, but the detached Arp window has a minimum of its own and
+    // had been set by hand, so the ninth knob fitted the docked case and overflowed the
+    // detached one with nothing on screen to say so (2026-08-21).
+    static int minMacroWidth();
+
+    // The same question for the panel as a whole - the macro view's requirement against the
+    // deep pages', whichever is larger. This is the one a *window* wants; minMacroWidth() is
+    // exposed beside it because it is the derived half and the tests check it on its own.
+    static int minPanelWidth();
+    // The same question one axis over, and public for the same reason: a window drawing this
+    // panel has to clear the *tallest* view, not the one that happens to be showing.
+    static int minPanelHeight();
+
     // Which of the arpeggiator lines everything on this panel is editing: the band, the
     // step lanes, the twelve slots, Bars and Chain. One row of controls, the lines behind
     // it, chosen by the A/B/All tabs on the ARP section bar (editor-owned since 2026-08-02).
@@ -245,6 +261,12 @@ public:
         // exists because the readout depends on three parameters and is bound to one. Cached,
         // since it runs off the 10 Hz timer.
         void refreshTuplet();
+        void refreshDice();
+        // Point the Shape combo at what this line's parameters actually say. One reader,
+        // called from the constructor as well as from refresh(), because everything that
+        // keys off the combo's selection - the dice's greying above all - reads -1 until
+        // something selects an item, and addItemList selects nothing.
+        void syncShapeBox();
         // The dial's readout, reinstalled after every attachment swap - see ArpPanel's.
         void installRateText();
         // Rate is one knob over two parameters and two units, exactly as the band's is: which
@@ -281,6 +303,23 @@ public:
         juce::TextButton detailsButton { "Details" };
         juce::ComboBox shapeBox;
         juce::TextButton shapePrev { "<" }, shapeNext { ">" };
+
+        // **The dice** (2026-08-21, Owen: "I use the random ones a lot, and I'd like to have a
+        // dice button when those are active nearby to regenerate their pattern"). Drawn rather
+        // than lettered or iconned: the same self-drawn-chrome rule SectionBar's fold chevron
+        // and the settings gear follow, and there is no word for this that fits in 34 px.
+        //
+        // It greys outside Random Once instead of vanishing. Random and Random Other draw fresh
+        // every step and have no stored order for a dice to deal again, so a button that stayed
+        // lit on them would promise something it cannot do - and the house rule is that a
+        // control which would reflow its neighbours greys rather than disappears. Its cell is
+        // reserved on every shape for exactly that reason.
+        struct DiceButton : juce::Button
+        {
+            DiceButton() : juce::Button("dice") {}
+            void paintButton(juce::Graphics&, bool highlighted, bool down) override;
+        };
+        DiceButton diceButton;
         // Five of the seven are plain rotaries. H.TIME and VEL are RangeKnobs, because each
         // of them is a random draw and a draw has two ends (2026-08-03) - `ranges` holds one
         // for those two indices and nullptr for the rest, and `knobFace()` is what everything

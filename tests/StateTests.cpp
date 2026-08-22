@@ -378,6 +378,72 @@ public:
                                       "the saved rate came back");
         }
 
+        beginTest("only \"Octave & 5th\" carries two intervals, and it carries the right two");
+        {
+            // 2026-08-21, Owen: "when you select octave plus fifth, it looks like it only just
+            // does octave". The ampersand has always been the promise; the engine was reading it
+            // as a compound interval of 19 semitones - one note, and not either of the two named.
+            //
+            // Swept rather than spot-checked because the second table is a column of zeroes with
+            // a single 7 in it, which is exactly the shape of table that acquires a typo nobody
+            // can hear. The three lists are indexed by the same choice and must grow together.
+            const auto choices = KeysProcessor::harmonyChoices();
+            const int idx = choices.indexOf("+ Octave & 5th");
+            expect(idx > 0, "the list still has the entry this test is about");
+            expectEquals(KeysProcessor::harmonySemisFor(idx), 12, "its first interval is the octave");
+            expectEquals(KeysProcessor::harmonySemisSecondFor(idx), 19,
+                         "...and its second is the fifth *above* that octave");
+
+            for (int i = 0; i < choices.size(); ++i)
+            {
+                if (i != idx)
+                    expectEquals(KeysProcessor::harmonySemisSecondFor(i), 0,
+                                 choices[i] + " should carry exactly one interval");
+                // Off is silence, and every other entry has to name something, or a row in the
+                // list would be a no-op with nothing on screen to say so. Either interval will
+                // do: the engine's gate tests both, so an entry spelled with only a second one
+                // would sound. Testing only the first would pin the workaround for a bug rather
+                // than the rule.
+                if (i > 0)
+                    expect(KeysProcessor::harmonySemisFor(i) != 0
+                               || KeysProcessor::harmonySemisSecondFor(i) != 0,
+                           choices[i] + " should name an interval");
+            }
+        }
+
+        beginTest("the harmony list is ordered by interval, pairs included");
+        {
+            // **This is the test that would have caught it**, and the one above is not - the
+            // spot check only ever says whatever the table currently says, which is why the pair
+            // shipped as 12-and-7 with a green suite behind it.
+            //
+            // The list is one ascending ramp from "- Octave" to "+ 2 Octaves", and reading down
+            // it is how the control is used: each row is meant to shimmer a little higher than
+            // the row above. So an entry that names two pitches has to sit in that order *by
+            // both of them*. 12-and-7 put the pair's lower pitch below the plain "+ Octave"
+            // directly above it - scanning down the list made the shimmer go down - and spelled
+            // the entry as two rows the list already had. 12-and-19 is the only reading that
+            // keeps the ramp, which is the argument for it that does not depend on taste.
+            const auto choices = KeysProcessor::harmonyChoices();
+            const auto lowest = [](int i)
+            {
+                const int a = KeysProcessor::harmonySemisFor(i), b = KeysProcessor::harmonySemisSecondFor(i);
+                return b == 0 ? a : juce::jmin(a, b);
+            };
+            const auto highest = [](int i)
+            {
+                const int a = KeysProcessor::harmonySemisFor(i), b = KeysProcessor::harmonySemisSecondFor(i);
+                return b == 0 ? a : juce::jmax(a, b);
+            };
+            for (int i = 2; i < choices.size(); ++i) // from the second real entry; index 0 is Off
+            {
+                expect(highest(i) > highest(i - 1),
+                       choices[i] + " should reach higher than " + choices[i - 1]);
+                expect(lowest(i) >= lowest(i - 1),
+                       choices[i] + " should not reach below " + choices[i - 1]);
+            }
+        }
+
         beginTest("a one-note chord is a pad, and the generator can be asked for one");
         {
             // 2026-08-21, Owen: "I also like to allow one note to show up in the chord pad and

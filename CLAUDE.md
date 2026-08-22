@@ -122,6 +122,38 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   purpose**: the dropdown names intervals, which is what keeps this from being a third copy of
   the Harmony lane's chord-tone counting. On each macro card: two combos with a chance knob
   each, on their own strip under the knobs (`Macro harmony 1 A` / `Macro harmony 1 chance A`).
+- **"+ Octave & 5th" names two intervals and plays two notes** (fixed 2026-08-21, Owen: "in the
+  harmony, when you select octave plus fifth, it looks like it only just does octave"). Every
+  other entry in the list names one interval; that one says **&**, and `harmonySemisFor` read it
+  as a *compound* interval instead - a single note 19 semitones up, which is neither of the two
+  it names. `Params::harmSemisB` and `KeysProcessor::harmonySemisSecondFor` give a slot a second
+  interval, 0 for the twenty-six entries that have none. **It stays one voice**: both pitches sit
+  inside that slot's single chance roll, because a slot that half-fired would be the same bug
+  wearing the chance knob. **There are three index-parallel tables now, not two** - `harmonyChoices`,
+  `harmonySemisFor`, `harmonySemisSecondFor` - and appending to one means appending to all three;
+  the `jassert` in each is what catches a miss, and `StateTests` sweeps the whole list for the
+  second table being zero everywhere else and for no entry past Off naming nothing. The lesson is
+  the older one restated: **the label was right and the implementation was reading it wrong**, and
+  nothing on screen could show that, because both readings put *something* plausible in the air.
+  **The pair is 12 and 19, not 12 and 7** (corrected the same day, in review). It shipped as the
+  fifth *below* the octave for an afternoon, and the list itself is what settles it: the entries
+  run as one ascending ramp from "- Octave" to "+ 2 Octaves", and this one sits between
+  "+ Octave" and "+ 2 Octaves". Spelled 12-and-7 its lower pitch reached *below* the plain
+  "+ Octave" directly above it - reading down the list made the shimmer go down - and the pair
+  was an exact duplicate of "+ Perfect 5th" plus "+ Octave", two rows the list already has.
+  **`StateTests` checks the ramp across the whole list now** rather than spot-checking this
+  entry's two numbers: a spot check can only ever repeat whatever the table currently says,
+  which is exactly why the wrong pair passed a green suite. The engine's slot gate tests **both**
+  intervals too (`semis == 0 && semisB == 0`), so a future entry spelled with only a second one
+  would sound instead of registering everywhere and playing nothing.
+- **A step's strays are per note, not per step** (2026-08-21, in review of the above). Under
+  **Chord** shape one step sounds several notes, and `mutatedPitch` hashed only (step, era) - so
+  every note of the step drew one answer and moved together, turning a held C-E-G into a parallel
+  D-F-A. That is the line changing key, which is not what Stray is for. The hash is salted with
+  the hit index now. **Lock is untouched by this**: the cell is still (step, era) and the salt only
+  picks a voice inside it, so the run is as stateless from the playhead as it ever was. Worth
+  keeping as a shape of bug rather than an incident - **a hash over "which step" is the wrong key
+  whenever a step can carry more than one of the thing being decided**.
 - **"Make harmony 2 columns" meant the dropdown's own popup** (2026-08-19; a first reading put
   the card's controls in two columns, and Owen, shown the menu: "still one column"). The
   harmony combo opens as two columns, descending intervals left and ascending right, BigSky's
@@ -166,8 +198,13 @@ arpeggiator ... it should just change the existing ones"* - then, asked, he chos
 behind a control of their own rather than deleted, with Mutate's travel rescaled to the reach it
 had been spending on them. This supersedes the three-zones bullet above it.
 
-- **Nothing was ever added, and the report was still right.** A step fires the same number of
-  hits at Mutate 100 as at 0 (`fireStep` resolves one hit per `playIdx` entry either way).
+- **Nothing was ever added, and the report was still right.** A step fires **no more** hits at
+  Mutate or Stray 100 than at 0 (`fireStep` resolves one hit per `playIdx` entry either way).
+  Not *exactly as many*, and the difference is worth stating: under a multi-hit shape a stray
+  can put two hits on one pitch, and `addHit` dedupes on (note, channel), so such a step comes
+  out a voice thinner. That is the harmony voices' own rule - a hit collapsing onto its source
+  is dropped rather than doubled, because a collapsed interval is a silence - and it errs the
+  safe way for a report about notes *arriving*.
   What arrived were *pitches belonging to no chord Owen had played*, which is what extra notes
   sound like from the listening chair. `ArpTests.cpp` pins the count outright now, beside the
   pitch-set tests, so the two halves of that claim cannot rot apart. **Reach for this
@@ -197,14 +234,28 @@ had been spending on them. This supersedes the three-zones bullet above it.
   how far outside it may go, how long it keeps what it finds. The `Knob` enum is UI indexing
   and nothing stores it, so inserting there is free; the *parameter* was appended, which is the
   order that is not free. **Nine is what the 38 px floor was chosen to survive**: 9 knobs plus
-  the two rings and eight gaps is 422 px, so every knob still clears the 34 px mouse-only
-  floor. **Measure that against the narrowest window the view is drawn in, not the editor's
-  minimum** - a column in the docked editor is comfortably over 600 px at the 1320 px floor,
-  so the docked case is not the binding one and never was; the *detached* Arp window is, and
-  it was not re-measured when this knob was added. **A tenth must buy the width** - raise the
-  floor of every window that draws the view, never starve the row. **Zero is its own off
-  switch**, so Stray takes no toggle beside it, the reading that already leaves Strum, Lock
-  Influence and Lean without one.
+  the two rings and eight gaps is 422 px, so every knob still clears the 34 px mouse-only floor.
+  **A tenth does not fit and must buy the width** - raise the floors, never starve the row.
+  **Zero is its own off switch**, so Stray takes no toggle beside it, the reading that already
+  leaves Strum, Lock Influence and Lean without one.
+  **"The editor's minimum width" was the wrong floor, and that is the standing lesson**
+  (corrected 2026-08-21, in review). The arp section **detaches into a window of its own**, whose
+  minimum was 900 px - a card column of 420 against a strip asking for 422. JUCE answers a row
+  that asks for more than it has by clamping, and the whole shortfall lands on the last cell, so
+  H.TIME's face drew at 16 px with nothing on screen to say why. Two of the deep pages were
+  already starving a control apiece at that width before the ninth knob arrived. So the floor is
+  **derived and asked for** now: `ArpPanel::minMacroWidth()` walks the same insets the layout
+  does and moves the moment `numKnobs` changes, `ArpPanel::minPanelWidth()` takes that against the
+  deep pages' own measured requirement, and `PluginEditor` passes it to the detached window rather
+  than carrying a literal. `LayoutTests` sweeps every view at that width, which is what keeps the
+  measured half honest. **A view that can be drawn in two windows has two floors, and only the
+  smaller one is ever tested by accident** - the same trap as `contentHeight()`'s max over five
+  sums, one axis over.
+  **The starvation sweep's own floor is not the mouse-only floor**, which is why it waved this
+  through: `width >= 20` passes for a range knob whose 32 px cell is mostly ring, so the face
+  inside it can be 16 px and still clear the test. `LayoutTests` measures the macro knobs against
+  34 px directly for that reason, and counts them, so a name-matched sweep that stops matching
+  fails instead of passing by finding nothing.
 
 **The step sequencer pass (2026-08-18, second round of that day).** Owen: *"a usability and
 functionality pass of the step sequencer. I wanna draw a lot of inspiration from [Kirnu Cream] and
@@ -1505,6 +1556,48 @@ what is no longer true lives here in one place:
   whenever both lines were in the same rate mode. `refreshRateMode()` early-outs on an unchanged
   mode and the dial's attachment lives there rather than in `buildAttachments()`, so it was the
   one control that never rebound; `lastRateFree = -1` before the call forces the swap.
+- **The Shape combo is capped, and the dice lives in what that freed** (2026-08-21, Owen: "the
+  shape of the arpeggiator drop down doesn't need to be so big. Make it smaller. And I use the
+  random ones a lot, and I'd like to have a dice button when those are active nearby to
+  regenerate their pattern"). Shape was the **one elastic control** on the card's top row, which
+  is correct at the editor's floor and absurd above it: on Owen's window it took about 540 px to
+  hold "Fingered Bottom", the longest of its fifteen names. `arpMacroShapeMaxW` (170) is a
+  **ceiling, not a size**, so above the floor the row simply stops giving the combo more and the
+  reserve-the-fixed-thing-first rule is untouched. It does **not** shrink "exactly as before" at
+  the narrow end, and the comment said so for an afternoon: the dice's 34 px cell and its 14 px
+  gap come out of this same row, so wherever the cap is not biting, Shape is 48 px narrower than
+  it used to be. That is affordable only because the panel's floor is set by the knob strip below,
+  which is wider than this line needs. The **~166 px at the floor** this used to claim was carried
+  over from before the dice and never re-derived - it is nearer 151, and less again at
+  `minMacroWidth()`. Still room for the longest name, so nothing was broken, but **a width
+  asserted in a comment goes stale silently**, which is this same round's other lesson wearing
+  different clothes. `LayoutTests` measures the combo against its own longest entry at both
+  floors now. **Narrow the floor and this is still the second thing that breaks, after the
+  knobs.**
+  **The dice deals this line's Random Once a new order**, and that is the whole feature:
+  `ArpEngine::rerollRandomOrder()` sets `permDirty`, and the next step reshuffles. **It leaves
+  `dirCursor` alone** - the cursor is the phase of the walk, so zeroing it would jolt the line
+  back to the top of its bar as well as changing the order, and only one of those was asked for.
+  **It greys outside Random Once**, because Random and Random Other draw fresh every step and
+  have no stored order to deal again; a lit button there would promise what it cannot do. Its
+  cell is reserved on every shape so the row never reflows, and `MacroRow::refreshDice()` is the
+  one place that rule is written - called from `applyShape` (the instant the combo moves), from
+  `refresh` (every other route: a host lane, a session load, MCP, the steppers), and from the
+  constructor. **It reads the Shape combo's selection, so the combo has to have one**:
+  `addItemList` selects nothing and Shape has no attachment to seed it either, so the constructor
+  calls `syncShapeBox()` first. Without that the dice opened greyed on a Random Once session and
+  came live only on the panel's next 10 Hz tick - a card built from a saved session has to be
+  right when it is built, not a hundred milliseconds later.
+  **The reroll crosses threads as a counter, not a flag**: `ArpLine::rerollRequest` is bumped on
+  the message thread and matched against `rerollSeen` in `runArpLines`, so every write to engine
+  state stays on the audio thread and each side writes only its own variable. It does **not**
+  mean two clicks in one block are two rerolls - the comparison fires once however far the
+  counter jumped, and it is right to, since `rerollRandomOrder()` only sets `permDirty` and a
+  second deal before the next step is inaudible by construction. That claim was in the code, the
+  changelog and this file, and was wrong in all three (corrected 2026-08-21, in review). **Placed beside the shape group with a 14 px gap**, not pinned to the
+  right end of the row: pinned right it sat 250 px from the thing it acts on and read as
+  unrelated, and Owen asked for it "nearby". The gap is wider than the 6 px inside the shape
+  group, which is what stops it reading as a third stepper.
 - **A crowded row grows a strip; it does not squeeze its targets** (2026-08-02, when Dot, Trip -
   now Tuplet - and Anchor joined the macro rows). The main line was already at every floor it has at Owen's
   window width, so two more 34 px targets in it would have driven the eight knobs under the
@@ -2076,6 +2169,10 @@ Four things will bite otherwise:
   further up, hit again on 2026-08-14 - a five-line UIA script is the way past it. The macro
   view's own controls are prefixed `Macro` so they never collide with the bar chips or a tab:
   `Macro rate A`, `Macro rate mode A`, `Macro shape A`,
+  `Macro reroll A` (the dice, 2026-08-21 - it is a plain
+  `juce::Button` and does offer an InvokePattern, but it is **disabled on every shape but Random
+  Once**, and a disabled control is absent from the UIA tree entirely, so "element not found" is
+  the expected answer there rather than evidence it is missing),
   `Macro dot A` / `Macro tuplet A` / `Macro anchor A` (`Macro trip A` until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual

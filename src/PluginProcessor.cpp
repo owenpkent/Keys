@@ -611,26 +611,85 @@ int KeysProcessor::tupletFor(int choiceIndex)
 
 // BigSky's shimmer list (the photo Owen held up), minus its two cents rows - MIDI semitones
 // cannot say ten cents. Ordered as the pedal orders it, descending intervals then ascending,
-// so anyone who knows the pedal reads this list as the same list. The two tables below must
-// agree entry for entry; the jassert in harmonySemisFor is what catches a miss.
+// so anyone who knows the pedal reads this list as the same list.
+//
+// **One table with three columns, not three tables that must agree** (2026-08-21, in review).
+// It was a StringArray and two `int[]`s, each of which had to be appended to together, with a
+// `jassert` in each of the two comparing its length against the StringArray's. That is the
+// `buildLaneRow`-versus-`laneRange` shape CLAUDE.md already logs: three tables that must agree
+// is three tables that will not, and a comment naming the hazard does not remove it. Here the
+// name and both intervals sit in one row, so appending is a single edit that cannot be half
+// done, and `harmonyChoices()` is built *from* this rather than kept beside it.
+//
+// The jasserts went with it, and that is a fix rather than a loss: they called `harmonyChoices()`,
+// which builds a 27-entry StringArray of heap Strings - and `harmonySemisFor` is called from
+// `runArpLines`, on the **audio thread**, four times a line every block. A Debug build was
+// allocating sixteen StringArrays a block to check a drift that is now impossible by
+// construction. Nothing may allocate there; see the invariant in CLAUDE.md.
+namespace
+{
+    struct HarmonyEntry
+    {
+        const char* name;
+        int semis;  // the interval the voice carries
+        int second; // a second interval for the one entry that names a pair, 0 for none
+    };
+
+    // The one entry with a second interval is "+ Octave & 5th": an octave *and* a fifth, two
+    // notes off the note being harmonised, which is what the ampersand says and what the pedal
+    // means. **The fifth is the one above the octave (19), not below it (7)**, because the list
+    // is ordered by ascending interval and this row sits between "+ Octave" and "+ 2 Octaves".
+    // It read 12 and 7 for an afternoon, which made the pair an exact duplicate of two rows the
+    // list already has and made the entry reach *lower* than the one above it.
+    constexpr HarmonyEntry harmonyTable[] = {
+        { "Off",             0,   0 },
+        { "- Octave",      -12,   0 }, { "- Major 7th",   -11,  0 },
+        { "- minor 7th",   -10,   0 }, { "- Major 6th",    -9,  0 },
+        { "- minor 6th",    -8,   0 }, { "- Perfect 5th",  -7,  0 },
+        { "- Tritone",      -6,   0 }, { "- Perfect 4th",  -5,  0 },
+        { "- Major 3rd",    -4,   0 }, { "- minor 3rd",    -3,  0 },
+        { "- Major 2nd",    -2,   0 }, { "- minor 2nd",    -1,  0 },
+        { "+ minor 2nd",     1,   0 }, { "+ Major 2nd",     2,  0 },
+        { "+ minor 3rd",     3,   0 }, { "+ Major 3rd",     4,  0 },
+        { "+ Perfect 4th",   5,   0 }, { "+ Tritone",       6,  0 },
+        { "+ Perfect 5th",   7,   0 }, { "+ minor 6th",     8,  0 },
+        { "+ Major 6th",     9,   0 }, { "+ minor 7th",    10,  0 },
+        { "+ Major 7th",    11,   0 }, { "+ Octave",       12,  0 },
+        { "+ Octave & 5th", 12,  19 }, { "+ 2 Octaves",    24,  0 },
+    };
+
+    constexpr int harmonyEntryCount = (int) std::size(harmonyTable);
+
+    // Not constexpr: juce::jlimit is not, in this JUCE. It does not need to be - the *table*
+    // is constexpr, which is the half that matters, and this is an indexed read either way.
+    inline const HarmonyEntry& harmonyEntry(int choiceIndex) noexcept
+    {
+        return harmonyTable[(size_t) juce::jlimit(0, harmonyEntryCount - 1, choiceIndex)];
+    }
+} // namespace
+
 juce::StringArray KeysProcessor::harmonyChoices()
 {
-    return { "Off",
-             "- Octave",      "- Major 7th",  "- minor 7th", "- Major 6th",  "- minor 6th",
-             "- Perfect 5th", "- Tritone",    "- Perfect 4th", "- Major 3rd", "- minor 3rd",
-             "- Major 2nd",   "- minor 2nd",
-             "+ minor 2nd",   "+ Major 2nd",  "+ minor 3rd", "+ Major 3rd",  "+ Perfect 4th",
-             "+ Tritone",     "+ Perfect 5th", "+ minor 6th", "+ Major 6th", "+ minor 7th",
-             "+ Major 7th",   "+ Octave",     "+ Octave & 5th", "+ 2 Octaves" };
+    juce::StringArray out;
+    for (const auto& e : harmonyTable)
+        out.add(e.name);
+    return out;
 }
 
+// Called from runArpLines on the audio thread: a plain indexed read of a constexpr table, no
+// allocation and no call into harmonyChoices().
 int KeysProcessor::harmonySemisFor(int choiceIndex)
 {
-    static constexpr int semis[] = { 0,
-                                     -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1,
-                                     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19, 24 };
-    jassert((int) std::size(semis) == harmonyChoices().size()); // the two lists drifted apart
-    return semis[(size_t) juce::jlimit(0, (int) std::size(semis) - 1, choiceIndex)];
+    return harmonyEntry(choiceIndex).semis;
+}
+
+// The **second** interval a voice may carry, 0 for none (2026-08-21, Owen: "when you select
+// octave plus fifth, it looks like it only just does octave"). A second interval per slot
+// rather than two more voices: it is still one voice, so it shares its slot's chance roll and
+// either both pitches fire or neither.
+int KeysProcessor::harmonySemisSecondFor(int choiceIndex)
+{
+    return harmonyEntry(choiceIndex).second;
 }
 
 // The id suffix of each per-line parameter, one table so the audio thread's cached pointers,
@@ -1866,6 +1925,17 @@ void mergeArpOut(juce::MidiBuffer& dest, const juce::MidiBuffer& src, int channe
 
 // Audio thread. One line's worth of engine parameters, read through the cached pointers so
 // nothing here builds a string or takes a lock.
+// The dice on a line's macro card (2026-08-21, Owen: "I use the random ones a lot, and I'd like
+// to have a dice button when those are active nearby to regenerate their pattern"). All it does
+// is bump a counter; runArpLines below notices and asks that engine for a new order, so nothing
+// on the message thread ever writes engine state. See ArpEngine::rerollRandomOrder.
+void KeysProcessor::rerollArpRandom(int line)
+{
+    if (line < 0 || line >= numArpLines)
+        return;
+    lines[(size_t) line].rerollRequest.fetch_add(1, std::memory_order_relaxed);
+}
+
 void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
 {
     // Which lines want the keys you play. A line that is off gets nothing: its input still
@@ -2012,8 +2082,10 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // nothing to the engine, and keeping the interval table out of it is the same
         // decision as the scale mask below.
         ap.harmSemis[0] = harmonySemisFor((int) arpParam(n, apHarm1));
+        ap.harmSemisB[0] = harmonySemisSecondFor((int) arpParam(n, apHarm1));
         ap.harmChance[0] = (int) arpParam(n, apHarm1Chance);
         ap.harmSemis[1] = harmonySemisFor((int) arpParam(n, apHarm2));
+        ap.harmSemisB[1] = harmonySemisSecondFor((int) arpParam(n, apHarm2));
         ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
         ap.stray = (int) arpParam(n, apStray);
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
@@ -2101,6 +2173,23 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.fallbackBpm = (double) apvts.getRawParameterValue("bpm")->load();
         // Tempo Sync: off pins every line to fallbackBpm above even with the host rolling.
         ap.followHost = apvts.getRawParameterValue("bpmSync")->load() > 0.5f;
+
+        // The dice, picked up here so every write to the engine's own state stays on this
+        // thread (2026-08-21). Compared rather than tested-and-cleared: the counter is the
+        // message thread's alone to write and this side only ever asks whether it moved, so
+        // neither thread has to write the other's variable.
+        //
+        // **It does not mean two clicks in one block are two rerolls** - the comparison fires
+        // once however far the counter jumped, and it is right to. rerollRandomOrder() only
+        // sets permDirty, so it is idempotent: dealing twice before a step reads the order is
+        // indistinguishable from dealing once, and the second deal would be a shuffle nobody
+        // could ever hear. What the counter buys over a flag is only the single-writer split
+        // above.
+        if (const int req = l.rerollRequest.load(std::memory_order_relaxed); req != l.rerollSeen)
+        {
+            l.rerollSeen = req;
+            l.engine.rerollRandomOrder();
+        }
 
         // The engine's input is this line's buffer alone, never the merged stream: that is the
         // whole of the routing. Its output goes into midi with everything the other lines and

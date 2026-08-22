@@ -103,6 +103,13 @@ break found by text, so the list and the split cannot drift apart). The list is 
 shimmer interval table with its
 two cents-detune rows dropped, since Keys has no concept of a partial-cent shift: Off, - Octave
 down through - minor 2nd, + minor 2nd up through + Octave, + Octave & 5th, + 2 Octaves. The
+**"+ Octave & 5th" plays two notes** (fixed 2026-08-21, Owen: "it looks like it only just does
+octave"): every other entry names one interval and that one names two, which is what its
+ampersand has always said. It was read as a compound interval of 19 semitones - one note, and
+not either of the two named - so `Params::harmSemisB` and `harmonySemisSecondFor` give a slot a
+second interval, 0 for the twenty-six entries that have none. It stays **one voice**: both
+pitches sit inside the slot's single chance roll, because a voice that half-fired would be the
+same bug wearing the chance knob. The
 semitone table lives in `KeysProcessor::harmonySemisFor`, the on-screen strings in
 `KeysProcessor::harmonyChoices` - append-only, the same rule every choice list in this file
 already answers to.
