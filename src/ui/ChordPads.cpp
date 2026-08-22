@@ -980,6 +980,13 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
         // a stale `dragSource` under it and play the chord you opened the menu to throw away.
         dragging = false;
         dragSource = -1;
+        // **Release whatever is sounding first** (2026-08-22). This branch returns before the
+        // `endAudition()` guard below, which was harmless while the press was silent and is not
+        // now that it fires: left-press a pad to lean on it, right-click to reach the card menu,
+        // and the popup takes the mouse - so the pending left mouseUp never arrives here and the
+        // chord rings until the next left press on the strip. Ending it here is also what the
+        // menu wants: every row on it is about a card you are no longer playing.
+        endAudition();
         const int cell = cellAt(e.position);
         if (cell >= 0)
             showPadMenu(cell);
@@ -1020,8 +1027,8 @@ void ChordPads::mouseDown(const juce::MouseEvent& e)
     // **The press is where a card starts sounding** (2026-08-22, Owen: "when the play mode is
     // checked on the pads, I want it to trigger as soon as you click on it and stay held until
     // you let go"), and the release is where it stops - so a stab is short and a lean is long,
-    // which is most of what a pad is for. `startAudition(false)` means no timer: the mouse-up
-    // owns the note-off.
+    // which is most of what a pad is for. The mouse-up owns the note-off; nothing on this strip
+    // is on a timer any more.
     //
     // This was the release for a fixed 800 ms from 2026-08-18, with holding hidden behind a
     // settings tick. The reason was that firing here lets a press that turns out to be a *drag*
@@ -1077,7 +1084,12 @@ void ChordPads::endAudition()
 
 void ChordPads::mouseDrag(const juce::MouseEvent& e)
 {
-    if (dragging || e.position.getDistanceFrom(downPos) <= 6.0f)
+    // **14 px, not 6** (2026-08-22). Six was chosen when the press was silent, so an accidental
+    // drag cost nothing but a ghost; now the press sounds and a drag routes a chord, so the
+    // threshold is what separates "I am leaning on this chord" from "I am moving this card".
+    // Wider is the forgiving direction on a surface driven by one mouse - the same reasoning
+    // that gives every target 34 px - and a deliberate drag crosses 14 px without noticing.
+    if (dragging || e.position.getDistanceFrom(downPos) <= 14.0f)
         return;
 
     // What a drag has to decide is only whether there was something under it worth carrying,
@@ -1090,16 +1102,23 @@ void ChordPads::mouseDrag(const juce::MouseEvent& e)
         return;
     }
 
-    // A drag is routing, not playing. In the default mode the press sounded nothing and this has
-    // only an *earlier* card's 800 ms audition to end - carrying a card while the last one plays
-    // on is its own confusion. In hold mode it silences the blurt this press made, which is the
-    // few tens of milliseconds it took to travel six pixels.
+    // **The note is not cut here** (2026-08-22). It was, and that made the *length of a chord*
+    // depend on the hand staying inside a small circle: with the press owning the note, any
+    // tremor past the threshold ended the audition and put a drag ghost under the cursor, so a
+    // lean stopped for no visible reason. Keys is played with one mouse by someone with muscular
+    // dystrophy - this is precisely the case a distance threshold penalises, and "stay held
+    // until you let go" is what was asked for, not "until you let go or twitch".
     //
-    // What it cannot undo in hold mode is the *choke*: firing a chord stops the other chord
-    // sources, and with Exclusive on that includes each arp line's held chord, so by the time a
-    // drag is recognised a running line has already been stopped. That is Exclusive doing exactly
-    // what it says, and it is why the quiet press is the default rather than the tick.
-    endAudition();
+    // So the chord runs until mouseUp whatever the gesture turned into, and a drag is a drag
+    // that happens to be sounding. Releasing over nothing cancels the drag and ends the note;
+    // releasing over a target routes the chord and ends the note. Nothing is left ringing:
+    // mouseUp calls endAudition on every path, and so does the destructor.
+    //
+    // What this still cannot undo is the *choke*: firing a chord stops the other chord sources,
+    // and with Exclusive on that includes each arp line's held chord, so by the time a drag is
+    // recognised a running line has already been stopped. **That is what the Play toggle is
+    // for** - off, the strip is drag-only and silent at both ends, which is the setting for
+    // dragging cards into the arpeggiator. Turning Exclusive off instead costs the drag nothing.
     beginChordDrag(e);
 }
 

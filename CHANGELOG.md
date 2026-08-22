@@ -25,6 +25,19 @@ out of. The answer is to switch **Play off** while you are dragging cards into t
 which makes the strip drag-only and is the one gesture it was built for. Turning Exclusive off
 alongside it costs the drag nothing at all.
 
+**A drag no longer stops the chord**, and the drag threshold went from 6 px to 14. With the
+press owning the note, cutting it on travel made the *length of a chord* depend on the hand
+staying inside a small circle: a tremor ended the note and put a drag ghost under the cursor, so
+a lean stopped for no visible reason. That is the one thing a surface driven by one mouse must
+not require. The chord now runs to the release whatever the gesture turned into - dropping a card
+ends it like any other release - and nothing is left ringing, since `mouseUp` and the destructor
+both end the audition on every path.
+
+**A right-click while a pad is sounding releases it.** That branch returns before the
+`endAudition()` guard, which was harmless while the press was silent: now the popup takes the
+mouse, the pending left mouse-up never arrives, and the chord would ring until the next left
+press on the strip.
+
 Sustain and Latch are untouched: the release still goes through `releaseChordPad` /
 `releaseLiveChord`, so a pedalled chord keeps ringing exactly as before. The generator's audition
 tray keeps its own 800 ms - a tray card is a candidate you are sampling, a pad is an instrument

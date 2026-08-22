@@ -572,11 +572,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // on, chokes every running line. Read at the moment a press or release is handled, so the
     // next click already obeys it; nothing to rebuild.
     padsPlayButton.setTitle("Pads play on click");
-    padsPlayButton.setTooltip("Whether clicking a chord card plays it. Untick this while you "
-                              "are dragging cards up into the arpeggiator: the cards go quiet "
-                              "under the mouse, so a click that meant to be a drag cannot fire "
-                              "a chord and cut the running lines off. Dragging, the card menu "
-                              "and dropping on the arp all still work.");
+    padsPlayButton.setTooltip("Ticked, a chord card plays for as long as you hold it - the "
+                              "press starts the chord and letting go ends it, so a stab is "
+                              "short and a lean is long. Untick this while you are dragging "
+                              "cards up into the arpeggiator: the cards go quiet under the "
+                              "mouse, so a click that meant to be a drag cannot fire a chord "
+                              "and cut the running lines off. Dragging, the card menu and "
+                              "dropping on the arp all still work either way.");
     padsPlayButton.setToggleState(processor.layout.padsPlayOnClick, juce::dontSendNotification);
     padsPlayButton.onClick = [this]
     { processor.layout.padsPlayOnClick = padsPlayButton.getToggleState(); };

@@ -287,11 +287,12 @@ keyboard on each, and it went on 2026-07-31 once the note list fit under the nam
 4. **Play it, beat-pad style.** With **Play** on (the Pads bar), click a filled pad to sound
    its chord: the **press** starts it and **letting go** ends it, so a stab is short and a
    lean is long (2026-08-22, Owen: "when the play mode is checked on the pads, I want it to
-   trigger as soon as you click on it and stay held until you let go"). A **drag** stops the
-   note the moment it registers, so capturing or routing a chord never leaves one ringing -
-   though the press has already sounded by then, which is why **Play off** is the setting to
-   use while you are dragging cards into the arpeggiator: it makes the strip drag-only and
-   silent at both ends. Turn **Sustain** on to keep a chord ringing after you let go. **A new pad always
+   trigger as soon as you click on it and stay held until you let go"). A **drag** does not stop the
+   note: it runs until you let go however far the hand travelled, because tying a chord's length
+   to the hand staying inside a small circle is the one thing a mouse-only surface must not do.
+   Dropping a card ends the note like any other release. The press has still *sounded* by then,
+   which is why **Play off** is the setting to use while you are dragging cards into the
+   arpeggiator: it makes the strip drag-only and silent at both ends. Turn **Sustain** on to keep a chord ringing after you let go. **A new pad always
    chokes the previous pad**, Sustain or not (2026-08-16, Owen: "when you click a pad it
    should clear other presses") - the strip is one voice, a palette you pick from, and
    stacking two pads only ever made a pile with no name. **Exclusive** decides whether a pad

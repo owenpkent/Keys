@@ -216,14 +216,9 @@ private:
     std::vector<int> currentNotes;
     juce::String currentName;
 
-    // **A card sounds on release, and a drag never sounds at all** (2026-08-18, Owen: "the chord
-    // should only play when you release the mouse. I was having a problem where an arpeggiator
-    // was playing where as soon as I tried to drag a different chord to the second arpeggiator,
-    // it played the new chord and stopped the first arpeggiator").
-    //
-    // This reverses the hold-to-play of 2026-08-16 (press fires, release lets go), and what it is
-    // really fixing is not the noise. **Firing a chord chokes the other chord sources** - that is
-    // pressChordPad's job, and with Exclusive on it reaches each line's held chord - so a press
+    // **A card sounds on release, and a drag never sounds at all** (2026-08-18) - **superseded
+    // 2026-08-22**, when the press took it back and the Play toggle became the switch between
+    // them. Kept because the reason the release ever won is still the live trade-off: a press
     // that turns out to be a drag had already stopped line A by the time the card was moving
     // toward line B. Silencing the blurt when the drag starts does not put that back, and there
     // is nothing on screen to explain why aiming at one arpeggiator stopped the other.

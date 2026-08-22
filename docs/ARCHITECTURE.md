@@ -309,21 +309,26 @@ the processor outlives it. `pressLiveChord` passes `includeKeybed = false`: the 
 *is* what the keybed is holding, so releasing the keybed there would unlatch the keys in the same
 breath as firing them.
 
-**A pad is hold-to-play** (2026-08-16, Owen: "when you click a pad cord, it should only play it
-for the amount of time that you're holding it, not a fixed value"). Pressing calls
-`pressChordPad` (fire, honouring the `chordExclusive` choke) and releasing calls
-`releaseChordPad` (stop, unless Sustain is holding it: the editor releases held pad
-chords when the pedal lifts). This reverses the 2026-08-02 change that made a card silent on
-press and auditioned it for a fixed `auditionMs` (800) on release, and the reason that change
-existed is worth keeping: it was never really about the noise a press made, it was that the
-press branch also handed the card to a running arp line and cleared `dragSource`, so a card
-could not be dragged in the one mode where dragging it onto a line is the point. That branch is
-gone outright now (a click never feeds a line), so sounding on press costs nothing this time.
-`ChordPads::mouseDrag` calls `endAudition()` before it starts carrying the card, so what a drag
-still costs is a blurt for the roughly six pixels it takes to register as a drag rather than a
-click; waiting out that threshold before sounding would put a lag on every note, the worse
-trade. **The generator's own audition tray keeps its fixed `auditionMs`** on purpose: a tray
-card is a candidate you are sampling, and a pad is an instrument you are playing. Dropping a pad on the live card runs the other
+**A pad is hold-to-play, when Play is on** (2026-08-16, restored 2026-08-22, Owen: "when the
+play mode is checked on the pads, I want it to trigger as soon as you click on it and stay held
+until you let go"). Pressing calls `pressChordPad` (fire, honouring the `chordExclusive` choke)
+and releasing calls `releaseChordPad` (stop, unless Sustain is holding it: the editor releases
+held pad chords when the pedal lifts).
+
+**`LayoutState::padsPlayOnClick` - the Pads bar's Play toggle - gates the whole of it.** Off, a
+click makes no sound at either end and the strip is drag-only, which is the setting for dragging
+cards up into the arpeggiator: firing a chord chokes the other chord sources, and with Exclusive
+on that reaches each line's held chord, so a press that turns out to be a drag has already
+stopped a running line. That trade is what made the release own the sound between 2026-08-18 and
+2026-08-22, behind a `padHoldToPlay` tick that no longer exists - one switch answers it now.
+
+A drag does **not** stop the chord (2026-08-22): with the press owning the note, cutting it on
+travel made the length of a chord depend on the hand staying inside a small circle, which is the
+one thing a mouse-only surface must not require. The note runs to mouseUp whatever the gesture
+became, and the drag threshold is 14 px rather than 6 for the same reason. Nothing on this strip
+runs on a timer any more and `ChordPads` is not a `juce::Timer`; **the generator's own audition
+tray keeps its fixed `auditionMs`** on purpose, since a tray card is a candidate you are sampling
+and a pad is an instrument you are playing. Dropping a pad on the live card runs the other
 direction: `onRecall` hands its notes to the active note surface, which latches the
 drawn keys that produce them (`recallOutputNotes`), so a stored chord comes back for
 editing. Playback reuses `noteOn`, so Humanize colours each tone,
