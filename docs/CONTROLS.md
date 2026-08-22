@@ -1231,3 +1231,29 @@ so a release a few pixels short of the panel destroyed the chord instead of rout
 the arp's own targets always vetoed the clear correctly, it only ever bit on a near miss and so
 read as random. Clearing a pad is **Clear pad** on its right-click menu, which is where it was
 already documented to live.
+
+### Feeding a line a whole sequence of chords
+
+Everything above hands a line **one** chord. There are three ways to hand it a sequence, and
+they differ in who owns the clock rather than in what they can play. Full survey, and what
+Scaler, Cthulhu, Kirnu and Ripchord each do instead, in `docs/CHORD_SEQUENCE.md`.
+
+- **Chain, at the bar.** Fill the twelve slots with chords and press **Chain**: the line plays
+  them in order, each for the bars on its card. This is the one that changes the *rhythm* as
+  well as the harmony, because a slot remembers its pattern, its shape and its rate along with
+  its chord, so bar three can arpeggiate differently from bar one. No other plug-in of this kind
+  does that. Described in full under **Playing the row as a progression**, above.
+- **The Chord lane, at the step.** On the Draw page, the **Chord** lane calls up one of the same
+  twelve slot chords for a single step: `0` leaves the step playing the held chord as usual,
+  `1`..`12` swap in that slot's chord for that step alone. Draw `1` across steps 1 to 4 and `2`
+  across 5 to 8 and the progression moves *inside* one pattern instead of on bar lines. It is
+  the finest resolution Keys offers, and it is limited to one pattern's length.
+- **A clip on the track, at the DAW's own timeline.** Switch **Play** on for the line and the
+  chords in an ordinary MIDI clip on the Keys track drive it: the arpeggiator takes the notes
+  out of the stream and plays its pattern over them. The host owns the durations, the loop and
+  the arrangement, so a chord can last any length you can draw. This is how Cthulhu, Ripchord
+  and an Ableton MIDI-effect rack all work, and it needs nothing switched on in Keys but Play.
+
+Chain cannot change chord in the middle of a bar, and the Chord lane cannot run a progression
+longer than one pattern. If you want two bars of one chord and then two beats of another, the
+clip on the track is the route that does it today.

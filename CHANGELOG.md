@@ -5,6 +5,30 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Documented: three ways to feed an arpeggiator line a sequence of chords
+
+Owen: *"for arpeggiators if I wanted to feed in a sequence of chords for it to play. How
+would we do that?"*
+
+No behaviour changed. It turns out Keys already does this three times over, and only one of
+the three was written down: **Chain** walks the twelve slots a bar at a time, the **Chord**
+lane swaps a slot's chord in for a single step, and a line with **Play** on arpeggiates the
+chords in an ordinary MIDI clip on the Keys track, letting the DAW own the durations. That
+last one was never a feature, it falls out of the routing, and it is the only one of the
+three that can hold one chord for two bars and the next for two beats.
+
+The user guide gains a section covering all three and saying which to reach for.
+`docs/CHORD_SEQUENCE.md` is the research behind it: what Scaler, Cthulhu, Ripchord,
+InstaChord, Captain Chords and Hapax each do instead, why Kirnu Cream's chord memories store
+intervals rather than chords ("the chord is a stamp where the base note is the handle") and
+what that would cost Keys to copy, and five options for the thing that *is* missing, which is
+a way to load a progression into the slots in fewer than one drag per chord. Proposed and
+unbuilt, awaiting a pick.
+
+Worth naming while it is being written down: because a slot remembers its pattern, shape and
+rate alongside its chord, a Keys chain can change the **rhythm** on the chord change. Every
+other plug-in in that list holds the pattern still and swaps the harmony under it.
+
 ## [0.2.0] - 2026-08-20
 
 ### Added: a documented release pipeline, and the first build Keys has ever published
