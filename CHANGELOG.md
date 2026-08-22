@@ -20,11 +20,26 @@ for an id no item has - and index 0 is **Off**. So the single row you need in or
 voice was the single row greyed out, which is why it read as a harmony that would not turn off
 rather than as a bug in a popup.
 
-Menu construction moved out of `showPopup` into `ArpPanel::buildHarmonyMenu`, because a menu that
-is only ever shown asynchronously cannot be asserted about. `LayoutTests` now walks every row and
-fails if one comes up disabled - checked against the original bug, where it fails on "Off" and
-nothing else - and pins the column break, which is found by text and is the other thing here that
-can silently stop matching.
+**The loop itself moved to `src/ui/ComboMenu.h` and is shared**, because Keys hand-rolls a
+ComboBox popup in two places and the other one - `StepComboBox` - carried a hard-coded `true`
+where the enabled flag goes, which is the same silent lie one call over: `setItemEnabled(id,
+false)` is the ordinary way to grey a row, and a row drawn enabled there would have been
+clickable and fired its callback with the value the caller meant to forbid. One loop now, with
+the index-versus-id rule written where a third popup would be read.
+
+**The column break is derived from the semitones, not the label text.** Matching on a leading
+`"+"` reads as data-driven and is not: the harmony table's own rule is that appending is the only
+safe edit, and an appended *descending* interval lands after every ascending one, so no break
+fires for it and it draws at the foot of the wrong column. `ArpTests` pins that the table stays
+grouped, so an append that breaks the grouping fails a test rather than mis-columning quietly.
+
+`LayoutTests` walks the **live** combos on a real panel - all eight of them - and pins every
+row's own **item id**, its text and its enabled flag. The ids matter most: a first cut of this
+test checked text, enablement and the break, and passed green against `addItem(i, ...)`, the
+identical index-for-id slip one call over. The id is the value this bug class turns on.
+
+The dropdown also opens with the current row highlighted now (`withInitiallySelectedItem`), which
+every stock ComboBox does and this one had stopped doing.
 
 
 ### Fixed: one harmony table instead of three that must agree

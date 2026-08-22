@@ -157,9 +157,11 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
 - **"Make harmony 2 columns" meant the dropdown's own popup** (2026-08-19; a first reading put
   the card's controls in two columns, and Owen, shown the menu: "still one column"). The
   harmony combo opens as two columns, descending intervals left and ascending right, BigSky's
-  own split: `MacroRow::HarmonyBox::showPopup` rebuilds the ComboBox's menu with a column
-  break found by text (never a hard-coded index) and must hand the menu its LookAndFeel, or
-  it comes up in JUCE's stock grey.
+  own split: `ArpPanel::buildHarmonyMenu` rebuilds the ComboBox's menu (`showPopup` only calls
+  it and shows the result), and `showPopup` must hand the menu its LookAndFeel, or it comes up
+  in JUCE's stock grey. **The break is derived from the semitones, not the label text**, and the
+  loop itself lives in `src/ui/ComboMenu.h`, shared with `StepComboBox` - both since 2026-08-22;
+  see the Off-was-greyed entry further down for what a hand-rolled popup costs.
 - **A Play toggle on the Pads bar** (`LayoutState::padsPlayOnClick`, default on; 2026-08-19,
   Owen: "I want a toggle above the keyboard to play notes... when I'm trying to drag a cord
   into the arpeggiator, it plays instead, and it stops everything"). Off, a pad click makes no
