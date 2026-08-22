@@ -1832,24 +1832,41 @@ namespace
 // list. The break is found by text rather than by a hard-coded index, so the choice list and
 // this popup cannot drift apart; everything else - ids, tick, attachment - is exactly what the
 // ComboBox's own menu would have carried.
-void ArpPanel::MacroRow::HarmonyBox::showPopup()
+juce::PopupMenu ArpPanel::buildHarmonyMenu(const juce::ComboBox& box)
 {
     juce::PopupMenu menu;
+    for (int i = 0; i < box.getNumItems(); ++i)
+    {
+        const auto text = box.getItemText(i);
+        if (i > 0 && text.startsWith("+") && ! box.getItemText(i - 1).startsWith("+"))
+            menu.addColumnBreak();
+        // **`isItemEnabled` takes an item ID; `getItemText` and `getItemId` take an index.**
+        // This passed `i`, the index, into the one call of the three that wants an ID
+        // (2026-08-19 to 2026-08-22, Owen: "I can't turn off the harmony. off is grey"). The
+        // list is added with `addItemList(..., 1)`, so index 0 is id 1 and every row was
+        // checked against its *neighbour's* enabled flag - harmless for all of them but the
+        // first, because `isItemEnabled` answers **false** for an id no item has, and index 0
+        // is **Off**. So the one row you need to silence a voice was the one row greyed out,
+        // and every other row looked right, which is why it read as a harmony that would not
+        // turn off rather than as a popup bug.
+        //
+        // The reasoning the old comment gave still stands and is why this reads the flag at
+        // all rather than passing `true`: overriding showPopup means every ComboBox API has to
+        // keep working through it, and setItemEnabled is the ordinary way to grey a row.
+        const int itemId = box.getItemId(i);
+        menu.addItem(itemId, text, box.isItemEnabled(itemId), itemId == box.getSelectedId());
+    }
+    return menu;
+}
+
+void ArpPanel::MacroRow::HarmonyBox::showPopup()
+{
+    auto menu = buildHarmonyMenu(*this);
     // The box's own LookAndFeel, exactly as ComboBox::showPopup hands its internal menu:
     // a PopupMenu does not inherit the target component's skin on its own, and without this
-    // the two columns came up in JUCE's stock grey.
+    // the two columns came up in JUCE's stock grey. Set here rather than in the builder so the
+    // builder needs no live component and a test can call it against a bare ComboBox.
     menu.setLookAndFeel(&getLookAndFeel());
-    for (int i = 0; i < getNumItems(); ++i)
-    {
-        const auto text = getItemText(i);
-        if (i > 0 && text.startsWith("+") && ! getItemText(i - 1).startsWith("+"))
-            menu.addColumnBreak();
-        // isItemEnabled(i), never a hard-coded true: this is a ComboBox, and setItemEnabled is
-        // the ordinary way to grey a row (an interval the current mode cannot express, say).
-        // Overriding showPopup means every ComboBox API has to keep working through it, and a
-        // disabled row that stayed pickable would be a silent lie one call away.
-        menu.addItem(getItemId(i), text, isItemEnabled(i), getItemId(i) == getSelectedId());
-    }
     // The standard item height JUCE's own ComboBox::showPopup passes, so the popup's geometry
     // tracks the box it belongs to rather than falling through to whatever the LookAndFeel
     // happens to answer. Those agree today at the 34 px mouse-only height; this keeps them

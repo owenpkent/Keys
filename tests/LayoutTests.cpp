@@ -283,6 +283,58 @@ public:
             }
         }
 
+        beginTest("every row of the harmony menu is pickable, Off included");
+        {
+            // 2026-08-22, Owen: "I can't turn off the harmony. off is grey."
+            //
+            // `ComboBox::isItemEnabled` takes an item **ID**; `getItemText` and `getItemId`
+            // take an **index**. The two-column popup passed the loop index into the one call
+            // of the three that wants an id, and the list is added with `addItemList(..., 1)`,
+            // so every row was checked against its neighbour's flag. That is invisible for all
+            // of them but the first: `isItemEnabled` answers false for an id no item has, and
+            // index 0 is **Off** - so the one row that silences a voice was the one row greyed.
+            //
+            // The menu is only ever *shown* asynchronously, which is why this asserts against
+            // `buildHarmonyMenu` instead. Walking it also pins the column break, since a break
+            // found by text is the other thing here that can silently stop matching.
+            const juce::ScopedJuceInitialiser_GUI juceInit;
+            juce::ComboBox box;
+            box.addItemList(KeysProcessor::harmonyChoices(), 1);
+
+            auto menu = ArpPanel::buildHarmonyMenu(box);
+            // A column break is not an item: `addColumnBreak()` sets `shouldBreakAfter` on
+            // whatever was added last, so the break shows up on the row *before* the split.
+            int rows = 0, breaks = 0, disabled = 0;
+            juce::String firstRow, breakAfter;
+            for (juce::PopupMenu::MenuItemIterator it(menu); it.next();)
+            {
+                const auto& item = it.getItem();
+                if (item.isSectionHeader || item.isSeparator)
+                    continue;
+                if (rows == 0)
+                    firstRow = item.text;
+                ++rows;
+                if (item.shouldBreakAfter)
+                {
+                    ++breaks;
+                    breakAfter = item.text;
+                }
+                if (! item.isEnabled)
+                {
+                    ++disabled;
+                    expect(false, "harmony row \"" + item.text + "\" came up greyed");
+                }
+            }
+            expectEquals(rows, KeysProcessor::harmonyChoices().size(),
+                         "every choice reached the menu");
+            expectEquals(disabled, 0, "no harmony row is greyed");
+            expectEquals(firstRow, juce::String("Off"),
+                         "Off is the first row, which is the one the bug greyed");
+            expectEquals(breaks, 1, "exactly one column break, between the minus and plus rows");
+            expectEquals(breakAfter, juce::String("- minor 2nd"),
+                         "the break falls after the last descending interval");
+        }
+
         beginTest("every lane tab is laid out, and they are all the same width");
         {
             // Chain was built, made visible and given zero width, so it was in the component

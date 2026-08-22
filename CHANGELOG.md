@@ -5,6 +5,28 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: the harmony dropdown's **Off** row was greyed out
+
+Owen: *"I can't turn off the harmony. off is grey."*
+
+`ComboBox::isItemEnabled` takes an item **ID**. `getItemText` and `getItemId` take an **index**.
+The harmony popup - rebuilt by hand since 2026-08-19 to get its two columns - passed the loop
+index into the one call of the three that wants an id.
+
+The list is added with `addItemList(..., 1)`, so index 0 is id 1: every row was checked against
+its *neighbour's* enabled flag. For twenty-six of the twenty-seven rows that is invisible, since
+they are all enabled anyway. For the first it is not, because `isItemEnabled` answers **false**
+for an id no item has - and index 0 is **Off**. So the single row you need in order to silence a
+voice was the single row greyed out, which is why it read as a harmony that would not turn off
+rather than as a bug in a popup.
+
+Menu construction moved out of `showPopup` into `ArpPanel::buildHarmonyMenu`, because a menu that
+is only ever shown asynchronously cannot be asserted about. `LayoutTests` now walks every row and
+fails if one comes up disabled - checked against the original bug, where it fails on "Off" and
+nothing else - and pins the column break, which is found by text and is the other thing here that
+can silently stop matching.
+
+
 ### Fixed: one harmony table instead of three that must agree
 
 `harmonyChoices()` and the two semitone tables were three parallel lists indexed by the same
