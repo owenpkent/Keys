@@ -112,6 +112,16 @@ public:
     // well, and an arpeggio is a run of single notes: folded in there it would rewrite the
     // "current chord" as whichever note the arp is on. Only the keybed asks this one.
     bool arpNoteLit(int midiNote) const;
+    // Which line is lighting it, lowest index first, or -1 for none. The keybed paints the key
+    // in that line's own colour (`skin::lineAccent`), which is what makes four lines running at
+    // once readable rather than one undifferentiated blink. **Lowest wins on an overlap** rather
+    // than blending: the palette exists to tell lines apart, and a blend of cyan and magenta is
+    // a fifth colour belonging to neither. Answers -1 whenever `arpNoteLit` is false, Light keys
+    // off included, so the two cannot disagree.
+    int arpLitLine(int midiNote) const;
+    // Every line lighting it, as a bitmask. The two above are both derived from this; it is
+    // public for a surface that wants to show an overlap rather than resolve one.
+    unsigned int arpLitLines(int midiNote) const;
 
     // What the on-screen keybed should light, which is deliberately **not** the same question
     // as isNoteSounding. With Light keys on and a line running, the chord handed to that line
@@ -1165,8 +1175,21 @@ private:
     // the arp's notes are indistinguishable from the pass-through beside them - and a chord
     // held into a line already lights the keybed through noteRefs, so counting the merged
     // stream would light it twice and never put it out.
-    std::array<std::atomic<bool>, 128> arpNoteOn {};
-    void watchArpNotes(const juce::MidiBuffer&); // audio thread, on one line's output
+    //
+    // **A bitmask per pitch, one bit per line** (2026-08-22, Owen: "new branch for each arp to
+    // play different colors on the keyboard"). It was a plain `bool` per pitch, which could
+    // answer "is the arp on this note" and not "which line is". Each line owns its own bit, so
+    // the two questions are one lookup apart and no line can clear another's.
+    //
+    // That also retires the artefact the old comment here documented and accepted: two lines on
+    // one pitch collapsed to a single flag, so the *first* note-off put the key out while the
+    // other line was still playing it. Per-line bits make that impossible. **Within** one line
+    // it still stands - a line's two harmony voices on one pitch share that line's bit, and the
+    // first note-off clears it - which is the same trade as before, one scope smaller, and is
+    // why this is still a flag rather than a count.
+    static_assert(numArpLines <= 32, "one bit per line has to fit in the mask");
+    std::array<std::atomic<unsigned int>, 128> arpNoteLines {};
+    void watchArpNotes(const juce::MidiBuffer&, int line); // audio thread, on one line's output
     void clearArpNotes();
 
     // Everything one arpeggiator line owns. Three of these; every arp entry point above takes

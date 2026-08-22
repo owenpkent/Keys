@@ -5,6 +5,37 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: each arp line lights the keyboard in its own colour
+
+Owen: *"new branch for each arp to play different colors on the keyboard."*
+
+**Light keys** has lit the keybed for the arp's output since it landed, and with four lines
+running that was one colour blinking for all of them - you could see *that* the arp was playing
+and not *which line*. The four line colours already existed and are already worn by the macro
+cards, the bar's letter switches and the Draw grid's playhead; this is the same palette on the
+one surface that was still answering in the singular. A is cyan, B magenta, C amber, D lime.
+
+**Two lines on one key: the lower letter wins.** Not a blend - the palette's whole job is telling
+lines apart, and cyan mixed with magenta is a fifth colour belonging to neither. The winner is
+stable while the note is held, so a key never changes colour as lines come and go underneath it.
+
+Notes from every other source - your own clicks, a latch, a chord pad, the MIDI input, an MCP
+tool - keep the theme's accent exactly as before, so a colour on the keybed only ever means
+*which arp line is playing this*.
+
+Under it, `arpNoteOn` became `arpNoteLines`, a **bitmask per pitch with one bit per line**,
+which is also a small fix: two lines sounding one pitch used to share a single flag, so whichever
+released first put the key out while the other was still playing it. Each line clears only its
+own bit now. Within a line it is still a flag rather than a count - a line's two harmony voices
+on one pitch, first note-off wins - the same trade at a smaller scope, and still the reason this
+is not a refcount.
+
+The four cyan gradients the keybed hard-coded moved into `skin::keyLit` and its three companions,
+which is where they should always have been: **cyan keeps its shipped values byte for byte** (the
+keybed was tuned against them, and A is the line Keys has always had) and every other accent is
+derived to sit in the same relationship.
+
+
 ### Fixed: one harmony table instead of three that must agree
 
 `harmonyChoices()` and the two semitone tables were three parallel lists indexed by the same

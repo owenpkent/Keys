@@ -109,9 +109,35 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
 - **Each line has a colour**: `skin::lineAccent(line)` - A cyan (the accent Keys shipped with),
   B magenta, C amber, D lime, the hexes reused from `accentChoices()`. Fixed, not
   theme-following, because the job is telling four lines apart. Worn by the macro card's frame,
-  fill and caption, a stripe under the bar's letter switch, the deep view's LINE caption and the
-  Draw grid's playhead - the marks that say *which line*, never the controls, which is how the
-  one-cyan skin law bends without breaking.
+  fill and caption, a stripe under the bar's letter switch, the deep view's LINE caption, the
+  Draw grid's playhead - and, from 2026-08-22, **the keybed keys that line is playing** - the
+  marks that say *which line*, never the controls, which is how the one-cyan skin law bends
+  without breaking.
+- **The keybed lights per line** (2026-08-22, Owen: *"new branch for each arp to play different
+  colors on the keyboard"*). **Light keys** already lit the keybed for the arp's output; with
+  four lines that was one colour for all of them, saying *that* the arp was playing and not
+  *which line*. `arpNoteOn` is **`arpNoteLines`** now, a bitmask per pitch with one bit per
+  line, and `arpLitLine()` reads the lowest set bit. **Lowest wins on an overlap, never a
+  blend**: the palette exists to tell lines apart and a mix of two line colours is a fifth
+  colour belonging to neither, and lowest-wins is *stable* while the note is held, so a key
+  never changes colour as lines come and go under it. Every non-arp source - a press, a latch,
+  a chord pad, the MIDI input, MCP - stays on the theme accent, which is what keeps a colour on
+  the keybed meaning exactly one thing.
+  **It retired a documented artefact**: two lines on one pitch shared a single flag, so the
+  first note-off put the key out under the line still playing it. Per-line bits make that
+  impossible. **Within** a line it still stands (two harmony voices, one pitch, first note-off
+  wins) and that is still why this is a flag and not a count - a missed note-off would leak a
+  refcount into a key lit forever. Single-writer: `runArpLines` walks the lines in order on the
+  audio thread, so the read-modify-write is safe on *that* basis, not on the atomic.
+  **The keybed's four cyan gradients moved into the skin** (`skin::keyLit`, `keyLitLip`,
+  `keyLitBlack`, `keyLitBlackFace`) - they were per-file chrome of exactly the kind the skin
+  rule forbids, and a second colour was impossible while they sat in `PianoKeyboard::paint`.
+  **Cyan keeps its shipped values byte for byte** rather than being re-derived, the same
+  reasoning `cyanAccent` is written down rather than derived; every other accent is derived to
+  sit in the same relationship. **`NoteSurface::externallySounding()` returns a map now**, key
+  to line, and `refresh()` folds the line into its change cache through `litKey` - a state-only
+  cache would hold the first colour when a key passed from one line to another without going
+  out in between.
 - **Two harmony voices per line** (`arp*Harm1/2` choice + `arp*Harm1/2Chance` int, appended,
   Off/100 defaults): `KeysProcessor::harmonyChoices()` is BigSky's shimmer list minus its two
   cents rows (MIDI cannot say ten cents), `harmonySemisFor` maps index to semitones, and the

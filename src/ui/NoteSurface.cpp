@@ -52,13 +52,16 @@ void NoteSurface::repaintLitChanges()
     // going from your own press to the arp sounding it.
     std::map<int, int> lit;
     for (const int drawn : latched)
-        lit[drawn] = stateHeld;
+        lit[drawn] = litKey(stateHeld, -1);
     for (const int drawn : sustained)
-        lit[drawn] = stateHeld;
-    for (const int drawn : externallySounding())
-        lit[drawn] = stateHeld;
+        lit[drawn] = litKey(stateHeld, -1);
+    // The line travels in the cached value: a key handed from line A to line B without going
+    // out in between changes colour and nothing else, so a state-only cache would hold the
+    // first colour until the key was released.
+    for (const auto& kv : externallySounding())
+        lit[kv.first] = litKey(stateHeld, kv.second);
     for (const int drawn : pressed)
-        lit[drawn] = stateActive; // last: paint checks `pressed` first, so this wins the same way
+        lit[drawn] = litKey(stateActive, -1); // last: paint checks `pressed` first, so this wins
 
     if (lit == lastLit)
         return; // the generation moved for a note this surface does not draw
@@ -106,7 +109,7 @@ void NoteSurface::repaintLitChanges()
         repaint(dirty.expanded(litOverdrawPx));
 }
 
-std::set<int> NoteSurface::externallySounding() const
+std::map<int, int> NoteSurface::externallySounding() const
 {
     // Skip what this surface is already playing. Its own notes are drawn from
     // `pressed`/`latched`/`sustained`, in the key coordinates they were pressed in, and
@@ -120,7 +123,7 @@ std::set<int> NoteSurface::externallySounding() const
     for (const auto& kv : sounding)
         own.insert(kv.second);
 
-    std::set<int> out;
+    std::map<int, int> out;
     for (int note = 0; note < 128; ++note)
     {
         // keybedLit, not isNoteSounding: this surface is the one place that wants the arp's
@@ -130,8 +133,18 @@ std::set<int> NoteSurface::externallySounding() const
         if (own.count(note) > 0 || ! processor.keybedLit(note))
             continue;
         const int drawn = drawnForOutputNote(note);
-        if (drawn >= 0)
-            out.insert(drawn);
+        if (drawn < 0)
+            continue;
+        // -1 for anything that is not an arp line, which is what keeps a chord pad, the MIDI
+        // input and an MCP note painting in the theme's own accent exactly as they always have.
+        // Two output notes can map onto one drawn key (Scale Lock snapping a neighbour), so the
+        // lower line index wins here too, by the same rule and for the same reason.
+        const int line = processor.arpLitLine(note);
+        const auto it = out.find(drawn);
+        if (it == out.end())
+            out.emplace(drawn, line);
+        else if (line >= 0 && (it->second < 0 || line < it->second))
+            it->second = line;
     }
     return out;
 }

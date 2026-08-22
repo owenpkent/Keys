@@ -113,6 +113,66 @@ namespace skin
         }
     }
 
+    // The four gradient stops a keybed key is painted with when it is lit, for one accent.
+    // (2026-08-22, Owen: "new branch for each arp to play different colors on the keyboard" -
+    // the keys the arp is playing wear the colour of the line playing them.)
+    //
+    // These were four hard-coded cyan hexes in PianoKeyboard::paint, which is exactly the
+    // per-file chrome the skin rule forbids, and they had to leave that file for a second
+    // colour to be possible at all. **Cyan keeps its shipped values byte for byte** rather
+    // than being re-derived - the same reasoning `cyanAccent` itself is written down rather
+    // than derived, since the keybed was tuned against these four and line A is the line Keys
+    // has always had. Every other accent is derived to sit in the same relationship: the top
+    // stop a touch brighter than the base, the bottom stop the accent's own `deep`.
+    struct KeyLit
+    {
+        juce::Colour activeTop, activeBot, heldTop, heldBot;
+    };
+
+    inline KeyLit keyLit(const Accent& a)
+    {
+        if (a.base == cyanAccent.base)
+            return { juce::Colour(0xff8cebf7), juce::Colour(0xff1fa5ba),   // pressed
+                     juce::Colour(0xff59c9da), juce::Colour(0xff16808f) }; // held / arp-lit
+        return { a.base.brighter(0.55f), a.base.darker(0.25f),
+                 a.base.brighter(0.20f), a.deep };
+    }
+
+    // The lip under a lit key, the same split for the same reason.
+    struct KeyLitLip
+    {
+        juce::Colour activeTop, activeBot, heldTop, heldBot;
+    };
+
+    inline KeyLitLip keyLitLip(const Accent& a)
+    {
+        if (a.base == cyanAccent.base)
+            return { juce::Colour(0xff2ab6cb), juce::Colour(0xff1a90a2),
+                     juce::Colour(0xff1f9dae), juce::Colour(0xff137886) };
+        return { a.base.darker(0.10f), a.base.darker(0.35f),
+                 a.base.darker(0.25f), a.deep.darker(0.15f) };
+    }
+
+    // The black keys carry the same four-stop split twice over - the key body and the raised
+    // playing face on top of it - and the same cyan-stays-exact rule.
+    inline KeyLit keyLitBlack(const Accent& a)
+    {
+        if (a.base == cyanAccent.base)
+            return { juce::Colour(0xff20b0c6), juce::Colour(0xff0c4c57),
+                     juce::Colour(0xff189aad), juce::Colour(0xff0a3d46) };
+        return { a.base.darker(0.05f), a.deep.darker(0.45f),
+                 a.base.darker(0.20f), a.deep.darker(0.55f) };
+    }
+
+    inline KeyLit keyLitBlackFace(const Accent& a)
+    {
+        if (a.base == cyanAccent.base)
+            return { juce::Colour(0xff4fd4e6), juce::Colour(0xff1793a6),
+                     juce::Colour(0xff2fb4c7), juce::Colour(0xff0f7280) };
+        return { a.base.brighter(0.35f), a.base.darker(0.15f),
+                 a.base.brighter(0.10f), a.deep.darker(0.10f) };
+    }
+
     // Brightened on 2026-08-01 (Owen: "hard to read some text. too dark"). `textDim` was
     // 0xff8a919c and `textFaint` 0xff5a6068, which are fine as *shades* and were chosen looking
     // at them next to `text`. That is the wrong comparison: almost everything wearing them is

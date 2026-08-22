@@ -1387,11 +1387,30 @@ bool KeysProcessor::keybedLit(int midiNote) const
     return arpNoteLit(midiNote);
 }
 
-bool KeysProcessor::arpNoteLit(int midiNote) const
+unsigned int KeysProcessor::arpLitLines(int midiNote) const
 {
     if (midiNote < 0 || midiNote > 127 || ! layout.arpLights)
-        return false;
-    return arpNoteOn[(size_t) midiNote].load();
+        return 0u;
+    return arpNoteLines[(size_t) midiNote].load();
+}
+
+bool KeysProcessor::arpNoteLit(int midiNote) const
+{
+    return arpLitLines(midiNote) != 0u;
+}
+
+int KeysProcessor::arpLitLine(int midiNote) const
+{
+    const unsigned int mask = arpLitLines(midiNote);
+    if (mask == 0u)
+        return -1;
+    // Lowest set bit: A over B over C over D. Deterministic and stable while the note is held,
+    // which matters more than which line "deserves" it - a key that changed colour as lines
+    // came and went on the same pitch would read as the arp having moved, not as an overlap.
+    for (int n = 0; n < numArpLines; ++n)
+        if ((mask & (1u << n)) != 0u)
+            return n;
+    return -1;
 }
 
 // Audio thread, on one arp line's output buffer just before it is merged. Same shape as
@@ -1399,18 +1418,31 @@ bool KeysProcessor::arpNoteLit(int midiNote) const
 // missed note-off would leak a refcount into a key lit forever, and a `changed` bump so the
 // surface repaints only when something actually moved.
 //
-// Two lines sounding the same pitch collapse to one flag, which is right: this answers "is
-// the arp on this note", not "how many of it". The last note-off wins and the key goes out
-// slightly early in that case - a display artefact on one pitch, against a refcount that
-// would have to be unwound perfectly across the flush, bypass and channel-change paths.
-void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi)
+// **One bit per line since 2026-08-22**, which is what lets the keybed paint the key in that
+// line's colour. It also fixes what the old single flag had to accept: two lines on one pitch
+// shared it, so whichever released first put the key out under the line still playing it.
+// Each line clears only its own bit now. Within a line it is still a flag and not a count -
+// two harmony voices on one pitch, first note-off wins - the same trade at a smaller scope.
+//
+// Single-writer: `runArpLines` walks the lines in order on this thread, so no two calls race,
+// and the message thread only ever reads. The read-modify-write below is safe on that basis
+// rather than on the atomic being one.
+void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi, int line)
 {
+    if (line < 0 || line >= numArpLines)
+        return;
+    const unsigned int bit = 1u << line;
     bool changed = false;
     const auto set = [&](int note, bool on)
     {
-        if (note < 0 || note > 127 || arpNoteOn[(size_t) note].load() == on)
+        if (note < 0 || note > 127)
             return;
-        arpNoteOn[(size_t) note].store(on);
+        auto& cell = arpNoteLines[(size_t) note];
+        const unsigned int was = cell.load();
+        const unsigned int now = on ? (was | bit) : (was & ~bit);
+        if (now == was)
+            return;
+        cell.store(now);
         changed = true;
     };
 
@@ -1429,8 +1461,8 @@ void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi)
 
 void KeysProcessor::clearArpNotes()
 {
-    for (auto& f : arpNoteOn)
-        f.store(false);
+    for (auto& f : arpNoteLines)
+        f.store(0u);
     soundingGen.fetch_add(1);
 }
 
@@ -2038,7 +2070,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         if (channel != l.lastChannel)
         {
             l.engine.flushInto(l.out);
-            watchArpNotes(l.out);
+            watchArpNotes(l.out, n);
             mergeArpOut(arpMerged, l.out, l.lastChannel);
             l.out.clear();
             l.lastChannel = channel;
@@ -2195,7 +2227,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // whole of the routing. Its output goes into midi with everything the other lines and
         // the pass-through left there, so two lines at two rates simply sum.
         l.engine.process(ap, hc, numSamples, l.in, l.out);
-        watchArpNotes(l.out);
+        watchArpNotes(l.out, n);
         // Into the shared buffer rather than straight out: the lines have to be interleaved in
         // time before the overlap rule below can run over them. MidiBuffer keeps its events
         // sorted by sample position, and equal positions stay in insertion order, so a line's

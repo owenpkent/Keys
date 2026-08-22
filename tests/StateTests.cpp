@@ -536,6 +536,76 @@ public:
             expect(h.processor.layout.libraryFavourites.contains("ii-V-I"));
         }
 
+        beginTest("the keybed knows which line lit a key, not just that one did");
+        {
+            // 2026-08-22, Owen: "each arp to play different colors on the keyboard". The colour
+            // is paint, but the thing it rests on is not: `arpNoteLines` is a bitmask per pitch
+            // and `arpLitLine` reads the lowest set bit. If that ever answers the wrong line, or
+            // stops answering, every key goes back to one colour with nothing else failing.
+            //
+            // One line at a time, as the routing test above does and for the same reason: a
+            // mask that leaks a neighbour's bit would still light the key, so a test that ran
+            // every line at once could not tell a correct answer from a lucky one.
+            for (int line = 0; line < KeysProcessor::uiArpLines; ++line)
+            {
+                Host h;
+                h.processor.prepareToPlay(48000.0, 512);
+                h.processor.layout.arpLights = true;
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+
+                juce::AudioBuffer<float> audio(2, 512);
+                int litNotes = 0, wrongLine = 0;
+                for (int blk = 0; blk < 40; ++blk)
+                {
+                    juce::MidiBuffer midi;
+                    if (blk == 0)
+                        for (int note : { 60, 64, 67 })
+                            midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+                    h.processor.processBlock(audio, midi);
+
+                    for (int n = 0; n < 128; ++n)
+                        if (h.processor.arpNoteLit(n))
+                        {
+                            ++litNotes;
+                            if (h.processor.arpLitLine(n) != line)
+                                ++wrongLine;
+                        }
+                }
+                const auto name = juce::String::charToString((juce::juce_wchar) ('A' + line));
+                expect(litNotes > 0, "line " + name + " lit the keybed at some point");
+                expectEquals(wrongLine, 0,
+                             "every key line " + name + " lit reported line " + name);
+            }
+        }
+
+        beginTest("Light keys off means no line is lighting anything");
+        {
+            // The gate is on the *reader*, so that one flag turns the whole feature off without
+            // the audio thread having to know: arpLitLines returns 0 with Light keys off, and
+            // arpNoteLit and arpLitLine are both derived from it, so the three cannot disagree.
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            h.processor.layout.arpLights = false;
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apOn), 1.0f);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apKeys), 1.0f);
+
+            juce::AudioBuffer<float> audio(2, 512);
+            int lit = 0;
+            for (int blk = 0; blk < 40; ++blk)
+            {
+                juce::MidiBuffer midi;
+                if (blk == 0)
+                    for (int note : { 60, 64, 67 })
+                        midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+                h.processor.processBlock(audio, midi);
+                for (int n = 0; n < 128; ++n)
+                    if (h.processor.arpNoteLit(n) || h.processor.arpLitLine(n) >= 0)
+                        ++lit;
+            }
+            expectEquals(lit, 0, "nothing is arp-lit while Light keys is off");
+        }
+
         beginTest("every UI line, switched on and listening, arpeggiates the keys");
         {
             // Processor-level, deliberately: ArpTests proves one engine works, and the bug this
