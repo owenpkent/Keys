@@ -195,14 +195,29 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // inversion, and I'd actually like how many notes to go from two all the way up to 11, and an
     // octave range").
     //
-    // Two to eleven, not the 3/4/5 tick boxes these replace. Below three you get dyads, which are
-    // a real voicing and not a broken chord; above five the stack keeps climbing in thirds
+    // **One to eleven** (from two until 2026-08-21, Owen: "I also like to allow one note to show
+    // up in the chord pad and the chord preview"), not the 3/4/5 tick boxes these replace. Below
+    // three you get dyads, which are a real voicing and not a broken chord; at one you get a bare
+    // note, useful for bass lines and pedal tones; above five the stack keeps climbing in thirds
     // through the scale, so eleven is a chord covering every degree and then some. `genOctave`
-    // became a pair for the same reason: one octave puts sixteen chords in one register, and a
+    // became a pair for the same reason: one octave puts a whole tray in one register, and a
     // range lets a page breathe. Nothing enforces min <= max here, because a parameter cannot see
     // its sibling; the reader swaps them (see `noteCountRange` / `octaveRange`).
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 2, 11, 3));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 2, 11, 4));
+    //
+    // Nothing downstream needed two - fitVoicing's shrink already guarded `want >= 1`, and
+    // applyInversion and applySpread both return a one-note chord unchanged.
+    //
+    // **Widening an int parameter is safe for sessions and lossy for host automation, and the
+    // two are worth keeping apart.** A saved session stores the denormalised value, so every
+    // value one of these could previously hold is still in range and still means what it said -
+    // no migration, unlike a reordered choice list. A *DAW* stores automation normalised, so a
+    // lane written against 2..11 is re-read against 1..11 and lands about one note lower: a
+    // point recorded at 3 was 0.111, which now denormalises to 2. That is unfixable from here
+    // (nothing distinguishes an old lane from a new one) and small enough that it was Owen's
+    // call to take, but it is a real change to an existing session's automation and the
+    // changelog says so rather than calling the widening safe outright.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMin", 1 }, "Notes Min", 1, 11, 3));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genNotesMax", 1 }, "Notes Max", 1, 11, 4));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { "genOctaveMax", 1 }, "Octave Max", 2, 6, 4));
 
     // Lean the chords major or minor, whatever brain made them and whatever mode they are in.

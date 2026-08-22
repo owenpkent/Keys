@@ -472,6 +472,49 @@ struct RootPositionCollapseTests : juce::UnitTest
                 expect((int) collapsed.size() <= 11, "and never more than was asked for");
             }
         }
+
+        beginTest("every voicing pass is a no-op on a single note");
+        {
+            // The floor of `genNotesMin` / `genNotesMax` moved to 1 on 2026-08-21, and the
+            // changelog's claim that nothing downstream needed two is what this pins. Each of
+            // these runs over whatever a source produced, so a one-note chord meets all of
+            // them - and the interesting failure is not a crash but a *silent* one: a pass
+            // that quietly returns two notes turns "a single note" back into a dyad, and the
+            // only place that shows up is on screen.
+            const std::vector<int> one { 60 };
+
+            for (int inv = 0; inv < 5; ++inv)
+            {
+                const auto out = keys::chordgen::applyInversion(one, inv);
+                expectEquals((int) out.size(), 1, "applyInversion left one note alone, inv "
+                                                      + juce::String(inv));
+                if (out.size() == 1)
+                    expectEquals(out.front(), 60, "...and did not move it");
+            }
+
+            const auto spread = keys::chordgen::applySpread(one);
+            expectEquals((int) spread.size(), 1, "applySpread left one note alone");
+            if (spread.size() == 1)
+                expectEquals(spread.front(), 60, "...and did not move it");
+
+            const auto rooted = keys::chordgen::rootPosition(one, 0);
+            expectEquals((int) rooted.size(), 1, "rootPosition left one note alone");
+
+            // The voicing *cycle* still has to offer something to walk, or "Next voicing" on a
+            // one-note card would step onto nothing. voicingCount's floor of 2 is what covers
+            // that, and canRevoice is what stops the walk being offered in the first place.
+            expect(! keys::chordgen::canRevoice(one), "a single note cannot be re-voiced");
+            expect(keys::chordgen::canRevoice({ 60, 64 }), "...and two notes can");
+
+            // fitVoicing's own shrink is `want >= 1`, mirrored here the way the grow loop above
+            // is: asking a triad down to one note keeps the root and drops from the top.
+            auto shrunk = keys::chordgen::chordNotes(0, keys::chordgen::typeIndex("Major"), 4);
+            while ((int) shrunk.size() > 1)
+                shrunk.pop_back();
+            expectEquals((int) shrunk.size(), 1, "a triad shrinks to a single note");
+            if (shrunk.size() == 1)
+                expectEquals(shrunk.front() % 12, 0, "...and the note it keeps is the root");
+        }
     }
 };
 static RootPositionCollapseTests rootPositionCollapseTests;

@@ -208,9 +208,19 @@ void ChordGenMenu::fitVoicing(std::vector<chordgen::Chord>& chords)
         if (c.notes.empty())
             continue;
 
-        // Unticked means the range is not a constraint at all, so the roll spans the whole 2..11
-        // the parameter can express rather than whatever the two steppers happen to read.
-        const int want = freeNotes ? 2 + rng.nextInt(10)
+        // Unticked means the range is not a constraint at all, so the roll spans the whole
+        // 1..11 the parameter can express rather than whatever the two steppers happen to read.
+        //
+        // **1, not 2, since 2026-08-21** - Owen's call, made the same day the floor moved and
+        // against the first reading of it, which held that a bare note one time in eleven would
+        // read as the tray having failed. It does not: a tray is twelve candidates you sample
+        // and drag the good ones out of, so a single note among them is one more thing on offer,
+        // and a page of chords with the odd pedal tone in it is a *better* spread than a page
+        // with none. The rule this restores is the one that was here before and is worth keeping
+        // stated: **an unticked gate rolls the whole range its parameter can express**, never a
+        // hand-picked sub-range, or the tick box stops meaning "you decide" and starts meaning
+        // "you decide, within limits nobody wrote down".
+        const int want = freeNotes ? 1 + rng.nextInt(11)
                                    : minN + (maxN > minN ? rng.nextInt(maxN - minN + 1) : 0);
         std::sort(c.notes.begin(), c.notes.end());
 

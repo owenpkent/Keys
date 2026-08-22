@@ -226,7 +226,7 @@ private:
     // about which chord it is, so seven brains honouring them separately would be seven places to
     // get it wrong (Owen, 2026-08-01: "all of their options should have the option for how many
     // notes and what inversion"). Both read ranges, and both swap the ends if they cross.
-    std::pair<int, int> noteCountRange() const; // 2..11
+    std::pair<int, int> noteCountRange() const; // 1..11 (the floor was 2 until 2026-08-21)
     std::pair<int, int> octaveRange() const;
     void fitVoicing(std::vector<chordgen::Chord>& chords);
     void fitPads(std::vector<KeysProcessor::ChordPad>& pads); // the Markov half of that

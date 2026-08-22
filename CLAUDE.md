@@ -632,6 +632,34 @@ what is no longer true lives here in one place:
   is three times that, so most of it is genre and production rather than harmony. Valence and
   arousal are two numbers and the vocabulary is 46 words, so Haunting and Eerie can never be
   separated this way. No tag was changed by any of it.
+- **A single note is a chord card** (2026-08-21, Owen: "I also like to allow one note to show up
+  in the chord pad and the chord preview"). One line was refusing it: `ChordPads`' file-local
+  `isChord` answered `notes.size() >= 2`, and it gated three things at once - the live card
+  **named** a held note only from two up ("hold a chord" with one key down), the card could not
+  be **pressed**, and an empty card is not draggable, so a single note could not be **carried
+  onto a pad** at all. **Nothing downstream ever needed two**, which is the part worth
+  remembering: `chords::detect` already names a lone pitch class by its note name,
+  `applyInversion` and `applySpread` both return a one-note chord unchanged, `fitVoicing`'s
+  shrink already guarded `want >= 1`, `setChordPad` has always stored what it was handed, and
+  the arp builds a one-entry sequence from it. A gate was refusing what the rest of Keys could
+  already do.
+  **The predicate split in two, because one name was asking two questions.** `hasNotes` - is
+  there anything here to show, play or drag - is what the live card, its press and its drag use.
+  `canRevoice` keeps the genuine two-note requirement and is what **Next voicing** greys on,
+  since a voicing moves notes about *within* a chord and one note has nowhere to go. A one-note
+  pad is legal; that row simply has nothing to do with it. **Do not re-merge them.**
+  **The generator's Notes range starts at 1**, so single notes can be asked for deliberately -
+  bass lines, pedal tones, stabs. Widening the bottom of an int parameter is safe in a way
+  reordering a choice list is not (the `genSource` rule): every value a saved session could hold
+  is still in range, and the 3/4 defaults are untouched.
+  **An unticked Notes range rolls 1..11 as well**, so the tray turns up the odd single note among
+  its twelve. This was built the other way first, on the reading that a bare note would read as
+  the tray having failed; Owen overruled it the same day, and the general rule is his: **an
+  unticked gate rolls the whole range its parameter can express**, never a hand-picked sub-range,
+  or the tick box stops meaning "you decide" and starts meaning "you decide, within limits nobody
+  wrote down". `StateTests` pins both halves - a one-note pad round-tripping, and the parameter's
+  floor - because a bound like that is exactly what gets tidied back to what the code around it
+  assumes.
 - **Every filled chord card carries its roman numeral in the top-left corner** (2026-08-18, Owen:
   "I want the progression number to show up in the generator on the chord pad") - the chord pads
   and the generator's audition tray both, because those are the same card read at two moments.

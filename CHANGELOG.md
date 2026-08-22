@@ -5,6 +5,46 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a single note is a chord card
+
+Owen: *"I also like to allow one note to show up in the chord pad and the chord preview."*
+
+One line was refusing it. `ChordPads`' own `isChord` answered `notes.size() >= 2`, and it
+gated three things at once: the live card **named** a held note only from two up (one key
+down read "hold a chord"), the card could not be **pressed**, and - because an empty card is
+not draggable - a single note could not be **carried onto a pad** at all.
+
+Nothing downstream ever needed two. `chords::detect` already names a lone pitch class by its
+note name, `applyInversion` and `applySpread` both return a one-note chord unchanged,
+`fitVoicing`'s shrink already guarded `want >= 1`, `setChordPad` has always stored whatever
+it was handed, and the arp builds a one-entry sequence quite happily. It was a gate refusing
+something the rest of Keys could already do.
+
+- The predicate split in two, because it was asking two questions under one name. **`hasNotes`**
+  - is there anything here to show, play or drag - is what the live card, its press and its drag
+  now use. **`canRevoice`** keeps the real two-note requirement, and is what the **Next voicing**
+  row greys on: a voicing moves notes about within a chord, and one note has nowhere to go. A
+  one-note pad is legal; that row just has nothing to do with it.
+- The generator's **Notes** range now starts at **1** rather than 2, so single notes can be asked
+  for deliberately - bass lines, pedal tones, single-note stabs. Widening the bottom of an int
+  parameter is safe for *sessions* where reordering a choice list is not: every value a saved
+  session could hold is still in range and still means what it said, and the 3/4 defaults are
+  untouched, so there is no migration.
+
+  **Host automation is the exception, and it is worth knowing before you reopen an old set.** A
+  DAW stores automation normalised rather than denormalised, so a lane written against 2..11 is
+  read back against 1..11 and lands about one note lower - a point recorded at 3 was 0.111, which
+  now denormalises to 2. Nothing here can tell an old lane from a new one, so it cannot be
+  migrated the way a session can. If you have automated **Notes Min** or **Notes Max** in a Live
+  set, check those lanes after updating.
+- **An unticked Notes range rolls 1..11 too**, so the tray turns up the odd single note among its
+  twelve candidates. This went the other way first, on the reading that a bare note would read as
+  the tray having failed; Owen's call, and the right one - a tray is candidates you sample and drag
+  the good ones out of, so a page with the odd pedal tone in it is a better spread than a page with
+  none. It also restores the rule that was there before: **an unticked gate rolls the whole range
+  its parameter can express**, never a hand-picked sub-range, or the tick box stops meaning "you
+  decide" and starts meaning "you decide, within limits nobody wrote down".
+
 ### Changed: Mutate stays inside your chord, and the strays get a knob of their own
 
 Owen: *"the mutate doesn't really work the way I want ... it's adding additional notes in

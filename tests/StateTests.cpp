@@ -378,6 +378,46 @@ public:
                                       "the saved rate came back");
         }
 
+        beginTest("a one-note chord is a pad, and the generator can be asked for one");
+        {
+            // 2026-08-21, Owen: "I also like to allow one note to show up in the chord pad and
+            // the chord preview". The *storage* never minded - setChordPad takes whatever it is
+            // given, and the undo tests above have been filling pads with a single note since
+            // 2026-08-14 - so the two things worth pinning are the two that did mind.
+            Host h;
+
+            // One: it survives a save and a load like any other pad. A single note being
+            // written but not read back would be the quiet half of this failing.
+            h.processor.setChordPad(5, { 48 }, "C");
+            juce::MemoryBlock block;
+            h.processor.getStateInformation(block);
+            h.processor.clearChordPad(5);
+            h.processor.setStateInformation(block.getData(), (int) block.getSize());
+            const auto& back = h.processor.chordPad(5).notes;
+            expectEquals((int) back.size(), 1, "the one-note pad came back");
+            // Guarded: expectEquals records a failure and keeps going, so an empty vector here
+            // would reach front() and take the whole runner down instead of reporting a test.
+            if (! back.empty())
+                expectEquals(back.front(), 48, "...with its note");
+
+            // Two: the generator's note-count range reaches 1. This is the parameter the UI
+            // gate was really made of - the steppers take their range from the attachment, so
+            // a floor of 2 here is a floor of 2 on screen, and it is exactly the sort of bound
+            // that gets "tidied" back to what the surrounding code assumes.
+            //
+            // **Both ends, because they moved together.** Restoring only genNotesMax to a floor
+            // of 2 would leave min=1/max=2 reading back as {1, 2} through noteCountRange's own
+            // swap, which a min-only check cannot see.
+            for (const auto* id : { "genNotesMin", "genNotesMax" })
+            {
+                const auto* param = h.processor.apvts.getParameter(id);
+                expect(param != nullptr, juce::String(id) + " exists");
+                if (param != nullptr)
+                    expectEquals((int) param->convertFrom0to1(0.0f), 1,
+                                 juce::String(id) + " goes down to a single note");
+            }
+        }
+
         beginTest("a pad remembers which progression it is a step of");
         {
             // The two fields added on 2026-08-18, and the reason they are worth a test of their

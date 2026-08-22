@@ -383,7 +383,8 @@ part that makes a chord recognisable) however far it shrinks. Inversions **repla
 rotation a chord arrived in rather than compounding with it (root position first, then
 invert), so ticking only "R" gives root position even from a source that had already
 inverted one. `genNotesMin` / `genNotesMax` replaced the old 3/4/5 tick boxes with a
-2 to 11 range, and `genOctave` / `genOctaveMax` do the same for register.
+1 to 11 range (2 to 11 until 2026-08-21), and `genOctave` / `genOctaveMax` do the same for
+register.
 
 **`genMajMin` ("Lean")** runs before `fitVoicing`, biasing generated chords' thirds major
 or minor whatever the mode. Its magnitude is the *probability* that a given chord gets
