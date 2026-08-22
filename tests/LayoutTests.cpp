@@ -100,6 +100,14 @@ public:
             //
             // A rule over the whole list rather than one string: it is the *next* long entry
             // appended to any menu that this is here to catch.
+            //
+            // The initialiser is needed even though no processor is: a LookAndFeel touches
+            // Desktop on the way out and the glyph work brings up the typeface cache, both
+            // DeletedAtShutdown singletons. Without a ScopedJuceInitialiser_GUI in scope they
+            // are created here and torn down at static destruction, which is a leak-detector
+            // assertion or a crash depending on which test ran first. Every other block in
+            // this file gets one through `Host`; this one has no processor, so it says so.
+            const juce::ScopedJuceInitialiser_GUI juceInit;
             KeysLookAndFeel lnf;
             const auto font = lnf.getPopupMenuFont();
             for (const auto& text : KeysProcessor::harmonyChoices())
@@ -215,6 +223,63 @@ public:
                 // name-matched sweep has and a hand-written list does not.
                 expectEquals(found, ArpPanel::MacroRow::numKnobs * KeysProcessor::uiArpLines,
                              "every macro knob on every card was measured");
+            }
+        }
+
+        beginTest("the Shape combo can draw its longest name at either window's floor");
+        {
+            // The dice took 34 px plus a 14 px gap out of this row, and the comment beside
+            // arpMacroShapeMaxW asserted the combo "still gets ~166 px, room for the longest
+            // name". It gets 151 at minPanelWidth and less at minMacroWidth - the figure was
+            // carried over from before the dice and never re-derived. **So this measures it
+            // rather than restating it**, which is the only version of that claim that can
+            // stay true: a name appended to the shape list, or a control added to this row,
+            // moves the answer and nothing on screen says the label got shorter.
+            //
+            // A ComboBox draws its text into `getWidth() - 32` (label inset plus the arrow),
+            // and ellipsises silently past that.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+
+            KeysLookAndFeel lnf;
+            for (const int w : { panelW, ArpPanel::minPanelWidth() })
+            {
+                panel.setSize(w, panel.preferredHeight());
+                juce::Array<juce::Component*> all;
+                collectTargets(panel, all);
+
+                int found = 0;
+                for (auto* t : all)
+                {
+                    auto* box = dynamic_cast<juce::ComboBox*>(t);
+                    if (box == nullptr || ! t->getTitle().startsWith("Macro shape"))
+                        continue;
+                    ++found;
+
+                    const auto font = lnf.getComboBoxFont(*box);
+                    float widest = 0.0f;
+                    juce::String widestText;
+                    for (int i = 0; i < box->getNumItems(); ++i)
+                    {
+                        juce::GlyphArrangement ga;
+                        ga.addLineOfText(font, box->getItemText(i), 0.0f, 0.0f);
+                        const float drawn = ga.getBoundingBox(0, -1, true).getRight();
+                        if (drawn > widest)
+                        {
+                            widest = drawn;
+                            widestText = box->getItemText(i);
+                        }
+                    }
+                    expect((float) (box->getWidth() - 32) >= widest,
+                           "'" + t->getTitle() + "' is " + juce::String(box->getWidth())
+                               + " px at panel " + juce::String(w) + ", leaving "
+                               + juce::String(box->getWidth() - 32) + " px of text area for \""
+                               + widestText + "\", which needs "
+                               + juce::String((int) std::ceil(widest)) + " - it ellipsises");
+                }
+                expectEquals(found, KeysProcessor::uiArpLines,
+                             "every card's Shape combo was measured");
             }
         }
 

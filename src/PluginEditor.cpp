@@ -194,9 +194,21 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // apiece here before that, which is the more useful half of the finding: **a view drawn in
     // two windows has two floors, and only the smaller one is ever tested by accident.**
     //
-    // The 8 px is the window's resizable border, which the content does not get.
+    // **Both axes, because fixing one was the same mistake one axis over.** The height was left
+    // at a literal 300 in the first cut of this, which is 38 px of title bar, 8 of border and a
+    // section bar out of the way before the panel sees any of it - about 216 px against the
+    // macro view's 690. The second card row, lines C and D, laid out at zero height. It is
+    // asked for now as well: `minPanelHeight()` clears the *tallest* view rather than the one
+    // showing, since a window has one floor and a view switched inside a minimised window has
+    // nowhere to grow into.
+    //
+    // The 8 px is the window's resizable border, which the content does not get; the 38 is the
+    // title bar above it, and `SectionBar::height` plus its 4 px gap is the strip the holder
+    // spends before the panel is reached.
     wire(secArp, arpBar, lay.arp, lay.arpDetached, lay.arpDetachedBounds,
-         "Arp", "Keys Arpeggiator", { ArpPanel::minPanelWidth() + 8, 300 }, { 1100, 520 });
+         "Arp", "Keys Arpeggiator",
+         { ArpPanel::minPanelWidth() + 8, ArpPanel::minPanelHeight() + 38 + 8 + SectionBar::height + 4 },
+         { 1100, 520 });
     wire(secPads, padsBar, lay.pads, lay.padsDetached, lay.padsDetachedBounds,
          "Pads", "Keys Chord Pads", { 620, 180 }, { 940, 300 });
     wire(secKeyboard, keyboardBar, lay.keyboard, lay.detached, lay.detachedBounds,

@@ -71,6 +71,9 @@ public:
     // deep pages', whichever is larger. This is the one a *window* wants; minMacroWidth() is
     // exposed beside it because it is the derived half and the tests check it on its own.
     static int minPanelWidth();
+    // The same question one axis over, and public for the same reason: a window drawing this
+    // panel has to clear the *tallest* view, not the one that happens to be showing.
+    static int minPanelHeight();
 
     // Which of the arpeggiator lines everything on this panel is editing: the band, the
     // step lanes, the twelve slots, Bars and Chain. One row of controls, the lines behind

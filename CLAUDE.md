@@ -198,8 +198,13 @@ arpeggiator ... it should just change the existing ones"* - then, asked, he chos
 behind a control of their own rather than deleted, with Mutate's travel rescaled to the reach it
 had been spending on them. This supersedes the three-zones bullet above it.
 
-- **Nothing was ever added, and the report was still right.** A step fires the same number of
-  hits at Mutate 100 as at 0 (`fireStep` resolves one hit per `playIdx` entry either way).
+- **Nothing was ever added, and the report was still right.** A step fires **no more** hits at
+  Mutate or Stray 100 than at 0 (`fireStep` resolves one hit per `playIdx` entry either way).
+  Not *exactly as many*, and the difference is worth stating: under a multi-hit shape a stray
+  can put two hits on one pitch, and `addHit` dedupes on (note, channel), so such a step comes
+  out a voice thinner. That is the harmony voices' own rule - a hit collapsing onto its source
+  is dropped rather than doubled, because a collapsed interval is a silence - and it errs the
+  safe way for a report about notes *arriving*.
   What arrived were *pitches belonging to no chord Owen had played*, which is what extra notes
   sound like from the listening chair. `ArpTests.cpp` pins the count outright now, beside the
   pitch-set tests, so the two halves of that claim cannot rot apart. **Reach for this
@@ -1562,8 +1567,13 @@ what is no longer true lives here in one place:
   the narrow end, and the comment said so for an afternoon: the dice's 34 px cell and its 14 px
   gap come out of this same row, so wherever the cap is not biting, Shape is 48 px narrower than
   it used to be. That is affordable only because the panel's floor is set by the knob strip below,
-  which is wider than this line needs - at the floor the combo still gets ~166 px, room for the
-  longest name. **Narrow the floor and this is the second thing that breaks, after the knobs.**
+  which is wider than this line needs. The **~166 px at the floor** this used to claim was carried
+  over from before the dice and never re-derived - it is nearer 151, and less again at
+  `minMacroWidth()`. Still room for the longest name, so nothing was broken, but **a width
+  asserted in a comment goes stale silently**, which is this same round's other lesson wearing
+  different clothes. `LayoutTests` measures the combo against its own longest entry at both
+  floors now. **Narrow the floor and this is still the second thing that breaks, after the
+  knobs.**
   **The dice deals this line's Random Once a new order**, and that is the whole feature:
   `ArpEngine::rerollRandomOrder()` sets `permDirty`, and the next step reshuffles. **It leaves
   `dirCursor` alone** - the cursor is the phase of the walk, so zeroing it would jolt the line

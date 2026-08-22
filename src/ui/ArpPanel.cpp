@@ -43,9 +43,15 @@ namespace
     // comment said so for an afternoon: the dice's 34 px cell and its 14 px gap come out of
     // the same row, so at any width where the cap is not biting, Shape is 48 px narrower than
     // before. That is affordable only because `minMacroWidth()` guarantees the row enough
-    // width to seat the knob strip, which is wider than this line needs - so at the floor the
-    // combo still gets ~166 px, room for the longest name. Narrow the floor and this is the
-    // second thing that breaks, after the knobs.
+    // width to seat the knob strip, which is wider than this line needs.
+    //
+    // **The "~166 px at the floor" figure that stood here was carried over from before the
+    // dice and never re-derived** - it is nearer 151 at `minPanelWidth()`, and less again at
+    // `minMacroWidth()`. It still clears the longest name, so nothing was broken, but a number
+    // asserted in a comment is a number that goes stale silently. `LayoutTests` measures the
+    // combo against its own longest entry at both floors now, so appending a shape name or
+    // adding a control to this row fails a test instead of quietly ellipsising a label.
+    // Narrow the floor and this is still the second thing that breaks, after the knobs.
     constexpr int arpMacroShapeMaxW = 170;
     // The ring a RangeKnob draws around its face, and therefore what the knob row is taller
     // than the row above it by (2026-08-03). The row grows rather than the faces shrinking:
@@ -63,11 +69,16 @@ namespace
     // was re-measured (2026-08-21).
     constexpr int arpMacroKnobMinW = 38;
     // The gap between the two cards in a row, and the insets the panel puts around them.
-    // Named because minMacroWidth() and resized() both need them and must agree.
+    // Named because minMacroWidth() and the layout both need them and must agree - and
+    // **substituted at every layout site**, not merely written down beside one. Naming a
+    // literal that the layout still spells out by hand buys nothing: the derivation then
+    // agrees with a comment rather than with the code, which is the `buildLaneRow` versus
+    // `laneRange` trap this file already pays for once. Change one of these and the floor,
+    // the card and the row all move together.
     constexpr int arpMacroCardGap = 12;
-    constexpr int arpMacroAreaInset = 12; // cardBounds().reduced(12) in resized()
-    constexpr int arpMacroCardInset = 8;  // getLocalBounds().reduced(8) in cardBounds()
-    constexpr int arpMacroRowInset = 10;  // getLocalBounds().reduced(10, 0) in MacroRow
+    constexpr int arpMacroAreaInset = 12; // the panel's inset inside cardBounds()
+    constexpr int arpMacroCardInset = 8;  // the card's own inset inside the panel
+    constexpr int arpMacroRowInset = 10;  // MacroRow's side inset inside the card
     // What the *deep* pages need, which is more than the macro view (2026-08-21). Measured
     // rather than derived, and honestly so: the band groups share the width by weight and the
     // lane tabs divide what is left by their count, so there is no clean sum to write here the
@@ -1870,6 +1881,14 @@ void ArpPanel::MacroRow::HarmonyBox::showPopup()
 // one row. So it is under CLAUDE.md's 34 px floor in one axis, exactly as the four steppers and
 // the two combos beside it have always been - a standing property of this line rather than
 // anything the dice introduced. Worth fixing, and worth fixing for the whole row at once.
+//
+// **What that costs, so the decision is one somebody can actually take** (measured 2026-08-21,
+// in review): `centred` would have to go and `arpMacroLine` grow by 8 px, which is 8 px on every
+// card, two card rows, so 16 px on the All view - and the All view is what sets the window's
+// minimum height. That lands on a figure the fold bullet in CLAUDE.md already shows is tight
+// against Owen's own 1392 px work area. It is affordable; it is not free, and it is a product
+// call rather than a tidy-up, which is why this note says what it would take instead of
+// quietly taking it.
 void ArpPanel::MacroRow::DiceButton::paintButton(juce::Graphics& g, bool highlighted, bool down)
 {
     const auto r = getLocalBounds().toFloat().reduced(5.0f);
@@ -2380,8 +2399,10 @@ void ArpPanel::MacroRow::syncShapeBox()
 void ArpPanel::MacroRow::refreshDice()
 {
     const bool canDeal = shapeBox.getSelectedItemIndex() == (int) ArpEngine::Direction::randomOnce;
-    if (diceButton.isEnabled() != canDeal)
-        diceButton.setEnabled(canDeal); // repaints itself; guarded so the timer does not churn
+    // No guard needed: Component::setEnabled opens with `if (flags.isEnabledFlag != shouldBe)`
+    // and returns without repainting otherwise, so a 10 Hz call on an unchanged value already
+    // costs nothing. A wrapper here would only teach the next timer-driven control to add one.
+    diceButton.setEnabled(canDeal);
 }
 
 void ArpPanel::MacroRow::stepShape(int delta)
@@ -2588,7 +2609,7 @@ void ArpPanel::MacroRow::resized()
     // arpMacroCap / arpMacroLine / arpMacroHeads / arpMacroMods; arpMacroCard is their sum
     // and has to agree with this function exactly - the knob *count* changed with the merge,
     // but every one of those heights is independent of it, so arpMacroCard did not move.
-    auto full = getLocalBounds().reduced(10, 0);
+    auto full = getLocalBounds().reduced(arpMacroRowInset, 0);
     full.removeFromTop(arpMacroCap); // the LINE A / LINE B caption rule, drawn by paint()
     // The single-height controls sit centred against the knobs beside them.
     const auto centred = [](juce::Rectangle<int> c) { return c.withSizeKeepingCentre(c.getWidth(), 26); };
@@ -3942,13 +3963,30 @@ int ArpPanel::minPanelWidth()
     return juce::jmax(minMacroWidth(), arpDeepPageMinW);
 }
 
+// The shortest the panel may be drawn in *any* view, the same question one axis over - and it
+// exists because fixing only the width would have been the very mistake the width fix is about.
+// `pageHeight()` answers for the view that happens to be showing; a *window* has one floor and
+// has to clear the tallest of them, because a section switched to its tallest view inside an
+// already-minimised window has nowhere to grow into and clips from the bottom.
+//
+// The macro view is the tallest at 690 (two card rows), which is also the default view, so this
+// is not a corner case: the detached Arp window's old 300 px literal left the panel ~216 px and
+// laid the second card row - lines C and D - out at zero height. Unfolded, so the floor does not
+// depend on a persisted UI toggle: folding is something you do inside a window that already fits.
+int ArpPanel::minPanelHeight()
+{
+    return juce::jmax(arpMacroTotalH,
+                      juce::jmax(arpPageStepsH,
+                                 juce::jmax(arpPageSlotsH + arpStripH, arpPageSetupH)));
+}
+
 juce::Rectangle<int> ArpPanel::cardBounds() const
 {
     // pageHeight(), not contentHeight(): the editor hands the panel the fixed height so the
     // window never resizes, and the card drawn inside it is sized to the page actually
     // showing. Inline used to return `full` outright for the same reason it now does not -
     // the height it is given stopped being the height its content needs.
-    const auto full = getLocalBounds().reduced(8);
+    const auto full = getLocalBounds().reduced(arpMacroCardInset);
     return full.withHeight(juce::jmin(full.getHeight(), pageHeight()));
 }
 
@@ -4014,7 +4052,7 @@ void ArpPanel::paint(juce::Graphics& g)
 
 void ArpPanel::resized()
 {
-    auto area = cardBounds().reduced(12);
+    auto area = cardBounds().reduced(arpMacroAreaInset);
 
     // No title row. The section bar above says ARP and carries the On toggle and Detach, so a
     // second "Arpeggiator" caption with its own On and Close was three duplicated controls and

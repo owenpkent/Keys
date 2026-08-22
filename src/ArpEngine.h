@@ -1337,7 +1337,16 @@ private:
         const unsigned int h = hash32((unsigned int) step * 3266489917u
                                       ^ (unsigned int) (era * 668265263u)
                                       ^ (unsigned int) (p.mutateSeed * 2246822519u)
-                                      ^ (unsigned int) (hitIndex + 1) * 2654435761u
+                                      // 0x85ebca6b, not the 2654435761 the other salts here
+                                      // use: that constant *is* 0x9e3779b1, one bit off the
+                                      // avalanche word on the next line, so at hitIndex 0 -
+                                      // every shape but Chord, i.e. almost every step - the
+                                      // two collapsed to 0x8 and the fixed term this hash was
+                                      // written to carry silently was not there. The two
+                                      // constants were picked independently and happened to be
+                                      // the same golden-ratio word. **Salts XORed against each
+                                      // other have to be checked, not just chosen.**
+                                      ^ (unsigned int) (hitIndex + 1) * 0x85ebca6bu
                                       ^ 0x9e3779b9u);
         // How often a step leaves the chord at all: never at 0, every step at 100.
         if ((int) (h % 100u) >= amt)

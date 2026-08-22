@@ -354,19 +354,21 @@ public:
     }
     static int tupletFor(int choiceIndex);
     // The per-line harmony interval list (2026-08-19): BigSky's shimmer intervals, minus its
-    // two cents rows, which MIDI semitones cannot say. One copy for the same reason as
-    // tupletChoices: the choice parameter, the combo and the semitone table below must agree
-    // by construction. Append only - the index is what a saved session stores.
+    // two cents rows, which MIDI semitones cannot say. **Built from the one table that also
+    // holds both semitone columns** (2026-08-21), so the names and the intervals cannot drift:
+    // appending is one row, not three edits and two jasserts. Append only - the index is what
+    // a saved session stores.
     static juce::StringArray harmonyChoices();
-    // The semitones a choice index means; 0 for Off.
-    // Deal this line's Random Once shape a new order. Message thread; the audio thread picks
-    // it up on its next block. Harmless on any other shape, which is why the dice greys rather
-    // than this refusing.
-    void rerollArpRandom(int line);
+    // The semitones a choice index means; 0 for Off. Audio-thread safe: a plain read of a
+    // constexpr table, no allocation.
     static int harmonySemisFor(int choiceIndex);
     // The second interval an entry carries, 0 for none. Only "+ Octave & 5th" has one; see
     // the definition for why the ampersand is load-bearing.
     static int harmonySemisSecondFor(int choiceIndex);
+    // Deal this line's Random Once shape a new order. Message thread; the audio thread picks
+    // it up on its next block. Harmless on any other shape, which is why the dice greys rather
+    // than this refusing.
+    void rerollArpRandom(int line);
     // `which`'s id on `line`: "arpRate", "arp2Rate", "arp3Rate".
     static juce::String arpParamId(int line, ArpParam which) { return arpParamId(line, arpParamSuffix(which)); }
     float arpParam(int line, ArpParam which) const;

@@ -5,6 +5,31 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: one harmony table instead of three that must agree
+
+`harmonyChoices()` and the two semitone tables were three parallel lists indexed by the same
+number, each of the latter two carrying a `jassert` comparing its length against the first. That
+is the shape CLAUDE.md already logs under `buildLaneRow` versus `laneRange` - three tables that
+must agree is three tables that will not - and a comment naming the hazard does not remove it.
+One table with a name and both intervals per row now, with `harmonyChoices()` built from it, so
+appending an interval is a single edit that cannot be half done.
+
+The jasserts went with it, and that is a fix rather than a loss: they called `harmonyChoices()`,
+which builds a 27-entry StringArray of heap Strings, and `harmonySemisFor` is called from
+`runArpLines` on the **audio thread** four times a line every block. A Debug build was allocating
+sixteen StringArrays a block to check a drift that is now impossible by construction. Nothing may
+allocate on that thread.
+
+### Fixed: the per-note stray salt cancelled the hash's own avalanche constant
+
+The hit-index salt added the same day multiplied by `2654435761`, which is `0x9E3779B1` - one bit
+away from the `0x9e3779b9` XORed in on the next line. At hit index 0, which is every shape except
+Chord and so very nearly every step, the two collapsed to `0x8` and the fixed avalanche term the
+expression was written to carry simply was not there. Decorrelation between voices still worked
+and the notes were still in range, so nothing sounded wrong; the hash was just weaker than it
+reads. Different multiplier. **Salts XORed against each other have to be checked, not just
+chosen.**
+
 ### Fixed: "Octave & 5th" plays an octave and a fifth
 
 Owen: *"in the harmony, when you select octave plus fifth, it looks like it only just does
@@ -78,6 +103,13 @@ that width, so the measured half cannot rot.
 
 The general lesson, which is the part worth keeping: **a view that can be drawn in two
 windows has two floors, and only the smaller one is ever tested by accident.**
+
+**And two axes.** The first cut of that fix derived the width and left the height at the literal
+300 it had always been, which is the same mistake one axis over: 38 px of title bar, 8 of border
+and a section bar come off before the panel sees any of it, leaving about 216 px against the
+macro view's 690. The second card row - lines C and D - laid out at zero height. It is asked for
+now too, and it clears the **tallest** view rather than the one showing, because a window has one
+floor and a view switched inside an already-minimised window has nowhere to grow into.
 
 ### Fixed: Stray moved the whole chord instead of straying one note
 

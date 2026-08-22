@@ -2721,10 +2721,10 @@ public:
         beginTest("Stray adds no note events, it only replaces them");
         {
             // The complaint the whole split came out of, pinned so it cannot come back: "it's
-            // adding additional notes in the arpeggiator". It never did - a step fires the same
-            // number of hits whatever these two say - so what was heard was pitches off the
-            // chord rather than extra ones. Both halves are worth holding: how many notes there
-            // are is this test, and which pitches they may be is the two above.
+            // adding additional notes in the arpeggiator". It never did - a step fires no more
+            // hits whatever these two say - so what was heard was pitches off the chord rather
+            // than extra ones. Both halves are worth holding: how many notes there are is this
+            // test, and which pitches they may be is the two above.
             //
             // **Three shapes, because one of them cannot see the failure.** Under Up a step
             // resolves one hit whatever Stray does, so the count is equal by construction and
@@ -2754,14 +2754,29 @@ public:
                 return n;
             };
             using Dir = ArpEngine::Direction;
+
+            // **Never more** is the claim, and it is deliberately not *exactly the same*. Under
+            // a multi-hit shape a stray can move two hits onto one pitch, and `addHit` dedupes
+            // on (note, channel), so the step comes out a voice thinner. That is the rule the
+            // harmony voices already follow - a hit that collapses onto its source is dropped
+            // rather than doubled, because a collapsed interval is a silence - and it points
+            // the safe way: the complaint this whole split came from was notes arriving, not
+            // notes going missing. Asserting equality here would be asserting something the
+            // engine does not promise and should not.
+            for (const auto dir : { Dir::up, Dir::chord })
+                for (const int harmony : { 0, 2 })
+                {
+                    const int tame = count(0, dir, harmony);
+                    const int strayed = count(100, dir, harmony);
+                    expect(strayed <= tame,
+                           "a straying line fires no more notes than a tame one: "
+                               + juce::String(strayed) + " against " + juce::String(tame));
+                }
+
+            // The single-hit shape is the one case where it *is* exact, and worth pinning as
+            // such: one hit a step cannot collide with itself, so nothing can thin it.
             expectEquals(count(100, Dir::up, 0), count(0, Dir::up, 0),
-                         "a straying line fires no more notes than a tame one");
-            expectEquals(count(100, Dir::chord, 0), count(0, Dir::chord, 0),
-                         "Chord shape: three hits a step, straying or not");
-            expectEquals(count(100, Dir::up, 2), count(0, Dir::up, 2),
-                         "a Harmony lane doubles the hits, and Stray does not change that");
-            expectEquals(count(100, Dir::chord, 2), count(0, Dir::chord, 2),
-                         "Chord shape and a Harmony lane together, still note for note");
+                         "Up: one hit a step, note for note whatever Stray does");
         }
 
         beginTest("Lock at 100 repeats one variation; at 0 it keeps finding new ones");
@@ -2876,7 +2891,11 @@ public:
                     ++ons;
                 }
             expect(seen.count(72) + seen.count(76) + seen.count(79) > 0, "the octave voice sounded");
-            expect(seen.count(67) + seen.count(71) + seen.count(74) > 0, "the fifth voice sounded");
+            // **71 and 74 only, not 67.** The chord is 60-64-67 and the base Up walk plays all
+            // three, so counting 67 here made the assertion true whatever the second interval
+            // did - delete harmSemisB entirely and it still passed. The fifth above 64 and
+            // above 67 are the two pitches that can only have come from this voice.
+            expect(seen.count(71) + seen.count(74) > 0, "the fifth voice sounded");
 
             // One voice, one roll: three hits a step, never two. A slot that half-fired would be
             // the same bug wearing the chance knob.
