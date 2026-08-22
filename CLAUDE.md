@@ -1601,6 +1601,20 @@ what is no longer true lives here in one place:
   rebuilds it whole; there is no choke point for slot writes, so **its call sites are the
   contract** (set, clear, copy, whole-slot write, session load). Miss one and a lane plays a
   stale chord.
+  **A sequence of chords already reaches a line three ways, and the third one surprises people**
+  (2026-08-21, Owen: *"for arpeggiators if I wanted to feed in a sequence of chords for it to
+  play. How would we do that?"*). Chain walks the slots at **bar** resolution; the Chord lane
+  swaps a slot's chord in for a single **step**; and a line with **Play** on arpeggiates *"the
+  keybed and a clip on the track"* (`runArpLines`), so a progression drawn into an Ableton clip
+  drives the arp with the **host** owning the durations. Nothing was written for that third one -
+  it falls out of the routing - and it is the only route that can hold a chord for two bars and
+  the next for two beats, which neither of the other two can express. What is genuinely missing
+  is a **loading gesture**: filling twelve slots is one drag per chord, and `ChordLibrary.h`'s
+  355 progressions know their own chord order but can only reach the tray and the pads.
+  `docs/CHORD_SEQUENCE.md` is the survey (Scaler, Cthulhu, Kirnu's interval "stamp", Ripchord,
+  Hapax) and five options, **proposed and unbuilt** - do not describe any of it as shipping, and
+  read it before designing a fourth mechanism, since the recommendation is that Chain already is
+  the third.
   **The rate is a dial with two clocks** (2026-07-30). `arpRate` is untouched - the same eleven
   divisions, the same order, the same default - and a Sync / Hz switch beside the dial adds
   `arpRateFree` and `arpRateHz`, 0.03125 to 32 Hz mapped exponentially, which is exactly what
