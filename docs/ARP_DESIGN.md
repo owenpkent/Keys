@@ -98,8 +98,11 @@ own colour back; it is exactly as load-bearing as the LINE caption it sits besid
 popup opens as two columns too**, Off and the descending intervals on the left, the ascending
 ones on the right, exactly as BigSky's panel draws the same list (Owen: *"make harmony 2
 columns"*, then, shown a single tall menu, *"still one column"* - which is what the ask had
-meant all along; `MacroRow::HarmonyBox::showPopup` rebuilds the ComboBox's menu with a column
-break found by text, so the list and the split cannot drift apart). The list is BigSky's
+meant all along; `ArpPanel::buildHarmonyMenu` rebuilds the ComboBox's menu with a column
+break derived from each entry's own semitones - by *text* until 2026-08-22, which reads as
+data-driven and is not, since an appended descending interval lands after the ascending ones and
+draws in the wrong column; `ArpTests` pins that the table stays grouped so an append that breaks
+it fails loudly). The list is BigSky's
 shimmer interval table with its
 two cents-detune rows dropped, since Keys has no concept of a partial-cent shift: Off, - Octave
 down through - minor 2nd, + minor 2nd up through + Octave, + Octave & 5th, + 2 Octaves. The

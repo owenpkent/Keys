@@ -1,6 +1,9 @@
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
+
+#include "ComboMenu.h"
+
 #include <functional>
 
 namespace keys
@@ -34,13 +37,13 @@ public:
 
     void showPopup() override
     {
-        juce::PopupMenu menu;
-        const int current = getSelectedId();
-        for (int i = 0; i < getNumItems(); ++i)
-        {
-            const int id = getItemId(i);
-            menu.addItem(id, getItemText(i), true, id == current);
-        }
+        // The shared builder, not a loop of its own (2026-08-22). This hard-coded `true` for
+        // the enabled flag, which is the "silent lie one call away" the harmony popup's own
+        // comment warns about: `setItemEnabled(id, false)` is the ordinary way to grey a row,
+        // and a row drawn enabled here would have been clickable and fired `onPick` with the
+        // very value the caller meant to forbid. See src/ui/ComboMenu.h for the index-versus-id
+        // rule both popups have to keep.
+        auto menu = combomenu::build(*this);
 
         auto& lf = getLookAndFeel();
         menu.setLookAndFeel(&lf);
