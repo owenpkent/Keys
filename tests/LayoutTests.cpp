@@ -13,6 +13,7 @@
 #include "../src/PluginProcessor.h"
 #include "../src/ui/ArpPanel.h"
 #include "../src/ui/KeysLookAndFeel.h"
+#include "../src/ui/RangeKnob.h"
 #include <juce_events/juce_events.h>
 
 namespace keys::tests
@@ -438,6 +439,77 @@ public:
 
             expectEquals(lanes.length[(size_t) ArpEngine::laneOctave].load(), 3,
                          "a deliberately short lane survived the panel opening");
+        }
+
+        beginTest("a halo gesture spends its whole travel on band the knob can actually reach");
+        {
+            // The range knobs opened lit on 2026-08-23, which made this reachable: the halo
+            // drag ran over the span's *whole* travel while the band is capped at the distance
+            // to the nearer rail, so most of every sweep moved nothing at all. H.TIME is the
+            // worst of the four - it opens at 24 of 0..100, so its band can never exceed 24
+            // however far the halo is turned, and 228 px of a 300 px drag were inert.
+            //
+            // These are the numbers of the shipping defaults rather than round ones on purpose:
+            // the bug was invisible until a default put a face near a rail, and a test on a
+            // centred knob would have passed throughout.
+            juce::ScopedJuceInitialiser_GUI juceInit;
+
+            RangeKnob rk;
+            rk.face().setRange(0.0, 100.0, 1.0);
+            rk.face().setValue(24.0, juce::dontSendNotification); // arpHumanize's own default
+            rk.setSpan(100.0);                                    // arpHumanizeSpan's own default
+
+            // The band, unchanged by any of this: the face is the centre and the low rail is
+            // nearer, so the reach stops there and H.TIME plays 0..48.
+            expectEquals(rk.room(), 24.0, "the nearer rail is 24 away");
+            expectEquals(rk.reach(), 24.0, "the band is capped by the rail, not the span");
+            expectEquals(rk.rangeLo(), 0.0, "the low end sits on the rail");
+            expectEquals(rk.rangeHi(), 48.0, "the high end is as far the other way");
+
+            // **The span itself is untouched.** A session, a host lane or the parameter's own
+            // default may hold one wider than the face currently allows, and it has to survive
+            // being loaded - that is what keeps H.TIME's 100 meaning "floor pinned at zero".
+            expectEquals(rk.getSpan(), 100.0, "a span wider than the rail is still stored");
+
+            // What the gesture may land on, which is the whole fix.
+            expectEquals(rk.usefulSpanMax(), 24.0, "the gesture's ceiling is the reachable band");
+
+            // A full sweep down closes the band completely, and a full sweep up reopens all of
+            // it. Before this, 300 px down landed on 100 - 100 = 0 by luck on this knob, while
+            // every intermediate position between 100 and 24 drew the identical arc.
+            expectEquals(rk.spanFromDrag(100.0, -300.0), 0.0, "a full sweep down closes it");
+            expectEquals(rk.spanFromDrag(0.0, 300.0), 24.0, "a full sweep up opens all of it");
+
+            // The pixel that used to do nothing. A quarter of the sweep down from wide open is
+            // a quarter off the band; it used to be the first of 228 px that changed nothing.
+            expectEquals(rk.spanFromDrag(100.0, -75.0), 18.0, "a quarter sweep takes a quarter");
+            expectEquals(rk.spanFromDrag(100.0, 1.0), 24.0, "already open: up does nothing");
+
+            // The wheel answers out of the same arithmetic, a twentieth of the sweep a notch.
+            expectEquals(rk.spanFromWheel(100.0, -1.0), 22.8, "one notch down is 5% of the band");
+            expectEquals(rk.spanFromWheel(24.0, 1.0), 24.0, "one notch up at the ceiling holds");
+
+            // VEL's shape: the ring carries a parameter of its own (0..127) and the face sits
+            // at 100 of 0..127, so the rail is 27 away - the ceiling CLAUDE.md names for it.
+            RangeKnob vel;
+            vel.face().setRange(0.0, 127.0, 1.0);
+            vel.face().setValue(100.0, juce::dontSendNotification); // arpVelLevel's default
+            vel.setSpanMax(127.0);                                  // arpHumanVel's own range
+            vel.setSpan(18.0);                                      // and its default
+            expectEquals(vel.usefulSpanMax(), 27.0, "VEL's ring stops 27 from the top rail");
+            expectEquals(vel.spanFromDrag(18.0, 300.0), 27.0, "a full sweep reaches the rail");
+            expectEquals(vel.reach(), 18.0, "and the default sits inside it, as documented");
+
+            // A face parked on a rail has no band to open at all. The gesture must leave the
+            // stored span alone there rather than quietly wiping it: nothing is on screen to
+            // say a drag did anything, so a drag must not have done anything.
+            RangeKnob railed;
+            railed.face().setRange(0.0, 100.0, 1.0);
+            railed.face().setValue(0.0, juce::dontSendNotification);
+            railed.setSpan(60.0);
+            expectEquals(railed.usefulSpanMax(), 0.0, "no room at the rail");
+            expectEquals(railed.spanFromDrag(60.0, -300.0), 60.0, "a dead halo stores nothing");
+            expectEquals(railed.spanFromWheel(60.0, -1.0), 60.0, "and neither does its wheel");
         }
     }
 };

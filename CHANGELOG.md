@@ -59,6 +59,40 @@ whatever it said**; what moves is what a new instance opens on, and a session ol
 predate one of the arp parameters, which takes the new default for it (lines B, C and D are off
 by default, so in practice that is line A a few milliseconds behind the grid).
 
+### Fixed: most of a halo's travel did nothing
+
+A range knob's satellite is dragged over 300 px for its whole sweep, and that sweep was
+calibrated against the span's **full** parameter travel - while the band it opens is capped at
+the distance from the knob to its **nearer rail**, which can never be more than half that travel
+and is far less whenever the face sits near an end. So the top of every halo's gesture moved
+nothing: not the arc, not the readout, not the sound.
+
+At the defaults above it was most of the gesture. H.TIME opens at 24 of 0..100, so its band can
+never exceed 24 however far the halo is turned and **228 px of a 300 px drag were inert**; VEL's
+ring reaches 27 of its 127; Strum's 55 of 200; Humanize's 51 of 127. The wheel had it too - the
+first fifteen notches down H.TIME's halo changed nothing.
+
+The arithmetic has been wrong since the band became centred on the face (2026-08-19). What
+changed on 2026-08-23 is that the knobs open **lit**, which is what put a hand on a halo that had
+never had one. It is the same failure `RangeKnob::setSpanMax` was written for - a drag calibrated
+to something wider than what it writes - arriving by the other route: the rail rather than the
+range.
+
+Both gestures now run against `usefulSpanMax()`, the reachable band, so a full sweep closes a
+band completely and a full sweep reopens all of it whatever the face is doing.
+
+**The stored span is not clamped to it**, only what a gesture lands on. A session or a host lane
+may still hold a span wider than the face allows, which is what keeps H.TIME's own default of 100
+meaning "floor pinned at zero wherever the knob sits". What a hand on the halo can no longer do
+is *store* one: a band nobody can see is not something anybody drags for, so the first movement
+normalises to what is on screen and tracks from there. A face parked on a rail has no band at
+all, and a drag there leaves the stored span alone rather than quietly wiping it.
+
+`LayoutTests` pins it at the shipping defaults rather than on round numbers, because a centred
+knob would have passed throughout - it took a default putting a face near a rail to make any of
+this visible.
+
+
 ### Fixed: a chord handed to an arp line is no longer raked
 
 Found on the way to the defaults above and worth fixing on its own. A chord routed to a line

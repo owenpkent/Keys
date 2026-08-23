@@ -271,6 +271,18 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   unchanged - it has been the default since it was a parameter), **Humanize on at 56-96**,
   **`arpHumanVel` 18**, **`arpHumanize` 24** with its ring already open, which draws as 0-48 and
   plays as 0 to 12 ms late.
+- **Most of a halo's travel did nothing, and turning the knobs on is what found it.** The
+  satellite's 300 px sweep was calibrated against the span's whole parameter travel, while
+  `reach()` caps the band at `room()` - the distance to the **nearer** rail, which is at most
+  half that travel and far less near an end. So the top of every halo gesture moved nothing on
+  screen or in the sound: 228 px of H.TIME's 300, and 100 of VEL's 127. Both gestures read
+  `RangeKnob::usefulSpanMax()` now. **The stored span is still not clamped to it** - a session
+  may hold one wider than the face allows, which is what keeps `arpHumanizeSpan`'s default of
+  100 meaning "floor pinned at zero wherever the knob sits" - but a *gesture* cannot store one
+  any more, since a band nobody can see is not something anybody drags for. The general shape,
+  and it is the third time this file has recorded it: **a drag calibrated to something wider
+  than what it can actually write is inert over the difference, with nothing on screen to say
+  so.** `setSpanMax` was the same bug by way of the parameter's range; this was the rail.
 - **Humanize's band was widened around its centre, not moved**, and that is the load-bearing
   part: Humanize *off* plays the band's **midpoint** (`baseVelocity01`), and `migrateVelLevel`
   converts an old session's arp level against that same **76**. Keep the midpoint and both go on
