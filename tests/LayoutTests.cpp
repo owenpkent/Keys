@@ -14,6 +14,7 @@
 #include "../src/ui/ArpPanel.h"
 #include "../src/ui/KeysLookAndFeel.h"
 #include "../src/ui/RangeKnob.h"
+#include "../src/PluginEditor.h"
 #include <juce_events/juce_events.h>
 
 namespace keys::tests
@@ -543,75 +544,146 @@ public:
                          "a deliberately short lane survived the panel opening");
         }
 
-        beginTest("a halo gesture spends its whole travel on band the knob can actually reach");
+        beginTest("the pad range knobs hold still when nothing is touching them");
         {
-            // The range knobs opened lit on 2026-08-23, which made this reachable: the halo
-            // drag ran over the span's *whole* travel while the band is capped at the distance
-            // to the nearer rail, so most of every sweep moved nothing at all. H.TIME is the
-            // worst of the four - it opens at 24 of 0..100, so its band can never exceed 24
-            // however far the halo is turned, and 228 px of a 300 px drag were inert.
+            // **The regression that cost an afternoon** (2026-08-23, Owen: "feels like it's
+            // fighting me... is there a race condition"). There was: `timerCallback` pushed a
+            // span of its own beside syncPadRangeKnobs, and it passed the band's *full* width
+            // to a control whose span is the reach on **each** side. So the band doubled ten
+            // times a second until it saturated against the nearer wall, and it did that while
+            // the halo was under the hand. Every symptom chased that day - a halo that would
+            // not open, a knob that seemed to drag its own band about, Strum reading "0-128 ms"
+            // with its knob at 64 - was this one arithmetic slip wearing different clothes.
             //
-            // These are the numbers of the shipping defaults rather than round ones on purpose:
-            // the bug was invisible until a default put a face near a rail, and a test on a
-            // centred knob would have passed throughout.
+            // So the test is not about the arithmetic: it runs the **real editor's timer** and
+            // asks whether four parameters nobody is touching stay where they were put. Any
+            // second writer that disagrees with syncPadRangeKnobs fails this, whatever it gets
+            // wrong, which is the only shape of test that would have caught it.
+            Host h;
+
+            struct Pair { const char* lo; const char* hi; float loV, hiV; };
+            // Clear of both walls on purpose: a band already pinned at a wall is saturated, so
+            // a doubling bug has nothing left to move and hides.
+            Pair pairs[] = { { "chordStrum", "chordStrumMax", 50.0f, 150.0f },
+                             { "humanizeVelMin", "humanizeVelMax", 40.0f, 90.0f } };
+
+            const auto put = [&h](const char* id, float v)
+            {
+                if (auto* p = h.processor.apvts.getParameter(id))
+                    p->setValueNotifyingHost(p->convertTo0to1(v));
+            };
+            const auto get = [&h](const char* id)
+            { return h.processor.apvts.getRawParameterValue(id)->load(); };
+
+            for (const auto& pr : pairs)
+            {
+                put(pr.lo, pr.loV);
+                put(pr.hi, pr.hiV);
+            }
+
+            KeysEditor ed { h.processor };
+            ed.setSize(panelW, ed.idealHeight());
+
+            // Several turns of the editor's own poll. The old bug doubled the span on every
+            // one of them, so even a single tick showed it; ten leaves no doubt, and a drift
+            // that needs a hundred would be a different bug worth failing on anyway.
+            for (int tick = 0; tick < 10; ++tick)
+                ed.tickForTest();
+
+            // **What the knobs draw, not what the parameters say.** `RangeKnob::setSpan` fires
+            // no callback, so a second writer handing it a wrong span corrupts the band on
+            // screen and leaves the parameters exactly where they were - which is how this bug
+            // hid from the first version of this very test. The readout under the knob and the
+            // lit arc are both derived from these two, so this is the number Owen was reading
+            // off the screen when he said it was fighting him.
+            const RangeKnob* knobs[] = { &ed.strumKnobForTest(), &ed.humanizeKnobForTest() };
+            for (int i = 0; i < 2; ++i)
+            {
+                expectWithinAbsoluteError(knobs[i]->rangeLo(), (double) pairs[i].loV, 0.51,
+                                          juce::String(pairs[i].lo) + ": the band's low end "
+                                          "drew somewhere other than the value it holds");
+                expectWithinAbsoluteError(knobs[i]->rangeHi(), (double) pairs[i].hiV, 0.51,
+                                          juce::String(pairs[i].hi) + ": the band's high end "
+                                          "drew somewhere other than the value it holds");
+                expectWithinAbsoluteError(get(pairs[i].lo), pairs[i].loV, 0.51f,
+                                          juce::String(pairs[i].lo) + " drifted on its own");
+                expectWithinAbsoluteError(get(pairs[i].hi), pairs[i].hiV, 0.51f,
+                                          juce::String(pairs[i].hi) + " drifted on its own");
+            }
+        }
+
+        beginTest("the halo's travel is the same wherever the knob is");
+        {
+            // Three readings of the halo's ceiling were tried on 2026-08-23 and only this one
+            // survives contact: it is the span's own maximum, and **it does not depend on
+            // where the face is**. The two that read a wall - first the nearer, then the
+            // farther - both made the same gesture worth a different amount depending on where
+            // the knob had been left (Owen: "moving knob moves halo weird", then "dragging
+            // halo is weird too"). The arp's VEL ring is the shape that was already right:
+            // `arpHumanVel` is 0..127 however the level beside it moves.
             juce::ScopedJuceInitialiser_GUI juceInit;
 
             RangeKnob rk;
-            rk.face().setRange(0.0, 100.0, 1.0);
-            rk.face().setValue(24.0, juce::dontSendNotification); // arpHumanize's own default
-            rk.setSpan(100.0);                                    // arpHumanizeSpan's own default
+            rk.face().setRange(0.0, 200.0, 1.0); // Strum's own range
+            rk.setSpanMax(100.0);                // half of it: see wireRange
 
-            // The band, unchanged by any of this: the face is the centre and the low rail is
-            // nearer, so the reach stops there and H.TIME plays 0..48.
-            expectEquals(rk.room(), 24.0, "the nearer rail is 24 away");
-            expectEquals(rk.reach(), 24.0, "the band is capped by the rail, not the span");
-            expectEquals(rk.rangeLo(), 0.0, "the low end sits on the rail");
-            expectEquals(rk.rangeHi(), 48.0, "the high end is as far the other way");
+            const auto ceiling = rk.usefulSpanMax();
+            expectEquals(ceiling, 100.0, "the ceiling is the span's own maximum");
+            for (const double where : { 0.0, 30.0, 100.0, 180.0, 200.0 })
+            {
+                rk.face().setValue(where, juce::dontSendNotification);
+                expectEquals(rk.usefulSpanMax(), ceiling,
+                             "the halo's ceiling moved when the knob did");
+                expectEquals(rk.spanFromDrag(0.0, 150.0), ceiling * 0.5,
+                             "and so did what half a sweep is worth");
+            }
 
-            // **The span itself is untouched.** A session, a host lane or the parameter's own
-            // default may hold one wider than the face currently allows, and it has to survive
-            // being loaded - that is what keeps H.TIME's 100 meaning "floor pinned at zero".
-            expectEquals(rk.getSpan(), 100.0, "a span wider than the rail is still stored");
-
-            // What the gesture may land on, which is the whole fix.
-            expectEquals(rk.usefulSpanMax(), 24.0, "the gesture's ceiling is the reachable band");
-
-            // A full sweep down closes the band completely, and a full sweep up reopens all of
-            // it. Before this, 300 px down landed on 100 - 100 = 0 by luck on this knob, while
-            // every intermediate position between 100 and 24 drew the identical arc.
+            // A full sweep closes the band and reopens it; a quarter is worth a quarter.
+            rk.face().setValue(100.0, juce::dontSendNotification);
             expectEquals(rk.spanFromDrag(100.0, -300.0), 0.0, "a full sweep down closes it");
-            expectEquals(rk.spanFromDrag(0.0, 300.0), 24.0, "a full sweep up opens all of it");
+            expectEquals(rk.spanFromDrag(0.0, 300.0), 100.0, "a full sweep up opens all of it");
+            expectEquals(rk.spanFromDrag(100.0, -75.0), 75.0, "a quarter sweep takes a quarter");
+            expectEquals(rk.spanFromWheel(100.0, -1.0), 95.0, "one notch is 5% of the sweep");
+        }
 
-            // The pixel that used to do nothing. A quarter of the sweep down from wide open is
-            // a quarter off the band; it used to be the first of 228 px that changed nothing.
-            expectEquals(rk.spanFromDrag(100.0, -75.0), 18.0, "a quarter sweep takes a quarter");
-            expectEquals(rk.spanFromDrag(100.0, 1.0), 24.0, "already open: up does nothing");
+        beginTest("the band stays symmetric, so a halo drag can never move the knob");
+        {
+            // **The invariant the pad knobs are built on.** Strum and Humanize are stored as
+            // nothing but their two ends, and the face is derived as the midpoint of them - so
+            // the band being symmetric is what makes that derivation exact. Letting each end
+            // stop at its own wall was tried on 2026-08-23 and reverted within the hour: with
+            // the low end clipped, the pair's midpoint slid off the face, the knob crept under
+            // the halo, and the pointer sat outside the middle of its own lit arc. That is the
+            // thing centring the band on the face was for (2026-08-19, "moving the halo
+            // shouldn't move knob"), so this pins it rather than leaving it to be rediscovered.
+            juce::ScopedJuceInitialiser_GUI juceInit;
 
-            // The wheel answers out of the same arithmetic, a twentieth of the sweep a notch.
-            expectEquals(rk.spanFromWheel(100.0, -1.0), 22.8, "one notch down is 5% of the band");
-            expectEquals(rk.spanFromWheel(24.0, 1.0), 24.0, "one notch up at the ceiling holds");
+            RangeKnob rk;
+            rk.face().setRange(0.0, 200.0, 1.0);
+            rk.setSpanMax(100.0);
 
-            // VEL's shape: the ring carries a parameter of its own (0..127) and the face sits
-            // at 100 of 0..127, so the rail is 27 away - the ceiling CLAUDE.md names for it.
-            RangeKnob vel;
-            vel.face().setRange(0.0, 127.0, 1.0);
-            vel.face().setValue(100.0, juce::dontSendNotification); // arpVelLevel's default
-            vel.setSpanMax(127.0);                                  // arpHumanVel's own range
-            vel.setSpan(18.0);                                      // and its default
-            expectEquals(vel.usefulSpanMax(), 27.0, "VEL's ring stops 27 from the top rail");
-            expectEquals(vel.spanFromDrag(18.0, 300.0), 27.0, "a full sweep reaches the rail");
-            expectEquals(vel.reach(), 18.0, "and the default sits inside it, as documented");
+            for (const double where : { 0.0, 20.0, 64.0, 100.0, 175.0, 200.0 })
+                for (const double howWide : { 0.0, 10.0, 64.0, 100.0 })
+                {
+                    rk.face().setValue(where, juce::dontSendNotification);
+                    rk.setSpan(howWide);
+                    const auto lo = rk.rangeLo(), hi = rk.rangeHi();
+                    expectWithinAbsoluteError((lo + hi) * 0.5, where, 1.0e-9,
+                                              "the knob is the midpoint of its own band");
+                    expect(lo >= 0.0 && hi <= 200.0, "and the band stays inside the range");
+                }
 
-            // A face parked on a rail has no band to open at all. The gesture must leave the
-            // stored span alone there rather than quietly wiping it: nothing is on screen to
-            // say a drag did anything, so a drag must not have done anything.
-            RangeKnob railed;
-            railed.face().setRange(0.0, 100.0, 1.0);
-            railed.face().setValue(0.0, juce::dontSendNotification);
-            railed.setSpan(60.0);
-            expectEquals(railed.usefulSpanMax(), 0.0, "no room at the rail");
-            expectEquals(railed.spanFromDrag(60.0, -300.0), 60.0, "a dead halo stores nothing");
-            expectEquals(railed.spanFromWheel(60.0, -1.0), 60.0, "and neither does its wheel");
+            // The cost of that invariant, stated so nobody "fixes" it by accident: near a wall
+            // the band narrows, because the nearer side governs both. The span itself is
+            // untouched and comes back the moment the knob leaves the wall.
+            rk.face().setValue(30.0, juce::dontSendNotification);
+            rk.setSpan(50.0);
+            expectEquals(rk.rangeLo(), 0.0, "the wall stops the near side");
+            expectEquals(rk.rangeHi(), 60.0, "and the far side matches it, keeping the centre");
+            expectEquals(rk.getSpan(), 50.0, "the span itself is only held back, not lost");
+            rk.face().setValue(100.0, juce::dontSendNotification);
+            expectEquals(rk.rangeLo(), 50.0, "away from the wall the whole span is back");
+            expectEquals(rk.rangeHi(), 150.0, "on both sides");
         }
     }
 };

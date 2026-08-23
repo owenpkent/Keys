@@ -59,38 +59,70 @@ whatever it said**; what moves is what a new instance opens on, and a session ol
 predate one of the arp parameters, which takes the new default for it (lines B, C and D are off
 by default, so in practice that is line A a few milliseconds behind the grid).
 
-### Fixed: most of a halo's travel did nothing
+### Changed: run.py says what it just launched
 
-A range knob's satellite is dragged over 300 px for its whole sweep, and that sweep was
-calibrated against the span's **full** parameter travel - while the band it opens is capped at
-the distance from the knob to its **nearer rail**, which can never be more than half that travel
-and is far less whenever the face sits near an end. So the top of every halo's gesture moved
-nothing: not the arc, not the readout, not the sound.
+Owen: *"update run py."*
 
-At the defaults above it was most of the gesture. H.TIME opens at 24 of 0..100, so its band can
-never exceed 24 however far the halo is turned and **228 px of a 300 px drag were inert**; VEL's
-ring reaches 27 of its 127; Strum's 55 of 200; Humanize's 51 of 127. The wheel had it too - the
-first fifteen notches down H.TIME's halo changed nothing.
+It prints the binary's build time and the commit under it on every launch, and - the point of it -
+warns in yellow when the exe is older than the source beside it, which is only reachable through
+`--no-build`:
 
-The arithmetic has been wrong since the band became centred on the face (2026-08-19). What
-changed on 2026-08-23 is that the knobs open **lit**, which is what put a hand on a halo that had
-never had one. It is the same failure `RangeKnob::setSpanMax` was written for - a drag calibrated
-to something wider than what it writes - arriving by the other route: the rail rather than the
-range.
+```
+Launched Keys Host.exe (Release)
+  built 16:43, main @ 7703f43
+  "A page of chords clears from one row, and every range knob opens lit"
+```
 
-Both gestures now run against `usefulSpanMax()`, the reachable band, so a full sweep closes a
-band completely and a full sweep reopens all of it whatever the face is doing.
+A day-old Keys Host was mistaken for a current one for most of an afternoon, and a stale build is
+indistinguishable from a fresh one by looking at it. The stamp is the *working tree's* commit
+rather than something baked into the exe: nothing records what a binary was built from, and a
+stamp compiled in would mean a relink on every commit. The staleness check is what covers the gap.
 
-**The stored span is not clamped to it**, only what a gesture lands on. A session or a host lane
-may still hold a span wider than the face allows, which is what keeps H.TIME's own default of 100
-meaning "floor pinned at zero wherever the knob sits". What a hand on the halo can no longer do
-is *store* one: a band nobody can see is not something anybody drags for, so the first movement
-normalises to what is on screen and tracks from there. A face parked on a rail has no band at
-all, and a drag there leaves the stored span alone rather than quietly wiping it.
 
-`LayoutTests` pins it at the shipping defaults rather than on round numbers, because a centred
-knob would have passed throughout - it took a default putting a face near a rail to make any of
-this visible.
+### Fixed: the pad range knobs were fighting the hand that dragged them
+
+Owen: *"feels like it's fighting me... when I drag the halo. is there a race condition."* There
+was, and it had been mistaken for four different bugs before anyone asked that question.
+
+`KeysEditor::timerCallback` pushed a span into Strum's and Humanize's knobs on every tick, beside
+`syncPadRangeKnobs()` which already does that job - and it passed **`abs(hi - lo)`, the band's
+full width**, to a control whose span is the reach on *each* side of the knob. So the band doubled
+ten times a second until it saturated against the nearer wall, and it did it while the halo was
+under the hand. It is a leftover from before the band was centred on the knob (2026-08-19), when
+the span really was the whole width reaching back from one end; that call site was never updated,
+and the correct pull was added beside it rather than replacing it.
+
+The arithmetic leaves a signature, which is what identified it: a saturated band is exactly
+`[0, 2 x the knob]`. Strum was photographed reading **0-128 ms with its knob at 64**, and Humanize
+**0-82 with its knob at 41**.
+
+**Everything else chased that afternoon was this.** A halo that would not open, a knob that seemed
+to drag its band about, a band that reached across the whole range from one small drag - one
+arithmetic slip, seen from four angles. Two attempts to fix the *geometry* went in and came back
+out again the same day, and the reason they are worth recording is that both were plausible and
+both made things worse:
+
+- Clipping each end at its own wall instead of keeping the band symmetric. It broke an invariant
+  the pad knobs are built on: they are stored as nothing but their two ends and derive the knob as
+  the **midpoint** of them, so symmetry is what makes that derivation exact. Clip one end and the
+  midpoint slides off the knob - the knob crept under the halo, and the pointer sat outside the
+  middle of its own lit arc, which is precisely what centring the band was for.
+- Making the halo's ceiling track a wall, first the nearer and then the farther. Both made the
+  same gesture worth a different amount depending on where the knob had been left.
+
+`LayoutTests` runs the real editor's timer and checks that a band nobody is touching still draws
+where its parameters say. **It has to watch what the knobs draw, not the parameters**:
+`RangeKnob::setSpan` fires no callback, so a wrong span corrupts the picture and leaves the
+parameters untouched - which is how this hid from the first version of that test. Reinstate the
+three lines and it fails with Strum's stored 50-150 drawing as 0-200.
+
+### Changed: the pad halos open half as far, so their travel is proportionate
+
+Strum's halo ran over the knob's whole 200 ms range, so a single drag threw the band across
+everything the control can express. It is capped at **half the knob's travel** now - 100 ms on
+Strum, 63 on Humanize - which is the widest a band centred on the knob can be, and the shape the
+arp's VEL ring already had: `arpHumanVel` is a fixed 0-127 however the level beside it moves
+(Owen: *"the arp have it right"*).
 
 
 ### Fixed: a chord handed to an arp line is no longer raked

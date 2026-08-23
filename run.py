@@ -488,6 +488,60 @@ def close_running(exe_name: str, window_title: str) -> None:
 
 # --------------------------------------------------------------------------------------
 
+def build_stamp() -> str:
+    """The commit the working tree is on, for the launch line.
+
+    Not what the *binary* was built from - nothing records that, and a stamp baked into the
+    exe would mean a relink on every commit. It is the honest thing to print beside a build
+    that just happened, and `stale_sources` below is what covers the case where one did not.
+    """
+    def git(*args) -> str:
+        try:
+            out = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
+                                 timeout=5)
+            return out.stdout.strip() if out.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""  # no git, no repo, no matter: the stamp is a nicety
+
+    sha = git("rev-parse", "--short", "HEAD")
+    if not sha:
+        return ""
+    branch = git("rev-parse", "--abbrev-ref", "HEAD") or "detached"
+    subject = git("log", "-1", "--format=%s")
+    dirty = " +changes" if git("status", "--porcelain") else ""
+    stamp = f"{branch} @ {sha}{dirty}"
+    if not subject:
+        return stamp
+    return stamp + chr(10) + '  "' + subject + '"' 
+
+
+def stale_sources(exe: str) -> list:
+    """Source files newer than the binary about to be launched, newest first.
+
+    The whole reason this exists (2026-08-23): a day-old Keys Host was mistaken for a current
+    one for most of an afternoon, and nothing on screen or in this script's output said
+    otherwise. A stale binary is the normal state after `--no-build`, and it is indistinguishable
+    from a fresh one by looking at it.
+    """
+    try:
+        built = os.path.getmtime(exe)
+    except OSError:
+        return []
+    newer = []
+    for sub_dir in ("src", "tests"):
+        for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, sub_dir)):
+            for name in filenames:
+                if not name.endswith((".cpp", ".h", ".hpp")):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    if os.path.getmtime(path) > built:
+                        newer.append(path)
+                except OSError:
+                    pass
+    return newer
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build and launch a Keys standalone.")
     parser.add_argument("--keys", action="store_true",
@@ -554,6 +608,21 @@ def main() -> int:
         return 1
 
     print(f"{GREEN}Launched {exe_name} ({args.config}){RESET}")
+
+    # What you are actually looking at. The build time first, because that is the fact that
+    # settles "is this my change?", then the commit, so a screenshot can be placed later.
+    built_at = time.strftime("%H:%M", time.localtime(os.path.getmtime(exe)))
+    stamp = build_stamp()
+    print(f"{GREY}  built {built_at}" + (f", {stamp}" if stamp else "") + f"{RESET}")
+
+    # And the warning that is the point of all this. Only reachable with --no-build, since a
+    # build that just ran leaves nothing newer than the exe.
+    stale = stale_sources(exe)
+    if stale:
+        print(f"{YELLOW}  This binary is older than {len(stale)} source "
+              f"file{'s' if len(stale) != 1 else ''} - it is NOT what you just changed.{RESET}")
+        print(f"{YELLOW}  Run it again without --no-build to rebuild.{RESET}")
+
     if not args.keys:
         print(f"{GREY}  Silent? Load a synth VST3 into the instrument slot - "
               f"Keys Host reloads it next launch.{RESET}")

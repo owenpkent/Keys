@@ -47,10 +47,15 @@ namespace keys
 //
 // **The knob is the band's centre and the halo reaches equally both ways** (2026-08-19, Owen:
 // "moving the halo shouldn't move knob. should be equal from center"). The halo drag touches
-// only the span; the face never moves under it, and the band is value +/- reach on both sides
-// always - so a side that runs out of travel stops the other side too (`reach()`), rather than
-// letting the band go lopsided at the rails. The band opened downward from the face for its
-// first sixteen days, which read as "lower the floor" rather than "more range".
+// only the span; the face never moves under it, and the band is value +/- span on both sides.
+// The band opened downward from the face for its first sixteen days, which read as "lower the
+// floor" rather than "more range".
+//
+// **A wall clips the side that meets it, and only that side** (2026-08-23, Owen: "moving knob
+// moves halo weird"). Reading "equal from center" as *strictly* equal meant the nearer wall
+// governed both sides, so turning the face toward either end squeezed the band shut and let it
+// back out again - the halo moving under a hand that was on the knob, which is 2026-08-19's own
+// complaint arriving from the other direction. See rangeLo/rangeHi.
 //
 // The span is not a parameter this class owns. It comes in with setSpan() and goes out through
 // the three callbacks, so the consumer keeps the parameter, the gesture brackets and the undo
@@ -131,41 +136,34 @@ public:
     }
     double getSpan() const { return span; }
 
-    // How much travel the face has on its **nearer** side. This is the whole reason the band
-    // and the span are two different numbers: "equal from center" means the shorter side sets
-    // both, so this is the widest the band can open here however far the span is turned up.
+    // How much travel the face has on its **nearer** side, which is what the band may use on
+    // both. See rangeLo/rangeHi for why it is the nearer one and not each side's own.
     double room() const
     {
         return juce::jmax(0.0, juce::jmin(knob.getValue() - knob.getMinimum(),
                                           knob.getMaximum() - knob.getValue()));
     }
 
-    // How far the band actually reaches either side of the value: the span, until a rail is
-    // nearer. One number for both sides on purpose - "equal from center" is the contract, so
-    // a side that runs out of travel stops the other side too, and the band never goes
-    // lopsided against an end of the face's range.
+    // How far the band actually reaches either side of the value: the span, until a wall is
+    // nearer. One number for both sides, so the band is always symmetric about the face.
     double reach() const { return juce::jmax(0.0, juce::jmin(span, room())); }
 
-    // **What the halo gesture is calibrated and clamped against** (2026-08-23), and the
-    // difference from `spanMax()` is the bug this fixes. The drag ran over the span's *whole*
-    // travel while `reach()` capped the band at `room()` - which can never be more than half
-    // that travel, and is far less whenever the face sits near a rail - so the top of every
-    // halo's sweep moved nothing on screen, in the readout or in the sound.
+    // **What the halo gesture is calibrated and clamped against, and it does not depend on
+    // where the face is** (2026-08-23, Owen: "moving knob moves halo weird", then "the arp have
+    // it right").
     //
-    // At the defaults of 2026-08-23 that was most of the gesture: H.TIME's face opens at 24 of
-    // 0..100, so 228 px of a 300 px sweep were inert; VEL's ring could reach 27 of its 127.
-    // The knobs opening lit is what made it reachable, but the arithmetic has been wrong since
-    // the band became centred on the face (2026-08-19). It is the same failure `setSpanMax`
-    // was written for - a drag calibrated to something wider than the parameter it writes -
-    // arriving by the other route, the rail rather than the range.
+    // It read a wall for a few hours - first the nearer, then the farther - and both were
+    // wrong for the same reason, which is the lesson worth keeping: **a gesture whose range
+    // depends on another control changes meaning when that control moves.** Turning the knob
+    // silently re-scaled the halo's sensitivity and moved its ceiling, so the halo behaved
+    // differently depending on where the knob happened to be, and one drag near a wall could
+    // throw a 0..200 ms band across Strum's whole range.
     //
-    // **The stored span is not clamped to this**, only what a gesture lands on. A session or a
-    // host lane may still hold a span wider than the face currently allows, which is what keeps
-    // H.TIME's own default of 100 meaning "floor pinned at zero wherever the knob sits". What a
-    // *hand* on the halo can no longer do is store one, since a band you cannot see is not
-    // something anybody drags for - the first movement normalises it to what is on screen and
-    // tracks from there.
-    double usefulSpanMax() const { return juce::jmin(spanMax(), room()); }
+    // The arp's VEL ring is the shape that was already right: it carries `arpHumanVel`, whose
+    // 0..127 is the same however the level beside it moves. So the ceiling is the span's own
+    // maximum and nothing else - `setSpanMax` for a ring with a parameter of its own, half the
+    // face's travel for the pads, since that is the widest a band centred on the knob can be.
+    double usefulSpanMax() const { return spanMax(); }
 
     // The arithmetic behind the two gestures, public so a test can ask it the question directly
     // rather than synthesising mouse events - and so both gestures answer out of one place.
@@ -191,6 +189,21 @@ public:
 
     // The two ends the span and the value work out to. This is what the consumer's engine
     // should reproduce, and what the readout says.
+    //
+    // **The band is symmetric about the face, always, and that is load-bearing rather than
+    // decorative.** Letting each end stop at its own wall was tried on 2026-08-23 and reverted
+    // the same afternoon (Owen: "dragging halo is weird too"), because a consumer may store
+    // the band as nothing but its two ends - Keys' Strum and Humanize are two int parameters
+    // and no more - and derive the face as their midpoint. Symmetry is what makes that
+    // derivation exact: midpoint == face, so a halo drag can never move the knob. Clip one end
+    // and the midpoint slides off the face, so the knob crept under the halo and the pointer
+    // sat outside the middle of its own lit arc - which is the very thing the band was centred
+    // on the face to stop (2026-08-19, "moving the halo shouldn't move knob").
+    //
+    // The cost, which is real and was weighed: near a wall the band narrows as the face
+    // approaches it, since the nearer side governs both. A band that keeps its width there
+    // needs somewhere to record a centre that is not the midpoint of its ends, and neither the
+    // pads' pair nor anything else here has one.
     double rangeLo() const { return knob.getValue() - reach(); }
     double rangeHi() const { return knob.getValue() + reach(); }
 
