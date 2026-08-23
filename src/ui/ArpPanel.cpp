@@ -1,5 +1,6 @@
 #include "ArpPanel.h"
 #include "KeysLookAndFeel.h"
+#include "ComboMenu.h"
 #include <okstudio/MouseOnly.h>
 #include <cmath>
 
@@ -1832,24 +1833,40 @@ namespace
 // list. The break is found by text rather than by a hard-coded index, so the choice list and
 // this popup cannot drift apart; everything else - ids, tick, attachment - is exactly what the
 // ComboBox's own menu would have carried.
+juce::PopupMenu ArpPanel::buildHarmonyMenu(const juce::ComboBox& box)
+{
+    // Two columns, descending intervals left and ascending right, the split BigSky's own panel
+    // draws (2026-08-19, Owen: "make harmony 2 columns", and shown a single tall column, "still
+    // one column").
+    //
+    // **The break is found from the semitones, not from the label text.** It matched
+    // `startsWith("+")` until 2026-08-22, which reads as data-driven and is not: the harmony
+    // table's own rule is that appending is the only safe edit, and an appended *descending*
+    // row lands after all the "+" rows, so no break fires for it and it is drawn at the foot of
+    // the ascending column. Asking `harmonySemisFor` puts the question to the same table the
+    // engine plays, and `ArpTests` pins that the table stays grouped - non-positive rows first -
+    // so an append that breaks the grouping fails a test instead of quietly mis-columning.
+    //
+    // **`harmonySemisFor` takes the 0-based choice index, which is the ComboBox's *index* and
+    // not its id.** This was written as `harmonySemisFor(box.getItemId(n))` first and read one
+    // row late, putting the break a row early - the same index-versus-id slip as the bug this
+    // whole function exists to fix, made while fixing it. The test caught it; that is what the
+    // test is for.
+    return combomenu::build(box,
+                            [](int i)
+                            {
+                                return KeysProcessor::harmonySemisFor(i) > 0
+                                       && KeysProcessor::harmonySemisFor(i - 1) <= 0;
+                            });
+}
+
 void ArpPanel::MacroRow::HarmonyBox::showPopup()
 {
-    juce::PopupMenu menu;
+    auto menu = buildHarmonyMenu(*this);
     // The box's own LookAndFeel, exactly as ComboBox::showPopup hands its internal menu:
     // a PopupMenu does not inherit the target component's skin on its own, and without this
-    // the two columns came up in JUCE's stock grey.
-    menu.setLookAndFeel(&getLookAndFeel());
-    for (int i = 0; i < getNumItems(); ++i)
-    {
-        const auto text = getItemText(i);
-        if (i > 0 && text.startsWith("+") && ! getItemText(i - 1).startsWith("+"))
-            menu.addColumnBreak();
-        // isItemEnabled(i), never a hard-coded true: this is a ComboBox, and setItemEnabled is
-        // the ordinary way to grey a row (an interval the current mode cannot express, say).
-        // Overriding showPopup means every ComboBox API has to keep working through it, and a
-        // disabled row that stayed pickable would be a silent lie one call away.
-        menu.addItem(getItemId(i), text, isItemEnabled(i), getItemId(i) == getSelectedId());
-    }
+    // the two columns came up in JUCE's stock grey. Set here rather than in the builder so the
+    // builder needs no live component and a test can call it against a box alone.
     // The standard item height JUCE's own ComboBox::showPopup passes, so the popup's geometry
     // tracks the box it belongs to rather than falling through to whatever the LookAndFeel
     // happens to answer. Those agree today at the 34 px mouse-only height; this keeps them
@@ -1858,6 +1875,11 @@ void ArpPanel::MacroRow::HarmonyBox::showPopup()
                            .withStandardItemHeight(juce::jmax(34, getHeight()))
                            .withTargetComponent(this)
                            .withItemThatMustBeVisible(getSelectedId())
+                           // What LookAndFeel_V2::getOptionsForComboBoxPopupMenu passes for
+                           // every stock combo, and `StepComboBox` passes too: it highlights the
+                           // current row on open, which on a 27-row two-column menu is the
+                           // difference between seeing where you are and hunting for a tick.
+                           .withInitiallySelectedItem(getSelectedId())
                            .withMinimumWidth(getWidth()),
                        [safe = juce::Component::SafePointer<HarmonyBox>(this)](int result)
                        {

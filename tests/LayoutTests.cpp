@@ -284,6 +284,108 @@ public:
             }
         }
 
+        beginTest("the harmony menu carries every row's own id, enabled, in order");
+        {
+            // 2026-08-22, Owen: "I can't turn off the harmony. off is grey."
+            //
+            // `ComboBox::isItemEnabled` takes an item **ID**; `getItemText` and `getItemId` take
+            // an **index**. The hand-rolled two-column popup passed the loop index into the one
+            // call of the three that wants an id. The list is added with `addItemList(..., 1)`,
+            // so every row was checked against its neighbour's flag - invisible for all of them
+            // but the first, because `isItemEnabled` answers false for an id no item has, and
+            // index 0 is **Off**. The one row that silences a voice was the one row greyed.
+            //
+            // **The ids are the assertion, not just the enablement.** A first cut of this test
+            // pinned the text, the enabled flag and the column break, and passed green with
+            // `menu.addItem(i, ...)` - the identical index-for-id slip one call over, which
+            // makes "+ Perfect 5th" select "+ Tritone" and gives Off the id 0 that JUCE refuses
+            // outright. The id is the value this whole bug class turns on, so it is the value
+            // worth pinning.
+            //
+            // Against the **live** boxes on a real panel, not a synthetic ComboBox filled by
+            // re-typing production's own setup line: a test that rebuilds what it is guarding
+            // cannot see that setup change.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+            panel.setSize(panelW, panel.preferredHeight());
+
+            juce::Array<juce::Component*> all;
+            collectTargets(panel, all);
+
+            int boxes = 0;
+            for (auto* t : all)
+            {
+                auto* box = dynamic_cast<juce::ComboBox*>(t);
+                if (box == nullptr || ! t->getTitle().startsWith("Macro harmony"))
+                    continue;
+                if (t->getTitle().contains("chance")) // the knob beside it, not the combo
+                    continue;
+                ++boxes;
+
+                auto menu = ArpPanel::buildHarmonyMenu(*box);
+                int row = 0, breaks = 0;
+                juce::String breakAfter;
+                for (juce::PopupMenu::MenuItemIterator it(menu); it.next();)
+                {
+                    const auto& item = it.getItem();
+                    if (item.isSectionHeader || item.isSeparator)
+                        continue;
+
+                    // Every row, in order: its own id, its own text, and enabled.
+                    expectEquals(item.itemID, box->getItemId(row),
+                                 "row " + juce::String(row) + " carries its own item id");
+                    expectEquals(item.text, box->getItemText(row),
+                                 "row " + juce::String(row) + " carries its own text");
+                    expect(item.isEnabled, "harmony row \"" + item.text + "\" came up greyed");
+
+                    // A column break is not an item: addColumnBreak() sets `shouldBreakAfter`
+                    // on whatever was added last, so it shows up on the row before the split.
+                    if (item.shouldBreakAfter)
+                    {
+                        ++breaks;
+                        breakAfter = item.text;
+                    }
+                    ++row;
+                }
+                expectEquals(row, KeysProcessor::harmonyChoices().size(),
+                             "every choice reached the menu");
+                expectEquals(breaks, 1, "exactly one column break");
+                expectEquals(breakAfter, juce::String("- minor 2nd"),
+                             "the break falls after the last descending interval");
+            }
+            expectEquals(boxes, 2 * KeysProcessor::uiArpLines,
+                         "two harmony combos on every card were measured");
+        }
+
+        beginTest("the harmony table stays grouped, descending before ascending");
+        {
+            // The two-column split is one break in an ordered list, so it can only be correct
+            // while the list is grouped: every non-positive interval before every positive one.
+            // Nothing in the table's own type enforces that, and the table's stated rule is that
+            // **appending is the only safe edit** - so appending a *descending* interval would
+            // land it after the ascending ones and draw it at the foot of the wrong column, with
+            // one break still firing and nothing on screen to say so.
+            //
+            // This is what makes the break safe to derive rather than hand-place: break the
+            // grouping and this fails loudly instead.
+            const auto choices = KeysProcessor::harmonyChoices();
+            bool seenAscending = false;
+            for (int i = 0; i < choices.size(); ++i)
+            {
+                // The 0-based choice index, which is the combo's index - not its id, which is
+                // one more. Getting that wrong is what this whole area keeps costing.
+                const int semis = KeysProcessor::harmonySemisFor(i);
+                if (semis > 0)
+                    seenAscending = true;
+                else
+                    expect(! seenAscending,
+                           "\"" + choices[i] + "\" (" + juce::String(semis) + ") sits after an "
+                           "ascending interval, so the two-column split would mis-place it");
+            }
+            expect(seenAscending, "the table has ascending intervals at all");
+        }
+
         beginTest("every lane tab is laid out, and they are all the same width");
         {
             // Chain was built, made visible and given zero width, so it was in the component

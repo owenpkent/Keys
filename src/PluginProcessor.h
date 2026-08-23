@@ -112,6 +112,26 @@ public:
     // well, and an arpeggio is a run of single notes: folded in there it would rewrite the
     // "current chord" as whichever note the arp is on. Only the keybed asks this one.
     bool arpNoteLit(int midiNote) const;
+    // Which line is lighting it, lowest index first, or -1 for none. The keybed paints the key
+    // in that line's own colour (`skin::lineAccent`), which is what makes four lines running at
+    // once readable rather than one undifferentiated blink. **Lowest wins on an overlap** rather
+    // than blending: the palette exists to tell lines apart, and a blend of cyan and magenta is
+    // a fifth colour belonging to neither. Answers -1 whenever `arpNoteLit` is false, Light keys
+    // off included, so the two cannot disagree.
+    int arpLitLine(int midiNote) const;
+    // Every line lighting it, as a bitmask. The two above are both derived from this, so the
+    // three cannot disagree about Light keys being off. **Named `...Mask` rather than
+    // `arpLitLines`**, which was one character from `arpLitLine` and returned something else
+    // entirely: `int line = processor.arpLitLines(n)` compiles, hands back 4 for line C, and
+    // `skin::lineAccent(4)` wraps that to line A. A slip that compiles and paints the wrong
+    // colour is worth a longer name.
+    unsigned int arpLitLineMask(int midiNote) const;
+    // Feed one line's output through the keybed-lights watcher, for tests. Two lines releasing
+    // the same pitch in a chosen order inside one block is not something a test can ask two real
+    // engines for, and the rule worth pinning - a line clears only its own bit - is about the
+    // storage rather than the scheduling. Named `...ForTest` because that is the only caller
+    // that should ever exist: the audio thread reaches `watchArpNotes` directly.
+    void watchArpNotesForTest(const juce::MidiBuffer& midi, int line) { watchArpNotes(midi, line); }
 
     // What the on-screen keybed should light, which is deliberately **not** the same question
     // as isNoteSounding. With Light keys on and a line running, the chord handed to that line
@@ -810,19 +830,6 @@ public:
         // this struct too - so a global one would be new machinery for one feature. Worth
         // revisiting the day a second preference wants to outlive a project.
         juce::StringArray libraryFavourites;
-        // Whether a chord pad sounds for as long as you hold it, or fires on the release for a
-        // fixed 800 ms (2026-08-18, Owen: "maybe we should have a checkbox to toggle that on and
-        // off so we can lean on chords when we want").
-        //
-        // **Default false**, which is release-and-fixed, because that is the one that cannot
-        // surprise you: firing a chord chokes the other chord sources, so in hold mode a press
-        // that turns out to be a drag has already choked them - and with Exclusive on that
-        // reaches each arp line's held chord, which is the report this pair of behaviours came
-        // out of. Hold mode is worth having anyway (a stab is short, a lean is long, which is
-        // most of what a pad is for), so it is a tick rather than a decision made for you. Turn
-        // Exclusive off alongside it and the drag costs nothing at all.
-        bool padHoldToPlay = false;
-
         // The Pads bar's **Play** toggle (2026-08-19, Owen: "I want a toggle above the
         // keyboard to play notes. Because some sometimes when I'm trying to drag a cord into
         // the arpeggiator, it plays instead, and it stops everything"). Off, a click on a
@@ -830,8 +837,24 @@ public:
         // become a drag toward the arpeggiator cannot fire a chord and, with Exclusive on,
         // choke every running line on the way past. The drag, the drop targets and the card
         // menu are untouched; the one left-click arp behaviour that survives is the stop on a
-        // cleared card still feeding a line, which plays nothing either way. On is today's
-        // behaviour and the default.
+        // cleared card still feeding a line, which plays nothing either way.
+        //
+        // **On, it is hold-to-play** (2026-08-22, Owen: "when the play mode is checked on the
+        // pads, I want it to trigger as soon as you click on it and stay held until you let
+        // go"). The press fires the chord and the release ends it, so a stab is short and a
+        // lean is long - which is most of what a pad is for. It used to be release-and-fixed,
+        // an 800 ms blip owned by a timer, with holding available only as a separate tick on
+        // the settings gear (`padHoldToPlay`, 2026-08-18). **That tick is gone and this is what
+        // it did**: two switches for one question is one switch too many, and Owen's reading is
+        // the plain one - a control called Play plays for as long as you are playing it.
+        //
+        // What the retired default was protecting against is real and is now this toggle's own
+        // job: firing on the press means a press that turns out to be a *drag* has already
+        // choked the other chord sources, and with Exclusive on that reaches each arp line's
+        // held chord. That is precisely the report Play itself came out of - so the answer is
+        // to turn Play **off** while you are dragging cards into the arpeggiator, which is the
+        // one gesture it was built for, rather than to keep a second switch that made the
+        // sounding half half-hearted. Turning Exclusive off alongside it costs the drag nothing.
         bool padsPlayOnClick = true;
 
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
@@ -1176,8 +1199,21 @@ private:
     // the arp's notes are indistinguishable from the pass-through beside them - and a chord
     // held into a line already lights the keybed through noteRefs, so counting the merged
     // stream would light it twice and never put it out.
-    std::array<std::atomic<bool>, 128> arpNoteOn {};
-    void watchArpNotes(const juce::MidiBuffer&); // audio thread, on one line's output
+    //
+    // **A bitmask per pitch, one bit per line** (2026-08-22, Owen: "new branch for each arp to
+    // play different colors on the keyboard"). It was a plain `bool` per pitch, which could
+    // answer "is the arp on this note" and not "which line is". Each line owns its own bit, so
+    // the two questions are one lookup apart and no line can clear another's.
+    //
+    // That also retires the artefact the old comment here documented and accepted: two lines on
+    // one pitch collapsed to a single flag, so the *first* note-off put the key out while the
+    // other line was still playing it. Per-line bits make that impossible. **Within** one line
+    // it still stands - a line's two harmony voices on one pitch share that line's bit, and the
+    // first note-off clears it - which is the same trade as before, one scope smaller, and is
+    // why this is still a flag rather than a count.
+    static_assert(numArpLines <= 32, "one bit per line has to fit in the mask");
+    std::array<std::atomic<unsigned int>, 128> arpNoteLines {};
+    void watchArpNotes(const juce::MidiBuffer&, int line); // audio thread, on one line's output
     void clearArpNotes();
 
     // Everything one arpeggiator line owns. Three of these; every arp entry point above takes

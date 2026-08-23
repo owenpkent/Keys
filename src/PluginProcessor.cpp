@@ -1455,11 +1455,30 @@ bool KeysProcessor::keybedLit(int midiNote) const
     return arpNoteLit(midiNote);
 }
 
-bool KeysProcessor::arpNoteLit(int midiNote) const
+unsigned int KeysProcessor::arpLitLineMask(int midiNote) const
 {
     if (midiNote < 0 || midiNote > 127 || ! layout.arpLights)
-        return false;
-    return arpNoteOn[(size_t) midiNote].load();
+        return 0u;
+    return arpNoteLines[(size_t) midiNote].load();
+}
+
+bool KeysProcessor::arpNoteLit(int midiNote) const
+{
+    return arpLitLineMask(midiNote) != 0u;
+}
+
+int KeysProcessor::arpLitLine(int midiNote) const
+{
+    const unsigned int mask = arpLitLineMask(midiNote);
+    if (mask == 0u)
+        return -1;
+    // Lowest set bit: A over B over C over D. Deterministic and stable while the note is held,
+    // which matters more than which line "deserves" it - a key that changed colour as lines
+    // came and went on the same pitch would read as the arp having moved, not as an overlap.
+    for (int n = 0; n < numArpLines; ++n)
+        if ((mask & (1u << n)) != 0u)
+            return n;
+    return -1;
 }
 
 // Audio thread, on one arp line's output buffer just before it is merged. Same shape as
@@ -1467,19 +1486,39 @@ bool KeysProcessor::arpNoteLit(int midiNote) const
 // missed note-off would leak a refcount into a key lit forever, and a `changed` bump so the
 // surface repaints only when something actually moved.
 //
-// Two lines sounding the same pitch collapse to one flag, which is right: this answers "is
-// the arp on this note", not "how many of it". The last note-off wins and the key goes out
-// slightly early in that case - a display artefact on one pitch, against a refcount that
-// would have to be unwound perfectly across the flush, bypass and channel-change paths.
-void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi)
+// **One bit per line since 2026-08-22**, which is what lets the keybed paint the key in that
+// line's colour. It also fixes what the old single flag had to accept: two lines on one pitch
+// shared it, so whichever released first put the key out under the line still playing it.
+// Each line clears only its own bit now. Within a line it is still a flag and not a count -
+// two harmony voices on one pitch, first note-off wins - the same trade at a smaller scope.
+//
+// `runArpLines` walks the lines in order on this thread, so no two *lines* race with each other
+// - but the message thread does more than read: `clearArpNotes()` writes zeroes from there. The
+// per-bit updates below are therefore atomic read-modify-writes rather than load-modify-stores;
+// see the note on `set` for what the difference buys.
+void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi, int line)
 {
+    if (line < 0 || line >= numArpLines)
+        return;
+    const unsigned int bit = 1u << line;
     bool changed = false;
     const auto set = [&](int note, bool on)
     {
-        if (note < 0 || note > 127 || arpNoteOn[(size_t) note].load() == on)
+        if (note < 0 || note > 127)
             return;
-        arpNoteOn[(size_t) note].store(on);
-        changed = true;
+        auto& cell = arpNoteLines[(size_t) note];
+        // **fetch_or / fetch_and, not load-modify-store.** `clearArpNotes()` runs on the
+        // *message* thread - `allNotesOff()`, so the All Off chip, a panic and the MCP tool -
+        // and stores 0 into every cell. A read, a clear landing between, and a write back would
+        // resurrect the bits this line read a moment ago: bits belonging to *other* lines,
+        // whose engines the same panic is about to flush, so no further note-off for that pitch
+        // would ever arrive and the key would stay lit for the rest of the session. An atomic
+        // read-modify-write has no window for the clear to land in, so a clear can only be
+        // followed by a line setting its own bit for a note that genuinely is sounding.
+        //
+        // The previous value comes back from the same call, so `changed` costs no extra load.
+        const unsigned int was = on ? cell.fetch_or(bit) : cell.fetch_and(~bit);
+        changed = changed || (on ? (was & bit) == 0u : (was & bit) != 0u);
     };
 
     for (const auto meta : midi)
@@ -1497,8 +1536,8 @@ void KeysProcessor::watchArpNotes(const juce::MidiBuffer& midi)
 
 void KeysProcessor::clearArpNotes()
 {
-    for (auto& f : arpNoteOn)
-        f.store(false);
+    for (auto& f : arpNoteLines)
+        f.store(0u);
     soundingGen.fetch_add(1);
 }
 
@@ -2106,7 +2145,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         if (channel != l.lastChannel)
         {
             l.engine.flushInto(l.out);
-            watchArpNotes(l.out);
+            watchArpNotes(l.out, n);
             mergeArpOut(arpMerged, l.out, l.lastChannel);
             l.out.clear();
             l.lastChannel = channel;
@@ -2263,7 +2302,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         // whole of the routing. Its output goes into midi with everything the other lines and
         // the pass-through left there, so two lines at two rates simply sum.
         l.engine.process(ap, hc, numSamples, l.in, l.out);
-        watchArpNotes(l.out);
+        watchArpNotes(l.out, n);
         // Into the shared buffer rather than straight out: the lines have to be interleaved in
         // time before the overlap rule below can run over them. MidiBuffer keeps its events
         // sorted by sample position, and equal positions stay in insertion order, so a line's
@@ -3681,7 +3720,6 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("holdVisualsOnSustain", layout.holdVisualsOnSustain, nullptr);
     tree.setProperty("dragWhileSustain", layout.dragWhileSustain, nullptr);
     tree.setProperty("sustainProposesChords", layout.sustainProposesChords, nullptr);
-    tree.setProperty("padHoldToPlay", layout.padHoldToPlay, nullptr);
     tree.setProperty("padsPlayOnClick", layout.padsPlayOnClick, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
@@ -3741,7 +3779,10 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     layout.holdVisualsOnSustain = flag("holdVisualsOnSustain", true);
     layout.dragWhileSustain = flag("dragWhileSustain", true);
     layout.sustainProposesChords = flag("sustainProposesChords", false);
-    layout.padHoldToPlay = flag("padHoldToPlay", false);
+    // padHoldToPlay is retired (2026-08-22): the Pads bar's Play toggle is that behaviour now.
+    // An older session's property is simply ignored, which is what an unknown key in this tree
+    // has always cost - unlike an APVTS parameter, a layout property carries no index anybody
+    // stores, so dropping one needs no migration.
     layout.padsPlayOnClick = flag("padsPlayOnClick", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the

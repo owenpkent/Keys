@@ -125,7 +125,12 @@ protected:
     // Built from the processor's refcounts and mapped back through drawnForOutputNote,
     // so a note with no key on this surface is simply skipped, and notes already in
     // `sounding` are excluded outright (see the .cpp for why that matters).
-    std::set<int> externallySounding() const;
+    // Maps each such key to the **arp line** lighting it, or -1 when the source is not an arp
+    // line (a chord pad, the MIDI input, an MCP tool). The keybed paints an arp-lit key in that
+    // line's own colour, so the line has to travel with the key rather than being looked up
+    // again at paint time - `refresh()` folds it into the change cache below, or a key whose
+    // line changed under it would keep the colour it was first lit in.
+    std::map<int, int> externallySounding() const;
 
     KeysProcessor& processor;
     bool scaleLock = false;
@@ -153,6 +158,10 @@ private:
     void repaintLitChanges();
     static constexpr int stateHeld = 1;   // latched, sustained, or sounding from elsewhere
     static constexpr int stateActive = 2; // under the mouse right now, drawn hotter
+    // The cached value is the state *and* the arp line that lit it, packed so an ordinary map
+    // comparison catches a line change as readily as a state change. `line` is -1 for every
+    // source that is not an arp line, which is what this surface's own presses always are.
+    static constexpr int litKey(int state, int line) { return state + (line + 1) * 8; }
     // How far past a key's own rectangle paint() can reach: a lit black key's outer glow is a
     // 4 px stroke centred 2.5 px outside it. Anything less leaves a ring of accent behind when
     // the note goes off.

@@ -98,8 +98,11 @@ own colour back; it is exactly as load-bearing as the LINE caption it sits besid
 popup opens as two columns too**, Off and the descending intervals on the left, the ascending
 ones on the right, exactly as BigSky's panel draws the same list (Owen: *"make harmony 2
 columns"*, then, shown a single tall menu, *"still one column"* - which is what the ask had
-meant all along; `MacroRow::HarmonyBox::showPopup` rebuilds the ComboBox's menu with a column
-break found by text, so the list and the split cannot drift apart). The list is BigSky's
+meant all along; `ArpPanel::buildHarmonyMenu` rebuilds the ComboBox's menu with a column
+break derived from each entry's own semitones - by *text* until 2026-08-22, which reads as
+data-driven and is not, since an appended descending interval lands after the ascending ones and
+draws in the wrong column; `ArpTests` pins that the table stays grouped so an append that breaks
+it fails loudly). The list is BigSky's
 shimmer interval table with its
 two cents-detune rows dropped, since Keys has no concept of a partial-cent shift: Off, - Octave
 down through - minor 2nd, + minor 2nd up through + Octave, + Octave & 5th, + 2 Octaves. The
@@ -319,9 +322,12 @@ It is **always enabled**, unlike Hold off, because a stop button that greys itse
 you have to read before you can trust it.
 
 **Light keys** (`layout.arpLights`) lights the on-screen keybed for the notes the arp is
-*playing*. `arpNoteOn` is a flag per pitch written on the audio thread from each line's `out`
-buffer - never off the merged stream, where the arp's notes are indistinguishable from the
-pass-through beside them. Three things are load-bearing:
+*playing*, **each line in its own colour** since 2026-08-22. `arpNoteLines` is a bitmask per
+pitch - one bit per line - written on the audio thread from each line's `out` buffer, never off
+the merged stream, where the arp's notes are indistinguishable from the pass-through beside them.
+It was `arpNoteOn`, a single flag per pitch, which could say *that* the arp was on a note and not
+*which line*; the bits also mean a line clears only its own, where the shared flag let whichever
+line released first put the key out under one still playing it. Three things are load-bearing:
 
 - **It is layout state, not a parameter.** It changes what is drawn and nothing that is heard,
   so there is nothing here for a host to automate.
