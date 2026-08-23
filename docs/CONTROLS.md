@@ -824,7 +824,12 @@ Beside them: **Hold off** lets go of every held chord and stops every chain, lea
 running. **All Off** does that *and* switches every line off, which is the difference - release
 alone hands the engines straight back to whatever the keybed is holding. **Light keys** lights
 the on-screen keyboard for the notes the arp is playing; it is display only and changes nothing
-you hear.
+you hear. **Each line lights in its own colour** (2026-08-22) - A cyan, B magenta, C amber, D
+lime, the same four the macro cards and the bar's letters wear - so four lines running at once
+read as four parts rather than one blinking keybed. Where two lines are on the same key at the
+same moment the lower letter wins, because a blend of two line colours is a fifth colour
+belonging to neither. Notes from anywhere else - your own clicks, a chord pad, the MIDI input -
+keep the theme's accent, so the colours only ever mean *which arp line*.
 
 **The panel edits one line at a time**, chosen now by that line's own **Details** button on its
 macro card (2026-08-02, seventh pass, Owen: "maybe we can add another button on the bottom by

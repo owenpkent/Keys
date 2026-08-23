@@ -322,9 +322,12 @@ It is **always enabled**, unlike Hold off, because a stop button that greys itse
 you have to read before you can trust it.
 
 **Light keys** (`layout.arpLights`) lights the on-screen keybed for the notes the arp is
-*playing*. `arpNoteOn` is a flag per pitch written on the audio thread from each line's `out`
-buffer - never off the merged stream, where the arp's notes are indistinguishable from the
-pass-through beside them. Three things are load-bearing:
+*playing*, **each line in its own colour** since 2026-08-22. `arpNoteLines` is a bitmask per
+pitch - one bit per line - written on the audio thread from each line's `out` buffer, never off
+the merged stream, where the arp's notes are indistinguishable from the pass-through beside them.
+It was `arpNoteOn`, a single flag per pitch, which could say *that* the arp was on a note and not
+*which line*; the bits also mean a line clears only its own, where the shared flag let whichever
+line released first put the key out under one still playing it. Three things are load-bearing:
 
 - **It is layout state, not a parameter.** It changes what is drawn and nothing that is heard,
   so there is nothing here for a host to automate.
