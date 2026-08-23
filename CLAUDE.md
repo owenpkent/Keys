@@ -109,9 +109,43 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
 - **Each line has a colour**: `skin::lineAccent(line)` - A cyan (the accent Keys shipped with),
   B magenta, C amber, D lime, the hexes reused from `accentChoices()`. Fixed, not
   theme-following, because the job is telling four lines apart. Worn by the macro card's frame,
-  fill and caption, a stripe under the bar's letter switch, the deep view's LINE caption and the
-  Draw grid's playhead - the marks that say *which line*, never the controls, which is how the
-  one-cyan skin law bends without breaking.
+  fill and caption, a stripe under the bar's letter switch, the deep view's LINE caption, the
+  Draw grid's playhead - and, from 2026-08-22, **the keybed keys that line is playing** - the
+  marks that say *which line*, never the controls, which is how the one-cyan skin law bends
+  without breaking.
+- **The keybed lights per line** (2026-08-22, Owen: *"new branch for each arp to play different
+  colors on the keyboard"*). **Light keys** already lit the keybed for the arp's output; with
+  four lines that was one colour for all of them, saying *that* the arp was playing and not
+  *which line*. `arpNoteOn` is **`arpNoteLines`** now, a bitmask per pitch with one bit per
+  line, and `arpLitLine()` reads the lowest set bit. **Lowest wins on an overlap, never a
+  blend**: the palette exists to tell lines apart and a mix of two line colours is a fifth
+  colour belonging to neither, and lowest-wins is *stable* while the note is held, so a key
+  never changes colour as lines come and go under it. Every non-arp source - a press, a latch,
+  a chord pad, the MIDI input, MCP - stays on the theme accent, which is what keeps a colour on
+  the keybed meaning exactly one thing.
+  **It retired a documented artefact**: two lines on one pitch shared a single flag, so the
+  first note-off put the key out under the line still playing it. Per-line bits make that
+  impossible. **Within** a line it still stands (two harmony voices, one pitch, first note-off
+  wins) and that is still why this is a flag and not a count - a missed note-off would leak a
+  refcount into a key lit forever. Single-writer: `runArpLines` walks the lines in order on the
+  audio thread, so the read-modify-write is safe on *that* basis, not on the atomic.
+  **The keybed's sixteen cyan gradients moved into the skin** as `skin::KeyLitSet`, reached
+  through `skin::keyLitFor(line)` - they were per-file chrome of exactly the kind the skin rule
+  forbids, and a second colour was impossible while they sat in `PianoKeyboard::paint`. **Cyan
+  keeps its shipped values byte for byte** rather than being re-derived, the same reasoning
+  `cyanAccent` is written down rather than derived; every other accent derives into the same
+  relationship. The sets hang off one function rather than four that each re-sniffed
+  `a.base == cyanAccent.base` - four copies of one decision, and a function guessing what its
+  caller already knew.
+  **A non-arp key is cyan, not the theme accent**, and that is the case to get right rather
+  than the interesting one: before this, these gradients were hard-coded cyan whatever the
+  swatch said (only the glow strokes followed the accent, and they still do), so deriving them
+  from the theme - which the first cut did - silently changed the colour of your own presses on
+  any non-default swatch. **The palette's honest limit**: line A *is* the default cyan, so on
+  that swatch a chord pad and line A are the same colour. B, C and D are unambiguous. **`NoteSurface::externallySounding()` returns a map now**, key
+  to line, and `refresh()` folds the line into its change cache through `litKey` - a state-only
+  cache would hold the first colour when a key passed from one line to another without going
+  out in between.
 - **Two harmony voices per line** (`arp*Harm1/2` choice + `arp*Harm1/2Chance` int, appended,
   Off/100 defaults): `KeysProcessor::harmonyChoices()` is BigSky's shimmer list minus its two
   cents rows (MIDI cannot say ten cents), `harmonySemisFor` maps index to semitones, and the
@@ -157,9 +191,11 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
 - **"Make harmony 2 columns" meant the dropdown's own popup** (2026-08-19; a first reading put
   the card's controls in two columns, and Owen, shown the menu: "still one column"). The
   harmony combo opens as two columns, descending intervals left and ascending right, BigSky's
-  own split: `MacroRow::HarmonyBox::showPopup` rebuilds the ComboBox's menu with a column
-  break found by text (never a hard-coded index) and must hand the menu its LookAndFeel, or
-  it comes up in JUCE's stock grey.
+  own split: `ArpPanel::buildHarmonyMenu` rebuilds the ComboBox's menu (`showPopup` only calls
+  it and shows the result), and `showPopup` must hand the menu its LookAndFeel, or it comes up
+  in JUCE's stock grey. **The break is derived from the semitones, not the label text**, and the
+  loop itself lives in `src/ui/ComboMenu.h`, shared with `StepComboBox` - both since 2026-08-22;
+  see the Off-was-greyed entry further down for what a hand-rolled popup costs.
 - **A Play toggle on the Pads bar** (`LayoutState::padsPlayOnClick`, default on; 2026-08-19,
   Owen: "I want a toggle above the keyboard to play notes... when I'm trying to drag a cord
   into the arpeggiator, it plays instead, and it stops everything"). Off, a pad click makes no
@@ -1320,9 +1356,10 @@ what is no longer true lives here in one place:
   up on whatever the keybed holds, so it would silence the room for a sixteenth note. It is
   always enabled, unlike Hold off, because a stop button you have to read before trusting is
   one you cannot reach for in the moment. **Light keys** (`layout.arpLights`) lights the keybed
-  for the notes the arp is *playing*. `arpNoteOn` is a flag per pitch written on the audio
-  thread off each line's `out` buffer - never off the merged stream, where the arp's notes are
-  indistinguishable from the pass-through, and never off `in`, which `noteRefs` already lights.
+  for the notes the arp is *playing*, each line in its own colour since 2026-08-22.
+  `arpNoteLines` is a bitmask per pitch, one bit per line, written on the audio thread off each
+  line's `out` buffer - never off the merged stream, where the arp's notes are indistinguishable
+  from the pass-through, and never off `in`, which `noteRefs` already lights.
   **`keybedLit()` is the keybed's own question and not `isNoteSounding()`**: that answer feeds
   the live chord card too, and an arpeggio is a run of single notes, so folding the arp into it
   would rewrite the "current chord" as whichever note the arp is on. Only `NoteSurface` asks

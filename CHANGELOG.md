@@ -45,6 +45,84 @@ you are playing, which was never the same question. With nothing on the strip on
 more, `ChordPads` is no longer a `juce::Timer`.
 
 
+### Added: each arp line lights the keyboard in its own colour
+
+Owen: *"new branch for each arp to play different colors on the keyboard."*
+
+**Light keys** has lit the keybed for the arp's output since it landed, and with four lines
+running that was one colour blinking for all of them - you could see *that* the arp was playing
+and not *which line*. The four line colours already existed and are already worn by the macro
+cards, the bar's letter switches and the Draw grid's playhead; this is the same palette on the
+one surface that was still answering in the singular. A is cyan, B magenta, C amber, D lime.
+
+**Two lines on one key: the lower letter wins.** Not a blend - the palette's whole job is telling
+lines apart, and cyan mixed with magenta is a fifth colour belonging to neither. The winner is
+stable while the note is held, so a key never changes colour as lines come and go underneath it.
+
+Notes from every other source - your own clicks, a latch, a chord pad, the MIDI input, an MCP
+tool - are drawn exactly as before: **cyan**, whatever the theme swatch says, which is what
+those keys have always been. Only the glow strokes around them follow the accent, as they
+always did. A first cut derived their gradients from the theme accent instead, which quietly
+changed the colour of your own presses on any non-default swatch.
+
+The honest limit, since the palette is meant to *mean* something: on the default cyan swatch a
+chord pad's key is the same colour as line A's, because line A **is** that cyan. B, C and D are
+unambiguous. So a colour says "an arp line, or the keybed's own" rather than "an arp line".
+
+Under it, `arpNoteOn` became `arpNoteLines`, a **bitmask per pitch with one bit per line**,
+updated with `fetch_or` / `fetch_and` rather than a load-modify-store, because `clearArpNotes()`
+writes zeroes from the *message* thread (All Off, a panic, the MCP tool) and a clear landing
+between a read and its write-back would resurrect other lines' bits for a pitch whose engines
+that same panic is about to flush - a key lit for the rest of the session. It
+which is also a small fix: two lines sounding one pitch used to share a single flag, so whichever
+released first put the key out while the other was still playing it. Each line clears only its
+own bit now. Within a line it is still a flag rather than a count - a line's two harmony voices
+on one pitch, first note-off wins - the same trade at a smaller scope, and still the reason this
+is not a refcount.
+
+The four cyan gradients the keybed hard-coded moved into `skin::keyLit` and its three companions,
+which is where they should always have been: **cyan keeps its shipped values byte for byte** (the
+keybed was tuned against them, and A is the line Keys has always had) and every other accent is
+derived to sit in the same relationship.
+
+
+### Fixed: the harmony dropdown's **Off** row was greyed out
+
+Owen: *"I can't turn off the harmony. off is grey."*
+
+`ComboBox::isItemEnabled` takes an item **ID**. `getItemText` and `getItemId` take an **index**.
+The harmony popup - rebuilt by hand since 2026-08-19 to get its two columns - passed the loop
+index into the one call of the three that wants an id.
+
+The list is added with `addItemList(..., 1)`, so index 0 is id 1: every row was checked against
+its *neighbour's* enabled flag. For twenty-six of the twenty-seven rows that is invisible, since
+they are all enabled anyway. For the first it is not, because `isItemEnabled` answers **false**
+for an id no item has - and index 0 is **Off**. So the single row you need in order to silence a
+voice was the single row greyed out, which is why it read as a harmony that would not turn off
+rather than as a bug in a popup.
+
+**The loop itself moved to `src/ui/ComboMenu.h` and is shared**, because Keys hand-rolls a
+ComboBox popup in two places and the other one - `StepComboBox` - carried a hard-coded `true`
+where the enabled flag goes, which is the same silent lie one call over: `setItemEnabled(id,
+false)` is the ordinary way to grey a row, and a row drawn enabled there would have been
+clickable and fired its callback with the value the caller meant to forbid. One loop now, with
+the index-versus-id rule written where a third popup would be read.
+
+**The column break is derived from the semitones, not the label text.** Matching on a leading
+`"+"` reads as data-driven and is not: the harmony table's own rule is that appending is the only
+safe edit, and an appended *descending* interval lands after every ascending one, so no break
+fires for it and it draws at the foot of the wrong column. `ArpTests` pins that the table stays
+grouped, so an append that breaks the grouping fails a test rather than mis-columning quietly.
+
+`LayoutTests` walks the **live** combos on a real panel - all eight of them - and pins every
+row's own **item id**, its text and its enabled flag. The ids matter most: a first cut of this
+test checked text, enablement and the break, and passed green against `addItem(i, ...)`, the
+identical index-for-id slip one call over. The id is the value this bug class turns on.
+
+The dropdown also opens with the current row highlighted now (`withInitiallySelectedItem`), which
+every stock ComboBox does and this one had stopped doing.
+
+
 ### Fixed: one harmony table instead of three that must agree
 
 `harmonyChoices()` and the two semitone tables were three parallel lists indexed by the same
