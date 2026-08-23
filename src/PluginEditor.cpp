@@ -345,6 +345,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         styleLabel(head, name);
         padsHolder.addAndMakeVisible(head);
         rk.face().setRange(lo, hi, 1.0);
+        // **Half the face's travel, which is the widest a band centred on the knob can be**
+        // (2026-08-23, Owen: "the arp have it right"). Without this the halo's sweep was the
+        // knob's whole range - 200 ms on Strum - so one drag threw the band across everything
+        // the control can express, and the ring was lit end to end while the pointer sat at the
+        // bottom. The arp's VEL ring is the shape being copied: it carries a parameter of its
+        // own whose range is fixed however the level beside it moves. These two have no such
+        // parameter (their whole record is the low/high pair), so the bound is stated here.
+        rk.setSpanMax((hi - lo) * 0.5);
         rk.face().setTitle(name);
         rk.face().setTooltip(tip);
         rk.setTitle(name + " range");
@@ -2689,14 +2697,21 @@ void KeysEditor::timerCallback()
     // the velocity control whether Humanize is on or off, since it plays the band's midpoint
     // when off, so grey it and there is no way left to set how hard Keys plays. humanKnob.isOn /
     // setOn is the on/off now.
-    const auto spanOf = [&apvts](const char* loId, const char* hiId)
-    {
-        const auto a = apvts.getRawParameterValue(loId)->load();
-        const auto b = apvts.getRawParameterValue(hiId)->load();
-        return (double) std::abs(b - a);
-    };
-    humanKnob.setSpan(spanOf("humanizeVelMin", "humanizeVelMax"));
-    strumKnob.setSpan(spanOf("chordStrum", "chordStrumMax"));
+    // **The pad range knobs are pulled by syncPadRangeKnobs() and by nothing else.** Two lines
+    // here used to push a span of their own on every tick - `std::abs(hi - lo)`, the band's
+    // *full* width - and they were a leftover from before the band was centred on the face
+    // (2026-08-19), when the span really was the whole width reaching back from one end. Once
+    // the span became the reach on *each* side, that call handed the knob twice the number it
+    // meant, ten times a second: the band doubled every tick until it saturated against the
+    // nearer wall, which is why Strum sat at "0-128 ms" with its knob at 64 and Humanize at
+    // "0-82" with its knob at 41 - `[0, 2x the knob]` in both cases, the arithmetic's own
+    // signature. They also ran with no `spanDragging()` guard, so they did it while the halo
+    // was under the hand: Owen, on 2026-08-23, "feels like it's fighting me... is there a race
+    // condition". There was, and this was it.
+    //
+    // syncPadRangeKnobs() is the one pull: it takes half the width, it compares before it
+    // writes, and it stands off mid-gesture. Do not add a second writer beside it - a
+    // parameter with two writers is the shape that has now cost this file four separate bugs.
 
     // The Strum caption carries its direction, since the `<` `>` beside it have to be stepping
     // something visible and a third control saying so would be one more thing to read. Short

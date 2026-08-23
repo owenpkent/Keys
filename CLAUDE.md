@@ -314,18 +314,36 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   unchanged - it has been the default since it was a parameter), **Humanize on at 56-96**,
   **`arpHumanVel` 18**, **`arpHumanize` 24** with its ring already open, which draws as 0-48 and
   plays as 0 to 12 ms late.
-- **Most of a halo's travel did nothing, and turning the knobs on is what found it.** The
-  satellite's 300 px sweep was calibrated against the span's whole parameter travel, while
-  `reach()` caps the band at `room()` - the distance to the **nearer** rail, which is at most
-  half that travel and far less near an end. So the top of every halo gesture moved nothing on
-  screen or in the sound: 228 px of H.TIME's 300, and 100 of VEL's 127. Both gestures read
-  `RangeKnob::usefulSpanMax()` now. **The stored span is still not clamped to it** - a session
-  may hold one wider than the face allows, which is what keeps `arpHumanizeSpan`'s default of
-  100 meaning "floor pinned at zero wherever the knob sits" - but a *gesture* cannot store one
-  any more, since a band nobody can see is not something anybody drags for. The general shape,
-  and it is the third time this file has recorded it: **a drag calibrated to something wider
-  than what it can actually write is inert over the difference, with nothing on screen to say
-  so.** `setSpanMax` was the same bug by way of the parameter's range; this was the rail.
+- **A parameter with two writers, again: the pad range knobs were fighting the hand**
+  (2026-08-23, Owen: "feels like it's fighting me... is there a race condition"). `timerCallback`
+  pushed `abs(hi - lo)` - the band's **full** width - into `RangeKnob::setSpan`, whose span is the
+  reach on *each* side, ten times a second and with no `spanDragging()` guard. The band doubled
+  every tick until it saturated against the nearer wall, so a saturated knob read exactly
+  `[0, 2 x the knob]` - Strum at "0-128 ms" with its knob at 64. A leftover from before the band
+  was centred on the face (2026-08-19), when the span *was* the full width;
+  `syncPadRangeKnobs()` was added beside it rather than replacing it. **`syncPadRangeKnobs` is the
+  one pull. Do not add a second writer beside it.**
+  Three things worth keeping out of the afternoon it cost:
+  **One bug wore four faces.** A halo that would not open, a knob that dragged its own band about,
+  a band that crossed the whole range from one small drag, and a control that fought the hand were
+  all this. Two geometry "fixes" went in on the strength of the first three and both came back
+  out - **when several controls misbehave in unrelated-looking ways at once, look for one writer
+  they share before redesigning any of them.**
+  **The band must stay symmetric about the face, and that is not aesthetics.** Strum and Humanize
+  are stored as nothing but their two ends and derive the face as the **midpoint**; symmetry is
+  what makes that exact, so a halo drag can never move the knob. Clipping each end at its own wall
+  was tried and reverted within the hour: the midpoint slid off the face and the pointer sat
+  outside the middle of its own arc. A band that keeps its width at a wall needs somewhere to
+  record a centre that is not the midpoint of its ends, and the pads have no such place.
+  **A gesture's range must not depend on another control.** The halo's ceiling was made to track a
+  wall - the nearer, then the farther - and both made the same drag worth a different amount
+  depending on where the knob had been left. It is `spanMax()` and nothing else: `setSpanMax` for a
+  ring carrying a parameter of its own, half the face's travel for the pads, which is what the
+  arp's VEL ring already did (`arpHumanVel` is 0..127 whatever the level does).
+  **A test that watches parameters cannot see this class of bug**: `setSpan` fires no callback, so
+  a wrong span corrupts only what is drawn. `LayoutTests` turns the real editor's timer through
+  `KeysEditor::tickForTest()` and asserts on `rangeLo()`/`rangeHi()`; the first version of it
+  watched the parameters and passed with the bug in place.
 - **Humanize's band was widened around its centre, not moved**, and that is the load-bearing
   part: Humanize *off* plays the band's **midpoint** (`baseVelocity01`), and `migrateVelLevel`
   converts an old session's arp level against that same **76**. Keep the midpoint and both go on

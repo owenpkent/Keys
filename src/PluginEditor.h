@@ -72,6 +72,21 @@ public:
     // and a literal goes stale the first time a section grows - the symptom being the
     // keyboard, which is laid out last, carved off the bottom with nothing to say so.
     int  idealHeight() const;
+    // One turn of the editor's own poll, for tests. Everything this window pulls rather than
+    // binds - the pad range knobs, the Play toggle, Light keys, the take controls - is refreshed
+    // there, and a second writer disagreeing with one of those pulls is a bug no unit test can
+    // see from outside (2026-08-23: `timerCallback` handed the pad range knobs twice the span
+    // they meant, ten times a second, and the only symptom was on screen). The message loop is
+    // not pumpable here - runDispatchLoopUntil needs JUCE_MODAL_LOOPS_PERMITTED - so the tick is
+    // exposed instead. Named `...ForTest` because that is the only caller there should ever be:
+    // the timer reaches timerCallback directly, the same shape as watchArpNotesForTest.
+    void tickForTest() { timerCallback(); }
+    // The two pad range knobs, for the test beside tickForTest. It has to watch what they
+    // **draw**, not the parameters: `RangeKnob::setSpan` fires no callback, so a second writer
+    // pushing a wrong span corrupts the band on screen and leaves the parameters untouched -
+    // which is exactly how the 2026-08-23 runaway hid from a first version of that test.
+    const RangeKnob& strumKnobForTest() const { return strumKnob; }
+    const RangeKnob& humanizeKnobForTest() const { return humanKnob; }
 
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
