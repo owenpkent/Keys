@@ -185,6 +185,17 @@ public:
     void setChordPad(int i, const std::vector<int>& notes, const juce::String& name);
     void setChordPad(int i, const ChordPad& pad);
     void clearChordPad(int i);
+    // Every unlocked pad on the page you are looking at, in one undo entry (2026-08-23, Owen:
+    // "we need to be able to clear all the chords on a pad page"). It lives here rather than on
+    // ChordPads or ChordGenMenu because it is data work on the pad table and nothing else, which
+    // is what makes it testable without an editor - and because the last copy of it lived on the
+    // generator's brain, where a page wipe had no business being in the first place.
+    //
+    // **Locked pads are spared**, the same rule regeneratePage follows: a lock is what says "not
+    // this one" to anything that acts on a whole page at once. Clearing one card is still Clear
+    // pad on its own menu, which refuses a locked pad outright, or a drag off the strip.
+    void clearChordPadPage();
+    bool pageHasClearablePads() const;
     void setChordPadLocked(int i, bool locked);
     void moveChordPad(int from, int to); // swap two slots
     void pressChordPad(int i);           // fire the chord now (beat-pad); honours Exclusive

@@ -213,6 +213,17 @@ the pad header", then "make smaller to fit" once it landed there):
 | **Play** | toggle, on the *Pads bar* beside the page buttons | Whether clicking a chord card plays it (2026-08-19, Owen: "when I'm trying to drag a cord into the arpeggiator, it plays instead, and it stops everything"). Off, the strip goes **drag-only**: a click makes no sound, so a press that meant to become a drag up into the arpeggiator cannot fire a chord and - with Exclusive on - cut every running line off on the way past. Dragging, dropping on the arp and the right-click card menu all still work, and the one left-click arp behaviour that survives is the *stop* on a cleared card still feeding a line, which plays nothing either way. On is the default and today's behaviour; the setting rides the session. |
 | **Humanize** | range knob, in the *pads strip* | How hard Keys plays, in **MIDI velocity, 0-127** (it stopped at 1 until 2026-08-18; the wire never carries 0, since a note-on at velocity 0 is a note-off, so 0 means "as quiet as MIDI can say" and what leaves is velocity 1). The knob is the band's **centre**, not its ceiling: the ring opens equally either side of it (2026-08-19), so each note takes a random velocity that can land louder or quieter than the knob, and a part stops sounding typed in. The **lamp** beside it is the on/off: lit, notes are drawn from the band; unlit, the arc collapses to an ordinary one and every note plays the knob's **own value**, which is the single number the readout then shows. (It had a separate tick box until 2026-08-03; the lamp says the same thing without a second control.) |
 
+**All four range knobs open lit** (2026-08-23, Owen: *"I want the default strum up, humanize,
+velocity, and H.TIME to have the range on and enabled by default"*). Every one of them used to
+open dark, so a fresh Keys played each chord stamped out at one velocity, landing all at once,
+dead on the grid - and since the switch on three of the four **is** the lamp on the knob, the
+only route to the feature was to already know it was there. Out of the box now: **Strum 30-80 ms**
+raking **Up**, **Humanize on at 56-96**, and on every arp card **VEL's ring at +/-18** and
+**H.TIME at 0-48**, which is nought to twelve milliseconds late. Humanize's band was widened
+*around* its old centre rather than moved, so what "off" plays is unchanged at 76. Turn any of
+them down, or click its lamp out, and the session remembers: these are what a **new** instance
+opens on, never something applied to a session you saved.
+
 ## Holding notes
 
 A single mouse can't hold several keys, so there are three ways to stack them:
@@ -326,8 +337,9 @@ work on another, so you can hold a bass chord on page 1 and play page 2 over it.
 
 ### A pad's card menu
 
-Right-click any pad. Everything that can act on that card is here: fourteen rows in three groups,
-separated by rules.
+Right-click any pad. Everything that can act on that card is here: seventeen rows in four groups,
+separated by rules. The last group is one row, and it is the only one about the **page** rather
+than the card.
 
 | Item | What it does |
 |------|--------------|
@@ -340,15 +352,20 @@ separated by rules.
 | **Next voicing** | The same chord arranged differently: root position, first inversion, second, (third, on a four-note chord), then a spread with the root left in the bass, then round to root again. The item says which one the card is in now. Greyed while the card is linked to the keyboard, like Octave |
 | **New chord** | A different chord for that pad's place in the scale: same role in the key, different colour. Greyed on a locked pad |
 | **Next: could follow** | Four submenus of chords that could follow this one, described below. On a filled pad only, since there has to be a chord to follow |
-| **Send to arp A** / **Send to arp B** | Hand this chord to that arpeggiator line now. Its left-click twin is dragging the card onto the line: its letter on the arp bar, or its card in the All view. Live on a line that is switched **off**, because a line that is off still takes a chord in and plays it the moment you switch it on. It routes and does not navigate: the arp panel stays on whatever line and page you had open |
+| **Send to arp A**..**D** | Hand this chord to that arpeggiator line now. Its left-click twin is dragging the card onto the line: its letter on the arp bar, or its card in the All view. Live on a line that is switched **off**, because a line that is off still takes a chord in and plays it the moment you switch it on. It routes and does not navigate: the arp panel stays on whatever line and page you had open |
 | **Send to arp slot** | Park a copy of this chord in one of the current line's twelve arp slots, to launch later. Its left-click twin is dragging this card onto the slot you mean. Undoable, like every other write to a slot |
+| **Clear page** | (2026-08-23, Owen: "we need to be able to clear all the chords on a pad page") Empty every unlocked pad on the page you are looking at, in **one** undo entry, so Undo on the Controls bar puts all twelve back at once. Locked cards are spared, the same rule Regen follows. Greyed when there is nothing on the page a clear would take. It is the one row here that acts on anything but the card you opened it from, which is why it sits alone at the foot |
 
-**One of these has no left-click twin**, and it is deliberate: **Lock**, which had a clickable
-chip in the card's corner for a few hours and lost it at Owen's request. The chip took roughly
-a quarter of the card, and every bit of that quarter had stopped playing the chord, starting a
-drag or feeding the arpeggiator. The whole card is the card again. (**Send to arp slot** was
-the other until 2026-08-01; dragging the card onto a slot does the same job now, and a drag is
-the target picker the menu item existed to be.)
+**Two of these have no left-click twin**, and both are deliberate. **Lock** had a clickable chip
+in the card's corner for a few hours and lost it at Owen's request: the chip took roughly a
+quarter of the card, and every bit of that quarter had stopped playing the chord, starting a drag
+or feeding the arpeggiator. The whole card is the card again. **Clear page** is here rather than
+on the Pads bar because a page wipe sitting a few pixels from Regen and from the page buttons is
+a destructive action on top of the two things you click constantly; that is why the old Clear
+chip left that bar, and the travel of a right-click is the right price for it. Owen picked this
+home over the chip when shown both. (**Send to arp slot** was a third until 2026-08-01; dragging
+the card onto a slot does the same job now, and a drag is the target picker the menu item existed
+to be.)
 
 **Octave** and **Next voicing** work on a locked pad too. A lock protects a chord from being
 *replaced or thrown away* — **Regen**, **Clear pad** and dropping the card off

@@ -47,7 +47,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
                                                       juce::StringArray { "Off", "1", "2", "3", "4", "5", "6", "7", "8" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "channel", 1 }, "MIDI Channel", channelNames(), 0));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "sustain", 1 }, "Sustain", false));
-    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", false));
+    // **On by default since 2026-08-23** (Owen: "I want the default strum up, humanize,
+    // velocity, and H.TIME to have the range on and enabled by default"). Keys opened with every
+    // chord stamped out at one velocity, which is the sound this control exists to get away
+    // from, and the switch is the lamp on a knob in the pad strip - so the only way to find it
+    // was to already know it was there. A default change and nothing else: a saved session
+    // stores this bool and keeps whatever it said.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "humanize", 1 }, "Humanize", true));
     // **0..127, MIDI's own range** (2026-08-18, Owen: "the velocity ranges ... should go from zero
     // to one twenty seven or one twenty eight, whatever the standard is"). The standard is 0-127,
     // 128 values, and the floor was 1 because a note-on at velocity **0 is a note-off** - the one
@@ -56,15 +62,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // say", not silence. Every saved session is unaffected - APVTS stores an int parameter's
     // plain value, so 64 still reads 64 - but a host *automation* lane shifts by one unit at the
     // bottom, since normalised 0.0 used to mean 1 and now means 0.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 0, 127, 64));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 0, 127, 88));
+    // **56..96 since 2026-08-23**, opened out from 64..88 alongside the switch above. The
+    // **midpoint is still 76**, and that is load-bearing rather than tidy: Humanize *off* plays
+    // the band's midpoint (baseVelocity01), so widening around the centre changes what a
+    // variation sounds like and can never change what "off" plays. migrateVelLevel reads that
+    // same 76 to convert an old session's arp level, and is untouched by this.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMin", 1 }, "Velocity Min", 0, 127, 56));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "humanizeVelMax", 1 }, "Velocity Max", 0, 127, 96));
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "chordExclusive", 1 }, "Chord Exclusive", false));
     // Strum is a *range*, like the humanize velocity beside it: each chord takes a random
     // spread between the two ends, so repeated stabs do not all rake at exactly the same
     // speed. "chordStrum" is the low end and keeps its old id, so a session saved with a
     // single strum value loads with that value as its minimum and nothing moves.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrum", 1 }, "Chord Strum", 0, 200, 0));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrumMax", 1 }, "Chord Strum Max", 0, 200, 0));
+    //
+    // **30..80 ms since 2026-08-23**, where both ends were 0 (Owen, same ask as Humanize above).
+    // Zero is a chord landing all at once, and the knob's lamp reads the *face* - the pair's
+    // centre - so at 0/0 the control opened dark and unlit, which is a feature you can only
+    // find by already knowing about the satellite that switches it on. The direction is
+    // unchanged: "Up" has been the default since the day it was a parameter, and it is what
+    // Owen asked for by name. migrateStrumRange is untouched, since its tell is the *absence*
+    // of chordStrumMax in a saved tree and never its value.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrum", 1 }, "Chord Strum", 0, 200, 30));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { "chordStrumMax", 1 }, "Chord Strum Max", 0, 200, 80));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "chordStrumDir", 1 }, "Chord Strum Dir",
                                                       juce::StringArray { "Up", "Down", "Random" }, 0));
     layout.add(std::make_unique<AudioParameterChoice>(ParameterID { "padPage", 1 }, "Chord Pad Page",
@@ -430,7 +449,14 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // One knob of "played, not programmed": nudges each hit late and takes a little off its
     // velocity. The arp has never been humanized - Humanize proper lives in noteOn, which the
     // arp's own notes never pass through - so this is the first thing that touches its feel.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Humanize"), 1 }, nm + " Humanize", 0, 100, 0));
+    //
+    // **24 since 2026-08-23**, where it was 0 (Owen: "... and H.TIME to have the range on and
+    // enabled by default"). The knob is the *centre* of the wander and HumanizeSpan below is
+    // already fully open by default, so 24 draws as 0-48 on the card and plays as 0 to 12 ms
+    // late, about 6 ms typical - the reach stops at the low rail, which is what keeps a hit
+    // from ever landing early. Every line takes it, but B, C and D are off by default, so what
+    // a fresh instance actually hears is line A a few milliseconds behind the grid.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Humanize"), 1 }, nm + " Humanize", 0, 100, 24));
 
     // The two the lines brought with them, and the only parameters an older session sees
     // appear on line 0. Both default to what Keys did before there were lines, so a session
@@ -471,9 +497,15 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // 0..127 since 2026-08-18, in **MIDI velocity units**: it is how far under VelLevel a hit may
     // fall, so the knob and its ring read as one band in one unit. Widened rather than replaced -
     // every value a session could already hold (0..100) is still in range and 0 still means no
-    // wander, which is the default. What a *set* value means does change, since the whole knob's
+    // wander. What a *set* value means does change, since the whole knob's
     // meaning did; a host automation lane for it rescales.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 127, 0));
+    //
+    // **18 since 2026-08-23**, where it was 0 (Owen, the same ask as H.TIME above). It reaches
+    // either side of VelLevel, and the reach stops at the nearer rail - min(level, 127 - level)
+    // - so at VelLevel's own default of 100 the most this knob can ever reach is +/-27. 18 sits
+    // inside that with room left to turn it up, which is the number to remember before widening
+    // it further: past 27 the knob stops doing anything until the level comes down.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 127, 18));
     // The bipolar velocity control that replaced VOL on the macro row (Owen, same day: "it
     // should start in the middle so you can turn it up or down"). 0 plays velocities as they
     // came, +100 doubles them, -100 mutes. Volume above stays registered for old sessions,
@@ -930,6 +962,35 @@ void KeysProcessor::clearChordPad(int i)
     chordPads[(size_t) i] = {};
 }
 
+void KeysProcessor::clearChordPadPage()
+{
+    // One entry for the whole page, not one per pad: this is a single gesture and the twelve
+    // cards it empties are what you would want back together. UndoGesture absorbs the nested
+    // pushes clearChordPad's own callers would otherwise make, the same way Fill and Regen use
+    // it. Nothing is pushed at all when there is nothing to clear, so a click on a row that
+    // should have been greyed cannot bury a real entry under an empty one.
+    if (! pageHasClearablePads())
+        return;
+
+    const UndoGesture undoable { *this, "Clear page", UndoScope::pads };
+    const int offset = padPageOffset();
+    for (int v = 0; v < padsPerPage; ++v)
+        if (! chordPads[(size_t) (offset + v)].locked)
+            clearChordPad(offset + v); // releases a ringing card and any line it is feeding
+}
+
+bool KeysProcessor::pageHasClearablePads() const
+{
+    const int offset = padPageOffset();
+    for (int v = 0; v < padsPerPage; ++v)
+    {
+        const auto& pad = chordPads[(size_t) (offset + v)];
+        if (! pad.locked && ! pad.notes.empty())
+            return true;
+    }
+    return false;
+}
+
 void KeysProcessor::setChordPadLocked(int i, bool locked)
 {
     if (i < 0 || i >= numChordPads)
@@ -1114,8 +1175,15 @@ std::vector<int> KeysProcessor::fireChord(const std::vector<int>& source, int ta
 
     // One spread per chord, not per note: a strum is a single rake, and re-rolling inside it
     // would scramble the order the direction just decided.
-    const double strumLo = apvts.getRawParameterValue("chordStrum")->load();
-    const double strumHi = apvts.getRawParameterValue("chordStrumMax")->load();
+    // **Nothing bound for a line's queue is raked** (2026-08-23, forced by Strum's own default
+    // going nonzero). `dest` > 0 means these notes are the *input* to an arp line: only that
+    // engine sees them, so a rake there is inaudible by construction and all it does is stagger
+    // when the engine learns each note. At 30-80 ms that is most of a 1/16 at 120 bpm, so the
+    // first steps of a run would fire on half a chord. Exactly the rule the Humanize velocity
+    // range already follows in noteOn, and for the same reason: a line has its own feel controls
+    // (Swing, H.TIME) and its input is not the place to apply the strip's.
+    const double strumLo = dest == 0 ? apvts.getRawParameterValue("chordStrum")->load() : 0.0;
+    const double strumHi = dest == 0 ? apvts.getRawParameterValue("chordStrumMax")->load() : 0.0;
     const double strumMs = strumLo == strumHi
                                ? strumLo
                                : juce::jmin(strumLo, strumHi)
@@ -2664,8 +2732,11 @@ void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::S
     auto& ln = lines[(size_t) line];
     ln.chordName = name;
     // Fired into this line's own queue, not the track output: only its engine sees it. Note
-    // it still goes through fireChord, so the Voices cap, Strum and Humanize all apply and
-    // the keybed lights up for it exactly as before.
+    // it still goes through fireChord, so the Voices cap applies and the keybed lights up for
+    // it exactly as before. The two feel controls do **not**: Humanize's velocity range has
+    // skipped a note bound for a line since 2026-08-02, and Strum has skipped one since
+    // 2026-08-23 - see fireChord and noteOn for why neither is audible on this path and both
+    // cost the engine something.
     ln.chordOn = fireChord(notes, arpChordTagFor(line), line + 1);
     lastChordSource = arpChordTagFor(line);
 }

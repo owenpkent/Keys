@@ -19,7 +19,8 @@ namespace keys
 //   * Right-click a pad for its card menu: Edit on keyboard (the editor links the pad to the
 //     piano; every latch change writes back live), Clear pad, Lock, Copy chord, Paste chord,
 //     Save chord as MIDI, Octave down/up, Next voicing, New chord, what could follow this
-//     one, and Send to arp slot. Part of the owner-directed right-click exception in
+//     one, Send to arp A..D, Send to arp slot, and - the one row that is about the page rather
+//     than the card - Clear page. Part of the owner-directed right-click exception in
 //     CLAUDE.md.
 //
 // The card surface itself is *entirely* play, drag and feed-the-arp: there is no corner that
@@ -107,8 +108,9 @@ public:
     std::function<void(int slot, int itemId)> onExtraMenuChoice;
 
     // The rest of the card menu's id space, recorded here rather than at the two call sites so
-    // the ranges can be seen to be disjoint. The fixed rows are 1..9 (1..6 were here first; 7
-    // Copy chord, 8 Paste chord and 9 Save chord as MIDI joined 2026-08-17); these two are the
+    // the ranges can be seen to be disjoint. The fixed rows are 1..10 (1..6 were here first; 7
+    // Copy chord, 8 Paste chord and 9 Save chord as MIDI joined 2026-08-17, and 10 Clear page
+    // on 2026-08-23); these two are the
     // ranges that grow, and both grow with a count that lives on KeysProcessor:
     //
     //   * `arpSlotIdBase` + 0..numArpPatterns-1  - Send to arp slot's submenu;

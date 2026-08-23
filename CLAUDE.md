@@ -257,6 +257,61 @@ had been spending on them. This supersedes the three-zones bullet above it.
   34 px directly for that reason, and counts them, so a name-matched sweep that stops matching
   fails instead of passing by finding nothing.
 
+**Every range knob opens lit, and a page can be cleared again (2026-08-23).** Owen: *"we need to
+be able to clear all the chords on a pad page"*, and *"I want the default strum up, humanize,
+velocity, and H.TIME to have the range on and enabled by default"* - then, asked, he took the
+medium of three amounts and the card menu over a chip on the Pads bar.
+
+- **All four range knobs opened dark, which is a discoverability bug rather than a taste one.**
+  Keys has exactly four (`RangeKnob`): Strum and Humanize in the pad strip, VEL and H.TIME on
+  every macro card. Every one of them defaulted to a face of zero or a switch of off, so a fresh
+  instance played every chord stamped out at one velocity, landing all at once, dead on the grid
+  - and on three of the four the switch **is** the lamp on the knob, so the only route to the
+  feature was to already know the satellite was there. Now: **Strum 30-80 ms** (direction Up,
+  unchanged - it has been the default since it was a parameter), **Humanize on at 56-96**,
+  **`arpHumanVel` 18**, **`arpHumanize` 24** with its ring already open, which draws as 0-48 and
+  plays as 0 to 12 ms late.
+- **Humanize's band was widened around its centre, not moved**, and that is the load-bearing
+  part: Humanize *off* plays the band's **midpoint** (`baseVelocity01`), and `migrateVelLevel`
+  converts an old session's arp level against that same **76**. Keep the midpoint and both go on
+  meaning what they meant; move it and a migration written months ago quietly starts converting
+  against a different number. **The general rule: widening a default band is free, sliding one
+  is not.**
+- **A ring wider than its rail allows is a lie on screen.** `arpHumanVel`'s reach stops at
+  `min(level, 127 - level)`, so at VelLevel's own default of 100 the knob can never reach past
+  **+/-27** however far you turn it. 18 sits under that with room to spare; anything at or above
+  27 would have looked like a default that does nothing. `StateTests` pins the relationship
+  rather than the number, so raising either one has to answer for the other.
+- **These are default changes and nothing else.** A saved session stores all five parameters and
+  keeps what it said. What moves is a new instance, and a session old enough to predate one of
+  the arp parameters, which takes the new default for it - lines B, C and D are off by default,
+  so in practice that is line A a few milliseconds behind the grid.
+- **A chord handed to an arp line is no longer raked**, found on the way here and a real fix.
+  Routing a chord goes through `fireChord`, so Strum applied to it - but those notes go into that
+  line's queue and make **no sound of their own**, so the rake was inaudible by construction and
+  all it did was stagger when the engine learned each note. At 30-80 ms that is most of a 1/16 at
+  120 bpm, so the first steps of a run fired on half a chord. `dest > 0` takes no strum now, the
+  rule the Humanize velocity range has followed on that same path since 2026-08-02. **The shape
+  to remember: a feel control applied to something inaudible is not neutral, it is a delay.** It
+  had been latent for as long as Strum has existed and could only ever be found by turning Strum
+  up, which is what a default of zero guarantees nobody does.
+- **Clear page came back, on the card menu, because undo exists now.** `KeysProcessor::
+  clearChordPadPage()` empties every unlocked pad on the current page in **one undo entry**, off
+  a **Clear page** row alone in a group at the foot of a pad's card menu. It is the only row
+  there that acts on anything but the card it was opened from, which is why it is not sitting
+  beside Clear pad, whose name it would read as the plural of. The last page wipe was deleted on
+  2026-08-01 for want of a home, and the two things that changed are that **undo arrived on
+  2026-08-14** and covers the pad tree, and that the card menu is a place you go on purpose - the
+  property the generator's window was standing in for. The Pads bar is still the wrong home for
+  it, on the record from the day the old chip left it. See the right-click closed list, entry 6.
+- **It lives on the processor, not on `ChordGenMenu`.** A page wipe is data work on the pad table
+  and has nothing to do with generating chords; half the reason the old one had nowhere to go was
+  that it was bolted to the brain. On `KeysProcessor` it is testable without an editor, which is
+  what `StateTests` does with it. `pageHasClearablePads()` is the same query the row greys on, so
+  the menu and the action can never disagree about whether there is anything to do, and the wipe
+  pushes **no undo entry at all** when there is nothing to clear - an empty entry burying a real
+  one is the failure a greyed row is not allowed to be the only guard against.
+
 **The step sequencer pass (2026-08-18, second round of that day).** Owen: *"a usability and
 functionality pass of the step sequencer. I wanna draw a lot of inspiration from [Kirnu Cream] and
 how you can make really interesting, melodic patterns, and it's very easy to understand. Right now,
@@ -1755,12 +1810,17 @@ what is no longer true lives here in one place:
   rows**: it is anchored to a pad near the bottom of a 699 px window at a 34 px item height, so
   it grows *upwards* off the screen, and JUCE answers a too-tall menu by splitting it into
   columns or making it hover-scroll - and a scrolling popup cannot be worked with one mouse. It
-  is **14 rows and 2 separators, 510 px** (rows 34, separators 17) since Copy chord, Paste
-  chord and Save chord as MIDI joined the first group on 2026-08-17 (Owen: "need to be able to
-  copy paste chords") - checked against `KeysEditor::idealHeight()` rather than assumed, since
-  the arp panel above the Pads section now varies by view; the anchor still has several hundred
-  px of headroom above it in every view. Send to arp A and B had already taken it to 11 rows on
-  2026-08-16; the settings took it to 23 rows and about 820 px for part of
+  is **17 rows and 3 separators, 629 px** (rows 34, separators 17) since **Clear page** took a
+  group of its own at the foot on 2026-08-23. It was 16 rows from 2026-08-19, when `uiArpLines`
+  went to four and Send to arp started emitting A, B, C and D - **the row count is a function of
+  that constant, so raising it raises this** - and 14 from 2026-08-17, when Copy chord, Paste
+  chord and Save chord as MIDI joined the first group (Owen: "need to be able to copy paste
+  chords"). Checked against the panel's own arithmetic rather than assumed: the anchor sits under
+  the arp section, so a taller arp pushes it *down*, which only helps, and the figures the code
+  used to carry (a 240 px macro view, an anchor around y=656) were two rounds of arp work out of
+  date - `arpMacroTotalH` is 401 px with the bottom row folded and 690 unfolded, so the anchor is
+  160 to 450 px lower than what the old budget assumed. Send to arp A and B had already taken it
+  to 11 rows on 2026-08-16; the settings took it to 23 rows and about 820 px for part of
   2026-07-30, which is what the window fixed. Two rows rather than a `Send to arp line` submenu
   costing one: Owen asked for it by name ("say send to ARP a or b"), and a submenu would have
   spent a hover to save 68 px this menu can afford.
@@ -1941,14 +2001,15 @@ what is no longer true lives here in one place:
   so it works with both buttons off).
   **Owner-directed exceptions, and they are a closed list.** Each one is Owen's call on a
   stated date, not something that drifted in:
-  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30, 2026-08-16 and
-     2026-08-17). Fourteen rows:
+  1. *The chord-pad card menu is right-click* (2026-07-22, widened 2026-07-30, 2026-08-16,
+     2026-08-17 and 2026-08-23). Seventeen rows:
      Edit on keyboard / Clear pad / Lock, **Copy chord** / **Paste chord** / **Save chord as
      MIDI** (2026-08-17, Owen: "need to be able to copy paste chords"), the two chord-shaping
      edits (Octave down/up, Next voicing), the generator's two per-card actions (New chord,
      Next: could follow),
-     **Send to arp A** and **Send to arp B**, and
-     **Send to arp slot**. Some of it is an accelerator - Clear pad is also a drag off the
+     **Send to arp A** through **D**,
+     **Send to arp slot**, and - alone in a group at the foot - **Clear page** (entry 6 below).
+     Some of it is an accelerator - Clear pad is also a drag off the
      strip, and Fill and Regen on the bar are New chord in bulk - but the per-card edits are
      reached from this menu and nowhere else, because a card is all playing surface and there
      is nowhere left on it to put a button. Ending an edit is the exception that proves it: the
@@ -2011,6 +2072,19 @@ what is no longer true lives here in one place:
      day it was built and came straight back out (Owen: "when you right click, it plays the
      chord. We don't want it to play") - right-clicking to reach Clear made a noise on the way to
      throwing the chord away. Hearing a chord is a left click and nothing else, everywhere.
+
+  6. ***Clear page* has no left-click twin* (2026-08-23, Owen: "we need to be able to clear all
+     the chords on a pad page", then choosing this over a chip on the Pads bar when shown both).
+     It empties every unlocked pad on the current page in one undo entry, and it is the only row
+     on this menu that acts on anything but the card it was opened from - hence its own group at
+     the foot, rather than a seat beside Clear pad, whose name it would otherwise read as the
+     plural of. **The bar was the worse home and the record already said why**: the old Clear
+     chip left that bar because a page wipe sitting 4 px from Regen and a few px from the page
+     buttons is a destructive action on top of the two things you click constantly. The travel of
+     a right-click is the price, and it is the right one. What makes this affordable now and did
+     not on 2026-08-01, when the last page wipe was deleted for want of a home, is **undo**: the
+     wipe is one entry (`KeysProcessor::clearChordPadPage`), so it is one click back. Locked pads
+     are spared, the rule Regen follows. Do not restore a bar chip for it.
 
   Do not add further right-click-only paths without Owen's explicit say-so.
   The arp slot cards also carry a right-click menu, but it is an ordinary accelerator:
