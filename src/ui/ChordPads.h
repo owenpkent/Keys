@@ -62,8 +62,7 @@ namespace keys
 // parented into, which is what makes the machinery survive the Pads section being popped out
 // into a window of its own.
 class ChordPads : public juce::Component,
-                  public juce::DragAndDropTarget,
-                  private juce::Timer
+                  public juce::DragAndDropTarget
 {
 public:
     explicit ChordPads(KeysProcessor&);
@@ -217,36 +216,29 @@ private:
     std::vector<int> currentNotes;
     juce::String currentName;
 
-    // **A card sounds on release, and a drag never sounds at all** (2026-08-18, Owen: "the chord
-    // should only play when you release the mouse. I was having a problem where an arpeggiator
-    // was playing where as soon as I tried to drag a different chord to the second arpeggiator,
-    // it played the new chord and stopped the first arpeggiator").
-    //
-    // This reverses the hold-to-play of 2026-08-16 (press fires, release lets go), and what it is
-    // really fixing is not the noise. **Firing a chord chokes the other chord sources** - that is
-    // pressChordPad's job, and with Exclusive on it reaches each line's held chord - so a press
+    // **A card sounds on release, and a drag never sounds at all** (2026-08-18) - **superseded
+    // 2026-08-22**, when the press took it back and the Play toggle became the switch between
+    // them. Kept because the reason the release ever won is still the live trade-off: a press
     // that turns out to be a drag had already stopped line A by the time the card was moving
     // toward line B. Silencing the blurt when the drag starts does not put that back, and there
-    // is nothing on screen to explain why aiming at one arpeggiator stopped the other. Deciding
-    // on the way *up* means the gesture is known before anything is choked: a drag is routing and
-    // stays silent, a click is playing.
+    // is nothing on screen to explain why aiming at one arpeggiator stopped the other.
     //
-    // The cost is that a pad can no longer be stabbed short or leaned on long: sounding starts at
-    // mouse-up, so there is no hand left to hold it, and the length is `auditionMs` again - 800,
-    // the same as the generator's tray, which never left it. Sustain and Latch still decide what
-    // the release means, since endAudition goes through releaseChordPad / releaseLiveChord
-    // exactly as it always has.
+    // **The press owns it again since 2026-08-22** (Owen: "when the play mode is checked on the
+    // pads, I want it to trigger as soon as you click on it and stay held until you let go").
+    // The cost above is exactly what came back: a pad can be stabbed short and leaned on long,
+    // which is most of what a pad is for. What paid for it is the **Play** toggle - the drag
+    // problem that moved this to the release in the first place is now answered by turning Play
+    // off, which makes the strip drag-only, rather than by making the sounding half half-hearted
+    // for everyone. Sustain and Latch still decide what the release means, since endAudition
+    // goes through releaseChordPad / releaseLiveChord exactly as it always has.
     //
-    // **That cost bought a tick rather than a decision** (same day, Owen: "maybe we should have a
-    // checkbox to toggle that on and off so we can lean on chords when we want"). *Chord pads
-    // play while held* on the settings menu puts the press back;
-    // `LayoutState::padHoldToPlay` carries why release-and-fixed is the default of the two, and
-    // mouseDrag carries the one thing hold mode cannot take back.
-    static constexpr int auditionMs = 800;
-    // Both modes start a card sounding through here, so there is one place it begins and one
-    // place - endAudition - it stops, whichever end of the click owns each.
-    void startAudition(bool fixedLength);
-    void timerCallback() override;
+    // The 800 ms `auditionMs` timer went with it: nothing on this strip is on a clock any more,
+    // so `startAudition` takes no length and the Timer base is gone. **The generator's audition
+    // tray keeps its own 800 ms** and always did - a tray card is a candidate you are sampling,
+    // a pad is an instrument you are playing, which was never the same question.
+    //
+    // A card starts sounding here and stops in endAudition, one place each.
+    void startAudition();
     void endAudition();
 
     // The cell a drag - anyone's, from either window - is currently offering a chord to, or -1.

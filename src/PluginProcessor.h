@@ -819,19 +819,6 @@ public:
         // this struct too - so a global one would be new machinery for one feature. Worth
         // revisiting the day a second preference wants to outlive a project.
         juce::StringArray libraryFavourites;
-        // Whether a chord pad sounds for as long as you hold it, or fires on the release for a
-        // fixed 800 ms (2026-08-18, Owen: "maybe we should have a checkbox to toggle that on and
-        // off so we can lean on chords when we want").
-        //
-        // **Default false**, which is release-and-fixed, because that is the one that cannot
-        // surprise you: firing a chord chokes the other chord sources, so in hold mode a press
-        // that turns out to be a drag has already choked them - and with Exclusive on that
-        // reaches each arp line's held chord, which is the report this pair of behaviours came
-        // out of. Hold mode is worth having anyway (a stab is short, a lean is long, which is
-        // most of what a pad is for), so it is a tick rather than a decision made for you. Turn
-        // Exclusive off alongside it and the drag costs nothing at all.
-        bool padHoldToPlay = false;
-
         // The Pads bar's **Play** toggle (2026-08-19, Owen: "I want a toggle above the
         // keyboard to play notes. Because some sometimes when I'm trying to drag a cord into
         // the arpeggiator, it plays instead, and it stops everything"). Off, a click on a
@@ -839,8 +826,24 @@ public:
         // become a drag toward the arpeggiator cannot fire a chord and, with Exclusive on,
         // choke every running line on the way past. The drag, the drop targets and the card
         // menu are untouched; the one left-click arp behaviour that survives is the stop on a
-        // cleared card still feeding a line, which plays nothing either way. On is today's
-        // behaviour and the default.
+        // cleared card still feeding a line, which plays nothing either way.
+        //
+        // **On, it is hold-to-play** (2026-08-22, Owen: "when the play mode is checked on the
+        // pads, I want it to trigger as soon as you click on it and stay held until you let
+        // go"). The press fires the chord and the release ends it, so a stab is short and a
+        // lean is long - which is most of what a pad is for. It used to be release-and-fixed,
+        // an 800 ms blip owned by a timer, with holding available only as a separate tick on
+        // the settings gear (`padHoldToPlay`, 2026-08-18). **That tick is gone and this is what
+        // it did**: two switches for one question is one switch too many, and Owen's reading is
+        // the plain one - a control called Play plays for as long as you are playing it.
+        //
+        // What the retired default was protecting against is real and is now this toggle's own
+        // job: firing on the press means a press that turns out to be a *drag* has already
+        // choked the other chord sources, and with Exclusive on that reaches each arp line's
+        // held chord. That is precisely the report Play itself came out of - so the answer is
+        // to turn Play **off** while you are dragging cards into the arpeggiator, which is the
+        // one gesture it was built for, rather than to keep a second switch that made the
+        // sounding half half-hearted. Turning Exclusive off alongside it costs the drag nothing.
         bool padsPlayOnClick = true;
 
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan

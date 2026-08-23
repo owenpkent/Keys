@@ -5,6 +5,46 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: Play on the pads means press-and-hold
+
+Owen: *"When the play mode is checked on the pads, I want it to trigger as soon as you click on
+it and stay held until you let go."*
+
+With **Play** on, a chord pad fires the moment you press it and holds until you let go, so a stab
+is short and a lean is long - which is most of what a pad is for. It used to fire on the *release*
+for a fixed 800 ms, with press-and-hold available only as **Chord pads play while held** on the
+settings gear.
+
+**That tick is gone, because Play is what it did.** Two switches for one question is one switch
+too many, and a control called Play should play for as long as you are playing it.
+
+What the old default was protecting against is real, and is now Play's own job. Firing on the
+press means a press that turns out to be a *drag* has already choked the other chord sources, and
+with Exclusive on that reaches each arp line's held chord - which is exactly the report Play came
+out of. The answer is to switch **Play off** while you are dragging cards into the arpeggiator,
+which makes the strip drag-only and is the one gesture it was built for. Turning Exclusive off
+alongside it costs the drag nothing at all.
+
+**A drag no longer stops the chord**, and the drag threshold went from 6 px to 14. With the
+press owning the note, cutting it on travel made the *length of a chord* depend on the hand
+staying inside a small circle: a tremor ended the note and put a drag ghost under the cursor, so
+a lean stopped for no visible reason. That is the one thing a surface driven by one mouse must
+not require. The chord now runs to the release whatever the gesture turned into - dropping a card
+ends it like any other release - and nothing is left ringing, since `mouseUp` and the destructor
+both end the audition on every path.
+
+**A right-click while a pad is sounding releases it.** That branch returns before the
+`endAudition()` guard, which was harmless while the press was silent: now the popup takes the
+mouse, the pending left mouse-up never arrives, and the chord would ring until the next left
+press on the strip.
+
+Sustain and Latch are untouched: the release still goes through `releaseChordPad` /
+`releaseLiveChord`, so a pedalled chord keeps ringing exactly as before. The generator's audition
+tray keeps its own 800 ms - a tray card is a candidate you are sampling, a pad is an instrument
+you are playing, which was never the same question. With nothing on the strip on a clock any
+more, `ChordPads` is no longer a `juce::Timer`.
+
+
 ### Added: each arp line lights the keyboard in its own colour
 
 Owen: *"new branch for each arp to play different colors on the keyboard."*

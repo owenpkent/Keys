@@ -186,7 +186,7 @@ bar.
 | **Instrument** | chip → menu | Keys Host only (2026-08-02, Owen: "the load instrument section with all that should go in the controls submenu"): Load instrument…, Show/Hide instrument GUI, and Eject, with the loaded instrument's name as the chip's own caption. Invisible in plain Keys, which never wires it up - the chip and its gap simply aren't reserved. The one *elastic* control on this bar: it gets whatever width the tempo group and the Root…MIDI Ch group leave over. |
 | **Strum** | range knob, in the *pads strip* | Spread a chord's notes instead of playing them together, over a time drawn from a 0–200 ms band - so repeated stabs do not all rake at the same speed. The knob is the middle of the rake band, not its ceiling: the ring opens equally either side of it (2026-08-19, Owen: "moving the halo shouldn't move knob. should be equal from center"), and the **lamp** beside it switches strum off and on (off is simply zero: the chord lands all at once). Applies to chord pads and the live chord card. |
 | **Dir** | `<` `>` by the caption | Strum direction: **Up** (low→high), **Down** (high→low), or **Random**. The caption reads the live one — `STRUM UP`, `STRUM DOWN`, `STRUM RAND` — and the arrows wrap. |
-| **Settings** | gear → menu | Immediately left of Theme, plugin-level like the swatch so it never hides with the Controls fold (2026-08-17, Owen: "we need a settings icon and menu. populate menu"). Five groups: **Hold visuals during sustain** (default on, and today's behaviour either way - off makes a key held only by the pedal rest visually while it keeps sounding, a paint-only difference); **Sustained drag leaves a trail** (default on, also today's behaviour - whether a glide made with the pedal down piles up every key it crosses or stays monophonic; the name is not Octavium's "Drag While Sustain", since Keys' drag has always glided and that toggle would have promised something no switch here can do); **Sustained notes propose chords** (default **off** - see the Chord pads section below); **Chord pads play while held** (default **off**: a pad's chord starts when you release the click and runs 800 ms, and a drag stays silent throughout. Ticked, the press starts it and the release ends it - a stab is short, a lean is long - at the price that a press which turns out to be a drag has already choked the other chord sources, and with Exclusive on that includes each arp line's held chord); and **Check for updates** / **User guide** / **About**. |
+| **Settings** | gear → menu | Immediately left of Theme, plugin-level like the swatch so it never hides with the Controls fold (2026-08-17, Owen: "we need a settings icon and menu. populate menu"). Four groups: **Hold visuals during sustain** (default on, and today's behaviour either way - off makes a key held only by the pedal rest visually while it keeps sounding, a paint-only difference); **Sustained drag leaves a trail** (default on, also today's behaviour - whether a glide made with the pedal down piles up every key it crosses or stays monophonic; the name is not Octavium's "Drag While Sustain", since Keys' drag has always glided and that toggle would have promised something no switch here can do); **Sustained notes propose chords** (default **off** - see the Chord pads section below); and **Check for updates** / **User guide** / **About**. *Chord pads play while held* was a fifth item here from 2026-08-18 and was removed on 2026-08-22, when the Pads bar's **Play** toggle became that behaviour outright. |
 | **Theme** | swatch | Colours this instance (Cyan, Amber, Lime, Violet, Magenta, Orange, Rose, Ice), so you can tell it from Keys on your other tracks. Per instance, saved with the session. Sits on the *Controls bar*, so it stays reachable with that section folded. |
 | **Update to vX.Y.Z** | button | Appears only when a newer signed release exists. One click downloads, verifies, and launches the installer. |
 
@@ -284,13 +284,15 @@ keyboard on each, and it went on 2026-07-31 once the note list fit under the nam
    so you hear it strummed, humanized and capped by Voices — the way a pad plays it.
 3. **Capture it.** Drag the card onto a pad. The pad stores that chord, auto-labelled.
    A drag makes no sound at all, so capturing a chord never plays one.
-4. **Play it, beat-pad style.** Click a filled pad to sound its chord. By default the sound
-   starts when you **let go** and runs for 800 ms; tick **Chord pads play while held**
-   (Settings gear) to have the press start it and the release end it instead, so a stab is
-   short and a lean is long (2026-08-18, Owen: "maybe we should have a checkbox to toggle
-   that on and off so we can lean on chords when we want"). Either way, a **drag never
-   sounds**: the default keeps the press silent, and in hold mode the note stops the moment
-   the drag registers. Turn **Sustain** on to keep a chord ringing after you let go. **A new pad always
+4. **Play it, beat-pad style.** With **Play** on (the Pads bar), click a filled pad to sound
+   its chord: the **press** starts it and **letting go** ends it, so a stab is short and a
+   lean is long (2026-08-22, Owen: "when the play mode is checked on the pads, I want it to
+   trigger as soon as you click on it and stay held until you let go"). A **drag** does not stop the
+   note: it runs until you let go however far the hand travelled, because tying a chord's length
+   to the hand staying inside a small circle is the one thing a mouse-only surface must not do.
+   Dropping a card ends the note like any other release. The press has still *sounded* by then,
+   which is why **Play off** is the setting to use while you are dragging cards into the
+   arpeggiator: it makes the strip drag-only and silent at both ends. Turn **Sustain** on to keep a chord ringing after you let go. **A new pad always
    chokes the previous pad**, Sustain or not (2026-08-16, Owen: "when you click a pad it
    should clear other presses") - the strip is one voice, a palette you pick from, and
    stacking two pads only ever made a pile with no name. **Exclusive** decides whether a pad
