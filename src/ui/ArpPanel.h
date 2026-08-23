@@ -74,6 +74,11 @@ public:
     // The same question one axis over, and public for the same reason: a window drawing this
     // panel has to clear the *tallest* view, not the one that happens to be showing.
     static int minPanelHeight();
+    // The harmony dropdown's two-column menu, built rather than shown, so a test can walk it.
+    // It lives out here rather than inside HarmonyBox because the bug it exists to catch was
+    // invisible on screen except on one row (see the .cpp), and a menu that is only ever shown
+    // asynchronously cannot be asserted about at all.
+    static juce::PopupMenu buildHarmonyMenu(const juce::ComboBox& box);
 
     // Which of the arpeggiator lines everything on this panel is editing: the band, the
     // step lanes, the twelve slots, Bars and Chain. One row of controls, the lines behind
@@ -349,6 +354,7 @@ public:
         {
             void showPopup() override;
         };
+
         std::array<HarmonyBox, 2> harmBoxes;
         std::array<juce::Slider, 2> harmChanceKnobs;
         std::array<juce::Label, 4> harmLabels;
