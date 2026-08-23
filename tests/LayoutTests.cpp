@@ -16,6 +16,7 @@
 #include "../src/ui/RangeKnob.h"
 #include "../src/PluginEditor.h"
 #include <juce_events/juce_events.h>
+#include <iterator> // std::size, so the parallel arrays below cannot fall out of step
 
 namespace keys::tests
 {
@@ -560,12 +561,20 @@ public:
             // second writer that disagrees with syncPadRangeKnobs fails this, whatever it gets
             // wrong, which is the only shape of test that would have caught it.
             Host h;
+            // No network thread out of a layout test - see KeysEditor::skipUpdateCheckForTest.
+            KeysEditor::skipUpdateCheckForTest = true;
 
             struct Pair { const char* lo; const char* hi; float loV, hiV; };
             // Clear of both walls on purpose: a band already pinned at a wall is saturated, so
             // a doubling bug has nothing left to move and hides.
+            //
+            // Humanize's is an **odd** width (51), which is the pair this control cannot hold
+            // exactly - the face snaps to whole units and the band is symmetric about it, so
+            // the centre lands half a unit off and the derived ends can never round back to
+            // what is stored. That is the pull's other failure mode (see syncPadRangeKnobs)
+            // and it walks the same ten ticks as the doubling one.
             Pair pairs[] = { { "chordStrum", "chordStrumMax", 50.0f, 150.0f },
-                             { "humanizeVelMin", "humanizeVelMax", 40.0f, 90.0f } };
+                             { "humanizeVelMin", "humanizeVelMax", 40.0f, 91.0f } };
 
             const auto put = [&h](const char* id, float v)
             {
@@ -597,7 +606,12 @@ public:
             // lit arc are both derived from these two, so this is the number Owen was reading
             // off the screen when he said it was fighting him.
             const RangeKnob* knobs[] = { &ed.strumKnobForTest(), &ed.humanizeKnobForTest() };
-            for (int i = 0; i < 2; ++i)
+            // Two arrays walked as one, so they have to be the same length: a third range knob
+            // added to `pairs` alone would simply go unasserted, and added to `knobs` alone
+            // would read past the end of `pairs` the moment anybody widened a hard-coded 2.
+            static_assert(std::size(pairs) == std::size(knobs),
+                          "every pad range knob needs a parameter pair to check it against");
+            for (size_t i = 0; i < std::size(pairs); ++i)
             {
                 expectWithinAbsoluteError(knobs[i]->rangeLo(), (double) pairs[i].loV, 0.51,
                                           juce::String(pairs[i].lo) + ": the band's low end "
@@ -625,25 +639,109 @@ public:
 
             RangeKnob rk;
             rk.face().setRange(0.0, 200.0, 1.0); // Strum's own range
-            rk.setSpanMax(100.0);                // half of it: see wireRange
 
-            const auto ceiling = rk.usefulSpanMax();
-            expectEquals(ceiling, 100.0, "the ceiling is the span's own maximum");
+            // Half the face's travel, and asked for by nobody: spanMax() caps every ring there
+            // because a band centred on the face can never open wider than that (room() is the
+            // smaller of two numbers summing to the travel). A ceiling above half is inert by
+            // construction, which is what the arp's two range knobs were still carrying while
+            // the pads had it passed in by hand at one call site.
+            const auto ceiling = rk.spanMax();
+            expectEquals(ceiling, 100.0, "the ceiling is half the face's travel");
             for (const double where : { 0.0, 30.0, 100.0, 180.0, 200.0 })
             {
                 rk.face().setValue(where, juce::dontSendNotification);
-                expectEquals(rk.usefulSpanMax(), ceiling,
+                expectEquals(rk.spanMax(), ceiling,
                              "the halo's ceiling moved when the knob did");
-                expectEquals(rk.spanFromDrag(0.0, 150.0), ceiling * 0.5,
-                             "and so did what half a sweep is worth");
             }
 
-            // A full sweep closes the band and reopens it; a quarter is worth a quarter.
+            // A full sweep closes the band and reopens it; a quarter is worth a quarter. Off
+            // the walls, so the gesture is live throughout - see the dead-halo test below.
             rk.face().setValue(100.0, juce::dontSendNotification);
+            expectEquals(rk.spanFromDrag(0.0, 150.0), ceiling * 0.5, "half a sweep is half");
             expectEquals(rk.spanFromDrag(100.0, -300.0), 0.0, "a full sweep down closes it");
             expectEquals(rk.spanFromDrag(0.0, 300.0), 100.0, "a full sweep up opens all of it");
             expectEquals(rk.spanFromDrag(100.0, -75.0), 75.0, "a quarter sweep takes a quarter");
             expectEquals(rk.spanFromWheel(100.0, -1.0), 95.0, "one notch is 5% of the sweep");
+
+            // And every one of those is a band the knob can actually show. This is the property
+            // the ceiling exists for, so it is asserted rather than left to the number above:
+            // wind the span all the way up at the face's midpoint and `reach()` uses the lot.
+            rk.setSpan(rk.spanFromDrag(0.0, 300.0));
+            expectEquals(rk.reach(), ceiling, "the top of the sweep is band you can see");
+        }
+
+        beginTest("a halo with nowhere to open stores nothing");
+        {
+            // **The guard, and why it is a second function rather than a smaller ceiling.**
+            // At a rail `room()` is zero, so `reach()` is zero however far the span is wound -
+            // there is no band here at any setting. Without this a drag runs to completion,
+            // fires onSpanChanged, and brackets a host automation gesture around a parameter
+            // move with nothing to show for it on screen, in the readout or in the sound.
+            //
+            // It was folded into the ceiling as `min(spanMax(), room())` until 2026-08-23, and
+            // taking the face back out of the ceiling - which was right, and is the test above -
+            // took the guard with it. Two questions, two functions: how far does the gesture
+            // reach (never reads the face), and is there a band to open (has to).
+            //
+            // H.TIME's face at 0 is how Keys reaches this by an ordinary route: "no lateness"
+            // is a setting, not a corner case.
+            juce::ScopedJuceInitialiser_GUI juceInit;
+
+            RangeKnob rk;
+            rk.face().setRange(0.0, 200.0, 1.0);
+            rk.setSpan(60.0);
+
+            for (const double rail : { 0.0, 200.0 })
+            {
+                rk.face().setValue(rail, juce::dontSendNotification);
+                expectEquals(rk.room(), 0.0, "there is no travel on the nearer side");
+                expectEquals(rk.reach(), 0.0, "so the band cannot open at all");
+                expectEquals(rk.spanFromDrag(60.0, 300.0), 60.0, "a drag up writes nothing");
+                expectEquals(rk.spanFromDrag(60.0, -300.0), 60.0, "and neither does one down");
+                expectEquals(rk.spanFromWheel(60.0, 1.0), 60.0, "the wheel writes nothing either");
+            }
+
+            // One step off the rail and it is live again, which is what makes this a guard
+            // rather than a range: the span it was holding is still there, untouched.
+            rk.face().setValue(1.0, juce::dontSendNotification);
+            expectEquals(rk.getSpan(), 60.0, "the stored span survived the rail");
+            expect(rk.spanFromDrag(60.0, -300.0) < 60.0, "and the gesture works again");
+        }
+
+        beginTest("H.TIME opens as the band the docs say it does");
+        {
+            // **The one assertion the 2026-08-23 rewrite dropped.** CLAUDE.md states as a
+            // shipping default that `arpHumanize` 24 "draws as 0-48 and plays as 0 to 12 ms
+            // late", and StateTests pins the two *parameters* - but nothing was left checking
+            // that those two numbers put that band on screen. StateTests does keep VEL's own
+            // relationship (18 fits inside what its level allows); this is H.TIME's twin.
+            //
+            // The knob is built here the way ArpPanel builds it - face range and ring range
+            // both read off the APVTS, values read off the defaults - so a change to either
+            // default, either range, or reach()'s clamp fails this rather than quietly moving
+            // a documented band.
+            Host h;
+            const auto faceId = KeysProcessor::arpParamId(0, KeysProcessor::apHumanize);
+            const auto ringId = KeysProcessor::arpParamId(0, KeysProcessor::apHumanizeSpan);
+            const auto faceRange = h.processor.apvts.getParameterRange(faceId);
+            const auto ringRange = h.processor.apvts.getParameterRange(ringId);
+
+            RangeKnob rk;
+            rk.face().setRange((double) faceRange.start, (double) faceRange.end, 1.0);
+            rk.setSpanMax((double) (ringRange.end - ringRange.start));
+            rk.face().setValue((double) h.processor.apvts.getRawParameterValue(faceId)->load(),
+                               juce::dontSendNotification);
+            rk.setSpan((double) h.processor.apvts.getRawParameterValue(ringId)->load());
+
+            expectEquals(rk.rangeLo(), 0.0, "the band opens at dead on the grid");
+            expectEquals(rk.rangeHi(), 48.0, "and reaches twice the knob");
+            // Stated as the relationship as well as the two numbers, since that is what makes
+            // "twice the knob" true rather than a coincidence of 24 and 48: the ring is open
+            // wider than the face's own value, so the nearer rail - zero, dead on the grid - is
+            // what both sides stop at.
+            expectEquals(rk.reach(), rk.face().getValue(), "the band reaches the knob's own value");
+            expect(rk.getSpan() >= rk.face().getValue(),
+                   "which only holds because the ring is open wider than that");
         }
 
         beginTest("the band stays symmetric, so a halo drag can never move the knob");

@@ -87,10 +87,10 @@ was, and it had been mistaken for four different bugs before anyone asked that q
 `KeysEditor::timerCallback` pushed a span into Strum's and Humanize's knobs on every tick, beside
 `syncPadRangeKnobs()` which already does that job - and it passed **`abs(hi - lo)`, the band's
 full width**, to a control whose span is the reach on *each* side of the knob. So the band doubled
-ten times a second until it saturated against the nearer wall, and it did it while the halo was
-under the hand. It is a leftover from before the band was centred on the knob (2026-08-19), when
-the span really was the whole width reaching back from one end; that call site was never updated,
-and the correct pull was added beside it rather than replacing it.
+**thirty** times a second until it saturated against the nearer wall, and it did it while the
+halo was under the hand. It is a leftover from before the band was centred on the knob
+(2026-08-19), when the span really was the whole width reaching back from one end; that call site
+was never updated, and the correct pull was added beside it rather than replacing it.
 
 The arithmetic leaves a signature, which is what identified it: a saturated band is exactly
 `[0, 2 x the knob]`. Strum was photographed reading **0-128 ms with its knob at 64**, and Humanize
@@ -116,13 +116,69 @@ where its parameters say. **It has to watch what the knobs draw, not the paramet
 parameters untouched - which is how this hid from the first version of that test. Reinstate the
 three lines and it fails with Strum's stored 50-150 drawing as 0-200.
 
-### Changed: the pad halos open half as far, so their travel is proportionate
+### Changed: every halo's sweep is band you can actually see
 
 Strum's halo ran over the knob's whole 200 ms range, so a single drag threw the band across
-everything the control can express. It is capped at **half the knob's travel** now - 100 ms on
-Strum, 63 on Humanize - which is the widest a band centred on the knob can be, and the shape the
-arp's VEL ring already had: `arpHumanVel` is a fixed 0-127 however the level beside it moves
-(Owen: *"the arp have it right"*).
+everything the control can express. It is capped at **half the knob's travel** - 100 ms on Strum,
+63 on Humanize - which is the widest a band centred on the knob can be, and the shape the arp's
+VEL ring already had: `arpHumanVel` is a fixed 0-127 however the level beside it moves (Owen:
+*"the arp have it right"*).
+
+**The bound lives in `RangeKnob::spanMax()` now, not at a call site.** It shipped as
+`setSpanMax((hi - lo) * 0.5)` passed by hand in `wireRange`, which fixed the pads and left the
+arp's own two range knobs - which needed exactly the same reasoning - carrying the ceiling they
+had before. At H.TIME's shipping default of 24 that was **228 px of a 300 px drag** writing a
+parameter the ring could not draw, and about four fifths of VEL's sweep.
+
+The half is arithmetic rather than taste: `room()` is the smaller of two distances that sum to
+the face's whole travel, so it can never exceed half of it, and `reach()` stops at `room()`. A
+ceiling above half is inert *by construction*, wherever the face is standing. **No band narrows**
+- `reach()` was already bounded by `room()`; what changes is how far a gesture can wind the span
+past the point where winding it stops meaning anything.
+
+### Fixed: a halo parked at a rail wrote automation nobody could hear
+
+At either end of a knob's travel there is no band at any setting: `room()` is zero, so `reach()`
+is zero however far the span is wound. Dragging the halo there ran the gesture to completion
+anyway - it moved the parameter and wrapped a `beginChangeGesture`/`endChangeGesture` pair round
+it, so a host recorded a lane, while nothing changed on screen, in the readout or in the sound.
+
+Keys reaches that state by an ordinary route rather than a corner one: H.TIME's face at 0 is
+simply "no lateness". The guard existed until 2026-08-23 as one half of `min(spanMax(), room())`,
+and taking the face out of the *ceiling* - which was right, and is the entry above - took it with
+it. They are two questions now and two functions: `spanMax()` is how far the gesture reaches and
+never reads the face; `haloIsLive()` is whether there is a band to open and has to. The stored
+span survives untouched, so a step off the rail brings it straight back.
+
+### Fixed: three timer pulls that never stopped pulling
+
+None of these was audible; all three were work the editor did thirty times a second for the life
+of the window, and each sat under a comment saying it did not.
+
+- **`RangeKnob::refresh()` compares before it writes.** `strumKnob.refresh(); humanKnob.refresh();`
+  ran unconditionally in `timerCallback`, and each call sets two component properties and asks two
+  components to repaint - four repaint requests a tick across the pair, moved or not. It caches
+  the drawn state now, the shape `MacroRow`'s `lastLineOn` already used for its scrim.
+- **`syncPadRangeKnobs()` stops at the fixed point.** An odd-width pair has no exact
+  representation here - the face snaps to whole units and the band is symmetric about it, so 30
+  and 81 give a centre of 55.5, whose ends round back to 31 and 82 and never match what is stored.
+  Written for it, the pull re-ran every tick for the rest of the session. Such a pair arrives from
+  a host lane, MCP or a session file; it is pulled once now and recognised next time.
+- **`run.py` asks git two things instead of four**, one of them a `status --porcelain` that stats
+  the whole working tree, on a loop this project advertises at about a second for a no-op.
+
+### Fixed: run.py's stale-build warning could not be cleared
+
+It scanned `tests/` and all of `src/` whatever was being launched. Neither target compiles the
+test suite, and plain Keys does not compile `src/host/` - so editing a test file left the exe
+legitimately older than a source file, and the yellow *"this binary is older than 1 source file -
+it is NOT what you just changed"* fired on every launch and **could not be cleared by rebuilding**.
+A warning you cannot act on teaches you to ignore the one that matters.
+
+It scans exactly what the launched target compiles now, and names the newest offender rather than
+only counting them. Two smaller things beside it: the launch line's build-time stamp is guarded,
+so an exe that goes unreadable between launching and printing can no longer report a failure with
+the app open in front of you; and a git that cannot answer at all no longer reads as a clean tree.
 
 
 ### Fixed: a chord handed to an arp line is no longer raked

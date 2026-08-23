@@ -503,43 +503,67 @@ def build_stamp() -> str:
         except (OSError, subprocess.SubprocessError):
             return ""  # no git, no repo, no matter: the stamp is a nicety
 
-    sha = git("rev-parse", "--short", "HEAD")
-    if not sha:
+    def git_dirty() -> bool:
+        # Exit 1 means "there are differences", 0 means clean, anything else means git could
+        # not answer - and a git that cannot answer must not read as a clean tree, which is
+        # what a stdout-based check quietly did.
+        try:
+            out = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=5)
+            return out.returncode == 1
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    # One call for the sha and the subject, one for the branch, one for the dirty flag.
+    # It was four, including a `status --porcelain` that stats the whole working tree, on a
+    # loop this project measures in seconds and advertises at about one for a no-op. Process
+    # creation is not free on Windows and none of this is worth a frame of it.
+    head = git("log", "-1", "--format=%h%n%s")
+    if not head:
         return ""
+    sha, _, subject = head.partition("\n")
     branch = git("rev-parse", "--abbrev-ref", "HEAD") or "detached"
-    subject = git("log", "-1", "--format=%s")
-    dirty = " +changes" if git("status", "--porcelain") else ""
+    # `diff --quiet` answers with an exit code and prints nothing, so it stops at the first
+    # difference instead of formatting a list nobody reads. Unstaged and staged both, since
+    # either means the tree is not the commit named beside it.
+    dirty = " +changes" if git_dirty() else ""
     stamp = f"{branch} @ {sha}{dirty}"
-    if not subject:
-        return stamp
-    return stamp + chr(10) + '  "' + subject + '"' 
+    return f'{stamp}\n  "{subject}"' if subject else stamp
 
 
-def stale_sources(exe: str) -> list:
+def stale_sources(exe: str, host: bool) -> list:
     """Source files newer than the binary about to be launched, newest first.
 
     The whole reason this exists (2026-08-23): a day-old Keys Host was mistaken for a current
     one for most of an afternoon, and nothing on screen or in this script's output said
     otherwise. A stale binary is the normal state after `--no-build`, and it is indistinguishable
     from a fresh one by looking at it.
+
+    **Only what this target compiles.** It walked `tests/` and all of `src/` whatever was being
+    launched, and neither target builds the test suite while plain Keys does not build
+    `src/host/` - so editing a test file and rebuilding relinked nothing, left the exe older
+    than the file, and printed a warning that *rebuilding could not clear*. A warning you
+    cannot act on is worse than none: it teaches you to ignore the one that matters.
     """
     try:
         built = os.path.getmtime(exe)
     except OSError:
         return []
+    # KEYS_SOURCES in CMakeLists.txt, plus src/host for the Keys Host target alone. Headers
+    # count: they are what the compiler reads, whatever the target lists.
+    skip = set() if host else {os.path.join(ROOT, "src", "host")}
     newer = []
-    for sub_dir in ("src", "tests"):
-        for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, sub_dir)):
-            for name in filenames:
-                if not name.endswith((".cpp", ".h", ".hpp")):
-                    continue
-                path = os.path.join(dirpath, name)
-                try:
-                    if os.path.getmtime(path) > built:
-                        newer.append(path)
-                except OSError:
-                    pass
-    return newer
+    for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, "src")):
+        dirnames[:] = [d for d in dirnames if os.path.join(dirpath, d) not in skip]
+        for name in filenames:
+            if not name.endswith((".cpp", ".h", ".hpp")):
+                continue
+            path = os.path.join(dirpath, name)
+            try:
+                newer.append((os.path.getmtime(path), path))
+            except OSError:
+                pass
+    return [path for when, path in sorted(newer, reverse=True) if when > built]
 
 
 def main() -> int:
@@ -611,17 +635,25 @@ def main() -> int:
 
     # What you are actually looking at. The build time first, because that is the fact that
     # settles "is this my change?", then the commit, so a screenshot can be placed later.
-    built_at = time.strftime("%H:%M", time.localtime(os.path.getmtime(exe)))
+    # Guarded, unlike the identical call inside stale_sources, and for a sharper reason: the
+    # launch has already succeeded and said so by the time this runs, so an exe that has gone
+    # unreadable in between (a quarantine, a concurrent build swapping it out) would raise here,
+    # hit the top-level handler, and report a failure with the app open on screen.
+    try:
+        built_at = time.strftime("%H:%M", time.localtime(os.path.getmtime(exe)))
+    except OSError:
+        built_at = "?"
     stamp = build_stamp()
     print(f"{GREY}  built {built_at}" + (f", {stamp}" if stamp else "") + f"{RESET}")
 
-    # And the warning that is the point of all this. Only reachable with --no-build, since a
-    # build that just ran leaves nothing newer than the exe.
-    stale = stale_sources(exe)
+    # And the warning that is the point of all this. Only reachable with --no-build: everything
+    # scanned is compiled into this target, so a build that just ran relinked past all of it.
+    stale = stale_sources(exe, host=not args.keys)
     if stale:
+        newest = os.path.relpath(stale[0], ROOT)
         print(f"{YELLOW}  This binary is older than {len(stale)} source "
               f"file{'s' if len(stale) != 1 else ''} - it is NOT what you just changed.{RESET}")
-        print(f"{YELLOW}  Run it again without --no-build to rebuild.{RESET}")
+        print(f"{YELLOW}  Newest: {newest}. Run it again without --no-build to rebuild.{RESET}")
 
     if not args.keys:
         print(f"{GREY}  Silent? Load a synth VST3 into the instrument slot - "

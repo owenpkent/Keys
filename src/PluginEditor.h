@@ -87,6 +87,14 @@ public:
     // which is exactly how the 2026-08-23 runaway hid from a first version of that test.
     const RangeKnob& strumKnobForTest() const { return strumKnob; }
     const RangeKnob& humanizeKnobForTest() const { return humanKnob; }
+    // Set before constructing an editor in a test, and never anywhere else. This constructor
+    // starts the updater's ambient check, which is a detached self-deleting thread that opens
+    // a URL to GitHub - so a unit test that builds a real editor launches a network thread that
+    // **outlives the ScopedJuceInitialiser_GUI shutting JUCE down at the end of the block**, and
+    // on an offline or slow runner blocks a pure layout test on a connection timeout. It cannot
+    // be a compile-time gate: PluginEditor.cpp is compiled into Keys_SharedCode, which the test
+    // target links rather than builds, so a define set on Keys_tests never reaches it.
+    static bool skipUpdateCheckForTest;
 
 private:
     using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;

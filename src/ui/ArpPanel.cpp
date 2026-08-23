@@ -2124,6 +2124,11 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                 // Both are 0..127 now, so this lands on the face's own travel anyway - it stays
                 // read from the ring's parameter because that is the rule (see setSpanMax), not
                 // because the two happen to differ today.
+                // spanMax() takes half the face's travel off this again, which is what makes
+                // the top of the sweep reachable: the band is centred on the face, so it can
+                // never open wider than room() allows, and room() tops out at half. Before
+                // that landed (2026-08-23) about four fifths of this drag wrote a parameter
+                // the ring could not draw.
                 const auto velRange = processor.apvts.getParameterRange(velId);
                 rk.setSpanMax((double) (velRange.end - velRange.start));
                 // A lamp, unlike H.TIME's ring: VEL keeps a level even with Humanize off, and
@@ -2196,10 +2201,11 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                 { return juce::String((int) lo) + "-" + juce::String((int) hi); };
 
                 const auto spanId = id(KeysProcessor::apHumanizeSpan);
-                // Set for the same reason as VEL's above, and here it lands on exactly the
-                // number the default already produced: face and ring are both 0..100, so this
-                // is a no-op that keeps the rule stated in one place rather than a special case
-                // living on one of the two range knobs.
+                // Set for the same reason as VEL's above, and here it names exactly the
+                // number the default already produced: face and ring are both 0..100. It is
+                // kept so the rule reads the same on both knobs rather than as a special case
+                // living on one of them - spanMax() halves it either way, which is what stopped
+                // 228 px of this 300 px drag being inert at the shipping default of 24.
                 const auto humanRange = processor.apvts.getParameterRange(spanId);
                 rk.setSpanMax((double) (humanRange.end - humanRange.start));
                 // By hand, with the gesture brackets an attachment would have given it: the ring
