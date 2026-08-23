@@ -589,14 +589,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // without these the only way to fill a page would be sixteen New chords one card at a
     // time. On the bar they cost no height at all, which is the trade that let the panel go.
     //
-    // Two of them, not three. **Clear** was here and is in the generator's window now: it
-    // empties every unlocked pad on the page, there is no undo anywhere in Keys, and it was
-    // sitting 4 px from Regen and a few px from the page buttons - the two things on this bar
-    // a user clicks constantly. Fill and Regen stay because they are constructive and they are
-    // the only left-click path into generation; a destructive bulk action is worth the extra
-    // click of opening a window. It spent a few hours on the card menu in between, which is
-    // where the older comments about it put it. `ChordGenMenu::clearPage()` was deleted
-    // throughout, only what reaches it.
+    // Two of them, not three. **Clear** was here and is on a pad's card menu now (2026-08-23,
+    // Owen's own pick when asked): it empties every unlocked pad on the page, and it was sitting
+    // 4 px from Regen and a few px from the page buttons - the two things on this bar a user
+    // clicks constantly. Fill and Regen stay because they are constructive and they are the only
+    // left-click path into generation; a destructive bulk action is worth the extra travel of a
+    // right-click. Do not put it back on this bar. See ChordPads::showPadMenu for the row and
+    // KeysProcessor::clearChordPadPage for what it does.
     //
     // Each carries a setTitle: "Fill" and "Regen" are unique today, but an accessible name is
     // what the capture script drives (`scripts/capture-window.ps1 -InvokeButtons`) and UI

@@ -56,14 +56,22 @@ public:
     // Each greys itself out when it would do nothing (see the two queries below), so which
     // button is which is readable from the bar without a tooltip.
     //
-    // **There is no clearPage.** There was one until 2026-08-01, and it lived in the generator's
-    // window rather than on the bar because it wiped sixteen pads with no undo behind it and
-    // wanted to be somewhere you went on purpose. That window stopped writing pads at all that
-    // day (Owen: "I don't want it to regenerate the ones in the host window, only in the card
-    // generator window"), which left the one destructive page action with nowhere to live that
-    // was not the bar it had already been moved off. It was deleted rather than rehoused: a card
-    // at a time is Clear pad on its own menu or a drag off the strip, and replacing the whole
-    // page wholesale is what Regen is. Do not restore it without asking.
+    // **There is still no clearPage here, and there is a page wipe again.** This class had one
+    // until 2026-08-01, in the generator's window rather than on the bar, because it wiped
+    // sixteen pads with no undo behind it and wanted to be somewhere you went on purpose. That
+    // window stopped writing pads at all that day (Owen: "I don't want it to regenerate the ones
+    // in the host window, only in the card generator window"), which left the one destructive
+    // page action with nowhere to live that was not the bar it had already been moved off, so it
+    // was deleted rather than rehoused.
+    //
+    // It came back on 2026-08-23 (Owen: "we need to be able to clear all the chords on a pad
+    // page"), as **KeysProcessor::clearChordPadPage**, reached from a Clear page row at the foot
+    // of a pad's card menu. Two things had changed in the meantime: undo arrived on 2026-08-14
+    // and covers the pad tree, so the wipe is one entry and one click back; and the card menu is
+    // a place you go on purpose, which is the property the generator's window was standing in
+    // for. It is deliberately **not** on this brain - a page wipe is data work on the pad table
+    // and has no business living on the thing that generates chords, which is half of why it had
+    // nowhere to go the first time.
     void fillPage();
     void regeneratePage();
 

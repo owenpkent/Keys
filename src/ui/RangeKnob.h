@@ -131,15 +131,62 @@ public:
     }
     double getSpan() const { return span; }
 
+    // How much travel the face has on its **nearer** side. This is the whole reason the band
+    // and the span are two different numbers: "equal from center" means the shorter side sets
+    // both, so this is the widest the band can open here however far the span is turned up.
+    double room() const
+    {
+        return juce::jmax(0.0, juce::jmin(knob.getValue() - knob.getMinimum(),
+                                          knob.getMaximum() - knob.getValue()));
+    }
+
     // How far the band actually reaches either side of the value: the span, until a rail is
     // nearer. One number for both sides on purpose - "equal from center" is the contract, so
     // a side that runs out of travel stops the other side too, and the band never goes
     // lopsided against an end of the face's range.
-    double reach() const
+    double reach() const { return juce::jmax(0.0, juce::jmin(span, room())); }
+
+    // **What the halo gesture is calibrated and clamped against** (2026-08-23), and the
+    // difference from `spanMax()` is the bug this fixes. The drag ran over the span's *whole*
+    // travel while `reach()` capped the band at `room()` - which can never be more than half
+    // that travel, and is far less whenever the face sits near a rail - so the top of every
+    // halo's sweep moved nothing on screen, in the readout or in the sound.
+    //
+    // At the defaults of 2026-08-23 that was most of the gesture: H.TIME's face opens at 24 of
+    // 0..100, so 228 px of a 300 px sweep were inert; VEL's ring could reach 27 of its 127.
+    // The knobs opening lit is what made it reachable, but the arithmetic has been wrong since
+    // the band became centred on the face (2026-08-19). It is the same failure `setSpanMax`
+    // was written for - a drag calibrated to something wider than the parameter it writes -
+    // arriving by the other route, the rail rather than the range.
+    //
+    // **The stored span is not clamped to this**, only what a gesture lands on. A session or a
+    // host lane may still hold a span wider than the face currently allows, which is what keeps
+    // H.TIME's own default of 100 meaning "floor pinned at zero wherever the knob sits". What a
+    // *hand* on the halo can no longer do is store one, since a band you cannot see is not
+    // something anybody drags for - the first movement normalises it to what is on screen and
+    // tracks from there.
+    double usefulSpanMax() const { return juce::jmin(spanMax(), room()); }
+
+    // The arithmetic behind the two gestures, public so a test can ask it the question directly
+    // rather than synthesising mouse events - and so both gestures answer out of one place.
+    // `pixelsUp` is positive for a drag upward, which is wider.
+    double spanFromDrag(double startSpan, double pixelsUp) const
     {
-        const double room = juce::jmin(knob.getValue() - knob.getMinimum(),
-                                       knob.getMaximum() - knob.getValue());
-        return juce::jmax(0.0, juce::jmin(span, room));
+        const auto full = usefulSpanMax();
+        if (full <= 0.0)
+            return startSpan; // no band available here: leave what is stored alone
+        // The same 300 px of travel per full sweep okstudio::RotaryKnob asks for, so the ring
+        // and the face each cross their own range under the same hand.
+        return juce::jlimit(0.0, full, juce::jmin(startSpan, full) + pixelsUp * (full / dragPixels));
+    }
+
+    // One notch is a twentieth of the sweep, as it has been since the wheel arrived here.
+    double spanFromWheel(double startSpan, double notches) const
+    {
+        const auto full = usefulSpanMax();
+        if (full <= 0.0)
+            return startSpan;
+        return juce::jlimit(0.0, full, juce::jmin(startSpan, full) + notches * full * wheelNotch);
     }
 
     // The two ends the span and the value work out to. This is what the consumer's engine
@@ -427,20 +474,11 @@ private:
     {
         if (! dragging)
             return;
-        // The span's own maximum, not the face's - see setSpanMax. They are the same number
-        // for a ring that spans its own knob and different for one that carries a parameter of
-        // its own, and using the face's for both the rate and the clamp is what left half of
-        // VEL's ring inert.
-        const auto full = spanMax();
-        if (full <= 0.0)
+        // **usefulSpanMax, not spanMax** - see the note there. Up is wider.
+        if (usefulSpanMax() <= 0.0)
             return;
-        // Up is wider, and the same 300 px of travel per full sweep okstudio::RotaryKnob asks
-        // for, so the ring and the face each cross their own range under the same hand.
-        const double wanted = juce::jlimit(0.0, full,
-                                           dragStartSpan
-                                               + (double) (dragStartY - (float) e.getScreenPosition().y)
-                                                     * (full / 300.0));
-        applySpan(wanted);
+        applySpan(spanFromDrag(dragStartSpan,
+                               (double) (dragStartY - (float) e.getScreenPosition().y)));
     }
 
     // The halo writes the span and nothing else (2026-08-19, Owen: "moving the halo shouldn't
@@ -466,8 +504,8 @@ private:
     {
         if (! isEnabled() || dragging)
             return;
-        const auto full = spanMax();
-        if (full <= 0.0 || wheel.deltaY == 0.0f)
+        // The gesture's own ceiling, the same one the drag uses - see usefulSpanMax.
+        if (usefulSpanMax() <= 0.0 || wheel.deltaY == 0.0f)
             return;
 
         // **Scaled by the delta, and reversed when the OS says so.** This used to test only the
@@ -485,7 +523,7 @@ private:
         // A smooth device can report a great deal in one event when it is flung; a notch is the
         // most one event may be worth, so a fling is fast rather than instantaneous.
         const double notches = juce::jlimit(-1.0, 1.0, dy);
-        const double wanted = juce::jlimit(0.0, full, span + notches * full * 0.05);
+        const double wanted = spanFromWheel(span, notches);
         if (std::abs(wanted - span) < 1.0e-9)
             return; // already at the rail: no gesture, no automation write
         if (onSpanDragStart)
@@ -511,6 +549,11 @@ private:
     // and the stem cannot disagree with the component's own bounds about where it is.
     juce::Point<float> satCentre;
     float satSize = 10.0f;
+    // The face's own drag sensitivity, so the ring and the knob cross their ranges under the
+    // same hand, and the wheel's notch as a fraction of the sweep. Named rather than repeated,
+    // since spanFromDrag and spanFromWheel are now the only readers of either.
+    static constexpr double dragPixels = 300.0;
+    static constexpr double wheelNotch = 0.05;
     double span = 0.0;
     // <= 0 means "follow the face's own travel"; see setSpanMax for the case that needs it.
     double spanMaxOverride = -1.0;

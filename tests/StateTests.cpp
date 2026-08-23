@@ -274,6 +274,108 @@ public:
             }
         }
 
+        beginTest("Clear page empties the page it is on, spares locks, and costs one undo");
+        {
+            // 2026-08-23. The row is on a pad's card menu; what it calls is all here, which is
+            // the reason it lives on the processor rather than on ChordPads or on the generator
+            // brain that used to own the old clearPage.
+            Host h;
+            const int page1 = KeysProcessor::padsPerPage; // the first slot of page 2
+            for (int i = 0; i < KeysProcessor::padsPerPage; ++i)
+                h.processor.setChordPad(i, { 60 + i, 64 + i, 67 + i }, "C" + juce::String(i));
+            h.processor.setChordPad(page1, { 62, 65, 69 }, "Dm");
+            h.processor.setChordPadLocked(4, true);
+
+            expect(h.processor.pageHasClearablePads(), "there is something to clear");
+            h.processor.clearChordPadPage();
+
+            expect(h.processor.chordPad(0).notes.empty(), "an unlocked pad went");
+            expect(h.processor.chordPad(11).notes.empty(), "...including the last of the page");
+            expectEquals((int) h.processor.chordPad(4).notes.size(), 3, "a locked pad survived");
+            // The whole point of the page in "clear page": another page is not this one.
+            expectEquals((int) h.processor.chordPad(page1).notes.size(), 3,
+                         "page 2 was not touched");
+            expect(! h.processor.pageHasClearablePads(),
+                   "nothing clearable is left, so the row would grey");
+
+            // One entry for twelve cards, not twelve entries. UndoGesture absorbing the nested
+            // pushes is what makes that true, and it is what makes this affordable at all: the
+            // reason a page wipe had no home from 2026-08-01 to today was that undo did not
+            // exist to put it back.
+            expect(h.processor.canUndo(), "the wipe is undoable");
+            h.processor.undo();
+            expectEquals((int) h.processor.chordPad(0).notes.size(), 3, "one undo put pad 1 back");
+            expectEquals((int) h.processor.chordPad(11).notes.size(), 3, "...and pad 12 with it");
+            expect(! h.processor.canUndo(), "and it was a single entry");
+        }
+
+        beginTest("Clear page on an empty page pushes nothing");
+        {
+            // A click on a row that should have been greyed must not bury a real entry under an
+            // empty one. The row does grey, so this is belt and braces for every other caller.
+            Host h;
+            h.processor.setChordPad(0, { 60, 64, 67 }, "C");
+            h.processor.pushUndo("something worth keeping", KeysProcessor::UndoScope::pads);
+            h.processor.setChordPadLocked(0, true);
+
+            expect(! h.processor.pageHasClearablePads(), "one locked pad is not clearable");
+            h.processor.clearChordPadPage();
+            expectEquals((int) h.processor.chordPad(0).notes.size(), 3, "the locked pad stayed");
+
+            expectEquals(h.processor.undoLabel(), juce::String("something worth keeping"),
+                         "the wipe pushed nothing on top of a real entry");
+        }
+
+        beginTest("the ranges open by default: Strum, Humanize, and the arp's VEL and H.TIME");
+        {
+            // 2026-08-23 (Owen: "I want the default strum up, humanize, velocity, and H.TIME to
+            // have the range on and enabled by default"). Four knobs whose lamps read a
+            // parameter, all of which opened dark. Pinned as *values* rather than as "nonzero"
+            // so the band each one plays is what a later tidy-up has to argue with. Half a unit
+            // of tolerance because an int parameter's default comes back through a normalised
+            // float: expectEquals fails on 30 against 30 here, and says so in exactly those
+            // words, which is a confusing half-hour if you have not met it before.
+            Host h;
+            expectWithinAbsoluteError(paramOf(h.processor, "chordStrum"), 30.0f, 0.51f,
+                                      "Strum's low end");
+            expectWithinAbsoluteError(paramOf(h.processor, "chordStrumMax"), 80.0f, 0.51f,
+                                      "Strum's high end");
+            expectWithinAbsoluteError(paramOf(h.processor, "chordStrumDir"), 0.0f, 0.01f,
+                                      "and it rakes Up");
+            expect(paramOf(h.processor, "humanize") > 0.5f, "Humanize is on");
+
+            // The midpoint is load-bearing, not the ends: Humanize *off* plays the band's
+            // midpoint, and migrateVelLevel converts an old arp level against that same number.
+            // Widening around 76 changes what a variation sounds like and never what off plays.
+            const float lo = paramOf(h.processor, "humanizeVelMin");
+            const float hi = paramOf(h.processor, "humanizeVelMax");
+            expectWithinAbsoluteError(lo, 56.0f, 0.51f, "the velocity band's floor");
+            expectWithinAbsoluteError(hi, 96.0f, 0.51f, "...and its ceiling");
+            expectWithinAbsoluteError((lo + hi) * 0.5f, 76.0f, 0.01f,
+                                      "the band still centres on the velocity Keys always played");
+
+            for (int line = 0; line < KeysProcessor::numArpLines; ++line)
+            {
+                const auto human = KeysProcessor::arpParamId(line, KeysProcessor::apHumanize);
+                const auto vel = KeysProcessor::arpParamId(line, KeysProcessor::apHumanVel);
+                expectWithinAbsoluteError(paramOf(h.processor, human), 24.0f, 0.51f,
+                                          "H.TIME opens at 0-48");
+                expectWithinAbsoluteError(paramOf(h.processor, vel), 18.0f, 0.51f,
+                                          "VEL's ring reaches +/-18");
+                // Both rings default fully open, which is what makes the faces above read as
+                // the centre of a band rather than as one end of a closed one.
+                expectWithinAbsoluteError(
+                    paramOf(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apHumanizeSpan)),
+                    100.0f, 0.51f, "H.TIME's ring is open");
+            }
+
+            // The reach stops at the nearer rail, so a ring wider than the level can carry does
+            // nothing. 18 has to sit under that ceiling or the default is a lie on screen.
+            const float level = paramOf(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apVelLevel));
+            expect(18.0f <= juce::jmin(level, 127.0f - level),
+                   "VEL's default ring fits inside what its default level allows");
+        }
+
         beginTest("undo puts a cleared pad back, and redo takes it away again");
         {
             Host h;

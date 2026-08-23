@@ -5,6 +5,105 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Clear page, on a pad's card menu
+
+Owen: *"we need to be able to clear all the chords on a pad page."*
+
+A **Clear page** row at the foot of a chord pad's right-click menu, in a group of its own behind
+a separator: it is the one row on that menu about the page rather than the card it was opened
+from. It empties every unlocked pad on the page you are looking at, in **one undo entry**, and
+greys when there is nothing on the page a clear would take.
+
+Keys had this until 2026-08-01 and lost it rather than rehoused it: the generator's window
+stopped writing pads that day, and a wipe of sixteen cards with no undo behind it had no other
+home anyone was happy with. Two things changed in the meantime. **Undo arrived** on 2026-08-14
+and covers the pad tree, so the wipe is one click back. And the card menu is somewhere you go on
+purpose, which is the property the window was standing in for - where the Pads bar, the other
+candidate, would have put a page wipe 4 px from Regen and a few px from the page buttons, the two
+things on that bar you click constantly. Owen picked the menu when asked.
+
+**Locked pads are spared**, the same rule Regen follows: a lock is what says "not this one" to
+anything that takes a page at a time. Clearing a single card is still Clear pad, or a drag off
+the strip. If the pad linked to the keyboard is one of the cards going, the edit ends first -
+left live, the next latched chord would write itself straight back into a slot you had just
+emptied.
+
+The wipe itself is `KeysProcessor::clearChordPadPage()`, on the processor rather than on the
+generator's brain where the old one lived: it is data work on the pad table and nothing else,
+which is what makes it testable without an editor.
+
+### Changed: Strum, Humanize, VEL and H.TIME open with their ranges on
+
+Owen: *"I want the default strum up, humanize, velocity, and H.TIME to have the range on and
+enabled by default."*
+
+Keys has four range knobs and all four opened dark, so a fresh instance played every chord
+stamped out at one velocity, landing all at once, dead on the grid. The switch on three of them
+is a lamp on the knob itself, which means the only way to find the feature was to already know
+it was there. New defaults:
+
+| Knob | Was | Now | What that plays |
+| --- | --- | --- | --- |
+| Strum (pads) | 0-0 ms, unlit | **30-80 ms**, direction Up | a rake with its own speed per chord |
+| Humanize (pads) | off, 64-88 | **on**, 56-96 | velocity varies around the same 76 |
+| VEL ring (arp) | 0 | **18** | hits land +/-18 velocity either side of the level |
+| H.TIME (arp) | 0 | **24**, ring already open | 0 to 12 ms late, about 6 typical |
+
+Humanize's band was **widened around its centre, not moved**: Humanize *off* plays the band's
+midpoint, and `migrateVelLevel` converts an old session's arp level against that same 76, so
+both keep meaning exactly what they meant. Strum's direction is unchanged - "Up" has been the
+default since the day it was a parameter.
+
+These are default changes only. **A saved session stores every one of these parameters and keeps
+whatever it said**; what moves is what a new instance opens on, and a session old enough to
+predate one of the arp parameters, which takes the new default for it (lines B, C and D are off
+by default, so in practice that is line A a few milliseconds behind the grid).
+
+### Fixed: most of a halo's travel did nothing
+
+A range knob's satellite is dragged over 300 px for its whole sweep, and that sweep was
+calibrated against the span's **full** parameter travel - while the band it opens is capped at
+the distance from the knob to its **nearer rail**, which can never be more than half that travel
+and is far less whenever the face sits near an end. So the top of every halo's gesture moved
+nothing: not the arc, not the readout, not the sound.
+
+At the defaults above it was most of the gesture. H.TIME opens at 24 of 0..100, so its band can
+never exceed 24 however far the halo is turned and **228 px of a 300 px drag were inert**; VEL's
+ring reaches 27 of its 127; Strum's 55 of 200; Humanize's 51 of 127. The wheel had it too - the
+first fifteen notches down H.TIME's halo changed nothing.
+
+The arithmetic has been wrong since the band became centred on the face (2026-08-19). What
+changed on 2026-08-23 is that the knobs open **lit**, which is what put a hand on a halo that had
+never had one. It is the same failure `RangeKnob::setSpanMax` was written for - a drag calibrated
+to something wider than what it writes - arriving by the other route: the rail rather than the
+range.
+
+Both gestures now run against `usefulSpanMax()`, the reachable band, so a full sweep closes a
+band completely and a full sweep reopens all of it whatever the face is doing.
+
+**The stored span is not clamped to it**, only what a gesture lands on. A session or a host lane
+may still hold a span wider than the face allows, which is what keeps H.TIME's own default of 100
+meaning "floor pinned at zero wherever the knob sits". What a hand on the halo can no longer do
+is *store* one: a band nobody can see is not something anybody drags for, so the first movement
+normalises to what is on screen and tracks from there. A face parked on a rail has no band at
+all, and a drag there leaves the stored span alone rather than quietly wiping it.
+
+`LayoutTests` pins it at the shipping defaults rather than on round numbers, because a centred
+knob would have passed throughout - it took a default putting a face near a rail to make any of
+this visible.
+
+
+### Fixed: a chord handed to an arp line is no longer raked
+
+Found on the way to the defaults above and worth fixing on its own. A chord routed to a line
+goes through `fireChord`, so Strum applied to it - but those notes go into that line's queue and
+make **no sound of their own**, so the rake was inaudible by construction. All it did was stagger
+when the engine learned each note, and at 30-80 ms that is most of a 1/16 at 120 bpm: the first
+steps of a run would fire on half a chord. `dest > 0` takes no strum now, which is the rule the
+Humanize velocity range has followed on that same path since 2026-08-02, for the same reason - a
+line has its own feel controls, and its input is not the place to apply the strip's.
+
+
 ### Changed: Play on the pads means press-and-hold
 
 Owen: *"When the play mode is checked on the pads, I want it to trigger as soon as you click on

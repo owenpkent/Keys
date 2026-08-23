@@ -643,39 +643,55 @@ void ChordPads::setEditingSlot(int slot)
     repaint();
 }
 
-// A pad's card menu. **Sixteen rows and two separators since 2026-08-19**, when uiArpLines went
-// to four and the Send to arp loop started emitting A, B, C and D (it was fourteen rows from
-// 2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the first group, Owen:
-// "need to be able to copy paste chords"). At the 34 px mouse-only item height (a separator is
-// half that, KeysLookAndFeel::getIdealPopupMenuItemSize) that is 16 * 34 + 2 * 17 = 578 px, up
-// from 510. **The row count is a function of uiArpLines now, so raising that raises this**: a
-// fifth line would make it 612. That budget is the
+// A pad's card menu. **Seventeen rows and three separators since 2026-08-23**, when Clear page
+// took a group of its own at the foot (it was sixteen rows and two separators from 2026-08-19,
+// when uiArpLines went to four and the Send to arp loop started emitting A, B, C and D, and
+// fourteen rows from 2026-08-17, when Copy chord, Paste chord and Save chord as MIDI joined the
+// first group, Owen: "need to be able to copy paste chords"). At the 34 px mouse-only item
+// height (a separator is half that, KeysLookAndFeel::getIdealPopupMenuItemSize) that is
+// 17 * 34 + 3 * 17 = 629 px, up from 578 and from 510 before that. **The row count is a
+// function of uiArpLines now, so raising that raises this**: a fifth line would make it 663.
+// That budget is the
 // reason the three new rows landed flat in the existing first group rather than behind a
 // submenu: the menu hangs off a pad near the bottom of the window and grows *upwards*, and JUCE
 // answers one taller than the space it has by splitting it into columns or making it
 // hover-scroll, neither of which can be worked with one mouse.
 //
-// Checked against KeysEditor::idealHeight() before adding these three, not assumed - the arp
-// panel's own height now varies by view (240 px in its default macro view, up to 298 px on its
-// tallest deep-view page), which moves this menu's anchor rather than the menu itself, since
-// the Pads section sits below the arp. Worked out from sectionHeight()'s own arithmetic: with
-// the arp at its tallest, the Pads band - and so a pad's card - lands at roughly y=714 of a
-// ~957 px window, which leaves comfortably more than 510 px of room for this menu to grow
-// upward into; in the default macro view the anchor sits a little higher still, around y=656 of
-// an ~899 px window, with the same margin to spare. Both numbers move together (a taller arp
-// pushes the anchor *down*, which only helps), so there is no view where the arp's own height
-// eats into this budget. It ran to 23 rows and roughly 820 px on 2026-07-30, which is what a
-// menu genuinely too tall for this budget looks like. Three groups, no headers, nothing three
-// levels deep except the suggestion families:
+// Checked against the panel's own arithmetic rather than assumed, twice: once before the three
+// 2026-08-17 rows, and again for Clear page. The arp panel's height varies by view and the Pads
+// section sits under it, so what moves is this menu's *anchor*, never the menu - and a taller
+// arp pushes the anchor **down**, which only ever helps. The figures this note used to carry
+// (240 px in the macro view, an anchor around y=656) are two rounds of arp work out of date and
+// were the *worst* case even then: since 2026-08-19 the macro view is a 2x2 grid, so
+// ArpPanel's own arpMacroTotalH is **401 px with the bottom row folded** - the default - and
+// **690 px unfolded**, 160 to 450 px lower than the anchor this note was budgeted against. The
+// deep-view pages sit between the two. So the 629 px this menu now wants has more room above it
+// than the 510 px version did, not less, and the direction of travel is safe. It ran to 23 rows
+// and roughly 820 px on 2026-07-30, which is what a menu genuinely too tall for this budget
+// looks like. Four groups, no headers, nothing three levels deep except the suggestion families:
 //
 //   Edit on keyboard / Clear pad / Lock / Copy chord / Paste chord / Save chord as MIDI
 //   Octave down / Octave up / Next voicing
 //   New chord / Next: could follow > / Send to arp A / Send to arp B / Send to arp slot >
+//   Clear page
 //
-// The fourth group went with the generator's settings, into the window that now holds them
-// (ChordGenPanel): its Fill, Regen and Clear act on the audition tray, not on this page, where
-// actions are. The separators do the work section headers used to, at half the height and
-// without naming what is already obvious from the items under them.
+// The fourth group is one row and is about the **page**, not this card (2026-08-23, Owen: "we
+// need to be able to clear all the chords on a pad page"). It is the only thing on this menu
+// that acts on anything but the pad it was opened from, which is why it sits alone at the
+// bottom behind a separator rather than beside Clear pad, whose name it otherwise reads as a
+// plural of. Owen chose this over a chip on the Pads bar when asked, and the reason the bar was
+// the worse home is on the record from the day the old Clear chip left it: a page wipe 4 px from
+// Regen, and a few px from the page buttons, is a destructive action sitting on top of the two
+// things you click constantly. Down here it costs a right-click and a travel, which is the
+// right price for it. A page-wide wipe used to be the generator brain's `clearPage`, deleted on
+// 2026-08-01 for want of a home; what makes this affordable now and did not then is undo, which
+// arrived on 2026-08-14 and covers the pad tree. It is one entry (KeysProcessor::
+// clearChordPadPage), so Undo on the Controls bar puts all twelve cards back at once.
+//
+// The generator's own window has a Fill, a Regen and a Clear too, and they act on the audition
+// tray rather than on the page - nothing in that window writes a pad. The separators do the work
+// section headers used to, at half the height and without naming what is already obvious from
+// the items under them.
 void ChordPads::showPadMenu(int slot)
 {
     const auto& pad = processor.chordPad(slot);
@@ -785,6 +801,13 @@ void ChordPads::showPadMenu(int slot)
     }
     menu.addSubMenu("Send to arp slot", slots, filled);
 
+    // The page, not the card. Greys when there is nothing on this page a clear would take -
+    // an empty page, or one where every filled card is locked - so the row says what it would
+    // do without a hover, the way Fill and Regen on the bar do. **Locked pads are spared**:
+    // that is the whole meaning of a lock against an action that takes a page at a time.
+    menu.addSeparator();
+    menu.addItem(10, "Clear page", processor.pageHasClearablePads());
+
     const auto area = localAreaToGlobal(padBounds(slot - processor.padPageOffset()).toNearestInt());
     juce::Component::SafePointer<ChordPads> safe(this);
     menu.showMenuAsync(juce::PopupMenu::Options()
@@ -843,6 +866,22 @@ void ChordPads::showPadMenu(int slot)
         else if (choice == 9) // Save chord as MIDI
         {
             safe->saveChordAsMidi(slot);
+        }
+        else if (choice == 10) // Clear page
+        {
+            // End the edit first if its target is one of the cards about to go, the same
+            // reason Clear pad does it above: the link is the keybed's to write, and left
+            // live it would write the next latched chord straight back into a slot the user
+            // has just emptied. The edited slot need not be the one this menu was opened
+            // from, so the test is the *page*, and a locked card survives the clear and so
+            // keeps its edit.
+            const int first = safe->processor.padPageOffset();
+            const int last = first + KeysProcessor::padsPerPage - 1;
+            const int edited = safe->editingSlot;
+            if (edited >= first && edited <= last && safe->onEditToggle
+                && ! safe->processor.chordPad(edited).locked)
+                safe->onEditToggle(edited);
+            safe->processor.clearChordPadPage();
         }
         else if (choice >= arpSlotIdBase && choice < arpSlotIdBase + KeysProcessor::numArpPatterns)
         {

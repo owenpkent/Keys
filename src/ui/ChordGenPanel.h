@@ -35,7 +35,10 @@ namespace keys
 //     page itself, next to the pads they write. This window did call `fillPage` /
 //     `regeneratePage` / `clearPage` until that day; the first two are still ChordGenMenu's and
 //     still reached from the bar, and `clearPage` was deleted outright, because a page-wide wipe
-//     with no undo had exactly one home and this was it;
+//     with no undo had exactly one home and this was it. The wipe came back on 2026-08-23, as
+//     KeysProcessor::clearChordPadPage off a Clear page row on a pad's card menu - undo covers
+//     the pad tree now, so it is one entry and one click back. It did not come back *here*;
+//     nothing in this window writes a pad, which is the rule that outlived the deletion;
 //   * the suggestion audition is *not* here. It calls noteOn with no pad behind it and is
 //     released by an 800 ms timer, so it stays in ChordGenMenu where the destructor that
 //     stops it cannot be closed away (see ~ChordGenMenu). This class never plays a note;
