@@ -317,7 +317,8 @@ medium of three amounts and the card menu over a chip on the Pads bar.
 - **A parameter with two writers, again: the pad range knobs were fighting the hand**
   (2026-08-23, Owen: "feels like it's fighting me... is there a race condition"). `timerCallback`
   pushed `abs(hi - lo)` - the band's **full** width - into `RangeKnob::setSpan`, whose span is the
-  reach on *each* side, ten times a second and with no `spanDragging()` guard. The band doubled
+  reach on *each* side, thirty times a second and with no `spanDragging()` guard (`KeysEditor` is
+  `startTimerHz(30)`; the 10 Hz in this file is `ArpPanel`'s own). The band doubled
   every tick until it saturated against the nearer wall, so a saturated knob read exactly
   `[0, 2 x the knob]` - Strum at "0-128 ms" with its knob at 64. A leftover from before the band
   was centred on the face (2026-08-19), when the span *was* the full width;
@@ -338,8 +339,34 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   **A gesture's range must not depend on another control.** The halo's ceiling was made to track a
   wall - the nearer, then the farther - and both made the same drag worth a different amount
   depending on where the knob had been left. It is `spanMax()` and nothing else: `setSpanMax` for a
-  ring carrying a parameter of its own, half the face's travel for the pads, which is what the
-  arp's VEL ring already did (`arpHumanVel` is 0..127 whatever the level does).
+  ring carrying a parameter of its own, which is what the arp's VEL ring already did
+  (`arpHumanVel` is 0..127 whatever the level does).
+  **Half the face's travel is a bound on all of it, and it belongs in `spanMax()`** (corrected
+  2026-08-23, in review). It shipped as `(hi - lo) * 0.5` handed in by `wireRange`, so the pads
+  got it and the arp's own two range knobs - needing the identical reasoning - did not: H.TIME
+  spent 228 px of a 300 px drag on band it could not reach, VEL about four fifths of its sweep.
+  The half is arithmetic, not taste: `room()` is the smaller of two distances summing to the
+  face's travel, so it never exceeds half, and `reach()` stops at `room()`. **A ceiling above
+  half is inert by construction**, so stating it once bounds every consumer and narrows no band.
+  The standing shape: *a bound derived from a control's own geometry belongs on the control, not
+  at the call site that first noticed it needed one.*
+  **"How far does the gesture reach" and "is there a band to open" are two questions.** Only the
+  second may read the face, and folding them together is what cost the guard: `usefulSpanMax()`
+  was `min(spanMax(), room())`, so taking the face out of the ceiling took with it the check that
+  a halo at a rail writes nothing. Without it a drag there ran to completion, moved the parameter
+  and bracketed a host automation gesture round it with **nothing to show on screen, in the
+  readout or in the sound** - and H.TIME's face at 0 is an ordinary setting, not a corner case.
+  `haloIsLive()` is that second question, and `usefulSpanMax()` is gone rather than left as an
+  identity wrapper over `spanMax()` with two call sites still insisting the two differ.
+  **A timer pull has to compare before it writes, and two here did not** (2026-08-23, in
+  review). `syncPadRangeKnobs()` could not converge on an **odd-width** pair - the face snaps to
+  whole units and the band is symmetric about it, so 30 and 81 give a centre of 55.5 whose ends
+  round back to 31 and 82 and never match what is stored - so it re-ran every tick for the rest
+  of the session under a comment saying it early-outs. `RangeKnob::refresh()` set two properties
+  and asked two components to repaint on every tick whether or not anything had moved, directly
+  beneath the comment claiming this region compares first. Both cache now, the shape
+  `MacroRow`'s `lastLineOn` already used. **None of it was audible**, which is the point: a pull
+  that cannot reach a fixed point has no symptom at all until somebody profiles the paint.
   **A test that watches parameters cannot see this class of bug**: `setSpan` fires no callback, so
   a wrong span corrupts only what is drawn. `LayoutTests` turns the real editor's timer through
   `KeysEditor::tickForTest()` and asserts on `rangeLo()`/`rangeHi()`; the first version of it
@@ -350,6 +377,18 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   meaning what they meant; move it and a migration written months ago quietly starts converting
   against a different number. **The general rule: widening a default band is free, sliding one
   is not.**
+  **The documented shipping band is asserted, not only its two parameters** (2026-08-23, in
+  review). The rewrite dropped the only check that `arpHumanize` 24 with a fully open ring
+  actually *draws* 0-48 - `StateTests` pins the parameters, and the two replacement tests used
+  synthetic 0..200 knobs - so a change to either default or to `reach()`'s clamp could move a
+  band this file names as shipped, with a green suite. `LayoutTests` builds the knob from the
+  APVTS's own ranges and defaults, the way `ArpPanel` does.
+  **A unit test that builds a real `KeysEditor` must set `KeysEditor::skipUpdateCheckForTest`
+  first.** The constructor starts the updater's ambient check, a detached self-deleting thread
+  that opens a URL to GitHub - so without it a layout test launches a network thread that
+  outlives the `ScopedJuceInitialiser_GUI` shutting JUCE down at the end of the block, and blocks
+  on a connection timeout on an offline runner. It cannot be a compile-time gate: `PluginEditor.cpp`
+  is compiled into `Keys_SharedCode`, which the test target *links* rather than builds.
 - **A ring wider than its rail allows is a lie on screen.** `arpHumanVel`'s reach stops at
   `min(level, 127 - level)`, so at VelLevel's own default of 100 the knob can never reach past
   **+/-27** however far you turn it. 18 sits under that with room to spare; anything at or above

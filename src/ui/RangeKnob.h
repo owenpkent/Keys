@@ -4,6 +4,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <okstudio/RotaryKnob.h>
 #include <functional>
+#include <optional>
 
 namespace keys
 {
@@ -47,15 +48,16 @@ namespace keys
 //
 // **The knob is the band's centre and the halo reaches equally both ways** (2026-08-19, Owen:
 // "moving the halo shouldn't move knob. should be equal from center"). The halo drag touches
-// only the span; the face never moves under it, and the band is value +/- span on both sides.
-// The band opened downward from the face for its first sixteen days, which read as "lower the
-// floor" rather than "more range".
+// only the span; the face never moves under it, and the band is value +/- `reach()` on both
+// sides *always* - so a side that runs out of travel stops the other side too, rather than
+// letting the band go lopsided at the rails. The band opened downward from the face for its
+// first sixteen days, which read as "lower the floor" rather than "more range".
 //
-// **A wall clips the side that meets it, and only that side** (2026-08-23, Owen: "moving knob
-// moves halo weird"). Reading "equal from center" as *strictly* equal meant the nearer wall
-// governed both sides, so turning the face toward either end squeezed the band shut and let it
-// back out again - the halo moving under a hand that was on the knob, which is 2026-08-19's own
-// complaint arriving from the other direction. See rangeLo/rangeHi.
+// **Clipping each side at its own wall was tried on 2026-08-23 and reverted the same
+// afternoon**, and this paragraph described that attempt for one build after it was gone -
+// which is worth a line of its own, because a file whose comments are the design record is
+// one where a stale paragraph is a bug report waiting to be re-implemented. Symmetry is
+// load-bearing: see rangeLo/rangeHi for what depends on it.
 //
 // The span is not a parameter this class owns. It comes in with setSpan() and goes out through
 // the three callbacks, so the consumer keeps the parameter, the gesture brackets and the undo
@@ -98,37 +100,68 @@ public:
     void setSpanTooltip(const juce::String& t) { handle.setTooltip(t); }
 
 
-    // The widest the span may open, in the face's own units. **Defaults to the face's own
-    // full travel**, which is the right answer whenever the ring is a span *of the face's
-    // value* - Keys' H.TIME, where knob and ring are both "how late, in the same unit", so
-    // the ring can in principle reach all the way down the face's travel.
+    // A ceiling of the ring's own, for a ring that carries an independent parameter rather
+    // than a span of the face's value. Keys has one: the arp macro card's VEL knob is a
+    // level whose ring is Humanize Velocity, a parameter with a range of its own. Left
+    // unset, the drag would be calibrated to the face's travel while the parameter it writes
+    // stops somewhere else - so the top of the satellite's travel writes nothing, and the arc
+    // drawn from it fights the consumer's own refresh, which reads the clamped parameter back
+    // on a timer.
     //
-    // It is the wrong answer the moment the ring is an independent quantity with a range of
-    // its own, and Keys has one: the arp macro card's VEL knob is a bipolar trim (-100..100,
-    // 200 of travel) whose ring is Humanize Velocity (0..100). Left on the default, the drag
-    // was calibrated to 200 while the parameter it wrote stopped at 100 - so the top half of
-    // the satellite's travel did nothing, and the arc drawn from it fought the consumer's own
-    // refresh, which reads the clamped parameter back ten times a second. Set this from the
-    // ring's parameter and both halves of the gesture line up again.
-    //
-    // Non-positive means "follow the face", which is how a consumer asks for the default back.
+    // It is a *further* bound, never a wider one: `spanMax()` caps everything at half the
+    // face's travel regardless (see there). Non-positive means "no ring parameter of my own",
+    // which is how a consumer asks for the default back.
     void setSpanMax(double maxSpan)
     {
         spanMaxOverride = maxSpan;
-        setSpan(span); // re-clamp: narrowing this under the current span has to bite now
+        reclampSpan(); // narrowing this under the current span has to bite now
     }
-    // What the span is actually clamped and calibrated against, the override resolved.
+
+    // Re-run that clamp against the face's range **as it stands now**. A consumer owes this
+    // call whenever it sets the ceiling before the thing that ranges the face - a
+    // `SliderAttachment`, typically, which is created after the knob it binds - because
+    // `spanMax()` reads that range and would otherwise be clamping against JUCE's default
+    // 0..10. Harmless while the span is still zero, which is the only reason Keys' own two
+    // never showed it; a ceiling that is meant to bite should not be relying on that.
+    void reclampSpan() { setSpan(span); }
+
+    // What the span is clamped and calibrated against: the ring's own ceiling if it has one,
+    // and **never more than half the face's travel** either way.
+    //
+    // The half is arithmetic rather than taste, and it is the one bound that belongs here
+    // rather than at a call site. `room()` is `min(v - lo, hi - v)`, two numbers that sum to
+    // the face's whole travel, so it can never exceed half of it - and `reach()` stops at
+    // `room()`. A ceiling above half is therefore inert **by construction**: the top of the
+    // sweep moves nothing on screen, in the readout or in the sound, wherever the face is
+    // standing. That is the defect `setSpanMax` was written for (2026-08-17) arriving by the
+    // other route, and it was fixed for the pads alone on 2026-08-23 by passing
+    // `(hi - lo) * 0.5` at one of the two call sites that needed it - which left the arp's
+    // H.TIME spending 228 px of a 300 px drag on band it could not reach, and VEL about four
+    // fifths of its sweep. Stated once, here, both are right and neither has to remember.
+    //
+    // **It narrows no band.** `reach()` is unchanged by this, having always been bounded by
+    // `room()`; what changes is only how far a *gesture* can wind the span past the point
+    // where winding it stops meaning anything.
     double spanMax() const
     {
-        return spanMaxOverride > 0.0 ? spanMaxOverride
-                                     : juce::jmax(0.0, knob.getMaximum() - knob.getMinimum());
+        const auto travel = juce::jmax(0.0, knob.getMaximum() - knob.getMinimum());
+        const auto ceiling = spanMaxOverride > 0.0 ? spanMaxOverride : travel;
+        return juce::jmin(ceiling, travel * 0.5);
     }
+
+    // **One tolerance, named once.** `std::abs(a - b) < 1.0e-9` was spelled out five times
+    // across this file and `KeysEditor::syncPadRangeKnobs`, and the fixed-point reasoning the
+    // comments around them rest on only holds while every copy agrees: the pull stops when the
+    // knob says it has settled, so a consumer comparing at a *coarser* tolerance than the
+    // control does would call it settled a tick before the control did, and one comparing
+    // finer would never see it settle at all. Public for that second reader.
+    static bool nearlyEqual(double a, double b) { return std::abs(a - b) < 1.0e-9; }
 
     // How far the range reaches back from the face's value, in the face's own units.
     void setSpan(double v)
     {
         const auto clamped = juce::jlimit(0.0, spanMax(), v);
-        if (std::abs(clamped - span) < 1.0e-9)
+        if (nearlyEqual(clamped, span))
             return;
         span = clamped;
         syncArcOrigin();
@@ -148,30 +181,36 @@ public:
     // nearer. One number for both sides, so the band is always symmetric about the face.
     double reach() const { return juce::jmax(0.0, juce::jmin(span, room())); }
 
-    // **What the halo gesture is calibrated and clamped against, and it does not depend on
-    // where the face is** (2026-08-23, Owen: "moving knob moves halo weird", then "the arp have
-    // it right").
+    // **Whether a halo gesture can do anything at all here.** Two questions live next to each
+    // other and only one of them may read the face's position:
     //
-    // It read a wall for a few hours - first the nearer, then the farther - and both were
-    // wrong for the same reason, which is the lesson worth keeping: **a gesture whose range
-    // depends on another control changes meaning when that control moves.** Turning the knob
-    // silently re-scaled the halo's sensitivity and moved its ceiling, so the halo behaved
-    // differently depending on where the knob happened to be, and one drag near a wall could
-    // throw a 0..200 ms band across Strum's whole range.
+    //   - *How far does the gesture reach?* `spanMax()`, and it must **not** depend on where
+    //     the face is standing (2026-08-23, Owen: "moving knob moves halo weird", then "the
+    //     arp have it right"). It read a wall for a few hours, first the nearer and then the
+    //     farther, and both were wrong for the same reason: **a gesture whose range depends on
+    //     another control changes meaning when that control moves.** Turning the knob silently
+    //     re-scaled the halo's sensitivity, so one drag near a wall could throw a 0..200 ms
+    //     band across Strum's whole range.
+    //   - *Is there a band to open?* This, and it has to read the face, because at a rail
+    //     there is genuinely nowhere for a band to go: `room()` is zero, so `reach()` is zero
+    //     however far the span is wound. Keys reaches that state by an ordinary route rather
+    //     than a corner one - H.TIME's face at 0 is simply "no lateness".
     //
-    // The arp's VEL ring is the shape that was already right: it carries `arpHumanVel`, whose
-    // 0..127 is the same however the level beside it moves. So the ceiling is the span's own
-    // maximum and nothing else - `setSpanMax` for a ring with a parameter of its own, half the
-    // face's travel for the pads, since that is the widest a band centred on the knob can be.
-    double usefulSpanMax() const { return spanMax(); }
+    // Folding the second into the first is what cost this its guard: `min(spanMax(), room())`
+    // answered both at once, so taking the face out of the ceiling took the guard with it.
+    // Without it a drag at a rail runs to completion, fires `onSpanChanged` and brackets a
+    // host automation gesture around a parameter move with **no visible, audible or readable
+    // effect** - a control writing a lane nobody asked for, which is worse than one that does
+    // nothing. Keep them two functions.
+    bool haloIsLive() const { return spanMax() > 0.0 && room() > 0.0; }
 
     // The arithmetic behind the two gestures, public so a test can ask it the question directly
     // rather than synthesising mouse events - and so both gestures answer out of one place.
     // `pixelsUp` is positive for a drag upward, which is wider.
     double spanFromDrag(double startSpan, double pixelsUp) const
     {
-        const auto full = usefulSpanMax();
-        if (full <= 0.0)
+        const auto full = spanMax();
+        if (! haloIsLive())
             return startSpan; // no band available here: leave what is stored alone
         // The same 300 px of travel per full sweep okstudio::RotaryKnob asks for, so the ring
         // and the face each cross their own range under the same hand.
@@ -181,8 +220,8 @@ public:
     // One notch is a twentieth of the sweep, as it has been since the wheel arrived here.
     double spanFromWheel(double startSpan, double notches) const
     {
-        const auto full = usefulSpanMax();
-        if (full <= 0.0)
+        const auto full = spanMax();
+        if (! haloIsLive())
             return startSpan;
         return juce::jlimit(0.0, full, juce::jmin(startSpan, full) + notches * full * wheelNotch);
     }
@@ -312,6 +351,46 @@ public:
         }
     }
 
+    // The lit stretch's two ends, and whether the switch is off - everything this component
+    // draws is a function of these three, which is what lets refresh() below tell a tick that
+    // changed something from the many that did not. The readout comes out of them too: off,
+    // `to` is the face's value; on, the value is the midpoint of the pair, the band being
+    // symmetric.
+    struct ArcEnds { bool off; double from, to; };
+    ArcEnds arcEnds() const
+    {
+        // Switched off, there is no range to draw and the knob goes back to being an ordinary
+        // one - lit from the start of its sweep to its value (2026-08-03, Owen: "when humanize
+        // is off, there's still a range appearance"). An unlit lamp over a range arc was the
+        // control saying two things at once, and the arc is the louder of the two.
+        const auto off = switchedOff();
+        return { off,
+                 off ? knob.getMinimum() : rangeLo(),
+                 off ? knob.getValue() : rangeHi() };
+    }
+
+    // The same three numbers after normalisation, which is to say exactly what syncArcOrigin()
+    // pushes into the properties. `refresh()` caches and compares **this** rather than
+    // `ArcEnds`, because the face's range is an input to the normalisation and not to the ends:
+    // hold the ends and a range change is invisible to the cache for ever.
+    struct DrawnArc
+    {
+        bool off;
+        double from, to;
+        bool operator== (const DrawnArc& o) const
+        {
+            return off == o.off && nearlyEqual(from, o.from) && nearlyEqual(to, o.to);
+        }
+    };
+    DrawnArc normalisedArc() const
+    {
+        const auto lo = knob.getMinimum(), hi = knob.getMaximum();
+        const auto ends = arcEnds();
+        const auto norm = [lo, hi](double v)
+        { return hi > lo ? juce::jlimit(0.0, 1.0, (v - lo) / (hi - lo)) : 0.0; };
+        return { ends.off, norm(ends.from), norm(ends.to) };
+    }
+
     // **One ring, not two** (2026-08-03, Owen: "it looks like there's two rings around the
     // knob ... just have the inner ring have the features. Everything should be reflected on
     // that single ring"). The face's own arc *is* the range: this tells the LookAndFeel where
@@ -324,26 +403,35 @@ public:
     // and it is the reason `skin::arcFromProperty` exists rather than a paintOverChildren.
     void syncArcOrigin()
     {
-        const auto lo = knob.getMinimum(), hi = knob.getMaximum();
-        // Switched off, there is no range to draw and the knob goes back to being an ordinary
-        // one - lit from the start of its sweep to its value (2026-08-03, Owen: "when humanize
-        // is off, there's still a range appearance"). An unlit lamp over a range arc was the
-        // control saying two things at once, and the arc is the louder of the two.
-        const auto from = switchedOff() ? lo : rangeLo();
-        const auto to = switchedOff() ? knob.getValue() : rangeHi();
-        const auto norm = [lo, hi](double v)
-        { return hi > lo ? juce::jlimit(0.0, 1.0, (v - lo) / (hi - lo)) : 0.0; };
-        knob.getProperties().set(skin::arcFromProperty, norm(from));
+        const auto wrote = normalisedArc();
+        knob.getProperties().set(skin::arcFromProperty, wrote.from);
         // The high half of the band sits past the pointer, which an end-at-value arc cannot
         // light - skin::arcToProperty is what reaches it (2026-08-19).
-        knob.getProperties().set(skin::arcToProperty, norm(to));
+        knob.getProperties().set(skin::arcToProperty, wrote.to);
         knob.repaint();
+        drawn = wrote;
     }
 
     // Both halves of "what does the switch say", in one call for a consumer's timer: the lamp
     // and the arc are driven by a parameter no attachment here watches.
+    //
+    // **It compares before it writes**, because the callers are timers and the writes are not
+    // free: two `NamedValueSet` entries and two repaint requests, on a 30 Hz tick, per knob.
+    // Keys' pad knobs sat under exactly that - `strumKnob.refresh(); humanKnob.refresh();`
+    // unconditional in `KeysEditor::timerCallback`, directly beneath a comment claiming the
+    // region compared first - so four repaints a tick were being asked for whether or not
+    // anything on either knob had moved. The cache is the drawn state rather than the
+    // parameters, the same shape `MacroRow`'s `lastLineOn` uses for its scrim.
     void refresh()
     {
+        // Against what was **written**, not against the ends it was derived from. The two part
+        // company when the face's range moves: normalising is what turns one into the other, so
+        // a cache of the raw ends answers "nothing has changed" to a range change that halves
+        // every angle on screen - and answers it for good, since no later tick can see a
+        // difference either. Comparing the normalised pair asks the question the properties can
+        // actually answer.
+        if (drawn.has_value() && *drawn == normalisedArc())
+            return;
         syncArcOrigin();
         repaint();
     }
@@ -471,7 +559,15 @@ private:
 
     void beginSpanDrag(const juce::MouseEvent& e)
     {
-        if (! isEnabled())
+        // **The same question `dragSpan` asks, asked before the brackets go on.** Guarding only
+        // the write left `onSpanDragStart`/`onSpanDragEnd` firing at a rail with nothing between
+        // them, which is a `beginChangeGesture`/`endChangeGesture` pair on the ring's parameter -
+        // a touch and an untouch the host records, and in Ableton with the lane armed in Touch or
+        // Latch that is a write. So the dead halo still wrote something after all; it just wrote
+        // it into the automation lane instead of the parameter. `wheelSpan` already refused to
+        // bracket a gesture it could not fulfil, and this is that rule on the other path.
+        // `endSpanDrag` keys off `dragging`, so declining here leaves nothing half-open.
+        if (! isEnabled() || ! haloIsLive())
             return;
         dragging = true;
         // Screen coordinates, because this same gesture arrives from two different components
@@ -487,8 +583,8 @@ private:
     {
         if (! dragging)
             return;
-        // **usefulSpanMax, not spanMax** - see the note there. Up is wider.
-        if (usefulSpanMax() <= 0.0)
+        // Nothing to open here - see haloIsLive. Up is wider.
+        if (! haloIsLive())
             return;
         applySpan(spanFromDrag(dragStartSpan,
                                (double) (dragStartY - (float) e.getScreenPosition().y)));
@@ -501,7 +597,7 @@ private:
     // was exactly the part that was not asked for.
     void applySpan(double wantedSpan)
     {
-        if (std::abs(wantedSpan - span) < 1.0e-9)
+        if (nearlyEqual(wantedSpan, span))
             return;
         span = wantedSpan;
         syncArcOrigin();
@@ -517,8 +613,8 @@ private:
     {
         if (! isEnabled() || dragging)
             return;
-        // The gesture's own ceiling, the same one the drag uses - see usefulSpanMax.
-        if (usefulSpanMax() <= 0.0 || wheel.deltaY == 0.0f)
+        // The same question the drag asks before it starts - see haloIsLive.
+        if (! haloIsLive() || wheel.deltaY == 0.0f)
             return;
 
         // **Scaled by the delta, and reversed when the OS says so.** This used to test only the
@@ -537,7 +633,7 @@ private:
         // most one event may be worth, so a fling is fast rather than instantaneous.
         const double notches = juce::jlimit(-1.0, 1.0, dy);
         const double wanted = spanFromWheel(span, notches);
-        if (std::abs(wanted - span) < 1.0e-9)
+        if (nearlyEqual(wanted, span))
             return; // already at the rail: no gesture, no automation write
         if (onSpanDragStart)
             onSpanDragStart();
@@ -576,6 +672,10 @@ private:
     bool dragging = false;
     float dragStartY = 0.0f;
     double dragStartSpan = 0.0;
+    // What syncArcOrigin() last put on screen, so refresh() can tell a tick that changed
+    // something from the many that did not. Empty until the first write, or the knob would
+    // start life believing it had already drawn a band of zero.
+    std::optional<DrawnArc> drawn;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RangeKnob)
 };

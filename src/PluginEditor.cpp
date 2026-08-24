@@ -121,6 +121,8 @@ namespace
     }
 } // namespace
 
+bool KeysEditor::skipUpdateCheckForTest = false;
+
 KeysEditor::KeysEditor(KeysProcessor& p)
     : juce::AudioProcessorEditor(p), processor(p),
       controlsHolder(section(secControls).holder),
@@ -345,14 +347,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         styleLabel(head, name);
         padsHolder.addAndMakeVisible(head);
         rk.face().setRange(lo, hi, 1.0);
-        // **Half the face's travel, which is the widest a band centred on the knob can be**
-        // (2026-08-23, Owen: "the arp have it right"). Without this the halo's sweep was the
-        // knob's whole range - 200 ms on Strum - so one drag threw the band across everything
-        // the control can express, and the ring was lit end to end while the pointer sat at the
-        // bottom. The arp's VEL ring is the shape being copied: it carries a parameter of its
-        // own whose range is fixed however the level beside it moves. These two have no such
-        // parameter (their whole record is the low/high pair), so the bound is stated here.
-        rk.setSpanMax((hi - lo) * 0.5);
+        // No setSpanMax here, and the absence is deliberate: these two have no ring parameter
+        // of their own - their whole record is the low/high pair - so the default is what they
+        // want, and RangeKnob::spanMax already caps that at half the face's travel, which is
+        // the widest a band centred on the knob can be. This site passed `(hi - lo) * 0.5` by
+        // hand for one build (2026-08-23, Owen: "the arp have it right") and the arp's own two
+        // range knobs, which needed exactly the same bound, went on without it.
         rk.face().setTitle(name);
         rk.face().setTooltip(tip);
         rk.setTitle(name + " range");
@@ -969,17 +969,21 @@ KeysEditor::KeysEditor(KeysProcessor& p)
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
     // Skipped when this editor is embedded inside Keys Host, which is a different
-    // product and will get its own release channel.
-    updaterConfig.productName = "Keys";
-    updaterConfig.releasesRepo = "okstudio1/keys-releases";
-    updaterConfig.currentVersion = juce::String(KEYS_VERSION);
-    updaterConfig.assetPrefix = "KeysSetup-";
-    juce::Component::SafePointer<KeysEditor> safe(this);
-    okstudio::updater::checkAsync(updaterConfig, [safe](okstudio::updater::UpdateInfo info)
+    // product and will get its own release channel - and in a unit test, whose JUCE
+    // shutdown would otherwise race this thread (see skipUpdateCheckForTest).
+    if (! skipUpdateCheckForTest)
     {
-        if (auto* e = safe.getComponent())
-            e->showUpdate(info);
-    });
+        updaterConfig.productName = "Keys";
+        updaterConfig.releasesRepo = "okstudio1/keys-releases";
+        updaterConfig.currentVersion = juce::String(KEYS_VERSION);
+        updaterConfig.assetPrefix = "KeysSetup-";
+        juce::Component::SafePointer<KeysEditor> safe(this);
+        okstudio::updater::checkAsync(updaterConfig, [safe](okstudio::updater::UpdateInfo info)
+        {
+            if (auto* e = safe.getComponent())
+                e->showUpdate(info);
+        });
+    }
    #endif
 
     // The bars are full-width and translucent, and the controls that ride on them are
@@ -1174,8 +1178,19 @@ void KeysEditor::syncPadRangeKnobs()
     {
         if (rk.spanDragging() || rk.face().isMouseButtonDown())
             return;
-        const double lo = (double) processor.apvts.getRawParameterValue(loId)->load();
-        const double hi = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        const double rawLo = (double) processor.apvts.getRawParameterValue(loId)->load();
+        const double rawHi = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        // **Sorted, and that is what makes the fixed point reachable at all.** These are two
+        // ordinary automatable parameters with no ordering between them - `migrateStrumRange`
+        // says so in as many words, and `baseVelocity01` sorts the pair before playing it - so
+        // max below min is a state a host lane, an MCP client or a session file can put them
+        // in. Unsorted, `wantSpan` comes out negative, `setSpan` clamps it to zero, and
+        // `settled` below can then never be satisfied: the pull re-runs on every tick for the
+        // rest of the session, which is the exact defect the guard was written to end. It also
+        // drew a zero-width band and read out a single number while the engine went on
+        // spreading across the whole pair - the readout disagreeing with the sound, from the
+        // one function whose job is to keep them saying the same thing.
+        const double lo = juce::jmin(rawLo, rawHi), hi = juce::jmax(rawLo, rawHi);
         // **The derived ends are compared rounded, because that is the form they are stored in.**
         // Still the ends and not the raw span, which is what preserves a latent span a rail is
         // holding back (reach() clamps to the nearer rail, so the knob can carry more span than
@@ -1191,8 +1206,28 @@ void KeysEditor::syncPadRangeKnobs()
         const auto rounded = [](double v) { return std::floor(v + 0.5); };
         if (rounded(rk.rangeLo()) == rounded(lo) && rounded(rk.rangeHi()) == rounded(hi))
             return;
-        rk.face().setValue(rounded((lo + hi) * 0.5), juce::dontSendNotification);
-        rk.setSpan((hi - lo) * 0.5);
+        // **And stop at the fixed point, for a pair this control cannot hold exactly.** The
+        // face snaps to whole units and the band is symmetric about it, so an odd-width pair
+        // has no representation here at all: 30 and 81 give a centre of 55.5, which rounds to
+        // 56, whose ends are 30.5 and 81.5 - and those round back to 31 and 82, so the test
+        // above can never be satisfied. Such a pair arrives from a host lane, MCP or a session
+        // file, never from a gesture here, and without this the pull re-ran on every editor
+        // tick for the rest of the session while the comment over this function claimed it
+        // early-outs. Pull it once, land as near as the representation allows, and recognise
+        // that state next time rather than chasing it.
+        //
+        // The residue is half a unit, and it is drawn rather than stored: the band sits at
+        // 30.5-81.5 where the parameters say 30-81, and the readout truncates to "30-81".
+        // The parameters are untouched either way - nothing here writes them.
+        const auto wantFace = rounded((lo + hi) * 0.5);
+        const auto wantSpan = (hi - lo) * 0.5;
+        // RangeKnob's own tolerance, not a second copy of it: this asks whether the control
+        // has settled, so it has to agree with what the control calls settled.
+        if (RangeKnob::nearlyEqual(rk.face().getValue(), wantFace)
+            && RangeKnob::nearlyEqual(rk.getSpan(), wantSpan))
+            return;
+        rk.face().setValue(wantFace, juce::dontSendNotification);
+        rk.setSpan(wantSpan);
         rk.refresh();
     };
     sync(strumKnob, "chordStrum", "chordStrumMax");
@@ -2685,9 +2720,8 @@ void KeysEditor::timerCallback()
     // the same read-back the arp's two Humanize knobs need, and for the same reason: a session
     // load, a host lane or an MCP client moves the low end and nothing else would tell the
     // ring. setSpan no-ops when the value is unchanged, so this never fights an open drag.
-    //
-    // Sorted, because the pair can arrive the wrong way round from host automation and a
-    // negative span is not a thing to draw.
+    // The sorting that used to be described here moved with the pull into syncPadRangeKnobs(),
+    // which is where the reason it is needed is now written down.
     //
     // **Nothing greys on Humanize any more, here or anywhere.** Both this comment and a
     // `const bool hum` above it described a greying pass that went when Humanize's tick box
@@ -2702,7 +2736,7 @@ void KeysEditor::timerCallback()
     // *full* width - and they were a leftover from before the band was centred on the face
     // (2026-08-19), when the span really was the whole width reaching back from one end. Once
     // the span became the reach on *each* side, that call handed the knob twice the number it
-    // meant, ten times a second: the band doubled every tick until it saturated against the
+    // meant, thirty times a second: the band doubled every tick until it saturated against the
     // nearer wall, which is why Strum sat at "0-128 ms" with its knob at 64 and Humanize at
     // "0-82" with its knob at 41 - `[0, 2x the knob]` in both cases, the arithmetic's own
     // signature. They also ran with no `spanDragging()` guard, so they did it while the halo
@@ -2726,6 +2760,10 @@ void KeysEditor::timerCallback()
     }
     // Both lamps are switches over a parameter no attachment here watches, so the lamp *and*
     // the arc are refreshed each tick - a host lane or a session load moves them too.
+    // RangeKnob::refresh() compares the drawn state before it writes anything, which it did
+    // not until 2026-08-23: these two lines sat under the "compares before it writes" comment
+    // above while asking for four repaints a tick unconditionally, at 30 Hz, for the life of
+    // the window.
     strumKnob.refresh();
     humanKnob.refresh();
 
