@@ -300,6 +300,60 @@ had been spending on them. This supersedes the three-zones bullet above it.
   34 px directly for that reason, and counts them, so a name-matched sweep that stops matching
   fails instead of passing by finding nothing.
 
+**The arp opens quieter and steadier, and a harmony voice is as loud as the note it thickens
+(2026-08-23).** Owen: *"want default arp settings"*, holding up a card reading VEL 22-62 and
+H.TIME 0-22, then - shown that harmony rolled its own loudness - *"harmony same velocity"*.
+
+- **Three defaults moved, and they are one decision rather than three**: `arpVelLevel` 100 -> 42,
+  `arpHumanVel` 18 -> 20, `arpHumanize` 24 -> 11. H.TIME now draws **0-22** and plays 0 to about
+  5 ms late where it drew 0-48 and played up to 12; VEL draws **22-62**. The level is the part
+  worth understanding: Humanize Velocity's reach stops at `min(level, 127 - level)`, so **a level
+  of 100 caps its ring at +/-27 however far the ring is wound**, and a level of 42 lets it reach
+  +/-42. Lowering the level is what gives the ring somewhere to go, which is why the two could not
+  be chosen separately. `StateTests` pins that relationship rather than either number.
+  **Defaults only.** A saved session stores all three and keeps what it said, and a session old
+  enough to predate `arpVelLevel` does not take the default at all - `migrateVelLevel` computes a
+  level that plays it at the loudness it was saved at. The pads' own Humanize band is untouched,
+  so the **76** midpoint that migration converts against still means what it meant.
+- **A hit and its harmony voices share one velocity draw.** The Humanize Velocity draw was made
+  per *emitted* hit, in the ratchet loop, and by then a harmony voice is an ordinary hit - so a
+  voice rolled its own number and could sit up to `2 * humanVel` from the note it was thickening.
+  At the shipping defaults that is the full width of the band - a voice at 62 against the note it
+  thickens at 22 - which is a second player rather than a thickening of the first. **Take the
+  magnitude from `2 * humanVel` and the reach clamp, not from a remembered pair of numbers**: the
+  reach stops at `min(level, 127 - level)`, so at 42/20 nothing outside 22-62 is reachable at all,
+  and a wider-sounding example can only have come from settings that are not the defaults. `ArpEngine::Hit` carries **`src`**, the
+  index of the hit it harmonises (or its own), and the draw is made once per source and read by
+  its voices.
+  **Per ratchet, deliberately.** The draw stays *inside* the ratchet loop, so each repeat of a
+  ratcheted step still draws afresh and a roll keeps its life; what is shared is a hit and its
+  harmony *within* one repeat. Hoisting it to once per step would have flattened every repeat to
+  one velocity, which is a different feature and was not the ask.
+  **This is what `Hit::vel` is for again**, and the dead field is the whole reason the bug was
+  invisible: it had been written at every call site and never read since `velLevel` replaced the
+  incoming chord's velocity (2026-08-18), and the harmony loop dutifully copied it - so the code
+  read exactly as though a voice already took its source's loudness. `addHit` no longer takes a
+  velocity at all. **The shape to remember: a field that is copied but never read makes the copy
+  look like the feature.**
+  **Every voice, no carve-out - and the first cut had one** (fixed 2026-08-24, in review). `src`
+  reached the two *fixed* per-line voices and stopped there: the Harmony **lane**'s two modes
+  still called `addHit` without naming a source, so they stayed their own source and went on
+  rolling an independent draw. The reported bug surviving by the one route the fix did not cover,
+  and *inconsistent* rather than merely missed - a fixed voice stacked on a lane-harmony hit did
+  inherit that hit's velocity, so within one step some voices shared and some did not.
+  **`addHit` returns the index it wrote or found**, which is what made this a one-argument fix,
+  and the *found* half is load-bearing: on the dedup path the voice must name the hit that is
+  actually sounding rather than the one that was refused, or it reads a velocity nobody drew.
+  **The shape to remember: a fix that names its call sites one at a time is only as complete as
+  that list, and nothing checks the list.** Ask what *else* reaches the thing being fixed.
+  **Timing is still per voice**, so a harmony voice takes its own H.TIME lateness draw and can
+  flam against its source. That is the identical question one axis over and is deliberately left
+  as it was, not overlooked - it was not asked for, and a flam is sometimes what a thickening
+  wants. `ArpTests` pins the velocity half for both routes, with a guard that the draw still
+  varies between steps so the pairing cannot pass on a flat run, and **a ratchet case for the
+  per-ratchet rule above** - without one the sharing tests run at ratchets = 1, where sharing and
+  hoisting are indistinguishable, and the hoist is a one-line move away.
+
 **Every range knob opens lit, and a page can be cleared again (2026-08-23).** Owen: *"we need to
 be able to clear all the chords on a pad page"*, and *"I want the default strum up, humanize,
 velocity, and H.TIME to have the range on and enabled by default"* - then, asked, he took the
@@ -312,8 +366,10 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   - and on three of the four the switch **is** the lamp on the knob, so the only route to the
   feature was to already know the satellite was there. Now: **Strum 30-80 ms** (direction Up,
   unchanged - it has been the default since it was a parameter), **Humanize on at 56-96**,
-  **`arpHumanVel` 18**, **`arpHumanize` 24** with its ring already open, which draws as 0-48 and
-  plays as 0 to 12 ms late.
+  **`arpHumanVel` 20**, **`arpHumanize` 11** with its ring already open, which draws as 0-22 and
+  plays as 0 to about 5 ms late, and **`arpVelLevel` 42**. Those three read 18, 24 and 100 for
+  the few hours between this entry and **The arp opens quieter and steadier** at the top of this
+  section, which is where they moved and why.
 - **A parameter with two writers, again: the pad range knobs were fighting the hand**
   (2026-08-23, Owen: "feels like it's fighting me... is there a race condition"). `timerCallback`
   pushed `abs(hi - lo)` - the band's **full** width - into `RangeKnob::setSpan`, whose span is the
@@ -378,8 +434,9 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   against a different number. **The general rule: widening a default band is free, sliding one
   is not.**
   **The documented shipping band is asserted, not only its two parameters** (2026-08-23, in
-  review). The rewrite dropped the only check that `arpHumanize` 24 with a fully open ring
-  actually *draws* 0-48 - `StateTests` pins the parameters, and the two replacement tests used
+  review). The rewrite dropped the only check that `arpHumanize` with a fully open ring actually
+  *draws* the band this file names - 0-22 today, 0-48 when this was written -
+  `StateTests` pins the parameters, and the two replacement tests used
   synthetic 0..200 knobs - so a change to either default or to `reach()`'s clamp could move a
   band this file names as shipped, with a green suite. `LayoutTests` builds the knob from the
   APVTS's own ranges and defaults, the way `ArpPanel` does.
@@ -390,10 +447,12 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   on a connection timeout on an offline runner. It cannot be a compile-time gate: `PluginEditor.cpp`
   is compiled into `Keys_SharedCode`, which the test target *links* rather than builds.
 - **A ring wider than its rail allows is a lie on screen.** `arpHumanVel`'s reach stops at
-  `min(level, 127 - level)`, so at VelLevel's own default of 100 the knob can never reach past
-  **+/-27** however far you turn it. 18 sits under that with room to spare; anything at or above
-  27 would have looked like a default that does nothing. `StateTests` pins the relationship
-  rather than the number, so raising either one has to answer for the other.
+  `min(level, 127 - level)`, so the level beside it decides how far the ring can ever reach: at
+  the old VelLevel default of 100 the knob could never pass **+/-27** however far you turned it,
+  and at 42 it reaches **+/-42**. The default ring sits under that ceiling with room to spare; a
+  ring at or above it is a default that does nothing. `StateTests` pins the relationship rather
+  than either number, so moving one has to answer for the other - which is what made the level
+  and the ring one decision rather than two when they moved on 2026-08-23.
 - **These are default changes and nothing else.** A saved session stores all five parameters and
   keeps what it said. What moves is a new instance, and a session old enough to predate one of
   the arp parameters, which takes the new default for it - lines B, C and D are off by default,

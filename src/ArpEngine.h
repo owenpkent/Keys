@@ -1713,7 +1713,15 @@ private:
         // Resolve the step into pitches once, before the ratchet loop repeats them. Three
         // lanes fold in here, and all three want the note *after* the sequence walk has
         // chosen one, not instead of it.
-        struct Hit { int note; float vel; int chan; };
+        // `src` is the index of the hit this one harmonises, or its own index if it is not a
+        // harmony voice - which is what lets a voice take the same velocity draw as the note it
+        // is thickening (2026-08-23, Owen: "harmony same velocity"). `vel` is **decided in the
+        // ratchet loop below and not here**: it used to carry the incoming note's velocity,
+        // which has been dead weight since `velLevel` replaced it (2026-08-18) - written at
+        // every call site, copied by the harmony voices, and then ignored by the one place that
+        // emits a note. That dead copy is exactly why the voice loop already looked as though it
+        // shared its source's loudness. Now the field means something and it does.
+        struct Hit { int note; int chan; int src; float vel; };
         // Five times the base capacity: the line has two harmony voices and a voice may name
         // **two** intervals (2026-08-19; the second interval 2026-08-21), so between them they
         // can add four copies of every base hit. The comment said three while a voice could
@@ -1726,11 +1734,14 @@ private:
         // Value-initialised. Only the first `hitCount` entries are ever read, and addHit is the
         // only writer, so the tail is dead either way - but the dedup scan below reads
         // hits[i].note for i < hitCount, and cppcheck cannot prove those were written, so the
-        // CI gate treats it as an uninitialised read. Zeroing about 8 KB once per *fired step*
+        // CI gate treats it as an uninitialised read. Zeroing about 11 KB once per *fired step*
         // is immaterial next to what the rest of fireStep does, and it costs no allocation and
         // no lock, so the audio-thread rule is untouched. Well-defined beats provably-unread.
-        // (680 entries at 12 bytes, up from 408 when the capacity was *3. Still immaterial, but
-        // it is the number to weigh if a third harmony voice is ever proposed.)
+        // (680 entries at **16** bytes - about 10.6 KB - up from 408 entries when the capacity
+        // was *3, and from 12 bytes before Hit carried `src` on 2026-08-23. That field grew the
+        // per-step memset by a third and this line did not move with it for a day, which is the
+        // standing lesson wearing different clothes: **a size asserted in a comment goes stale
+        // silently.** It is still the number to weigh if a third harmony voice is proposed.)
         Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 5] {};
         int hitCount = 0;
         const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
@@ -1749,14 +1760,24 @@ private:
         // The harmony loop's own guard only ever caught a copy that clamped onto *its own*
         // source. Deduping here covers every route into hits[] at once, which is where a rule
         // about the whole step belongs.
-        const auto addHit = [&](int note, float vel, int chan)
+        // `src` defaults to "this hit is its own source"; only the harmony voices pass one.
+        // Returns the index of the hit this pitch now occupies - the existing one when the
+        // dedup above claims it, the new one otherwise, and -1 only on overflow. A harmony
+        // voice needs that index to name its source, and on the dedup path it must name the
+        // hit that is *actually sounding* rather than the one that was refused: thickening a
+        // hit that was dropped would leave the voice reading a velocity nobody drew.
+        const auto addHit = [&](int note, int chan, int src = -1)
         {
             const int n = juce::jlimit(0, 127, note);
             for (int i = 0; i < hitCount; ++i)
                 if (hits[i].note == n && hits[i].chan == chan)
-                    return;
+                    return i;
             if (hitCount < (int) (sizeof(hits) / sizeof(hits[0])))
-                hits[hitCount++] = { n, vel, chan };
+            {
+                hits[hitCount] = { n, chan, src >= 0 ? src : hitCount, 0.0f };
+                return hitCount++;
+            }
+            return -1;
         };
         const auto place = [&](int note)
         {
@@ -1780,7 +1801,7 @@ private:
             // What is held decides only the velocity and the channel.
             for (int i = 0; i < chordCount; ++i)
                 addHit(place(p.chords->note[(size_t) (chordSel - 1)][(size_t) i].load(std::memory_order_relaxed)),
-                       lead.velocity * velScale, lead.channel);
+                       lead.channel);
         }
         else
         {
@@ -1808,7 +1829,15 @@ private:
                 // do.
                 const int played = mutatedPitch(p, place(src.note + entry.semitoneOffset),
                                                 globalStep, k);
-                addHit(played, src.velocity * velScale, src.channel);
+                // The index this pitch landed at, so the Harmony *lane*'s voice below can name
+                // it as its source and take its velocity draw (2026-08-24). The fixed per-line
+                // voices further down have done this since the draw was shared; the lane's two
+                // modes were left passing the default, so they went on rolling their own number
+                // and a lane harmony could still arrive `2 * humanVel` from the note it was
+                // thickening - the reported bug surviving by the one route the fix did not
+                // reach. **One rule, no carve-out**: every voice that thickens a hit reads that
+                // hit's velocity, whether the interval came from a lane or from a card.
+                const int srcHit = addHit(played, src.channel);
 
                 // Harmony: a second voice, in one of two modes (harmonyMode, 2026-08-14).
                 // Mode 0, the original: this many chord tones above the one just played,
@@ -1827,7 +1856,7 @@ private:
                     const int playedClamped = juce::jlimit(0, 127, played);
                     const int subClamped = juce::jlimit(0, 127, played + kSubharmonicSemis[juce::jlimit(0, 7, harmony)]);
                     if (subClamped != playedClamped)
-                        addHit(subClamped, src.velocity * velScale, src.channel);
+                        addHit(subClamped, src.channel, srcHit);
                 }
                 else if (harmony > 0)
                 {
@@ -1835,7 +1864,7 @@ private:
                     const auto& hEntry = seq[(size_t) (h % seqCount)];
                     const auto& hSrc = held[(size_t) juce::jlimit(0, heldCount - 1, hEntry.heldIndex)];
                     addHit(place(hSrc.note + hEntry.semitoneOffset + 12 * (h / seqCount)),
-                           hSrc.velocity * velScale, hSrc.channel);
+                           hSrc.channel, srcHit);
                 }
             }
         }
@@ -1880,7 +1909,7 @@ private:
                     {
                         const int target = juce::jlimit(0, 127, hits[k].note + iv);
                         if (target != hits[k].note)
-                            addHit(target, hits[k].vel, hits[k].chan);
+                            addHit(target, hits[k].chan, k);
                     }
                 }
             }
@@ -1898,6 +1927,35 @@ private:
         if (p.volume <= 0 || p.velLevel <= 0)
             hitCount = 0;
 
+        // The line's level plus this draw's share of the Humanize Velocity band. Lifted out of
+        // the hit loop so a hit and its harmony voices can be handed **one** answer rather than
+        // each rolling its own - see where it is called, and Hit::src.
+        const auto humanisedVelocity = [&]
+        {
+            // **The line's own level is the velocity, not the one that arrived** (2026-08-18).
+            // The Velocity lane, the ramp and Drift all still shape it through velScale exactly
+            // as they did; only the *base* moved from the incoming chord to the knob. See
+            // Params::velLevel.
+            float v = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
+            if (p.humanVel > 0)
+            {
+                // In **MIDI velocity units** since 2026-08-18, and **either side of the level**
+                // since 2026-08-19 (Owen, on the halo: "should be equal from center"): the knob
+                // is the band's centre, the ring is how far a hit may land above or below it,
+                // uniform across the band. The reach stops where a rail is nearer - the level
+                // itself, or 127 less it - so the band stays equal on both sides rather than
+                // piling up against an end. humanVelSpan, the ring's own former sub-span, is
+                // pinned at its default by the UI and no longer read: a centred band has no
+                // ceiling for a sub-span to hang from.
+                const int level = juce::jlimit(0, 127, p.velLevel);
+                const int reach = juce::jmin(juce::jlimit(0, 127, p.humanVel),
+                                             juce::jmin(level, 127 - level));
+                const double u = (double) (rng() % 1000u) / 1000.0;
+                v += (float) ((2.0 * u - 1.0) * (double) reach / 127.0) * velScale;
+            }
+            return v;
+        };
+
         for (int r = 0; r < ratchets; ++r)
         {
             const int at = offset + (int) std::floor(subLen * r);
@@ -1905,42 +1963,38 @@ private:
 
             for (int k = 0; k < hitCount; ++k)
             {
-                const auto& hit = hits[k];
+                auto& hit = hits[k];
                 const int note = hit.note;
 
                 int on = at;
-                // **The line's own level is the velocity, not the one that arrived**
-                // (2026-08-18). `hit.vel` is the source note's velocity times velScale; what
-                // replaces it is this line's level times the same velScale, so the Velocity lane,
-                // the ramp and Drift all still shape it exactly as they did - only the *base*
-                // moved from the incoming chord to the knob. See Params::velLevel.
-                float vel = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
-                // Late, never early: a nudge that can rush the grid is what Swing is for,
-                // and an early hit would need to fire before the step it belongs to. Both
-                // wanders are centred on their knob since 2026-08-19 - the draw lands either
-                // side of it, equally - so "never louder" retired with the halo redesign:
-                // the level is the band's middle now, not its top. Two knobs since
-                // 2026-08-02 (humanize is the timing, humanVel the velocity), so each half
-                // only runs when its own knob is up.
+                // Late, never early: a nudge that can rush the grid is what Swing is for, and
+                // an early hit would need to fire before the step it belongs to. So H.TIME's
+                // band is the one that is *not* centred on its knob - the low rail is
+                // zero-late - where the velocity half genuinely is (2026-08-19). That half is
+                // drawn in humanisedVelocity above and explained there; this branch is the
+                // timing alone, and only runs when its own knob is up.
                 if (maxLate > 0)
                     on += minLate + (int) (rng() % (unsigned) (maxLate - minLate + 1));
-                if (p.humanVel > 0)
-                {
-                    // In **MIDI velocity units** since 2026-08-18, and **either side of the
-                    // level** since 2026-08-19 (Owen, on the halo: "should be equal from
-                    // center"): the knob is the band's centre, the ring is how far a hit may
-                    // land above or below it, uniform across the band. The reach stops where
-                    // a rail is nearer - the level itself, or 127 less it - so the band stays
-                    // equal on both sides rather than piling up against an end. humanVelSpan,
-                    // the ring's own former sub-span, is pinned at its default by the UI and
-                    // no longer read: a centred band has no ceiling for a sub-span to hang
-                    // from.
-                    const int level = juce::jlimit(0, 127, p.velLevel);
-                    const int reach = juce::jmin(juce::jlimit(0, 127, p.humanVel),
-                                                 juce::jmin(level, 127 - level));
-                    const double u = (double) (rng() % 1000u) / 1000.0;
-                    vel += (float) ((2.0 * u - 1.0) * (double) reach / 127.0) * velScale;
-                }
+                // **A hit and its harmony voices share one velocity draw** (2026-08-23, Owen:
+                // "harmony same velocity"). A hit that is its own source draws; a harmony voice
+                // reads the answer its source already stored. Voices are always appended after
+                // the hit they copy and this loop runs forward, so the source is decided by the
+                // time a voice asks for it.
+                //
+                // **Per ratchet, deliberately.** This sits inside the ratchet loop, so each
+                // repeat of a ratcheted step still draws afresh and a roll keeps its life -
+                // deciding it once per step would have flattened every repeat to one velocity,
+                // which is a different feature and not the one that was asked for. What is
+                // shared is a hit and its harmony *within* one repeat.
+                if (hit.src == k)
+                    hit.vel = humanisedVelocity();
+                // Every voice is appended after the hit it copies, so its source is always at a
+                // lower index and has already drawn on this ratchet. Asserted rather than left
+                // in prose: a voice derived from a voice would read a source that has not drawn
+                // yet, which on r == 0 is the value-initialised 0.0f clamped to 1/127 - an
+                // inaudible note and no error anywhere.
+                jassert(hit.src >= 0 && hit.src <= k);
+                float vel = hits[hit.src].vel;
                 // The 0.05 floor protects programmed dynamics: a Velocity lane at 0 or a
                 // hard H.VEL draw must stay audible rather than turn into a note-off. The
                 // line's fader multiplies *after* it, because turning a line down is

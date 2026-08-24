@@ -46,8 +46,12 @@ it was there. New defaults:
 | --- | --- | --- | --- |
 | Strum (pads) | 0-0 ms, unlit | **30-80 ms**, direction Up | a rake with its own speed per chord |
 | Humanize (pads) | off, 64-88 | **on**, 56-96 | velocity varies around the same 76 |
-| VEL ring (arp) | 0 | **18** | hits land +/-18 velocity either side of the level |
-| H.TIME (arp) | 0 | **24**, ring already open | 0 to 12 ms late, about 6 typical |
+| VEL ring (arp) | 0 | **20** | hits land +/-20 either side of a level of 42, so 22-62 |
+| H.TIME (arp) | 0 | **11**, ring already open | 0 to about 5 ms late |
+
+The two arp rows read **18** and **24** for a few hours between this entry being written and
+*the arp opens quieter and steadier* below, which is where the level moved 100 -> 42 and took
+them with it. Nothing shipped on those numbers; this table lists what a new instance opens on.
 
 Humanize's band was **widened around its centre, not moved**: Humanize *off* plays the band's
 midpoint, and `migrateVelLevel` converts an old session's arp level against that same 76, so
@@ -149,6 +153,64 @@ and taking the face out of the *ceiling* - which was right, and is the entry abo
 it. They are two questions now and two functions: `spanMax()` is how far the gesture reaches and
 never reads the face; `haloIsLive()` is whether there is a band to open and has to. The stored
 span survives untouched, so a step off the rail brings it straight back.
+
+### Changed: the arp opens quieter and steadier
+
+`arpVelLevel` 100 -> 42, and, adjusting the ranges-on entry above from within the same unreleased
+round, `arpHumanVel` 18 -> 20 and `arpHumanize` 24 -> 11 (Owen: "want default arp settings").
+H.TIME draws **0-22** and plays 0 to about 5 ms late where it drew 0-48 and played up to 12; VEL
+draws **22-62**. The table in that entry lists the three as they ship.
+
+The three are one decision. Humanize Velocity's reach stops at `min(level, 127 - level)`, so a
+level of 100 capped its own ring at +/-27 however far the ring was wound; at 42 the ring reaches
++/-42. Lowering the level is what gives it somewhere to go.
+
+**Defaults only.** A saved session stores all three and keeps what it said, and one old enough to
+predate `arpVelLevel` does not take the default at all - `migrateVelLevel` computes a level that
+plays it at the loudness it was saved at. The pads' Humanize band is untouched, so the 76 midpoint
+that migration converts against still means what it meant.
+
+### Fixed: a harmony voice was as loud as it liked
+
+The Humanize Velocity draw was made per *emitted* hit, inside the ratchet loop, and by then a
+harmony voice is an ordinary hit - so every voice rolled its own number and could land up to
+`2 * humanVel` from the note it was thickening. At the shipping defaults that is the full width of
+the band: a voice at 62 against the note it thickens at 22, a second player rather than a
+thickening of the first. Wind `humanVel` up against a level near the middle and the gap is 2 x 60,
+most of the MIDI range.
+
+`ArpEngine::Hit` carries `src` now, the index of the hit it harmonises or its own, and the draw is
+made once per source hit and read by its voices. It stays **inside** the ratchet loop on purpose,
+so each repeat of a ratcheted step still draws afresh - what is shared is a hit and its harmony
+within one repeat, not a whole step flattened to one velocity.
+
+This is `Hit::vel` doing a job again, and the dead field is why the bug was invisible: it had been
+written at every call site and never read since `velLevel` replaced the incoming chord's velocity
+(2026-08-18), and the harmony loop dutifully copied it - so the code read exactly as though a
+voice already took its source's loudness. `addHit` no longer takes a velocity at all.
+
+Timing is unchanged: a voice still takes its own H.TIME lateness draw and can flam against its
+source. Same question one axis over, deliberately left alone.
+
+### Fixed: the harmony fix above missed the Harmony lane
+
+`Hit::src` reached the two *fixed* per-line harmony voices and stopped there. The Harmony **lane**'s
+two modes - the chord tone above and the subharmonic below - still called `addHit` without naming a
+source, so each stayed its own source and went on rolling its own Humanize Velocity draw: the same
+bug, by the one route the fix did not cover. It was also inconsistent, since a fixed voice stacked
+on a lane-harmony hit *did* inherit that hit's velocity, so within one step some voices shared and
+some did not. `addHit` returns the index it wrote or found now, and the lane's voices name it.
+
+Also from that review, none of it audible: `Hit` grew to 16 bytes when it gained `src` and the
+comment budgeting the per-step memset still said 12; the assert meant to pin VEL's ring against
+what its level allows compared a hardcoded 20 rather than reading the parameter, so raising that
+default would have shipped a ring past its own ceiling with a green suite; VEL's documented 22-62
+band gained the drawn-band test H.TIME already had; and the per-ratchet rule the round argued for
+in three places gained the ratchet case that distinguishes it. The user guide and the two arp rows
+in *every range knob opens lit* above still quoted the defaults as they read for a few hours
+mid-round (VEL ring 18, H.TIME 24) rather than as they ship, and the claim that a stray voice could
+arrive "at MIDI 105 against a source at 22" was taken from the test's exaggerated settings - at the
+shipping defaults the reach clamp puts the whole band inside 22-62.
 
 ### Fixed: five things the round above got half-right
 
