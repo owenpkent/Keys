@@ -819,6 +819,45 @@ public:
                    "which only holds because the ring is open wider than that");
         }
 
+        beginTest("VEL opens as the band the docs say it does");
+        {
+            // H.TIME's twin, and added for the same reason one build later: the round that moved
+            // these defaults documented a second band - CLAUDE.md, CHANGELOG and CONTROLS all
+            // state "VEL draws 22-62" - whose only guard was StateTests' two parameter values
+            // and the ceiling relationship beside them. Neither of those looks at what is drawn,
+            // so a change to reach()'s clamp or to spanMax()'s half-the-travel bound could move
+            // this band with the whole suite green; H.TIME would have caught the same change
+            // only because H.TIME happens to have a test.
+            //
+            // VEL's ring is `arpHumanVel` **directly**, not a span of the face's own value the
+            // way H.TIME's is, so this is also the coverage for the one RangeKnob whose ring
+            // carries a parameter with a range of its own.
+            Host h;
+            const auto faceId = KeysProcessor::arpParamId(0, KeysProcessor::apVelLevel);
+            const auto ringId = KeysProcessor::arpParamId(0, KeysProcessor::apHumanVel);
+            const auto faceRange = h.processor.apvts.getParameterRange(faceId);
+            const auto ringRange = h.processor.apvts.getParameterRange(ringId);
+
+            RangeKnob rk;
+            rk.face().setRange((double) faceRange.start, (double) faceRange.end, 1.0);
+            rk.setSpanMax((double) (ringRange.end - ringRange.start));
+            rk.face().setValue((double) h.processor.apvts.getRawParameterValue(faceId)->load(),
+                               juce::dontSendNotification);
+            rk.setSpan((double) h.processor.apvts.getRawParameterValue(ringId)->load());
+
+            expectEquals(rk.face().getValue(), 42.0, "the level is the band's centre");
+            expectEquals(rk.rangeLo(), 22.0, "the band opens 20 under the level");
+            expectEquals(rk.rangeHi(), 62.0, "and 20 over it");
+            // The band is the *ring*, not a rail: unlike H.TIME - whose low end is clamped by
+            // zero and so equals the face - VEL sits far enough from both ends of 0..127 that
+            // the ring reaches its whole width. That is what the level coming down to 42 bought,
+            // so it is the half worth stating rather than the two numbers.
+            expectEquals(rk.reach(), rk.getSpan(), "the ring is not stopped by a rail");
+            expect(rk.getSpan() <= juce::jmin(rk.face().getValue(),
+                                              faceRange.end - rk.face().getValue()),
+                   "a ring wider than the nearer rail allows would be a lie on screen");
+        }
+
         beginTest("the band stays symmetric, so a halo drag can never move the knob");
         {
             // **The invariant the pad knobs are built on.** Strum and Humanize are stored as

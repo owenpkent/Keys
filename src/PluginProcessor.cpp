@@ -450,17 +450,18 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // velocity. The arp has never been humanized - Humanize proper lives in noteOn, which the
     // arp's own notes never pass through - so this is the first thing that touches its feel.
     //
-    // **24 since 2026-08-23**, where it was 0 (Owen: "... and H.TIME to have the range on and
-    // enabled by default"). The knob is the *centre* of the wander and HumanizeSpan below is
-    // already fully open by default, so 24 draws as 0-48 on the card and plays as 0 to 12 ms
-    // late, about 6 ms typical - the reach stops at the low rail, which is what keeps a hit
-    // from ever landing early. Every line takes it, but B, C and D are off by default, so what
-    // a fresh instance actually hears is line A a few milliseconds behind the grid.
-    // **11 since 2026-08-23**, where it was 24 (Owen, holding up a card reading "0-22": "want
-    // default arp settings"). With the ring open the face is the band's centre and the band is
-    // clamped by the nearer rail, so 11 draws as **0-22** and plays 0 to about 5 ms late where
-    // 24 drew 0-48 and played up to 12. Same feature, half the wander: enough that a run is not
-    // machine-stiff, little enough that it never reads as sloppy against the grid.
+    // **11 since 2026-08-23**, where it was 0 (Owen: "... and H.TIME to have the range on and
+    // enabled by default", then, holding up a card reading "0-22": "want default arp settings").
+    // The knob is the *centre* of the wander and HumanizeSpan below is already fully open by
+    // default, so 11 draws as **0-22** on the card and plays 0 to about 5 ms late - the reach
+    // stops at the low rail, which is what keeps a hit from ever landing early. Every line takes
+    // it, but B, C and D are off by default, so what a fresh instance actually hears is line A a
+    // few milliseconds behind the grid. Enough that a run is not machine-stiff, little enough
+    // that it never reads as sloppy against the grid.
+    //
+    // It read **24** (0-48, up to 12 ms) for a few hours the same day, between that first ask
+    // and the second. Nothing shipped on it; the number is here only so a changelog or a
+    // screenshot from that window can be placed.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Humanize"), 1 }, nm + " Humanize", 0, 100, 11));
 
     // The two the lines brought with them, and the only parameters an older session sees
@@ -505,13 +506,14 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // wander. What a *set* value means does change, since the whole knob's
     // meaning did; a host automation lane for it rescales.
     //
-    // **18 since 2026-08-23**, where it was 0 (Owen, the same ask as H.TIME above). It reaches
+    // **20 since 2026-08-23**, where it was 0 (Owen, the same ask as H.TIME above). It reaches
     // either side of VelLevel, and the reach stops at the nearer rail - min(level, 127 - level)
-    // - so the level beside it is what decides how far this can ever reach. **20 since
-    // 2026-08-23**, alongside a level that moved 100 -> 42 in the same stroke: at the old 100
+    // - so the level beside it is what decides how far this can ever reach. It moved alongside a
+    // level that went 100 -> 42 in the same stroke, and the two are one decision: at the old 100
     // the ceiling was +/-27 however far the ring was wound, and at 42 it is +/-42, so the knob
     // has somewhere to go. The number to remember before widening it further is still that
-    // ceiling - past `min(level, 127 - level)` this stops doing anything at all.
+    // ceiling - past `min(level, 127 - level)` this stops doing anything at all. (It read **18**
+    // for a few hours between the two asks; nothing shipped on it.)
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 127, 20));
     // The bipolar velocity control that replaced VOL on the macro row (Owen, same day: "it
     // should start in the middle so you can turn it up or down"). 0 plays velocities as they

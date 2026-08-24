@@ -375,9 +375,16 @@ public:
             // moving one default has to answer for the other. The level came down to 42 on
             // 2026-08-23 partly to give this ceiling somewhere to go: at the old 100 it was 27
             // whatever the ring said.
+            //
+            // **Both sides are read, neither is a literal.** Written with the ring's 20 spelled
+            // out, this tested `20 <= 42` for ever: raise the ring's default and the value
+            // assert above fails loudly and points at itself, while this one goes on passing -
+            // so a ring past its own ceiling would ship green, which is the exact "lie on
+            // screen" the block exists to catch.
             const float level = paramOf(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apVelLevel));
+            const float ring = paramOf(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apHumanVel));
             expectWithinAbsoluteError(level, 42.0f, 0.51f, "VEL's default level");
-            expect(20.0f <= juce::jmin(level, 127.0f - level),
+            expect(ring <= juce::jmin(level, 127.0f - level),
                    "VEL's default ring fits inside what its default level allows");
         }
 

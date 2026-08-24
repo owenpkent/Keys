@@ -318,8 +318,11 @@ H.TIME 0-22, then - shown that harmony rolled its own loudness - *"harmony same 
 - **A hit and its harmony voices share one velocity draw.** The Humanize Velocity draw was made
   per *emitted* hit, in the ratchet loop, and by then a harmony voice is an ordinary hit - so a
   voice rolled its own number and could sit up to `2 * humanVel` from the note it was thickening.
-  At the shipping defaults that is a harmony arriving at MIDI 105 against a source at 22, which is
-  a second player rather than a thickening of the first. `ArpEngine::Hit` carries **`src`**, the
+  At the shipping defaults that is the full width of the band - a voice at 62 against the note it
+  thickens at 22 - which is a second player rather than a thickening of the first. **Take the
+  magnitude from `2 * humanVel` and the reach clamp, not from a remembered pair of numbers**: the
+  reach stops at `min(level, 127 - level)`, so at 42/20 nothing outside 22-62 is reachable at all,
+  and a wider-sounding example can only have come from settings that are not the defaults. `ArpEngine::Hit` carries **`src`**, the
   index of the hit it harmonises (or its own), and the draw is made once per source and read by
   its voices.
   **Per ratchet, deliberately.** The draw stays *inside* the ratchet loop, so each repeat of a
@@ -332,11 +335,24 @@ H.TIME 0-22, then - shown that harmony rolled its own loudness - *"harmony same 
   read exactly as though a voice already took its source's loudness. `addHit` no longer takes a
   velocity at all. **The shape to remember: a field that is copied but never read makes the copy
   look like the feature.**
+  **Every voice, no carve-out - and the first cut had one** (fixed 2026-08-24, in review). `src`
+  reached the two *fixed* per-line voices and stopped there: the Harmony **lane**'s two modes
+  still called `addHit` without naming a source, so they stayed their own source and went on
+  rolling an independent draw. The reported bug surviving by the one route the fix did not cover,
+  and *inconsistent* rather than merely missed - a fixed voice stacked on a lane-harmony hit did
+  inherit that hit's velocity, so within one step some voices shared and some did not.
+  **`addHit` returns the index it wrote or found**, which is what made this a one-argument fix,
+  and the *found* half is load-bearing: on the dedup path the voice must name the hit that is
+  actually sounding rather than the one that was refused, or it reads a velocity nobody drew.
+  **The shape to remember: a fix that names its call sites one at a time is only as complete as
+  that list, and nothing checks the list.** Ask what *else* reaches the thing being fixed.
   **Timing is still per voice**, so a harmony voice takes its own H.TIME lateness draw and can
   flam against its source. That is the identical question one axis over and is deliberately left
   as it was, not overlooked - it was not asked for, and a flam is sometimes what a thickening
-  wants. `ArpTests` pins the velocity half, with a guard that the draw still varies between steps
-  so the pairing cannot pass on a flat run.
+  wants. `ArpTests` pins the velocity half for both routes, with a guard that the draw still
+  varies between steps so the pairing cannot pass on a flat run, and **a ratchet case for the
+  per-ratchet rule above** - without one the sharing tests run at ratchets = 1, where sharing and
+  hoisting are indistinguishable, and the hoist is a one-line move away.
 
 **Every range knob opens lit, and a page can be cleared again (2026-08-23).** Owen: *"we need to
 be able to clear all the chords on a pad page"*, and *"I want the default strum up, humanize,

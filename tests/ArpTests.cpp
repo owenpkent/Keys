@@ -1,6 +1,7 @@
 #include "../src/ArpEngine.h"
 #include "../src/EuclidGen.h"
 #include <juce_core/juce_core.h>
+#include <map>
 #include <set>
 
 namespace keys::tests
@@ -2901,6 +2902,103 @@ public:
             // would play at the level and the pairing above would pass on a dead flat run -
             // which is the shape of green test the rest of this file exists to avoid.
             expect(distinct.size() > 1, "the humanise draw stopped varying between steps");
+        }
+
+        beginTest("the Harmony lane's voices share their source's velocity too, in both modes");
+        {
+            // 2026-08-24, found reviewing the fix above. `Hit::src` reached the two *fixed*
+            // per-line voices and stopped there: the Harmony **lane**'s two modes still called
+            // addHit without naming a source, so each stayed its own source and went on rolling
+            // an independent draw - the reported bug surviving by the one route the fix did not
+            // cover. Worse than a plain miss, it was inconsistent: a fixed voice stacked on a
+            // lane-harmony hit *did* inherit that hit's velocity, so within one step some voices
+            // shared and some did not. One rule, no carve-out.
+            const auto pairsAgree = [&](int mode, const juce::String& what)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                e.harmonyMode.store(mode);
+                for (int st = 0; st < 8; ++st)
+                    e.lanes.value[ArpEngine::laneHarmony][(size_t) st].store(1);
+                auto mp = p;
+                mp.usePattern = true; // or every lane reads as its default and Harmony is off
+                mp.velLevel = 64;     // mid, so the band reaches equally either way
+                mp.humanVel = 60;     // wide enough that two independent draws could not agree by luck
+                mp.humanize = 0;      // timing out of it: this is the velocity axis alone
+
+                std::set<float> distinct;
+                int paired = 0;
+                for (int i = 0; i < 16; ++i)
+                {
+                    juce::MidiBuffer out;
+                    clock.ppq = 0.25 * i;
+                    e.process(mp, clock, block, i == 0 ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer {}, out);
+                    std::vector<float> vels;
+                    for (const auto meta : out)
+                        if (meta.getMessage().isNoteOn())
+                            vels.push_back(meta.getMessage().getFloatVelocity());
+                    if (vels.size() != 2) // the hit and its one lane voice
+                        continue;
+                    ++paired;
+                    expectWithinAbsoluteError(vels[0], vels[1], 1.0f / 127.0f,
+                                              what + ": the voice and the note it thickens came "
+                                                     "out at different velocities");
+                    distinct.insert(vels[0]);
+                }
+                expect(paired >= 4, what + ": the run never produced a note beside its harmony");
+                // The same guard the fixed-voice test carries: were humanVel being ignored the
+                // pairing above would pass on a dead flat run.
+                expect(distinct.size() > 1, what + ": the humanise draw stopped varying");
+            };
+            pairsAgree(0, "mode 0, a chord tone above");
+            pairsAgree(1, "mode 1, the subharmonic below");
+        }
+
+        beginTest("the velocity draw is per ratchet: repeats differ, a pair inside one does not");
+        {
+            // The draw sits **inside** the ratchet loop on purpose, so each repeat of a
+            // ratcheted step draws afresh and a roll keeps its life; what is shared is a hit and
+            // its harmony *within* one repeat. Hoisting it to once per step is the obvious next
+            // simplification - the lambda is already declared outside the loop, so it is a
+            // one-line move - and it would flatten every repeat to one velocity, a different
+            // feature. Nothing pinned that until this test: the sharing test above runs at
+            // ratchets = 1, where the two readings are indistinguishable, and the older ratchet
+            // tests assert on onset timing alone.
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneRatchet][0].store(4);
+            auto mp = p;
+            mp.usePattern = true; // or the Ratchet lane reads as its default of one
+            mp.velLevel = 64;
+            mp.humanVel = 60;
+            mp.humanize = 0;      // so a repeat's two notes share one sample offset exactly
+            mp.harmSemis[0] = 12; // one voice, an octave up
+            mp.harmChance[0] = 100;
+
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(mp, clock, block, chordOn({ 60 }), out);
+
+            // Grouped by onset: with H.TIME out of it, one repeat is exactly the notes sharing a
+            // sample position - the hit and its voice.
+            std::map<int, std::vector<float>> byOnset;
+            for (const auto meta : out)
+                if (meta.getMessage().isNoteOn())
+                    byOnset[meta.samplePosition].push_back(meta.getMessage().getFloatVelocity());
+
+            expectEquals((int) byOnset.size(), 4, "ratchet 4 did not fire four repeats");
+            std::set<float> perRepeat;
+            for (const auto& [onset, vels] : byOnset)
+            {
+                juce::ignoreUnused(onset);
+                expectEquals((int) vels.size(), 2, "a repeat did not carry its harmony voice");
+                expectWithinAbsoluteError(vels[0], vels[1], 1.0f / 127.0f,
+                                          "inside one repeat the voice and its source disagreed");
+                perRepeat.insert(vels[0]);
+            }
+            expect(perRepeat.size() > 1,
+                   "every repeat played at one velocity - the draw was hoisted out of the "
+                   "ratchet loop, which flattens a roll");
         }
 
         beginTest("a harmony voice may name two pitches, and they share one chance roll");

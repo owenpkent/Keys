@@ -218,9 +218,13 @@ velocity, and H.TIME to have the range on and enabled by default"*). Every one o
 open dark, so a fresh Keys played each chord stamped out at one velocity, landing all at once,
 dead on the grid - and since the switch on three of the four **is** the lamp on the knob, the
 only route to the feature was to already know it was there. Out of the box now: **Strum 30-80 ms**
-raking **Up**, **Humanize on at 56-96**, and on every arp card **VEL's ring at +/-18** and
-**H.TIME at 0-48**, which is nought to twelve milliseconds late. Humanize's band was widened
-*around* its old centre rather than moved, so what "off" plays is unchanged at 76. Turn any of
+raking **Up**, **Humanize on at 56-96**, and on every arp card **VEL's ring at +/-20** over a
+level of **42** - so hits land anywhere in **22-62** - and **H.TIME at 0-22**, which is nought to
+about five milliseconds late. The arp's level came down from 100 in the same stroke, and the two
+are one setting rather than two: VEL's ring can never reach past the nearer rail, so at a level of
+100 it was capped at +/-27 however far you wound it, and at 42 it has room for the whole +/-42.
+Humanize's band was widened *around* its old centre rather than moved, so what "off" plays is
+unchanged at 76. Turn any of
 them down, or click its lamp out, and the session remembers: these are what a **new** instance
 opens on, never something applied to a session you saved.
 
