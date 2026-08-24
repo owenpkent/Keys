@@ -150,6 +150,42 @@ it. They are two questions now and two functions: `spanMax()` is how far the ges
 never reads the face; `haloIsLive()` is whether there is a band to open and has to. The stored
 span survives untouched, so a step off the rail brings it straight back.
 
+### Changed: the arp opens quieter and steadier
+
+`arpVelLevel` 100 -> 42, `arpHumanVel` 18 -> 20, `arpHumanize` 24 -> 11 (Owen: "want default arp
+settings"). H.TIME draws **0-22** and plays 0 to about 5 ms late where it drew 0-48 and played up
+to 12; VEL draws **22-62**.
+
+The three are one decision. Humanize Velocity's reach stops at `min(level, 127 - level)`, so a
+level of 100 capped its own ring at +/-27 however far the ring was wound; at 42 the ring reaches
++/-42. Lowering the level is what gives it somewhere to go.
+
+**Defaults only.** A saved session stores all three and keeps what it said, and one old enough to
+predate `arpVelLevel` does not take the default at all - `migrateVelLevel` computes a level that
+plays it at the loudness it was saved at. The pads' Humanize band is untouched, so the 76 midpoint
+that migration converts against still means what it meant.
+
+### Fixed: a harmony voice was as loud as it liked
+
+The Humanize Velocity draw was made per *emitted* hit, inside the ratchet loop, and by then a
+harmony voice is an ordinary hit - so every voice rolled its own number and could land up to
+`2 * humanVel` from the note it was thickening. At the shipping defaults that is a harmony
+arriving at MIDI 105 against a source at 22: a second player rather than a thickening of the
+first.
+
+`ArpEngine::Hit` carries `src` now, the index of the hit it harmonises or its own, and the draw is
+made once per source hit and read by its voices. It stays **inside** the ratchet loop on purpose,
+so each repeat of a ratcheted step still draws afresh - what is shared is a hit and its harmony
+within one repeat, not a whole step flattened to one velocity.
+
+This is `Hit::vel` doing a job again, and the dead field is why the bug was invisible: it had been
+written at every call site and never read since `velLevel` replaced the incoming chord's velocity
+(2026-08-18), and the harmony loop dutifully copied it - so the code read exactly as though a
+voice already took its source's loudness. `addHit` no longer takes a velocity at all.
+
+Timing is unchanged: a voice still takes its own H.TIME lateness draw and can flam against its
+source. Same question one axis over, deliberately left alone.
+
 ### Fixed: five things the round above got half-right
 
 Found reviewing the entries below, and each is the same shape as the bug it sits beside - a guard

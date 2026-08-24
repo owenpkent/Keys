@@ -2860,6 +2860,49 @@ public:
 
         // --- The per-line harmony voices (2026-08-19, BigSky's shimmer list) --------------
 
+        beginTest("a harmony voice plays at its source's velocity, not a draw of its own");
+        {
+            // 2026-08-23, Owen: "harmony same velocity". A voice thickens the note it
+            // harmonises, so it has to arrive at that note's loudness. It drew its own share of
+            // the Humanize Velocity band until today - the draw was made per emitted hit, in the
+            // ratchet loop, and a voice is an ordinary hit by then - so a voice could sit up to
+            // `2 * humanVel` from the note it was thickening and read as a second player rather
+            // than as part of the first. The draw is made once per source hit now and the voices
+            // copy it; see Hit::src.
+            ArpEngine e;
+            e.prepare(sr);
+            auto mp = p;
+            mp.velLevel = 64;     // mid, so the band reaches equally either way
+            mp.humanVel = 60;     // wide enough that two independent draws could not agree by luck
+            mp.harmSemis[0] = 12; // one voice, an octave up
+            mp.harmChance[0] = 100;
+
+            std::set<float> distinct;
+            int paired = 0;
+            for (int i = 0; i < 16; ++i)
+            {
+                juce::MidiBuffer out;
+                clock.ppq = 0.25 * i;
+                e.process(mp, clock, block, i == 0 ? chordOn({ 60 }) : juce::MidiBuffer {}, out);
+                std::vector<float> vels;
+                for (const auto meta : out)
+                    if (meta.getMessage().isNoteOn())
+                        vels.push_back(meta.getMessage().getFloatVelocity());
+                if (vels.size() != 2) // one held note: the hit and its one voice
+                    continue;
+                ++paired;
+                expectWithinAbsoluteError(vels[0], vels[1], 1.0f / 127.0f,
+                                          "the voice and the note it thickens came out at "
+                                          "different velocities");
+                distinct.insert(vels[0]);
+            }
+            expect(paired >= 4, "the run never produced a note beside its harmony");
+            // **And the draw is still a draw.** Were humanVel simply being ignored, every step
+            // would play at the level and the pairing above would pass on a dead flat run -
+            // which is the shape of green test the rest of this file exists to avoid.
+            expect(distinct.size() > 1, "the humanise draw stopped varying between steps");
+        }
+
         beginTest("a harmony voice may name two pitches, and they share one chance roll");
         {
             // 2026-08-21, Owen: "in the harmony, when you select octave plus fifth, it looks

@@ -358,10 +358,10 @@ public:
             {
                 const auto human = KeysProcessor::arpParamId(line, KeysProcessor::apHumanize);
                 const auto vel = KeysProcessor::arpParamId(line, KeysProcessor::apHumanVel);
-                expectWithinAbsoluteError(paramOf(h.processor, human), 24.0f, 0.51f,
-                                          "H.TIME opens at 0-48");
-                expectWithinAbsoluteError(paramOf(h.processor, vel), 18.0f, 0.51f,
-                                          "VEL's ring reaches +/-18");
+                expectWithinAbsoluteError(paramOf(h.processor, human), 11.0f, 0.51f,
+                                          "H.TIME opens at 0-22");
+                expectWithinAbsoluteError(paramOf(h.processor, vel), 20.0f, 0.51f,
+                                          "VEL's ring reaches +/-20");
                 // Both rings default fully open, which is what makes the faces above read as
                 // the centre of a band rather than as one end of a closed one.
                 expectWithinAbsoluteError(
@@ -370,9 +370,14 @@ public:
             }
 
             // The reach stops at the nearer rail, so a ring wider than the level can carry does
-            // nothing. 18 has to sit under that ceiling or the default is a lie on screen.
+            // nothing. The ring's default has to sit under that ceiling or it is a lie on
+            // screen, and the *relationship* is what is pinned rather than either number, so
+            // moving one default has to answer for the other. The level came down to 42 on
+            // 2026-08-23 partly to give this ceiling somewhere to go: at the old 100 it was 27
+            // whatever the ring said.
             const float level = paramOf(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apVelLevel));
-            expect(18.0f <= juce::jmin(level, 127.0f - level),
+            expectWithinAbsoluteError(level, 42.0f, 0.51f, "VEL's default level");
+            expect(20.0f <= juce::jmin(level, 127.0f - level),
                    "VEL's default ring fits inside what its default level allows");
         }
 

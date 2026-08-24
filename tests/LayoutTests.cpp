@@ -785,11 +785,11 @@ public:
 
         beginTest("H.TIME opens as the band the docs say it does");
         {
-            // **The one assertion the 2026-08-23 rewrite dropped.** CLAUDE.md states as a
-            // shipping default that `arpHumanize` 24 "draws as 0-48 and plays as 0 to 12 ms
-            // late", and StateTests pins the two *parameters* - but nothing was left checking
-            // that those two numbers put that band on screen. StateTests does keep VEL's own
-            // relationship (18 fits inside what its level allows); this is H.TIME's twin.
+            // **The one assertion the 2026-08-23 rewrite dropped.** CLAUDE.md states a
+            // shipping band for `arpHumanize` - 0-22 since later that same day, 0-48 before it -
+            // and StateTests pins the two *parameters*, but nothing was left checking that those
+            // two numbers put that band on screen. StateTests does keep VEL's own relationship
+            // (its ring fits inside what its level allows); this is H.TIME's twin.
             //
             // The knob is built here the way ArpPanel builds it - face range and ring range
             // both read off the APVTS, values read off the defaults - so a change to either
@@ -809,9 +809,9 @@ public:
             rk.setSpan((double) h.processor.apvts.getRawParameterValue(ringId)->load());
 
             expectEquals(rk.rangeLo(), 0.0, "the band opens at dead on the grid");
-            expectEquals(rk.rangeHi(), 48.0, "and reaches twice the knob");
+            expectEquals(rk.rangeHi(), 22.0, "and reaches twice the knob");
             // Stated as the relationship as well as the two numbers, since that is what makes
-            // "twice the knob" true rather than a coincidence of 24 and 48: the ring is open
+            // "twice the knob" true rather than a coincidence of 11 and 22: the ring is open
             // wider than the face's own value, so the nearer rail - zero, dead on the grid - is
             // what both sides stop at.
             expectEquals(rk.reach(), rk.face().getValue(), "the band reaches the knob's own value");

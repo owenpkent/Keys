@@ -456,7 +456,12 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // late, about 6 ms typical - the reach stops at the low rail, which is what keeps a hit
     // from ever landing early. Every line takes it, but B, C and D are off by default, so what
     // a fresh instance actually hears is line A a few milliseconds behind the grid.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Humanize"), 1 }, nm + " Humanize", 0, 100, 24));
+    // **11 since 2026-08-23**, where it was 24 (Owen, holding up a card reading "0-22": "want
+    // default arp settings"). With the ring open the face is the band's centre and the band is
+    // clamped by the nearer rail, so 11 draws as **0-22** and plays 0 to about 5 ms late where
+    // 24 drew 0-48 and played up to 12. Same feature, half the wander: enough that a run is not
+    // machine-stiff, little enough that it never reads as sloppy against the grid.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Humanize"), 1 }, nm + " Humanize", 0, 100, 11));
 
     // The two the lines brought with them, and the only parameters an older session sees
     // appear on line 0. Both default to what Keys did before there were lines, so a session
@@ -502,10 +507,12 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     //
     // **18 since 2026-08-23**, where it was 0 (Owen, the same ask as H.TIME above). It reaches
     // either side of VelLevel, and the reach stops at the nearer rail - min(level, 127 - level)
-    // - so at VelLevel's own default of 100 the most this knob can ever reach is +/-27. 18 sits
-    // inside that with room left to turn it up, which is the number to remember before widening
-    // it further: past 27 the knob stops doing anything until the level comes down.
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 127, 18));
+    // - so the level beside it is what decides how far this can ever reach. **20 since
+    // 2026-08-23**, alongside a level that moved 100 -> 42 in the same stroke: at the old 100
+    // the ceiling was +/-27 however far the ring was wound, and at 42 it is +/-42, so the knob
+    // has somewhere to go. The number to remember before widening it further is still that
+    // ceiling - past `min(level, 127 - level)` this stops doing anything at all.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("HumanVel"), 1 }, nm + " Human Velocity", 0, 127, 20));
     // The bipolar velocity control that replaced VOL on the macro row (Owen, same day: "it
     // should start in the middle so you can turn it up or down"). 0 plays velocities as they
     // came, +100 doubles them, -100 mutes. Volume above stays registered for old sessions,
@@ -585,11 +592,17 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // the same units. 0 mutes the line, exactly as VelTrim -100 did. Appended, so a session saved
     // before it opens with VelTrim still holding its level and migrateVelLevel converting it.
     //
-    // Default 100: loud without being pinned, and the number a hardware arpeggiator would show.
-    // A session that predates this does not take it - the migration computes a level that plays
-    // that session at the loudness it was saved at.
+    // **42 since 2026-08-23**, where it was 100 (Owen, of the band a card was showing at the
+    // time: "want default arp settings"). 100 was chosen as "loud without being pinned", and it
+    // carries a cost the halo redesign introduced and nobody re-measured: Humanize Velocity
+    // reaches equally both ways and stops at the nearer rail, so at a level of 100 the widest
+    // band it can ever draw is +/-27 however far the ring is wound. At 42 it can reach +/-42, so
+    // the ring is a control with room to work in rather than one clamped by its neighbour, and a
+    // line leaves headroom over the instrument it drives instead of arriving at full tilt.
+    // A session that predates this parameter does not take the default at all - migrateVelLevel
+    // computes a level that plays that session at the loudness it was saved at.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("VelLevel"), 1 },
-                                                   nm + " Velocity Level", 0, 127, 100));
+                                                   nm + " Velocity Level", 0, 127, 42));
 
     // Two fixed harmony voices per line (2026-08-19, Owen holding up BigSky's shimmer
     // interval list: "2 harmony drop down like the photo. and each of those has a chance knob
