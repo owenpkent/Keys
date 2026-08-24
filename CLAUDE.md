@@ -358,7 +358,7 @@ medium of three amounts and the card menu over a chip on the Pads bar.
   readout or in the sound** - and H.TIME's face at 0 is an ordinary setting, not a corner case.
   `haloIsLive()` is that second question, and `usefulSpanMax()` is gone rather than left as an
   identity wrapper over `spanMax()` with two call sites still insisting the two differ.
-  **A timer pull has to compare before it writes, and three here did not** (2026-08-23, in
+  **A timer pull has to compare before it writes, and two here did not** (2026-08-23, in
   review). `syncPadRangeKnobs()` could not converge on an **odd-width** pair - the face snaps to
   whole units and the band is symmetric about it, so 30 and 81 give a centre of 55.5 whose ends
   round back to 31 and 82 and never match what is stored - so it re-ran every tick for the rest

@@ -562,7 +562,12 @@ public:
             // wrong, which is the only shape of test that would have caught it.
             Host h;
             // No network thread out of a layout test - see KeysEditor::skipUpdateCheckForTest.
-            KeysEditor::skipUpdateCheckForTest = true;
+            // Scoped, because it is a public mutable static on a class that ships in the plugin:
+            // set and left true, it silently covers every test that runs after this one and
+            // covers nothing that runs before, so whether the guard works at all becomes a
+            // question about registration order.
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
 
             struct Pair { const char* lo; const char* hi; float loV, hiV; };
             // Clear of both walls on purpose: a band already pinned at a wall is saturated, so
@@ -624,6 +629,26 @@ public:
                 expectWithinAbsoluteError(get(pairs[i].hi), pairs[i].hiV, 0.51f,
                                           juce::String(pairs[i].hi) + " drifted on its own");
             }
+
+            // **And the pair can arrive the wrong way round** (2026-08-23, in review). Nothing
+            // orders these two: `migrateStrumRange` says a host or an MCP client may write max
+            // below min deliberately, and `baseVelocity01` sorts them before playing them.
+            // Unsorted here, the derived span comes out negative, `setSpan` clamps it to zero,
+            // and the settle test can then never be satisfied - the every-tick re-run this
+            // whole test exists to catch, arriving by the one route the pairs above cannot
+            // reach, with a zero-width band drawn over an engine spreading across 20..100.
+            put("humanizeVelMin", 100.0f);
+            put("humanizeVelMax", 20.0f);
+            for (int tick = 0; tick < 10; ++tick)
+                ed.tickForTest();
+            expectWithinAbsoluteError(ed.humanizeKnobForTest().rangeLo(), 20.0, 0.51,
+                                      "an inverted pair drew its low end somewhere else");
+            expectWithinAbsoluteError(ed.humanizeKnobForTest().rangeHi(), 100.0, 0.51,
+                                      "an inverted pair drew its high end somewhere else");
+            expectWithinAbsoluteError(get("humanizeVelMin"), 100.0f, 0.51f,
+                                      "the pull wrote back to a parameter it only reads");
+            expectWithinAbsoluteError(get("humanizeVelMax"), 20.0f, 0.51f,
+                                      "the pull wrote back to a parameter it only reads");
         }
 
         beginTest("the halo's travel is the same wherever the knob is");
@@ -652,6 +677,22 @@ public:
                 rk.face().setValue(where, juce::dontSendNotification);
                 expectEquals(rk.spanMax(), ceiling,
                              "the halo's ceiling moved when the knob did");
+            }
+
+            // **And the gestures themselves, at more than one face position.** The loop above
+            // cannot fail: spanMax() is `jmin(override, travel * 0.5)`, a pure function of the
+            // slider's range with no way to read the face at all. Where a wall creeps back in
+            // is the two gesture functions - they carried `min(spanMax(), room())` until
+            // 2026-08-23 - and asking them at exactly one position, as this test did for an
+            // afternoon, would let that back in with the suite green. Off the rails, where the
+            // gesture is live; the rails get their own test below.
+            for (const double where : { 1.0, 30.0, 100.0, 180.0, 199.0 })
+            {
+                rk.face().setValue(where, juce::dontSendNotification);
+                expectEquals(rk.spanFromDrag(0.0, 150.0), ceiling * 0.5,
+                             "half a sweep stopped being half when the knob moved");
+                expectEquals(rk.spanFromWheel(0.0, 1.0), ceiling * 0.05,
+                             "and a notch stopped being a notch");
             }
 
             // A full sweep closes the band and reopens it; a quarter is worth a quarter. Off
@@ -700,6 +741,40 @@ public:
                 expectEquals(rk.spanFromDrag(60.0, -300.0), 60.0, "and neither does one down");
                 expectEquals(rk.spanFromWheel(60.0, 1.0), 60.0, "the wheel writes nothing either");
             }
+
+            // **And it must not touch the host's automation lane on the way to writing
+            // nothing** (2026-08-23, in review). Guarding only the value write left
+            // beginSpanDrag/endSpanDrag firing onSpanDragStart/onSpanDragEnd with nothing
+            // between them, which is a begin/endChangeGesture pair on the ring's parameter -
+            // in Ableton, with the lane armed in Touch or Latch, a touch and an untouch is a
+            // write. So the dead halo did still write something; it wrote it somewhere this
+            // test could not see. Driven through the handle's own mouse path rather than the
+            // private entry point, so it is the gesture that is pinned and not an internal.
+            int starts = 0, ends = 0;
+            rk.onSpanDragStart = [&starts] { ++starts; };
+            rk.onSpanDragEnd = [&ends] { ++ends; };
+            rk.setSize(80, 80);
+            const auto press = [&rk](float y)
+            {
+                return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(),
+                                        { 0.0f, y }, juce::ModifierKeys(), 1.0f, 0.0f, 0.0f,
+                                        0.0f, 0.0f, &rk.spanHandle(), &rk.spanHandle(),
+                                        juce::Time(), { 0.0f, y }, juce::Time(), 1, false);
+            };
+
+            rk.face().setValue(0.0, juce::dontSendNotification); // H.TIME's "no lateness"
+            rk.spanHandle().mouseDown(press(40.0f));
+            expect(! rk.spanDragging(), "a gesture opened where there is no band to open");
+            rk.spanHandle().mouseUp(press(40.0f));
+            expectEquals(starts, 0, "a dead halo touched the host's lane");
+            expectEquals(ends, 0, "and untouched it, which is the write");
+
+            rk.face().setValue(100.0, juce::dontSendNotification);
+            rk.spanHandle().mouseDown(press(40.0f));
+            expect(rk.spanDragging(), "and the live gesture stopped opening");
+            rk.spanHandle().mouseUp(press(40.0f));
+            expectEquals(starts, 1, "one touch, where there is something to touch");
+            expectEquals(ends, 1, "and one untouch");
 
             // One step off the rail and it is live again, which is what makes this a guard
             // rather than a range: the span it was holding is still there, untouched.

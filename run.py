@@ -503,30 +503,44 @@ def build_stamp() -> str:
         except (OSError, subprocess.SubprocessError):
             return ""  # no git, no repo, no matter: the stamp is a nicety
 
-    def git_dirty() -> bool:
-        # Exit 1 means "there are differences", 0 means clean, anything else means git could
-        # not answer - and a git that cannot answer must not read as a clean tree, which is
-        # what a stdout-based check quietly did.
-        try:
-            out = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=ROOT,
-                                 capture_output=True, text=True, timeout=5)
-            return out.returncode == 1
-        except (OSError, subprocess.SubprocessError):
-            return False
+    def git_dirty() -> str:
+        """The stamp's dirty marker: "" clean, " +changes" dirty, " +?" if git could not say.
 
-    # One call for the sha and the subject, one for the branch, one for the dirty flag.
-    # It was four, including a `status --porcelain` that stats the whole working tree, on a
-    # loop this project measures in seconds and advertises at about one for a no-op. Process
-    # creation is not free on Windows and none of this is worth a frame of it.
+        **Three states, because two of them are not the same.** A git that cannot answer must
+        not read as a clean tree, and it has now done exactly that twice by two different
+        routes: first a stdout-only check, then `diff --quiet` read as `returncode == 1`, which
+        quietly files exit 128 - no HEAD, not a work tree, a corrupt index - under "no
+        differences". Whatever cannot be established has to be said out loud, since the whole
+        job of this stamp is to answer "is the thing in front of me my change?".
+
+        **`status --porcelain` rather than `diff --quiet HEAD`, and the untracked files are the
+        reason.** `diff` compares tracked paths against HEAD and cannot see a new file at all,
+        and a source file added but not yet staged is the ordinary state halfway through a
+        feature - precisely the change most worth warning about. One process either way, and
+        both stat the whole tree, so the saving that bought the blind spot was a subprocess.
+        """
+        try:
+            out = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                                 capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return " +?"
+        if out.returncode != 0:
+            return " +?"  # git is there and still could not answer: say so, do not guess
+        return " +changes" if out.stdout.strip() else ""
+
+    # One call for the sha and the subject, one for the branch, one for the dirty flag. It was
+    # four, on a loop this project measures in seconds and advertises at about one for a no-op:
+    # process creation is not free on Windows and none of this is worth a frame of it. The
+    # `--format=%h%n%s` is where the saving actually came from; the dirty check stayed on
+    # `status --porcelain` because it is the only one of the two that sees an untracked file.
     head = git("log", "-1", "--format=%h%n%s")
     if not head:
         return ""
     sha, _, subject = head.partition("\n")
     branch = git("rev-parse", "--abbrev-ref", "HEAD") or "detached"
-    # `diff --quiet` answers with an exit code and prints nothing, so it stops at the first
-    # difference instead of formatting a list nobody reads. Unstaged and staged both, since
-    # either means the tree is not the commit named beside it.
-    dirty = " +changes" if git_dirty() else ""
+    # Unstaged, staged and untracked all count: any of them means the tree is not the commit
+    # named beside it.
+    dirty = git_dirty()
     stamp = f"{branch} @ {sha}{dirty}"
     return f'{stamp}\n  "{subject}"' if subject else stamp
 
@@ -560,10 +574,15 @@ def stale_sources(exe: str, host: bool) -> list:
                 continue
             path = os.path.join(dirpath, name)
             try:
-                newer.append((os.path.getmtime(path), path))
+                when = os.path.getmtime(path)
             except OSError:
-                pass
-    return [path for when, path in sorted(newer, reverse=True) if when > built]
+                continue
+            # Filtered here rather than after the sort: the common answer is "nothing is
+            # stale", and collecting the whole tree first meant sorting every source file in
+            # the repo on every launch to hand back an empty list.
+            if when > built:
+                newer.append((when, path))
+    return [path for _, path in sorted(newer, reverse=True)]
 
 
 def main() -> int:

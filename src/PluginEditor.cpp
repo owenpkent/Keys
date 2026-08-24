@@ -1178,8 +1178,19 @@ void KeysEditor::syncPadRangeKnobs()
     {
         if (rk.spanDragging() || rk.face().isMouseButtonDown())
             return;
-        const double lo = (double) processor.apvts.getRawParameterValue(loId)->load();
-        const double hi = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        const double rawLo = (double) processor.apvts.getRawParameterValue(loId)->load();
+        const double rawHi = (double) processor.apvts.getRawParameterValue(hiId)->load();
+        // **Sorted, and that is what makes the fixed point reachable at all.** These are two
+        // ordinary automatable parameters with no ordering between them - `migrateStrumRange`
+        // says so in as many words, and `baseVelocity01` sorts the pair before playing it - so
+        // max below min is a state a host lane, an MCP client or a session file can put them
+        // in. Unsorted, `wantSpan` comes out negative, `setSpan` clamps it to zero, and
+        // `settled` below can then never be satisfied: the pull re-runs on every tick for the
+        // rest of the session, which is the exact defect the guard was written to end. It also
+        // drew a zero-width band and read out a single number while the engine went on
+        // spreading across the whole pair - the readout disagreeing with the sound, from the
+        // one function whose job is to keep them saying the same thing.
+        const double lo = juce::jmin(rawLo, rawHi), hi = juce::jmax(rawLo, rawHi);
         // **The derived ends are compared rounded, because that is the form they are stored in.**
         // Still the ends and not the raw span, which is what preserves a latent span a rail is
         // holding back (reach() clamps to the nearer rail, so the knob can carry more span than
@@ -1210,8 +1221,10 @@ void KeysEditor::syncPadRangeKnobs()
         // The parameters are untouched either way - nothing here writes them.
         const auto wantFace = rounded((lo + hi) * 0.5);
         const auto wantSpan = (hi - lo) * 0.5;
-        const auto settled = [](double a, double b) { return std::abs(a - b) < 1.0e-9; };
-        if (settled(rk.face().getValue(), wantFace) && settled(rk.getSpan(), wantSpan))
+        // RangeKnob's own tolerance, not a second copy of it: this asks whether the control
+        // has settled, so it has to agree with what the control calls settled.
+        if (RangeKnob::nearlyEqual(rk.face().getValue(), wantFace)
+            && RangeKnob::nearlyEqual(rk.getSpan(), wantSpan))
             return;
         rk.face().setValue(wantFace, juce::dontSendNotification);
         rk.setSpan(wantSpan);
@@ -2707,9 +2720,8 @@ void KeysEditor::timerCallback()
     // the same read-back the arp's two Humanize knobs need, and for the same reason: a session
     // load, a host lane or an MCP client moves the low end and nothing else would tell the
     // ring. setSpan no-ops when the value is unchanged, so this never fights an open drag.
-    //
-    // Sorted, because the pair can arrive the wrong way round from host automation and a
-    // negative span is not a thing to draw.
+    // The sorting that used to be described here moved with the pull into syncPadRangeKnobs(),
+    // which is where the reason it is needed is now written down.
     //
     // **Nothing greys on Humanize any more, here or anywhere.** Both this comment and a
     // `const bool hum` above it described a greying pass that went when Humanize's tick box

@@ -150,10 +150,50 @@ it. They are two questions now and two functions: `spanMax()` is how far the ges
 never reads the face; `haloIsLive()` is whether there is a band to open and has to. The stored
 span survives untouched, so a step off the rail brings it straight back.
 
-### Fixed: three timer pulls that never stopped pulling
+### Fixed: five things the round above got half-right
 
-None of these was audible; all three were work the editor did thirty times a second for the life
-of the window, and each sat under a comment saying it did not.
+Found reviewing the entries below, and each is the same shape as the bug it sits beside - a guard
+or a claim that stopped one step short of where it had to be.
+
+- **The halo guard moved to where the gesture opens.** `haloIsLive()` gated the value write and
+  not `beginSpanDrag`, so a press and release at a rail still fired
+  `onSpanDragStart`/`onSpanDragEnd` with nothing between them - a `beginChangeGesture` and
+  `endChangeGesture` pair on the ring's parameter, which in a host with the lane armed in Touch or
+  Latch is a write. The dead halo did still write something; it wrote it into the automation lane
+  instead of the parameter, which is the one place the entry below did not look. `wheelSpan` had
+  refused to bracket a gesture it could not fulfil all along, and this is that rule on the other
+  path.
+- **`syncPadRangeKnobs()` sorts the pair.** Nothing orders `chordStrum`/`chordStrumMax` or
+  `humanizeVelMin`/`humanizeVelMax` - `migrateStrumRange` says in as many words that a host or an
+  MCP client may write max below min, and `baseVelocity01` sorts them before playing them. Handed
+  them inverted, the new fixed-point guard could never be satisfied: the derived span goes
+  negative, `setSpan` clamps it to zero, and the pull re-ran every tick while drawing a
+  zero-width band over an engine spreading across the whole pair. The sorting comment had outlived
+  the code it described and was sitting two hundred lines away in `timerCallback`.
+- **`run.py` sees untracked files again, and says when it cannot see anything.** `git diff --quiet
+  HEAD` compares tracked paths only, so a new source file added but not staged - the ordinary
+  state halfway through a feature - stamped the tree as matching its commit. And `returncode == 1`
+  filed exit 128 (no HEAD, not a work tree, a corrupt index) under "no differences", which is the
+  same "a git that cannot answer reads as clean" fault the change was written to fix, one route
+  over. Three states now, on one `status --porcelain`.
+- **`RangeKnob`'s drawn-state cache holds what was written**, the normalised pair, rather than the
+  ends it was derived from. The face's range is an input to that normalisation and not to the
+  ends, so a range change was invisible to the cache - and invisible for good, since no later tick
+  could see a difference either. `MacroRow` also re-clamps its rings after the `SliderAttachment`
+  that gives each face its range, instead of before it.
+- **The test that names the regression tests for it.** The per-face-position loop was left
+  asserting `spanMax()` alone, which is `jmin(override, travel * 0.5)` - a pure function of the
+  slider's range that cannot read the face, so the loop could not fail. Reintroducing
+  `min(spanMax(), room())` in `spanFromDrag` would have kept the suite green at every off-centre
+  face. The gestures are asked at five positions again, the inverted pair and the automation
+  brackets are pinned, and `skipUpdateCheckForTest` is scoped so the network guard no longer
+  depends on which test registered first.
+
+### Fixed: two timer pulls that never stopped pulling
+
+Neither was audible; both were work the editor did thirty times a second for the life of the
+window, and each sat under a comment saying it did not. `run.py`'s git calls are counted with them
+below because they were trimmed in the same pass, not because they are a timer pull.
 
 - **`RangeKnob::refresh()` compares before it writes.** `strumKnob.refresh(); humanKnob.refresh();`
   ran unconditionally in `timerCallback`, and each call sets two component properties and asks two
@@ -164,8 +204,10 @@ of the window, and each sat under a comment saying it did not.
   and 81 give a centre of 55.5, whose ends round back to 31 and 82 and never match what is stored.
   Written for it, the pull re-ran every tick for the rest of the session. Such a pair arrives from
   a host lane, MCP or a session file; it is pulled once now and recognised next time.
-- **`run.py` asks git two things instead of four**, one of them a `status --porcelain` that stats
-  the whole working tree, on a loop this project advertises at about a second for a no-op.
+- **`run.py` asks git three things instead of four**, on a loop this project advertises at about
+  a second for a no-op. The saving is `--format=%h%n%s`, which answers the sha and the subject in
+  one call; the dirty check stays on `status --porcelain`, since it is the only one of the two
+  candidates that can see an untracked file.
 
 ### Fixed: run.py's stale-build warning could not be cleared
 
@@ -178,7 +220,8 @@ A warning you cannot act on teaches you to ignore the one that matters.
 It scans exactly what the launched target compiles now, and names the newest offender rather than
 only counting them. Two smaller things beside it: the launch line's build-time stamp is guarded,
 so an exe that goes unreadable between launching and printing can no longer report a failure with
-the app open in front of you; and a git that cannot answer at all no longer reads as a clean tree.
+the app open in front of you; and a git that cannot answer at all no longer reads as a clean tree,
+saying `+?` instead of nothing.
 
 
 ### Fixed: a chord handed to an arp line is no longer raked

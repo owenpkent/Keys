@@ -4,6 +4,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <okstudio/RotaryKnob.h>
 #include <functional>
+#include <optional>
 
 namespace keys
 {
@@ -113,8 +114,16 @@ public:
     void setSpanMax(double maxSpan)
     {
         spanMaxOverride = maxSpan;
-        setSpan(span); // re-clamp: narrowing this under the current span has to bite now
+        reclampSpan(); // narrowing this under the current span has to bite now
     }
+
+    // Re-run that clamp against the face's range **as it stands now**. A consumer owes this
+    // call whenever it sets the ceiling before the thing that ranges the face - a
+    // `SliderAttachment`, typically, which is created after the knob it binds - because
+    // `spanMax()` reads that range and would otherwise be clamping against JUCE's default
+    // 0..10. Harmless while the span is still zero, which is the only reason Keys' own two
+    // never showed it; a ceiling that is meant to bite should not be relying on that.
+    void reclampSpan() { setSpan(span); }
 
     // What the span is clamped and calibrated against: the ring's own ceiling if it has one,
     // and **never more than half the face's travel** either way.
@@ -140,11 +149,19 @@ public:
         return juce::jmin(ceiling, travel * 0.5);
     }
 
+    // **One tolerance, named once.** `std::abs(a - b) < 1.0e-9` was spelled out five times
+    // across this file and `KeysEditor::syncPadRangeKnobs`, and the fixed-point reasoning the
+    // comments around them rest on only holds while every copy agrees: the pull stops when the
+    // knob says it has settled, so a consumer comparing at a *coarser* tolerance than the
+    // control does would call it settled a tick before the control did, and one comparing
+    // finer would never see it settle at all. Public for that second reader.
+    static bool nearlyEqual(double a, double b) { return std::abs(a - b) < 1.0e-9; }
+
     // How far the range reaches back from the face's value, in the face's own units.
     void setSpan(double v)
     {
         const auto clamped = juce::jlimit(0.0, spanMax(), v);
-        if (std::abs(clamped - span) < 1.0e-9)
+        if (nearlyEqual(clamped, span))
             return;
         span = clamped;
         syncArcOrigin();
@@ -352,6 +369,28 @@ public:
                  off ? knob.getValue() : rangeHi() };
     }
 
+    // The same three numbers after normalisation, which is to say exactly what syncArcOrigin()
+    // pushes into the properties. `refresh()` caches and compares **this** rather than
+    // `ArcEnds`, because the face's range is an input to the normalisation and not to the ends:
+    // hold the ends and a range change is invisible to the cache for ever.
+    struct DrawnArc
+    {
+        bool off;
+        double from, to;
+        bool operator== (const DrawnArc& o) const
+        {
+            return off == o.off && nearlyEqual(from, o.from) && nearlyEqual(to, o.to);
+        }
+    };
+    DrawnArc normalisedArc() const
+    {
+        const auto lo = knob.getMinimum(), hi = knob.getMaximum();
+        const auto ends = arcEnds();
+        const auto norm = [lo, hi](double v)
+        { return hi > lo ? juce::jlimit(0.0, 1.0, (v - lo) / (hi - lo)) : 0.0; };
+        return { ends.off, norm(ends.from), norm(ends.to) };
+    }
+
     // **One ring, not two** (2026-08-03, Owen: "it looks like there's two rings around the
     // knob ... just have the inner ring have the features. Everything should be reflected on
     // that single ring"). The face's own arc *is* the range: this tells the LookAndFeel where
@@ -364,17 +403,13 @@ public:
     // and it is the reason `skin::arcFromProperty` exists rather than a paintOverChildren.
     void syncArcOrigin()
     {
-        const auto lo = knob.getMinimum(), hi = knob.getMaximum();
-        const auto ends = arcEnds();
-        const auto norm = [lo, hi](double v)
-        { return hi > lo ? juce::jlimit(0.0, 1.0, (v - lo) / (hi - lo)) : 0.0; };
-        knob.getProperties().set(skin::arcFromProperty, norm(ends.from));
+        const auto wrote = normalisedArc();
+        knob.getProperties().set(skin::arcFromProperty, wrote.from);
         // The high half of the band sits past the pointer, which an end-at-value arc cannot
         // light - skin::arcToProperty is what reaches it (2026-08-19).
-        knob.getProperties().set(skin::arcToProperty, norm(ends.to));
+        knob.getProperties().set(skin::arcToProperty, wrote.to);
         knob.repaint();
-        drawn = ends;
-        drawnValid = true;
+        drawn = wrote;
     }
 
     // Both halves of "what does the switch say", in one call for a consumer's timer: the lamp
@@ -389,10 +424,13 @@ public:
     // parameters, the same shape `MacroRow`'s `lastLineOn` uses for its scrim.
     void refresh()
     {
-        const auto ends = arcEnds();
-        const auto same = [](double a, double b) { return std::abs(a - b) < 1.0e-9; };
-        if (drawnValid && ends.off == drawn.off && same(ends.from, drawn.from)
-            && same(ends.to, drawn.to))
+        // Against what was **written**, not against the ends it was derived from. The two part
+        // company when the face's range moves: normalising is what turns one into the other, so
+        // a cache of the raw ends answers "nothing has changed" to a range change that halves
+        // every angle on screen - and answers it for good, since no later tick can see a
+        // difference either. Comparing the normalised pair asks the question the properties can
+        // actually answer.
+        if (drawn.has_value() && *drawn == normalisedArc())
             return;
         syncArcOrigin();
         repaint();
@@ -521,7 +559,15 @@ private:
 
     void beginSpanDrag(const juce::MouseEvent& e)
     {
-        if (! isEnabled())
+        // **The same question `dragSpan` asks, asked before the brackets go on.** Guarding only
+        // the write left `onSpanDragStart`/`onSpanDragEnd` firing at a rail with nothing between
+        // them, which is a `beginChangeGesture`/`endChangeGesture` pair on the ring's parameter -
+        // a touch and an untouch the host records, and in Ableton with the lane armed in Touch or
+        // Latch that is a write. So the dead halo still wrote something after all; it just wrote
+        // it into the automation lane instead of the parameter. `wheelSpan` already refused to
+        // bracket a gesture it could not fulfil, and this is that rule on the other path.
+        // `endSpanDrag` keys off `dragging`, so declining here leaves nothing half-open.
+        if (! isEnabled() || ! haloIsLive())
             return;
         dragging = true;
         // Screen coordinates, because this same gesture arrives from two different components
@@ -551,7 +597,7 @@ private:
     // was exactly the part that was not asked for.
     void applySpan(double wantedSpan)
     {
-        if (std::abs(wantedSpan - span) < 1.0e-9)
+        if (nearlyEqual(wantedSpan, span))
             return;
         span = wantedSpan;
         syncArcOrigin();
@@ -587,7 +633,7 @@ private:
         // most one event may be worth, so a fling is fast rather than instantaneous.
         const double notches = juce::jlimit(-1.0, 1.0, dy);
         const double wanted = spanFromWheel(span, notches);
-        if (std::abs(wanted - span) < 1.0e-9)
+        if (nearlyEqual(wanted, span))
             return; // already at the rail: no gesture, no automation write
         if (onSpanDragStart)
             onSpanDragStart();
@@ -627,10 +673,9 @@ private:
     float dragStartY = 0.0f;
     double dragStartSpan = 0.0;
     // What syncArcOrigin() last put on screen, so refresh() can tell a tick that changed
-    // something from the many that did not. Invalid until the first write, or the knob would
+    // something from the many that did not. Empty until the first write, or the knob would
     // start life believing it had already drawn a band of zero.
-    ArcEnds drawn { false, 0.0, 0.0 };
-    bool drawnValid = false;
+    std::optional<DrawnArc> drawn;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RangeKnob)
 };

@@ -2244,6 +2244,15 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
             heading(knobLabels[(size_t) k], macroKnobSpecs[(size_t) k].heading);
         knobAtts[(size_t) k] = std::make_unique<SliderAtt>(
             processor.apvts, id(macroKnobSpecs[(size_t) k].param), knob);
+        // **The attachment is what gives the face its range, and spanMax() reads that range.**
+        // So the setSpanMax() calls above - a hundred lines up, inside the range-knob branch -
+        // ran while the face was still on JUCE's default 0..10 and re-clamped at a ceiling of
+        // five. It is inert today only because the span is still zero at that point, which is
+        // luck rather than design: the whole point of that re-clamp is to bite when a ceiling
+        // narrows under a live span. Re-running it here, once the face knows its own range, is
+        // what makes the ordering stop mattering.
+        if (auto& rk = ranges[(size_t) k])
+            rk->reclampSpan();
     }
 
     // The two fixed harmony voices (2026-08-19, BigSky's shimmer list). The combo picks the
