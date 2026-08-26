@@ -857,6 +857,30 @@ public:
         // sounding half half-hearted. Turning Exclusive off alongside it costs the drag nothing.
         bool padsPlayOnClick = true;
 
+        // **Keep arp running** (2026-08-26, Owen: "I wanna be able to hold the chord down to
+        // build it with my mouse, but then also to drag a new chord onto the arpeggiator").
+        // Ticked, pressing a card on the strip - a pad or the live card - never releases an arp
+        // line's held chord, however Exclusive is set. Unticked is what Keys did before: with
+        // Exclusive on, leaning on a card stopped every running line.
+        //
+        // This is the half of the Play toggle's story that Play could not fix. Play decides
+        // whether the strip makes a *sound*; what actually cut the lines off was the **choke**,
+        // and the only way to avoid it was to give up the sound as well - so hold-to-build and
+        // drag-into-the-arp were two settings you had to keep swapping between. They are one
+        // now: Play stays ticked, and a press that turns out to be a drag has taken nothing
+        // away by the time it is recognised.
+        //
+        // A *drop* on a line still replaces that line's chord, and Exclusive still chokes the
+        // pads and the live card from it. This narrows one gesture, not the rule: pressing a
+        // card is playing a chord, and a line's held chord is not something you are playing -
+        // it is what the machine is chewing. Same distinction `takeChordOnLine` draws when it
+        // routes a chord without navigating to the line.
+        //
+        // Default **on**, so it is the behaviour you get without knowing the switch is there -
+        // and an older session, whose tree has no such property, takes it too. Nothing about a
+        // saved session changes visibly unless Exclusive is on, which is off by default.
+        bool padsKeepArpRunning = true;
+
         int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
 
         // Where each window was left. Empty = never detached yet, so centre it.

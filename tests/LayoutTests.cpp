@@ -127,6 +127,59 @@ public:
             }
         }
 
+        beginTest("the Pads bar still fits Play and Keep arp at the editor's floor");
+        {
+            // The Pads bar grew a second toggle on 2026-08-26 (Keep arp running, beside Play),
+            // and CLAUDE.md's rule for a bar outgrowing its floor is to raise the floor rather
+            // than let a control pay for it. This is the measurement that says which happened,
+            // instead of the arithmetic in minWidthForView()'s comment - which has drifted
+            // twice before, in opposite directions, and said so.
+            //
+            // Both toggles are checked, not just the new one: a fixed-width cell taken out of a
+            // bar starves its *neighbours*, so the interesting failure is Play going thin.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+
+            for (const char* title : { "Pads play on click", "Keep arp running" })
+            {
+                juce::Component* found = nullptr;
+                for (auto* t : targets)
+                    if (t->getTitle() == title)
+                        found = t;
+                expect(found != nullptr, juce::String("'") + title + "' is on screen at all");
+                if (found == nullptr)
+                    continue;
+
+                const auto b = found->getBounds();
+                expectEquals(b.getHeight(), 24, juce::String(title) + " is a bar-height chip");
+
+                // A ToggleButton draws its tick box and then its text beside it. Measured with
+                // GlyphArrangement, never Font::getStringWidth, which under-measures - the rule
+                // the chord library's `iim7`-drawn-as-`iim` bug wrote down.
+                auto* button = dynamic_cast<juce::Button*>(found);
+                expect(button != nullptr);
+                juce::GlyphArrangement ga;
+                // The size JUCE's own drawToggleButton picks: jmin(15, height * 0.75).
+                const juce::Font font { juce::FontOptions(
+                    (float) juce::jmin(15, b.getHeight() * 3 / 4)) };
+                ga.addLineOfText(font, button->getButtonText(), 0.0f, 0.0f);
+                const float text = ga.getBoundingBox(0, -1, true).getRight();
+                // The tick box plus its gap is the height-derived square JUCE lays out, and it
+                // is generous here on purpose: what this is guarding against is a cell squeezed
+                // to nothing, not a pixel of kerning.
+                expect((float) b.getWidth() >= text + (float) b.getHeight(),
+                       juce::String(title) + " is " + juce::String(b.getWidth())
+                           + " px wide, too narrow for its box plus \""
+                           + button->getButtonText() + "\"");
+            }
+        }
+
         beginTest("no visible control is starved, in any view or page");
         {
             // The rule the Chain tab broke by being laid out at zero width, and the Shape

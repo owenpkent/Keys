@@ -2719,6 +2719,129 @@ public:
             }
         }
 
+        // --- Scale Lock reaching the line's output (2026-08-26) ---------------------------
+        //
+        // Owen: "does the scale lock button at the top apply to arpeggiators and harmonies?"
+        // It did not - Root and Scale reached the engine, the *lock* did not. These pin all
+        // three routes at once, because they all land in `addHit`.
+
+        beginTest("snapToMask rounds to the nearest degree, ties down, and is idempotent");
+        {
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            expectEquals(ArpEngine::snapToMask(60, cMajor, 0), 60, "an in-scale note is untouched");
+            expectEquals(ArpEngine::snapToMask(61, cMajor, 0), 60, "C# rounds down to C");
+            expectEquals(ArpEngine::snapToMask(63, cMajor, 0), 62, "Eb rounds down to D");
+            expectEquals(ArpEngine::snapToMask(66, cMajor, 0), 65, "F# rounds down to F");
+            // Ties go down, the same way the kit's scales::snapToScale walks (`-d` before `+d`),
+            // so a snapped note is stable rather than drifting upward under repeated passes.
+            expectEquals(ArpEngine::snapToMask(ArpEngine::snapToMask(63, cMajor, 0), cMajor, 0),
+                         62, "snapping is idempotent");
+            // The root moves the whole mask with it: in D major, C# is in and C is not.
+            constexpr unsigned int major = cMajor;
+            expectEquals(ArpEngine::snapToMask(61, major, 2), 61, "C# is the 7th of D major");
+            // Chromatic is every pitch class, so there is nothing to snap to. Checked because
+            // it is the *default* mask, and a snap that moved notes there would break every
+            // session that has never touched Scale.
+            for (int n = 48; n < 72; ++n)
+                expectEquals(ArpEngine::snapToMask(n, 0xFFFu, 0), n,
+                             "a chromatic scale snaps nothing");
+        }
+
+        beginTest("Scale Lock snaps a chord the arp was handed, harmony voices included");
+        {
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            // Cm in C major: the Eb is the note that has to move, and a minor-third harmony
+            // voice on every hit is the second route into addHit.
+            const auto run = [&](bool lock)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                auto sp = p;
+                sp.rootPc = 0;
+                sp.scaleMask = cMajor;
+                sp.scaleLock = lock;
+                sp.harmSemis[0] = 3;
+                sp.harmChance[0] = 100;
+                juce::MidiBuffer out;
+                clock.ppq = 0.0;
+                e.process(sp, clock, block * 16, chordOn({ 60, 63, 67 }), out);
+                std::set<int> heard;
+                for (auto& ev : collect(out))
+                    if (ev.on)
+                        heard.insert(ev.note);
+                return heard;
+            };
+
+            for (int n : run(true))
+                expect((cMajor >> (n % 12)) & 1u,
+                       "Lock on played " + juce::String(n) + ", out of scale");
+
+            // The other half, and the one that stops this passing vacuously: unlocked, the
+            // same run genuinely does leave the scale, so the assertion above is about the
+            // switch rather than about the notes happening to fit.
+            bool leftScale = false;
+            for (int n : run(false))
+                leftScale = leftScale || (((cMajor >> (n % 12)) & 1u) == 0);
+            expect(leftScale, "Lock off still plays the Eb and its harmony, unchanged");
+        }
+
+        beginTest("Scale Lock wins over Stray's chromatic zone");
+        {
+            // Stray at 100 is the one thing in the engine whose whole job is leaving the scale,
+            // so it is the sharpest test that the snap is applied last. The two are not in
+            // conflict: locking the output is what the toggle says it does.
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.rootPc = 0;
+            sp.scaleMask = cMajor;
+            sp.scaleLock = true;
+            sp.stray = 100;
+            sp.mutate = 100;
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(sp, clock, block * 32, chordOn({ 60, 64, 67 }), out);
+            int notes = 0;
+            for (auto& ev : collect(out))
+                if (ev.on)
+                {
+                    ++notes;
+                    expect((cMajor >> (ev.note % 12)) & 1u,
+                           "Stray 100 under Lock played " + juce::String(ev.note));
+                }
+            expect(notes > 0, "the run actually sounded");
+        }
+
+        beginTest("Scale Lock never leaves a pitch hanging when two notes snap onto one");
+        {
+            // The snap happens *before* addHit's dedup, which is the half that matters: two
+            // hits on one pitch in one step is a hung note, not a doubled one (see addHit).
+            // Db and D both round to D in C major, so this step has to come out as one.
+            constexpr unsigned int cMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5)
+                                          | (1u << 7) | (1u << 9) | (1u << 11);
+            ArpEngine e;
+            e.prepare(sr);
+            auto sp = p;
+            sp.rootPc = 0;
+            sp.scaleMask = cMajor;
+            sp.scaleLock = true;
+            sp.direction = ArpEngine::Direction::chord; // one step, every held note at once
+            juce::MidiBuffer out;
+            clock.ppq = 0.0;
+            e.process(sp, clock, block * 8, chordOn({ 61, 62 }), out);
+            std::map<int, int> balance;
+            for (auto& ev : collect(out))
+                balance[ev.note] += ev.on ? 1 : -1;
+            for (auto& [note, b] : balance)
+                expect(b >= 0 && b <= 1,
+                       "note " + juce::String(note) + " left the run " + juce::String(b)
+                           + " note-ons deep");
+        }
+
         beginTest("Stray adds no note events, it only replaces them");
         {
             // The complaint the whole split came out of, pinned so it cannot come back: "it's

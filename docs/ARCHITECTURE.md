@@ -316,11 +316,20 @@ and releasing calls `releaseChordPad` (stop, unless Sustain is holding it: the e
 held pad chords when the pedal lifts).
 
 **`LayoutState::padsPlayOnClick` - the Pads bar's Play toggle - gates the whole of it.** Off, a
-click makes no sound at either end and the strip is drag-only, which is the setting for dragging
-cards up into the arpeggiator: firing a chord chokes the other chord sources, and with Exclusive
-on that reaches each line's held chord, so a press that turns out to be a drag has already
-stopped a running line. That trade is what made the release own the sound between 2026-08-18 and
-2026-08-22, behind a `padHoldToPlay` tick that no longer exists - one switch answers it now.
+click makes no sound at either end and the strip is drag-only. That trade is what made the
+release own the sound between 2026-08-18 and 2026-08-22, behind a `padHoldToPlay` tick that no
+longer exists - one switch answers it now.
+
+**`LayoutState::padsKeepArpRunning` - the Keep arp toggle beside it - answers the other half**
+(2026-08-26, default on). Turning Play *off* used to be the way to drag cards into the
+arpeggiator, because firing a chord chokes the other chord sources and with Exclusive on that
+reached each line's held chord: a press that turned out to be a drag had already stopped a
+running line. But the choke, not the sound, was the problem, and giving up the sound to avoid it
+meant you could not hear what you were building. Ticked, `pressChordPad` and `pressLiveChord`
+pass `includeArpHolds = false`, so a press on the strip never releases a line's chord however
+Exclusive is set. **A drop on a line still replaces that line's chord** and still chokes the pads
+and the live card: pressing a card is playing a chord, and a line's held chord is not something
+you are playing - it is what the machine is chewing.
 
 A drag does **not** stop the chord (2026-08-22): with the press owning the note, cutting it on
 travel made the length of a chord depend on the hand staying inside a small circle, which is the

@@ -385,6 +385,12 @@ private:
     // drag-only; see LayoutState::padsPlayOnClick for the whole story. A plain toggle rather
     // than a parameter: it is a UI mode, like Light keys, and it lives in the layout tree.
     juce::ToggleButton padsPlayButton { "Play" };
+    // Beside it, and the pair is deliberate (2026-08-26): Play says whether the strip makes a
+    // sound, this says whether making one is allowed to stop the arpeggiator. Two questions, so
+    // two switches - the one case where that is not the mistake `padHoldToPlay` was, because
+    // neither answer implies the other and Owen wants both halves at once. See
+    // LayoutState::padsKeepArpRunning. Layout tree, like Play, not a parameter.
+    juce::ToggleButton padsKeepArpButton { "Keep arp" };
 
     // The generator's two bulk actions, riding the Pads bar. They are the fast path into
     // generation, and they are on a bar because a bar is 34 px that already exists: a control
@@ -568,6 +574,11 @@ private:
     // never navigates from either surface, so there is nothing left for the flag to choose
     // between - see the note over the definition in PluginEditor.cpp.
     void sendPadToArpLine(int padSlot, int line);
+    // A *dropped* chord into one line, from whichever surface carried it (2026-08-26): the pad
+    // strip, the live "current chord" card, the generator's tray, its reference box. Separate
+    // from the pad overload above because only a pad has a slot for the line to remember, and
+    // only the menu rows can promise one.
+    void sendDroppedChordToArpLine(const chorddrag::Payload& dropped, int line);
     void nudgeBpm(int delta);
     void nudgeOctave(int delta); // the Keyboard bar's < > pair beside the octave read-out
 

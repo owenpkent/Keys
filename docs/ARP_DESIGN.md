@@ -968,7 +968,9 @@ working width, the same "grow height, not width" call the two strips make.
   Mode 1 draws the Harmony lane's second voice from the undertone series **below** the
   played note - f/2 to f/8 quantized to 12-TET, `{-12, -19, -24, -28, -31, -34, -36}` -
   instead of chord tones above it. It deliberately leaves the chord, so it is meant to be
-  heard with Scale Lock off (Lock upstream will re-quantize it). A voice that clamps onto
+  heard with Scale Lock off - and since 2026-08-26 that is literal rather than incidental:
+  Lock snaps the line's own output in `addHit`, so with it on these undertones round back
+  into the key and the mode has nothing left to say. A voice that clamps onto
   the note it was meant to harmonize is dropped, not wrapped: a wrapped low note reads as a
   new attack rather than a silence.
 
@@ -1357,9 +1359,17 @@ against the two you sit and turn.
 ## Scale awareness
 
 Keys already owns Root/Scale. The arp editor flags out-of-key results visually
-(Stepic's red-flag convention) and, because Keys has Scale Lock upstream, the arp
-output can never leave the scale when Lock is on. This is a differentiator the
-stock arps lack; it comes almost free here.
+(Stepic's red-flag convention) and the arp output can never leave the scale when Lock is on.
+This is a differentiator the stock arps lack; it comes almost free here.
+
+**That last claim was aspirational until 2026-08-26 and is now true.** Lock was read in one
+place - resolving a note at keybed press time - so it snapped what you played *into* a line and
+nothing the line did afterwards: a harmony voice, a Stray, a Chord-lane slot or an octave stack
+could all leave the key with Lock lit. `Params::scaleLock` and `ArpEngine::snapToMask` put the
+snap in `addHit`, which every emitted pitch passes through, so one rule covers all of them. It
+snaps *before* the dedup, so two pitches that round onto one collapse to a single hit rather
+than becoming the hung note two hits on one pitch in one step always are. Chord pads are
+untouched: a stored chord is one you built.
 
 ## Patterns, which became slots
 

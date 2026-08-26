@@ -840,6 +840,101 @@ public:
                                      (juce::juce_wchar) ('A' + line))
                                      + " played " + juce::String(ons) + " notes");
             }        }
+
+        // --- Keep arp running, and a chord that has no pad (2026-08-26) --------------------
+
+        beginTest("Keep arp running round-trips, and an older session takes the default");
+        {
+            Host h;
+            expect(h.processor.layout.padsKeepArpRunning, "default on");
+            h.processor.layout.padsKeepArpRunning = false;
+            juce::MemoryBlock block;
+            h.processor.getStateInformation(block);
+
+            Host loaded;
+            loaded.processor.setStateInformation(block.getData(), (int) block.getSize());
+            expect(! loaded.processor.layout.padsKeepArpRunning, "off survives a save/load");
+
+            // A session written before the property existed: the layout tree simply has no such
+            // key, which for a layout flag has always meant "take the default" - unlike an APVTS
+            // parameter, where an absence needs a migration.
+            auto xml = juce::AudioProcessor::getXmlFromBinary(block.getData(), (int) block.getSize());
+            expect(xml != nullptr);
+            auto root = juce::ValueTree::fromXml(*xml);
+            auto lay = root.getChildWithName("layout");
+            expect(lay.isValid(), "the layout node is where the flag lives");
+            lay.removeProperty("padsKeepArpRunning", nullptr);
+            juce::MemoryBlock older;
+            if (auto trimmed = root.createXml())
+                juce::AudioProcessor::copyXmlToBinary(*trimmed, older);
+
+            Host old;
+            old.processor.setStateInformation(older.getData(), (int) older.getSize());
+            expect(old.processor.layout.padsKeepArpRunning,
+                   "an absent flag is the default, not false");
+        }
+
+        beginTest("Keep arp running: a pad press stops the lines only when it is off");
+        {
+            // The whole point of the switch, and it is only ever visible with Exclusive **on** -
+            // off, a pad press has never reached the arp holds. Both halves asserted, because a
+            // gate that is stuck open and a gate that is doing its job look identical from the
+            // ticked side alone.
+            for (bool keep : { false, true })
+            {
+                Host h;
+                h.processor.prepareToPlay(48000.0, 512);
+                setParam(h.processor, "chordExclusive", 1.0f);
+                h.processor.layout.padsKeepArpRunning = keep;
+
+                KeysProcessor::ChordPad pad;
+                pad.notes = { 60, 64, 67 };
+                pad.name = "C";
+                h.processor.setChordPad(0, pad);
+
+                h.processor.holdArpChord({ 62, 65, 69 }, "Dm", 0);
+                expect(! h.processor.arpHeldNotes(0).empty(), "the line is holding a chord");
+
+                h.processor.pressChordPad(0);
+                expectEquals((int) h.processor.arpHeldNotes(0).empty() ? 1 : 0, keep ? 0 : 1,
+                             keep ? "ticked, the line keeps its chord through a pad press"
+                                  : "unticked, Exclusive still stops the line");
+            }
+        }
+
+        beginTest("Keep arp running: the live card press is gated the same way");
+        {
+            // The live card is the surface Owen was dragging from, so it is the one that has to
+            // work - and it takes a different route (`pressLiveChord`, which already passed a
+            // flag of its own for the keybed). Two call sites, one rule.
+            for (bool keep : { false, true })
+            {
+                Host h;
+                h.processor.prepareToPlay(48000.0, 512);
+                setParam(h.processor, "chordExclusive", 1.0f);
+                h.processor.layout.padsKeepArpRunning = keep;
+                h.processor.holdArpChord({ 62, 65, 69 }, "Dm", 0);
+                h.processor.pressLiveChord({ 60, 64, 67 });
+                expectEquals((int) h.processor.arpHeldNotes(0).empty() ? 1 : 0, keep ? 0 : 1,
+                             keep ? "ticked, the live card leaves the line alone"
+                                  : "unticked, it stops the line");
+            }
+        }
+
+        beginTest("a line can hold a chord that belongs to no pad");
+        {
+            // What the live card drop lands on. `holdArpChordFromPad` was the only route a drop
+            // had until 2026-08-26, and it needs a slot to look the chord up by - so the live
+            // card, whose index is -1 by construction, was refused by all four arp targets.
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            h.processor.holdArpChord({ 60, 63, 67 }, "Cm", 1);
+            expectEquals((int) h.processor.arpHeldNotes(1).size(), 3, "the line took the chord");
+            expectEquals(h.processor.arpHeldName(1), juce::String("Cm"));
+            expectEquals(h.processor.arpHeldPad(1), -1,
+                         "and marks no pad, because no pad was involved");
+            expect(h.processor.arpLineHoldingPad(0) < 0, "nor does it claim somebody's slot");
+        }
     }
 };
 

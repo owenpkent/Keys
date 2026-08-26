@@ -5,6 +5,79 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: the chord you are holding can be dragged onto an arpeggiator line
+
+Owen: *"I can't drag the held chord onto the arpeggiator."*
+
+The **live chord card** at the left of the pad strip picked up and carried like any other card,
+ghost and all, and then no arp target would take it. All four of them - a macro card, a slot
+card, the panel itself, and the A/B/C/D switches on the arp bar - asked for a chord that came
+from a *pad slot*, and then looked the chord up by that slot's index. The live card has no slot
+by construction, so its drops landed on nothing and vanished. Nothing lit on the way, which is
+why it read as the drag not working rather than as the drop being refused.
+
+The arp takes a chord from anywhere now: the pad strip, the live card, the generator's audition
+tray and its reference box. Every route was already carrying the whole chord in the drag - the
+targets were turning it away for not carrying an index as well.
+
+**A tray candidate dropped on a line is copied, not spent.** Committing one to a *pad* empties
+its cell, which is how you see what you have taken and what gives Fill something to do; a line
+is not storage, so a candidate that vanished into one would be unrecoverable. The reference box
+was already a fixed point and stays one.
+
+A line fed this way wears no pad letter, because no pad was involved - **Hold off** and **All
+Off** are what stop it. A chord sent from a pad still marks its card, exactly as before.
+
+### Added: Keep arp running, beside Play on the Pads bar
+
+Owen: *"I wanna be able to hold the chord down to build it with my mouse, but then also to drag
+a new chord onto the arpeggiator."*
+
+Ticked (the default), pressing a card on the pad strip never releases a running arp line's held
+chord. Lean on a pad to hear it, drag it up into the arpeggiator, and the lines that were
+already going are still going when you get there.
+
+This is the half of the story **Play** could not tell. Play decides whether the strip makes a
+*sound*; what actually cut the lines off was the **choke** - with Chord Exclusive on, firing a
+chord stopped every other chord source, arp holds included, and a press that turns out to be a
+drag has already done that by the time the drag is recognised. The only way out was to turn Play
+off and give up the sound as well, so hold-to-build and drag-into-the-arp were two settings you
+had to keep swapping between. They are one now.
+
+It narrows one gesture rather than the rule. **Dropping** a chord on a line still replaces that
+line's chord, and Exclusive still chokes the pads and the live card from it: pressing a card is
+playing a chord, and a line's held chord is not something you are playing, it is what the machine
+is chewing. Untick this and Exclusive reaches the lines as it always did.
+
+Nothing changes at all while Exclusive is off, which is its own default.
+
+### Fixed: Scale Lock reaches the arpeggiator and its harmony voices
+
+Owen: *"does the scale lock button at the top apply to arpeggiators and harmonies?"* It did not.
+
+**Lock** was read in exactly one place - resolving a note at keybed press time - so it shaped
+what you played into a line and nothing the line did afterwards. Root and Scale beside it have
+always reached the engine (the Transpose lane counts scale degrees, Distance can stack in them,
+and Stray's lower zone is defined by them); the *lock* was the piece that never arrived.
+
+Every pitch a line emits is now snapped onto the scale while Lock is on. That is one rule rather
+than five, because it lands where every emitted pitch already passes through: the direction walk,
+Octave and Transpose, a chord called up by the Chord lane, the octave stacking, both harmony
+voices and Stray's strays all go through it.
+
+Two consequences worth knowing:
+
+- **Harmony voices stop being chromatic while Lock is on.** The dropdown still names an exact
+  interval, and with Lock off it still plays exactly that; locked, a voice that lands outside the
+  key rounds into it, so "+ Minor 3rd" over a chord tone in a major key comes out as the third the
+  key has.
+- **Lock beats Stray.** Stray's upper zone exists to leave the scale, and locking the output is
+  what the toggle says it does, so with Lock on those strays round back in and Stray's two zones
+  read as one. Untick Lock to hear the wrong notes it exists to prevent.
+
+Chord pads are untouched: a stored chord is a chord you built, and snapping it would silently
+rewrite a borrowed one.
+
 ### Added: Clear page, on a pad's card menu
 
 Owen: *"we need to be able to clear all the chords on a pad page."*
