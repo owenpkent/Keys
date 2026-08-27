@@ -47,6 +47,22 @@ namespace
              + " (A, B, C, D). Omit for A.";
     }
 
+    // Reads the optional `line` argument, rejecting one that names a line that does not
+    // exist. Rejected rather than clamped, and shared rather than written out per tool: a
+    // clamp is the one validation failure nobody can see, because `line: 7` lands on D and
+    // reports success. Every other out-of-range argument in these handlers is a hard error,
+    // so this was also the only one that behaved differently from its neighbours.
+    bool readLine(const juce::var& args, int& line, juce::String& error)
+    {
+        line = (int) args.getProperty("line", 0);
+        if (line < 0 || line >= KeysProcessor::numArpLines)
+        {
+            error = "line out of range 0.." + juce::String(KeysProcessor::numArpLines - 1);
+            return false;
+        }
+        return true;
+    }
+
     juce::var intVectorToVar(const std::vector<int>& values)
     {
         juce::Array<juce::var> arr;
@@ -794,17 +810,9 @@ okstudio::mcp::Tool KeysMcp::toolHoldArpChord()
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        // Rejected, not clamped. Every other argument in this handler is a hard error out of
-        // range, and a clamp here is the one that cannot be noticed: `line: 7` would land the
-        // chord on D and report success, which is the silent-wrong-target failure this whole
-        // tool exists to end. (The older arp tools still clamp; that is a wider change than
-        // this one and is left alone deliberately rather than half-done here.)
-        const int line = (int) args.getProperty("line", 0);
-        if (line < 0 || line >= KeysProcessor::numArpLines)
-        {
-            error = "line out of range 0.." + juce::String(KeysProcessor::numArpLines - 1);
+        int line = 0;
+        if (! readLine(args, line, error))
             return {};
-        }
         const bool hasNotes = args.hasProperty("notes");
         const bool hasPad = args.hasProperty("padSlot");
         if (hasNotes == hasPad)
@@ -888,12 +896,10 @@ okstudio::mcp::Tool KeysMcp::toolReleaseArpChord()
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const bool all = (bool) args.getProperty("allLines", false);
-        const int line = (int) args.getProperty("line", 0);
-        if (! all && (line < 0 || line >= KeysProcessor::numArpLines))
-        {
-            error = "line out of range 0.." + juce::String(KeysProcessor::numArpLines - 1);
+        int line = 0;
+        // With allLines the argument is documented as ignored, so it is not validated either.
+        if (! all && ! readLine(args, line, error))
             return {};
-        }
 
         // releaseArpHold, both forms, never releaseArpChord: the description above promises
         // the Hold off chip, and PluginProcessor.h says at the declaration why the bare chord
@@ -929,11 +935,12 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
                      "editor); with slot, reads that stored pattern (0..11) without "
                      "disturbing what's live.";
     t.params = { { "slot", "integer", "Pattern slot 0..11. Omit to read the live lanes.", false },
-                 { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has always had.", false } };
+                 { "line", "integer", arpLineRange(), false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
-                                      (int) args.getProperty("line", 0));
+        int line = 0;
+        if (! readLine(args, line, error))
+            return {};
         auto* obj = new juce::DynamicObject();
         if (args.hasProperty("slot"))
         {
@@ -1011,7 +1018,7 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         "refreshes the live lanes too if that slot happens to be the active one.";
     t.params = {
         { "slot", "integer", "Pattern slot 0..11 to write. Omit to write the live lanes.", false },
-        { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has always had.", false },
+        { "line", "integer", arpLineRange(), false },
         { "note", "array", "Per-step note lane (-1..8).", false },
         { "octave", "array", "Per-step octave lane (-3..3).", false },
         { "velocity", "array", "Per-step velocity lane (10..200).", false },
@@ -1115,8 +1122,9 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         }
 
         const bool hasSlot = args.hasProperty("slot");
-        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
-                                      (int) args.getProperty("line", 0));
+        int line = 0;
+        if (! readLine(args, line, error))
+            return {};
         const int slot = hasSlot ? (int) args.getProperty("slot", -1) : processor.arpActivePattern(line);
         if (hasSlot && (slot < 0 || slot >= KeysProcessor::numArpPatterns))
         {
@@ -1194,7 +1202,7 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
                      "clicking its pattern button. Snapshots the current live lanes into "
                      "their slot first, so nothing being edited is lost.";
     t.params = { { "slot", "integer", "Pattern slot 0..11 to make active.", true },
-                 { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has always had.", false } };
+                 { "line", "integer", arpLineRange(), false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
@@ -1203,8 +1211,10 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
             error = "slot out of range 0..11";
             return {};
         }
-        processor.recallArpPattern(slot, juce::jlimit(0, KeysProcessor::numArpLines - 1,
-                                                     (int) args.getProperty("line", 0)));
+        int line = 0;
+        if (! readLine(args, line, error))
+            return {};
+        processor.recallArpPattern(slot, line);
         return juce::var(true);
     };
     return t;
@@ -1217,12 +1227,13 @@ okstudio::mcp::Tool KeysMcp::toolStoreArpPattern()
     t.description = "Snapshot the live lanes (whatever is currently playing/being edited) "
                      "into the active pattern slot, same as what happens automatically "
                      "just before the editor switches patterns.";
-    t.params = { { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line "
-                                      "Keys has always had.", false } };
-    t.run = [this](const juce::var& args, juce::String&) -> juce::var
+    t.params = { { "line", "integer", arpLineRange(), false } };
+    t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        processor.storeActiveArpPattern(juce::jlimit(0, KeysProcessor::numArpLines - 1,
-                                                    (int) args.getProperty("line", 0)));
+        int line = 0;
+        if (! readLine(args, line, error))
+            return {};
+        processor.storeActiveArpPattern(line);
         return juce::var(true);
     };
     return t;
@@ -1237,8 +1248,7 @@ okstudio::mcp::Tool KeysMcp::toolApplyEuclid()
                      "on a hit, 0 on a rest, and sets that lane's length to steps. Only the "
                      "probability lane has a meaningful hit/rest mapping today.";
     t.params = {
-        { "line", "integer", "Arpeggiator line 0..1 (A, B). Omit for A, the line Keys has "
-                             "always had.", false },
+        { "line", "integer", arpLineRange(), false },
         { "hits", "integer", "Pulses to distribute, 0..steps.", true },
         { "steps", "integer", "Pattern length, 1..32.", true },
         { "rotation", "integer", "Rotate the pattern by this many steps. Default 0.", false },
@@ -1250,7 +1260,9 @@ okstudio::mcp::Tool KeysMcp::toolApplyEuclid()
             error = "hits and steps are required";
             return {};
         }
-        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1, (int) args.getProperty("line", 0));
+        int line = 0;
+        if (! readLine(args, line, error))
+            return {};
         const int hits = (int) args.getProperty("hits", 0);
         const int steps = (int) args.getProperty("steps", 0);
         const int rotation = (int) args.getProperty("rotation", 0);

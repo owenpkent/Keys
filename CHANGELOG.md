@@ -5,6 +5,26 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: the MCP arp tools said there were two lines, and clamped onto the wrong one
+
+Five tools take a `line` argument - `get_arp_pattern`, `set_arp_pattern`, `recall_arp_pattern`,
+`store_arp_pattern`, `apply_euclid` - and every one of them described it as **"0..1 (A, B)"**.
+Keys has had four lines since 2026-08-19, so a client reading the schema could not know C and D
+were reachable at all. The string is built from `numArpLines` now, like the pad-slot bounds
+beside it, so there is no second copy of the count to go stale.
+
+Worse, all five **clamped** an out-of-range line instead of rejecting it, so `line: 7` wrote to D
+and reported success. That is the one validation failure nobody can see: every other out-of-range
+argument in those handlers is a hard error, and a clamp turns a typo into a pattern silently
+written to the wrong arpeggiator. They reject now, through one shared `readLine` that
+`hold_arp_chord` and `release_arp_chord` use too, so the rule lives in one place rather than
+seven. `allLines` on `release_arp_chord` still ignores `line`, as documented.
+
+Covered by a sweep over every tool that declares a `line` rather than a list of names, since the
+failure being guarded against is a tool being *missed*. The sweep asserts the error message names
+the line: checking only that *an* error came back let `set_arp_pattern` pass while rejecting
+something else entirely.
+
 ### Added: get_state says what a line is sounding, not just what it was handed
 
 `arpLines` entries gain **`soundingNoteCount`** (how many notes the engine holds, from any
