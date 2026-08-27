@@ -19,6 +19,7 @@
 #include "../src/PluginProcessor.h"
 #include "../src/mcp/KeysMcp.h"
 #include <juce_events/juce_events.h>
+#include <juce_core/juce_core.h>
 #include <algorithm>
 
 namespace keys::tests
@@ -33,22 +34,60 @@ namespace
         KeysProcessor processor;
     };
 
-    okstudio::mcp::Tool toolNamed(KeysProcessor& p, const juce::String& name)
-    {
-        for (auto& t : p.mcp()->buildTools())
-            if (t.name == name)
-                return t;
-        return {};
-    }
-
-    // Invoke a tool the way the server would. `error` comes back empty on success.
+    // One JSON-RPC round trip against the bridge the processor already owns. `error` comes
+    // back empty on success and carries the tool's own message otherwise.
+    //
+    // This goes through the server rather than calling a tool's `run` directly, and the
+    // difference is the point: the schema, the registration and the JSON-RPC layer are all
+    // exercised on the way past, so a tool with malformed params, a duplicate name addTool
+    // refused, or a tool that never reached the table fails here. Calling `run` could not
+    // notice any of those. It is also why a renamed tool now fails one test instead of
+    // aborting the binary: the old helper jassert'd a null std::function and then called it,
+    // and jassert compiles out in Release, which is how Keys_tests is built.
     juce::var call(KeysProcessor& p, const juce::String& tool, const juce::var& toolArgs,
                    juce::String& error)
     {
         error.clear();
-        auto t = toolNamed(p, tool);
-        jassert(t.run != nullptr);
-        return t.run(toolArgs, error);
+
+        auto* params = new juce::DynamicObject();
+        params->setProperty("name", tool);
+        params->setProperty("arguments", toolArgs);
+        auto* req = new juce::DynamicObject();
+        req->setProperty("jsonrpc", "2.0");
+        req->setProperty("id", 1);
+        req->setProperty("method", "tools/call");
+        req->setProperty("params", juce::var(params));
+
+        const auto responseLine = p.mcp()->handleLine(juce::JSON::toString(juce::var(req), true));
+        const auto response = juce::JSON::parse(responseLine);
+
+        if (response.hasProperty("error"))
+        {
+            error = response["error"]["message"].toString();
+            if (error.isEmpty())
+                error = "JSON-RPC error with no message: " + responseLine;
+            return {};
+        }
+
+        // A tools/call result is a single text block holding the tool's own JSON.
+        auto* content = response["result"]["content"].getArray();
+        if (content == nullptr || content->isEmpty())
+        {
+            error = "malformed tools/call response: " + responseLine;
+            return {};
+        }
+        return juce::JSON::parse((*content)[0]["text"].toString());
+    }
+
+    // tools/list, for the tests that want the registered table rather than one tool's answer.
+    juce::var toolTable(KeysProcessor& p)
+    {
+        auto* req = new juce::DynamicObject();
+        req->setProperty("jsonrpc", "2.0");
+        req->setProperty("id", 1);
+        req->setProperty("method", "tools/list");
+        const auto response = juce::JSON::parse(p.mcp()->handleLine(juce::JSON::toString(juce::var(req), true)));
+        return response["result"]["tools"];
     }
 
     juce::var call(KeysProcessor& p, const juce::String& tool, const juce::var& toolArgs)
@@ -86,24 +125,58 @@ public:
 
     void runTest() override
     {
-        beginTest("every tool in the table has a name, a description and a runnable body");
+        beginTest("every registered tool has a name, a description and a usable schema");
         {
             Host h;
-            auto tools = h.processor.mcp()->buildTools();
-            expect(tools.size() >= 18, "the table lost tools");
-            juce::StringArray names;
-            for (auto& t : tools)
+            // The table as the *server* holds it, not as buildTools() returns it: a tool that
+            // never reached addTool, or one addTool refused, is invisible to the second and
+            // caught by the first.
+            // The var is held in a named local on purpose: it owns the array, so
+            // `toolTable(...).getArray()` would hand back a pointer into a temporary that is
+            // already gone by the time the loop reads it.
+            const auto table = toolTable(h.processor);
+            auto* tools = table.getArray();
+            if (tools == nullptr)
             {
-                expect(t.name.isNotEmpty(), "a tool has no name");
-                expect(t.description.isNotEmpty(), "tool has no description: " + t.name);
-                expect(t.run != nullptr, "tool has no body: " + t.name);
-                expect(! names.contains(t.name), "duplicate tool name: " + t.name);
-                names.add(t.name);
+                expect(false, "tools/list returned no array");
+                return;
+            }
+            expect(tools->size() >= 18, "the table lost tools");
+            juce::StringArray names;
+            for (auto& t : *tools)
+            {
+                const auto name = t["name"].toString();
+                expect(name.isNotEmpty(), "a tool has no name");
+                expect(t["description"].toString().isNotEmpty(), "tool has no description: " + name);
+                expect(! names.contains(name), "duplicate tool name: " + name);
+                names.add(name);
+
+                // Every param must declare a type, or a client cannot build a call at all.
+                // Only reachable through the schema, which is why the old table test could
+                // not see it.
+                auto schema = t["inputSchema"];
+                expect(schema["type"].toString() == "object", "tool has no object schema: " + name);
+                if (auto* props = schema["properties"].getDynamicObject())
+                    for (const auto& param : props->getProperties())
+                    {
+                        const auto where = name + "." + param.name.toString();
+                        expect(param.value["type"].toString().isNotEmpty(), "param has no type: " + where);
+                        expect(param.value["description"].toString().isNotEmpty(),
+                               "param has no description: " + where);
+                    }
             }
             // Named explicitly: docs/MCP.md documents these two, and a rename would leave
             // every script written against the docs failing with "unknown tool".
             expect(names.contains("hold_arp_chord"));
             expect(names.contains("release_arp_chord"));
+        }
+
+        beginTest("an unknown tool is an error, not a crash");
+        {
+            Host h;
+            juce::String err;
+            call(h.processor, "no_such_tool", args({}), err);
+            expect(err.isNotEmpty(), "an unknown tool reported no error");
         }
 
         beginTest("hold_arp_chord holds the notes it was given, and reports them back");
@@ -194,6 +267,67 @@ public:
             expect(h.processor.arpHeldNotes(0).empty(), "line A did not let go");
             expect(h.processor.arpHeldName(0).isEmpty(), "line A kept its chord name");
             expectEquals((int) h.processor.arpHeldNotes(1).size(), 2);
+        }
+
+        // The bug this pins: release_arp_chord called releaseArpChord(), which
+        // PluginProcessor.h documents at its own declaration as NOT what "let go" means -
+        // it drops the chord and leaves chainOn set, so heartbeatTick() launches the next
+        // slot at the following bar boundary and the chord is back. A release that undoes
+        // itself a bar later reads as a tool that did nothing.
+        beginTest("release_arp_chord stops the chain, so the chord cannot come back");
+        {
+            Host h;
+            // startChain walks the slots that hold a *chord* and does not stick on for an
+            // empty row, so the chain needs somewhere to go before there is anything to stop.
+            h.processor.setArpSlotChord(0, { 45, 48, 52, 55 }, "Am7", 0);
+            h.processor.setArpSlotChord(1, { 43, 47, 50, 53 }, "G7", 0);
+            h.processor.startChain(0);
+            expect(h.processor.chainRunning(0), "the chain did not start");
+            call(h.processor, "release_arp_chord", args({ { "line", 0 } }));
+            expect(! h.processor.chainRunning(0),
+                   "release_arp_chord left the chain running, so the next bar hands the line "
+                   "another chord");
+            expect(h.processor.arpHeldNotes(0).empty(), "line A did not let go");
+        }
+
+        // Every other out-of-range argument in these two handlers is a hard error; `line`
+        // was silently clamped, so line 7 landed on D and reported success. That is the
+        // silent-wrong-target failure the whole tool exists to end.
+        beginTest("an out-of-range line is an error, not a clamp onto the wrong arpeggiator");
+        {
+            Host h;
+            juce::String err;
+            call(h.processor, "hold_arp_chord",
+                 args({ { "notes", noteArray({ 45, 48 }) }, { "line", KeysProcessor::numArpLines } }), err);
+            expect(err.isNotEmpty(), "hold_arp_chord accepted a line past the last one");
+            for (int n = 0; n < KeysProcessor::numArpLines; ++n)
+                expect(h.processor.arpHeldNotes(n).empty(),
+                       "a rejected hold still reached line " + juce::String(n));
+
+            call(h.processor, "hold_arp_chord",
+                 args({ { "notes", noteArray({ 45, 48 }) }, { "line", -1 } }), err);
+            expect(err.isNotEmpty(), "hold_arp_chord accepted line -1");
+
+            call(h.processor, "release_arp_chord", args({ { "line", KeysProcessor::numArpLines } }), err);
+            expect(err.isNotEmpty(), "release_arp_chord accepted a line past the last one");
+        }
+
+        // A line that is off still takes a chord in, by design, so a hold that worked and a
+        // line that will never sound are indistinguishable without this field.
+        beginTest("hold_arp_chord reports whether the line it landed on is actually running");
+        {
+            Host h;
+            juce::String err;
+            auto off = call(h.processor, "hold_arp_chord",
+                            args({ { "notes", noteArray({ 45, 48 }) }, { "line", 1 } }), err);
+            expect(err.isEmpty(), "unexpected error: " + err);
+            expect(off.hasProperty("lineOn"), "the reply does not carry lineOn");
+            expect(! (bool) off["lineOn"], "line B defaults off and the reply said otherwise");
+
+            h.processor.apvts.getParameter("arp2On")->setValueNotifyingHost(1.0f);
+            auto on = call(h.processor, "hold_arp_chord",
+                           args({ { "notes", noteArray({ 45, 48 }) }, { "line", 1 } }), err);
+            expect((bool) on["lineOn"], "line B was switched on and the reply said otherwise");
         }
 
         beginTest("release_arp_chord allLines lets every line go");

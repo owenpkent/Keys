@@ -22,12 +22,26 @@ generative cue driven that way cannot be left running.
 
 Either shape of chord goes in - `notes` directly, or `padSlot` to take a pad's (which lights its
 card, same as the editor). One chord per line; a second call swaps it. `release_arp_chord` lets
-one line go, or every line with `allLines`.
+one line go, or every line with `allLines`, and both mean **`releaseArpHold`** - the Hold off
+chip, chain stopped and pending quantized launch dropped. The bare `releaseArpChord` is not
+that, as `PluginProcessor.h` says at its own declaration: it leaves `chainOn` set, so the next
+bar boundary hands the line another chord and the call reads as having done nothing.
+`releaseArpHold` gained a per-line form so a script and the chip cannot mean different things
+by "release".
 
-**The reply reports the hold it actually took**, including `waitingForQuantize`, because with
-Launch Quantize on the gesture waits for the next boundary and the line is briefly holding
-nothing. An empty hold and a deferred hold look identical otherwise, and telling them apart is
-most of the point: the failure this tool replaces was one where every reading looked right.
+**The reply reports the hold it actually took**, including `waitingForQuantize` and `lineOn`.
+With Launch Quantize on the gesture waits for the next boundary, so the line is briefly holding
+its *previous* chord rather than the one just sent; the flag asks whether **this call** deferred
+(`arpLaunchPending`), not whether the parameter happens to be set. `lineOn` covers the other
+half: B, C and D default to off, a line that is off still takes a chord in by design, and
+without it a hold that worked and a line that will never sound look identical. Telling those
+apart is most of the point - the failure this tool replaces was one where every reading looked
+right.
+
+**An out-of-range `line` is an error, not a clamp.** Every other argument in these two handlers
+is rejected out of range, and a clamp is the one that cannot be noticed: `line: 7` would land
+the chord on D and report success, which is the same silent-wrong-target failure the tool exists
+to end. The older arp tools still clamp; that is a wider change, deliberately not half-done here.
 
 `docs/MCP.md` also gains **"Which instance am I talking to?"**. Nothing in the API answers it -
 no track name, no device index - and the shim picks by recency, so a script can build a whole
@@ -35,6 +49,17 @@ patch into a Keys on a track nobody is listening to and be told it succeeded at 
 Found the hard way: six discovery files for one Live process, four answering tool calls, and the
 routed instance among the two that did not. **A bound port is not evidence a Keys will answer,
 and neither is a discovery file** - only a reply is.
+
+### Fixed: the MCP pad-slot schema said 0..63 when there are 48 pads
+
+Every `slot` / `padSlot` description advertised `0..63` with "page P slot S is `P*16+S`", both
+left over from before the strip went to twelve pads a page on 2026-08-03. The validator has been
+rejecting anything past 47 the whole time, so the schema disagreed with its own error message,
+and a client computing a slot the documented way landed on the wrong pad for every page but the
+first. The strings are built from `padsPerPage` / `numPadPages` / `numChordPads` now, so there is
+no second copy of the number to go stale. `docs/MCP.md` also stopped telling readers to set
+`padChannel` when pads are silent: it is retained for session compatibility only and is read by
+nothing, and pads go out on the global MIDI Channel control like everything else Keys plays.
 
 ### Fixed: an instance could be alive, bound, and deaf
 

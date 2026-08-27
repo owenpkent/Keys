@@ -570,6 +570,12 @@ public:
     // rather than in whichever surface happens to own the button.
     void releaseArpHold();
 
+    // The same thing for one line, which is what "let go of line B" means and what the MCP
+    // release_arp_chord tool calls. Same three parts as the all-lines form above, so a script
+    // and the Hold off chip mean the same thing by "release"; only this line's pending
+    // quantized launch is dropped.
+    void releaseArpHold(int line);
+
     // **All Off, for the arpeggiator** (2026-08-02, Owen: "we need an all off button in the
     // arpeggiator section as well"). Switches every line off, then lets go of everything:
     // holds released, chains stopped, pending quantized launches dropped.

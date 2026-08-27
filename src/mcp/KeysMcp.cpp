@@ -27,6 +27,26 @@ namespace
     // `ArpEngine::laneRange` is the one answer, which is the same rule the Draw grid was put on
     // when `buildLaneRow`'s lo/hi arguments came out. Do not reintroduce a copy.
 
+    // The pad-slot and arp-line bounds, spelled from the constants rather than typed out.
+    // Every one of these strings still said "0..63" on 2026-08-27, long after the strip went
+    // to twelve pads a page (padsPerPage 12 x numPadPages 4 = 48), and the arithmetic beside
+    // it said P*16+S, which lands on the wrong pad for every page but the first. A
+    // schema that disagrees with its own validator is worse than no schema, and the only fix
+    // that stays fixed is to not write the number down twice.
+    juce::String padSlotRange()
+    {
+        return "0.." + juce::String(KeysProcessor::numChordPads - 1) + " ("
+             + juce::String(KeysProcessor::padsPerPage) + " pads per page x "
+             + juce::String(KeysProcessor::numPadPages) + " pages; page P slot S is P*"
+             + juce::String(KeysProcessor::padsPerPage) + "+S)";
+    }
+
+    juce::String arpLineRange()
+    {
+        return "Arpeggiator line 0.." + juce::String(KeysProcessor::numArpLines - 1)
+             + " (A, B, C, D). Omit for A.";
+    }
+
     juce::var intVectorToVar(const std::vector<int>& values)
     {
         juce::Array<juce::var> arr;
@@ -536,7 +556,7 @@ okstudio::mcp::Tool KeysMcp::toolGetChordPads()
     okstudio::mcp::Tool t;
     t.name = "get_chord_pads";
     t.description = "List every chord pad that currently holds a chord: its absolute "
-                     "slot (0..63, page P slot S is P*16+S), name, notes, lock state and "
+                     "slot (" + padSlotRange() + "), name, notes, lock state and "
                      "roman numeral (when it came from the Markov generator).";
     t.run = [this](const juce::var&, juce::String&) -> juce::var
     {
@@ -572,7 +592,7 @@ okstudio::mcp::Tool KeysMcp::toolSetChordPad()
                      "slot held (its generator metadata, if any, is dropped, same as a "
                      "hand-captured pad from the keyboard).";
     t.params = {
-        { "slot", "integer", "Pad slot 0..63 (16 pads per page x 4 pages; page P slot S is P*16+S).", true },
+        { "slot", "integer", "Pad slot " + padSlotRange() + ".", true },
         { "notes", "array", "1..10 MIDI notes (0..127) making up the chord.", true },
         { "name", "string", "Label for the pad, e.g. \"Cm7\". Optional; left blank if omitted.", false },
         { "locked", "boolean", "Lock the pad so the chord generator's Regenerate leaves it alone.", false },
@@ -619,7 +639,7 @@ okstudio::mcp::Tool KeysMcp::toolClearChordPad()
     okstudio::mcp::Tool t;
     t.name = "clear_chord_pad";
     t.description = "Empty a chord pad slot (stops it first if it's sounding).";
-    t.params = { { "slot", "integer", "Pad slot 0..63 to clear.", true } };
+    t.params = { { "slot", "integer", "Pad slot " + padSlotRange() + " to clear.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
@@ -643,7 +663,7 @@ okstudio::mcp::Tool KeysMcp::toolPressChordPad()
                      "With durationMs, it auto-releases after that many ms; without it, "
                      "the chord keeps ringing until release_chord_pad is called or Sustain lifts.";
     t.params = {
-        { "slot", "integer", "Pad slot 0..63 to fire.", true },
+        { "slot", "integer", "Pad slot " + padSlotRange() + " to fire.", true },
         { "durationMs", "integer", "Auto-release after this many ms (clamped 10..60000). Omit to leave it ringing.", false },
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
@@ -684,7 +704,7 @@ okstudio::mcp::Tool KeysMcp::toolReleaseChordPad()
     t.description = "Stop a chord pad (unless Sustain is holding it), same as releasing "
                      "the mouse over it. Cancels any pending auto-release you scheduled "
                      "with press_chord_pad's durationMs.";
-    t.params = { { "slot", "integer", "Pad slot 0..63 to release.", true } };
+    t.params = { { "slot", "integer", "Pad slot " + padSlotRange() + " to release.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         const int slot = (int) args.getProperty("slot", -1);
@@ -719,14 +739,23 @@ okstudio::mcp::Tool KeysMcp::toolHoldArpChord()
                      "and a line cannot lift it. One chord per line; a second call swaps it.";
     t.params = {
         { "notes", "array", "1..10 MIDI notes (0..127) to hold. Give this or padSlot, not both.", false },
-        { "padSlot", "integer", "Take the chord from this pad slot 0..63 instead (the strip lights it, same as the editor). Give this or notes.", false },
+        { "padSlot", "integer", "Take the chord from this pad slot " + padSlotRange() + " instead (the strip lights it, same as the editor). Give this or notes.", false },
         { "name", "string", "Label reported as the line's held chord, e.g. \"Am7\". Ignored with padSlot, which brings the pad's own name. Optional.", false },
-        { "line", "integer", "Arpeggiator line 0..3 (A, B, C, D). Omit for A.", false },
+        { "line", "integer", arpLineRange(), false },
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
-                                      (int) args.getProperty("line", 0));
+        // Rejected, not clamped. Every other argument in this handler is a hard error out of
+        // range, and a clamp here is the one that cannot be noticed: `line: 7` would land the
+        // chord on D and report success, which is the silent-wrong-target failure this whole
+        // tool exists to end. (The older arp tools still clamp; that is a wider change than
+        // this one and is left alone deliberately rather than half-done here.)
+        const int line = (int) args.getProperty("line", 0);
+        if (line < 0 || line >= KeysProcessor::numArpLines)
+        {
+            error = "line out of range 0.." + juce::String(KeysProcessor::numArpLines - 1);
+            return {};
+        }
         const bool hasNotes = args.hasProperty("notes");
         const bool hasPad = args.hasProperty("padSlot");
         if (hasNotes == hasPad)
@@ -770,14 +799,26 @@ okstudio::mcp::Tool KeysMcp::toolHoldArpChord()
         }
 
         // Launch Quantize defers the whole gesture to the next boundary, so straight after this
-        // call the line can honestly still be holding nothing. Say so rather than reporting an
-        // empty hold as if the call had failed - that ambiguity is what this tool exists to end.
+        // call the line may not be holding what was just handed to it. `held`/`name`/`heldPad`
+        // are always the line's *live* state, which while waiting is its PREVIOUS chord (or
+        // nothing, if it had none) - not the one this call sent. A client comparing `held`
+        // against what it sent has to check `waitingForQuantize` first.
+        //
+        // That flag asks whether *this call* deferred, via arpLaunchPending(line), not whether
+        // the Launch Quantize parameter happens to be set: holdArpChord fires immediately in
+        // cases where it is (an empty note list, for one), and the global parameter would call
+        // those deferred when nothing is pending.
+        //
+        // `lineOn` is here because a line that is off still takes chords in, silently and by
+        // design - so a hold that worked perfectly and a line that will never make a sound
+        // look identical without it, which is the same shape of ambiguity as the above.
         auto* obj = new juce::DynamicObject();
         obj->setProperty("line", line);
+        obj->setProperty("lineOn", processor.arpLineOn(line));
         obj->setProperty("held", intVectorToVar(processor.arpHeldNotes(line)));
         obj->setProperty("name", processor.arpHeldName(line));
         obj->setProperty("heldPad", processor.arpHeldPad(line));
-        obj->setProperty("waitingForQuantize", processor.arpQuantizeOn());
+        obj->setProperty("waitingForQuantize", processor.arpLaunchPending(line));
         return juce::var(obj);
     };
     return t;
@@ -792,24 +833,35 @@ okstudio::mcp::Tool KeysMcp::toolReleaseArpChord()
                      "With allLines, releases every line and drops anything still waiting on "
                      "a quantize boundary, same as the panel's Stop.";
     t.params = {
-        { "line", "integer", "Arpeggiator line 0..3 (A, B, C, D). Omit for A.", false },
+        { "line", "integer", arpLineRange(), false },
         { "allLines", "boolean", "Release every line instead of one. Ignores line.", false },
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        juce::ignoreUnused(error);
         const bool all = (bool) args.getProperty("allLines", false);
+        const int line = (int) args.getProperty("line", 0);
+        if (! all && (line < 0 || line >= KeysProcessor::numArpLines))
+        {
+            error = "line out of range 0.." + juce::String(KeysProcessor::numArpLines - 1);
+            return {};
+        }
+
+        // releaseArpHold, both forms, never releaseArpChord: the description above promises
+        // the Hold off chip, and PluginProcessor.h says at the declaration why the bare chord
+        // release is not that. It leaves chainOn set and leaves a pending quantized launch
+        // queued, so the chord comes back at the next bar boundary and the call reads as
+        // having done nothing - the button that undoes itself, reached from a script.
         if (all)
-        {
             processor.releaseArpHold();
-        }
         else
-        {
-            processor.releaseArpChord(juce::jlimit(0, KeysProcessor::numArpLines - 1,
-                                                   (int) args.getProperty("line", 0)));
-        }
+            processor.releaseArpHold(line);
+
+        // One shape whatever the branch: `line` is always an integer and `allLines` always a
+        // boolean. This reported the string "all lines" in one branch and a number in the
+        // other, under one key, which no typed client can describe.
         auto* obj = new juce::DynamicObject();
-        obj->setProperty("released", all ? juce::var("all lines") : juce::var(juce::jlimit(0, KeysProcessor::numArpLines - 1, (int) args.getProperty("line", 0))));
+        obj->setProperty("allLines", all);
+        obj->setProperty("line", all ? juce::var() : juce::var(line));
         return juce::var(obj);
     };
     return t;

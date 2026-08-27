@@ -35,12 +35,21 @@ public:
     explicit KeysMcp(KeysProcessor& processor);
     ~KeysMcp() override;
 
-    // The tool table, built but not registered. The constructor hands it straight to the
-    // server; it is public so `tests/McpTests.cpp` can exercise a tool's `run` without a
-    // socket, a client or a second server. Building the table has no side effects.
-    std::vector<okstudio::mcp::Tool> buildTools();
+    // One JSON-RPC line in, the response line out, straight through to the embedded server.
+    // This is the seam `tests/McpTests.cpp` drives: no socket, no client, no second server,
+    // and - the point of going through here rather than reaching for the tool table - the
+    // schema, the registration and the JSON-RPC layer are all under test alongside the tool
+    // body. A tool whose params are malformed, or that never reached addTool, fails here
+    // where calling its `run` directly could not notice either. The kit documents the same
+    // reasoning on Server::handleLine itself.
+    juce::String handleLine(const juce::String& line) { return server.handleLine(line); }
 
 private:
+    // The tool table, built but not registered; the constructor hands it straight to the
+    // server. Private, because handleLine above is the seam and a second public route into
+    // the tools would be a table under test that nothing had registered.
+    std::vector<okstudio::mcp::Tool> buildTools();
+
     void timerCallback() override;
     void wake(); // start the poll timer if a queue just gained work; see the constructor
     void cancelPendingRelease(int slot);

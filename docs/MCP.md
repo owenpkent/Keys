@@ -140,10 +140,17 @@ that line holds the chord and keeps arpeggiating it until something replaces it 
 `release_arp_chord` lets go, whether or not its Latch is on:
 
 ```
-set_params      { "values": { "arpOn": true, "arpPattern": true } }
+set_params      { "values": { "arpOn": true, "arpPattern": true,
+                              "arp2On": true, "arp2Pattern": true } }
 hold_arp_chord  { "notes": [45, 48, 52, 55], "name": "Am7", "line": 0 }
 hold_arp_chord  { "padSlot": 0, "line": 1 }
 ```
+
+**Note the second line's own `arp2On`.** B, C and D default to off, and a line that is
+off still takes a chord in, silently and by design - so handing one to line 1 without
+switching it on is a call that returns success and makes no sound, which is the exact
+trap this section exists to close. `hold_arp_chord` reports `lineOn` for that reason:
+if it comes back `false`, the chord landed and the line is not running.
 
 It calls the same `holdArpChord` the editor calls when you drop a chord card on a
 line, so a script and a drag now reach the arp the same way. **It was added on
@@ -182,9 +189,11 @@ Two things about `heldChord` that follow from all this:
   Quantize is on: the whole gesture waits for the next boundary. Its reply carries
   `waitingForQuantize` so the two cases are told apart.
 
-**`padChannel` defaults to 10**, the drum channel, so a script that writes and
-presses pads sends them where a normal instrument track is not listening. Set it
-if you expect to hear the pads themselves.
+**Chord pads go out on the global MIDI Channel control** (the `channel` parameter), like
+anything else Keys plays: `fireChord` passes channel 0, which means "follow that
+control". There is a `padChannel` parameter in the tree and it is **not** the answer to
+silent pads - it is retained for session compatibility only and is read by nothing, so
+setting it changes nothing at all.
 
 ### Euclidean rhythms, rhythm dividers and subharmonic harmony
 
