@@ -118,9 +118,16 @@ Not the playback. The **loading**, and the granularity gap.
 1. **Loading a progression into the slots is one gesture per chord.** A four-chord progression is
    four drags onto four slot cards, plus a click-and-step on each slot whose length is not one
    bar. Meanwhile [ChordLibrary.h](../src/ChordLibrary.h) holds 355 progressions that already
-   know their own chords *and their order*, and the library window offers only **To tray** and
-   **To pads** ([ChordLibraryPanel.cpp:41](../src/ui/ChordLibraryPanel.cpp#L41)). The one table
-   in Keys full of progressions cannot reach the one mechanism built to play them.
+   know their own chords *and their order*, and a library row's two destinations are **Tray** and
+   **Pads** ([ChordLibraryPanel.cpp](../src/ui/ChordLibraryPanel.cpp)) - neither of which is a
+   slot.
+
+   **The gap narrowed on 2026-08-26 and did not close.** Every arp target takes a chord from any
+   surface now, the generator's tray and its reference box included, so a library row can reach a
+   slot by way of the tray without ever touching a pad. What that removes is the *detour*, not the
+   count: it is still one drag per chord, and the order a row already knows is still supplied by
+   hand, one card at a time, in the right sequence. The table full of progressions can reach the
+   mechanism built to play them; it cannot yet tell it what the order was.
 2. **The Chord lane's slot numbers are invisible.** A cell reading "3" is an index into a slot
    the Draw page does not show, which is the identical complaint that got the Note lane its note
    names on 2026-08-18. Whatever else is built, this lane needs to say `Cm` rather than `3`.
@@ -132,7 +139,7 @@ Not the playback. The **loading**, and the granularity gap.
 
 ### A. A **To arp** button (the loading gesture)
 
-A third button on every library row, beside To tray and To pads, plus the same action from the
+A third button on every library row, beside Tray and Pads, plus the same action from the
 pad strip: lay the progression across the current line's slots in order, one chord per slot,
 starting at the first empty one, then optionally start the Chain.
 
