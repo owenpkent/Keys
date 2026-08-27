@@ -2824,25 +2824,30 @@ void KeysProcessor::releaseArpChord(int line)
     ln.padSlot = -1;
 }
 
+void KeysProcessor::releaseArpHold(int line)
+{
+    // What "let go" means for one line, in the order that makes it stick.
+    // Anything of this line's still waiting on a quantize boundary goes first: it has not
+    // sounded yet, but it is a chord on its way, and letting go means "nothing is coming".
+    pendingLaunches.erase(std::remove_if(pendingLaunches.begin(), pendingLaunches.end(),
+                                         [line](const PendingLaunch& p) { return p.line == line; }),
+                          pendingLaunches.end());
+    // The chain next, and for the same reason the heartbeat stops it when the arp goes off:
+    // releasing the chord without it only wins until the next bar boundary, when
+    // heartbeatTick() launches the following slot and hands the arp another one. stopChain()
+    // is a no-op when nothing is chaining, and releases the chord it was holding when it is.
+    stopChain(line);
+    // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
+    releaseArpChord(line);
+}
+
 void KeysProcessor::releaseArpHold()
 {
     // Every line, because this is one button and it means "let go". A Hold off that released
-    // only the line the panel happened to be showing would leave the other two droning, with
+    // only the line the panel happened to be showing would leave the other three droning, with
     // nothing on a folded bar to stop them.
-    // Anything waiting on a quantize boundary is let go of too: it has not sounded yet, but it
-    // is a chord on its way, and Hold off means "nothing is coming".
-    pendingLaunches.clear();
     for (int n = 0; n < numArpLines; ++n)
-    {
-        // The chain goes first, and for the same reason the heartbeat stops it when the arp
-        // goes off: releasing the chord without it only wins until the next bar boundary,
-        // when heartbeatTick() launches the following slot and hands the arp another one.
-        // stopChain() is a no-op when nothing is chaining, and releases the chord it was
-        // holding when it is.
-        stopChain(n);
-        // Whatever a card or a lone slot launch left behind. Idempotent after stopChain().
-        releaseArpChord(n);
-    }
+        releaseArpHold(n);
 }
 
 void KeysProcessor::allArpOff()

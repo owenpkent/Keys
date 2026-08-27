@@ -570,6 +570,12 @@ public:
     // rather than in whichever surface happens to own the button.
     void releaseArpHold();
 
+    // The same thing for one line, which is what "let go of line B" means and what the MCP
+    // release_arp_chord tool calls. Same three parts as the all-lines form above, so a script
+    // and the Hold off chip mean the same thing by "release"; only this line's pending
+    // quantized launch is dropped.
+    void releaseArpHold(int line);
+
     // **All Off, for the arpeggiator** (2026-08-02, Owen: "we need an all off button in the
     // arpeggiator section as well"). Switches every line off, then lets go of everything:
     // holds released, chains stopped, pending quantized launches dropped.
@@ -1366,6 +1372,13 @@ private:
     // (src/mcp/KeysMcp.h) letting Claude Code or any local MCP client drive Keys
     // directly. Harmless during plugin scans (loopback-only, OS-assigned port).
     std::unique_ptr<KeysMcp> mcpBridge;
+public:
+    // The MCP bridge this processor already owns, for tests. Constructed last, so it is
+    // non-null for the whole life of the processor. Tests use it rather than making a
+    // KeysMcp of their own, which would bind a second port and write a second discovery
+    // file for one process. See tests/McpTests.cpp.
+    KeysMcp* mcp() const { return mcpBridge.get(); }
+private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysProcessor)
 };
