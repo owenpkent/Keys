@@ -205,15 +205,20 @@ notes coming from" - a question this API could not answer at all until 2026-08-2
   Quantize is on: the whole gesture waits for the next boundary. Its reply carries
   `waitingForQuantize` so the two cases are told apart.
 
-The usual "some other way" is the **track's own MIDI input**, which `arpKeys` feeds
-straight to the arp. In Ableton a track set to `MIDI From: All Ins / All Channels`
+The usual "some other way" is the **track's own MIDI input**. Until 2026-08-27 `arpKeys`
+fed it straight to the arp, and since `arpKeys` defaults **on** for every line, every
+untouched instance in a set was listening. It has its own switch now - **`arpTrackMidi`**,
+global, default **off** - so this is the state to check first when a line is sounding and
+nothing explains it: if `arpTrackMidi` is on, the track is a candidate source; if it is
+off, it is not, and the notes came from the keybed or the MCP bridge. In Ableton a track set to `MIDI From: All Ins / All Channels`
 hands every stray note in the session to a generative device, and none of it shows
 up as a held chord. That cost an afternoon: an instance played continuously while
 `heldChord` was blank, the chord lane was `0`, and there was no chain and no
 launched slot. Nothing survived the panic, because fresh note-ons arrived straight
 after it, and the only way to find it was muting lines one at a time and asking a
-human what stopped. `arpKeys` off, or `MIDI From: None`, shuts that door;
-`sequence` is what makes it visible without either.
+human what stopped. `arpTrackMidi` off (the default now), `arpKeys` off, or
+`MIDI From: None` all shut that door; `sequence` is what makes it visible without any of
+them.
 
 **Chord pads go out on the global MIDI Channel control** (the `channel` parameter), like
 anything else Keys plays: `fireChord` passes channel 0, which means "follow that

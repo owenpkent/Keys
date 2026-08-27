@@ -194,6 +194,69 @@ public:
             }
         }
 
+        beginTest("the arp bar's chips all fit at the editor's minimum width");
+        {
+            // The arp bar gained **Track MIDI** on 2026-08-27, 128 px of it, on a bar that
+            // already carried four chips at its right end. CLAUDE.md's rule when a bar outgrows
+            // its floor is to raise the floor rather than let a control pay for it, and this is
+            // the measurement that says which happened - the Pads bar test above exists for the
+            // same reason and this one was written the day something was added here with no
+            // equivalent check in place.
+            //
+            // All four are measured, not just the new one: a fixed-width cell taken out of the
+            // right end starves its *neighbours*, so the interesting failure is Hold off going
+            // thin, not Track MIDI.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+
+            int seen = 0;
+            for (const char* title : { "Arp track MIDI", "Arp light keys",
+                                       "Arp all off", "Arp hold off" })
+            {
+                juce::Component* found = nullptr;
+                for (auto* t : targets)
+                    if (t->getTitle() == title)
+                        found = t;
+                expect(found != nullptr, juce::String("'") + title + "' is on screen at all");
+                if (found == nullptr)
+                    continue;
+                ++seen;
+
+                const auto b = found->getBounds();
+                expectEquals(b.getHeight(), 24, juce::String(title) + " is a bar-height chip");
+
+                auto* button = dynamic_cast<juce::Button*>(found);
+                expect(button != nullptr);
+                if (button == nullptr)
+                    continue;
+
+                // GlyphArrangement, never Font::getStringWidth, which under-measures - the rule
+                // the chord library's `iim7`-drawn-as-`iim` bug wrote down.
+                juce::GlyphArrangement ga;
+                const juce::Font font { juce::FontOptions(
+                    (float) juce::jmin(15, b.getHeight() * 3 / 4)) };
+                ga.addLineOfText(font, button->getButtonText(), 0.0f, 0.0f);
+                const float text = ga.getBoundingBox(0, -1, true).getRight();
+                // A ToggleButton draws a tick box before its text; a TextButton is text alone.
+                const float needed = text
+                    + (dynamic_cast<juce::ToggleButton*>(button) != nullptr
+                           ? (float) b.getHeight() : 8.0f);
+                expect((float) b.getWidth() >= needed,
+                       juce::String(title) + " is " + juce::String(b.getWidth())
+                           + " px wide, too narrow for \"" + button->getButtonText()
+                           + "\" which needs " + juce::String(juce::roundToInt(needed)));
+            }
+            // Counted, so a rename that stops matching fails here instead of passing by
+            // finding nothing - the trap the macro-knob sweep already paid for.
+            expectEquals(seen, 4, "the arp bar lost a chip, or one was renamed");
+        }
+
         beginTest("every arp drop target takes a chord from any surface, not only a pad");
         {
             // The 2026-08-26 fix, pinned. All four arp targets - the panel, a macro card, a slot

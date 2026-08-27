@@ -83,6 +83,14 @@ public:
     void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0, int dest = 0);
     void allNotesOff();
 
+    // **Every parameter back to its default, and nothing else.** Deliberately does not
+    // touch chord pads, arp patterns or slots: those are work you made, undo already
+    // covers them, and a Reset that quietly emptied a page would be the worst button in
+    // the plugin. What it does cover is the settings that can leave an instance behaving
+    // in a way you did not ask for and cannot find - which is the case it exists for.
+    // Pushes no undo entry, because it changes no undoable content.
+    void resetAllParameters();
+
     // What is sounding, for display only. Every note this processor emits is counted
     // here, whichever source asked for it: the surface, a chord pad, or an MCP tool.
     // The surface paints its own gestures from `pressed`/`latched`/`sustained`, so this
@@ -484,6 +492,9 @@ public:
     //
     // Only the gestures that fire something go through here. Playing the keybed never does.
     bool arpQuantizeOn() const;
+    // Does the track's own MIDI reach the arpeggiator at all. Global, not per line: it is
+    // one door into the instance, and a door shut for A and open for C is not shut.
+    bool arpTrackMidiOn() const;
     // How long a launch asked for *now* would wait, in milliseconds. 0 when quantize is off or
     // the boundary is already here. Message thread.
     double arpQuantizeDelayMs() const;
@@ -1347,6 +1358,11 @@ private:
     // copy, and what was left behind when they were. Audio thread; sized in prepareToPlay
     // with the rest. juce::MidiBuffer cannot erase, so a split is two buffers and a swap.
     juce::MidiBuffer keyNotes, streamRest;
+    // The track's own MIDI, held out of the arp's reach for a block when the Track MIDI
+    // chip is off, then put back so it still passes through untouched. Audio thread.
+    juce::MidiBuffer trackMidiAside;
+    bool lastTrackMidiToArp = false;   // for the falling edge; see runArpLines
+    bool trackMidiJustClosed = false;  // set for exactly one block by processBlock
 
     // Every line's output, merged in time order before any of it reaches the outgoing stream
     // (2026-08-18, Owen: "when there's two arpeggiators happening, how does it handle when

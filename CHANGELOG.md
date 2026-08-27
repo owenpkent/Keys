@@ -5,6 +5,60 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the track's own MIDI no longer reaches the arpeggiator unless you say so
+
+**PARAMETER LAYOUT CHANGE.** `arpTrackMidi` is appended, default **false**, and a new parameter
+is absent from every saved session - so **every existing set takes the new default**. If you were
+driving an arp line from a clip on the track, it goes quiet until you switch **Track MIDI** back
+on. That is deliberate, and it was Owen's call when shown both defaults.
+
+Owen: *"why do I start recording in Ableton? It starts playing in something different"*, then
+*"we need it to be easier to turn it off, and it's so unclear where that's hiding"*.
+
+**One switch was answering two questions.** Per-line **PLAY** (`arpKeys`) says "Play", its tooltip
+said "what you play on the keyboard", and the stream it lifts is the keybed **and** whatever the
+DAW sends the track. Chord pads were split out of that stream on 2026-08-18; the track input never
+was. `arpKeys` also defaults **on** for all four lines, for a good reason of its own - a line you
+just switched on that does nothing until you find a second toggle reads as broken - so **six Keys
+in one Live set, none of them touched, all had every line listening to the track**. Pressing record
+started four of them arpeggiating at once, on tracks nobody was looking at.
+
+Finding it meant going into a line's Details view, Play page, PLAYBACK group, per line, per
+instance: seven toggles across four windows for a thing making an unwanted noise.
+
+So the keybed keeps its per-line switch and the track input gets one of its own. **Track MIDI**, on
+the arp bar beside All Off and Hold off, where a control you reach for to make something *stop*
+belongs, and where it never hides with the section fold. Global rather than per line, for Scale
+Lock's own reasoning: it is one door into the instance, and a door shut for A and open for C is not
+shut. The notes still pass through to your instrument untouched either way - the chip decides what
+the *arpeggiator* hears, not what the track plays.
+
+**The falling edge is the part that had to be right.** A line that had already taken a clip's notes
+in is holding pitches whose note-offs are now routed around it, so closing the door has to let go of
+them or the line arpeggiates forever under a switch that says it is shut. Those releases are
+synthesised into the lines' own input alone; the real note-offs still travel down the output stream.
+`StateTests` pins both that and the door itself, and the suite caught the behaviour change on the
+first run - six existing tests drove lines from the track input and now open the door explicitly.
+
+### Added: a dot on the line letter when it is sounding something nobody handed it
+
+The on-screen half of `get_state`'s `soundingNoteCount`. `heldChord` is only ever the chord you gave
+a line, by design, so an instance playing continuously with every readout blank was diagnosable only
+by ear. The A/B/C/D letters on the arp bar now carry a dot in the top-right when that line is on,
+holding notes, and was handed no chord. Compared before it is written, so the timer repaints on a
+change rather than every tick.
+
+### Added: Reset all settings, in the settings menu
+
+Owen: *"we need reset button in settings"*. Puts every parameter back to its default and **nothing
+else**: chord pads, arp patterns and slots are untouched, because those are work you made and undo
+already covers them - a Reset that quietly emptied a page would be the worst button in the plugin.
+The dialog says so, since "reset" is a word people reasonably expect to mean more than it does here.
+
+It asks first, and that confirmation is the way back rather than a formality: undo covers content,
+not parameters, so this is not undoable. It releases every sounding note before it runs, because a
+reset moves Root, Octave and the arp's whole routing underneath anything still ringing, and the
+played note is resolved at press time and remembered.
 ### Added: an instance can say which track it is on, and which port it answers on
 
 **There was no answer to "which of these am I talking to".** Every Keys in one Live set shares a
