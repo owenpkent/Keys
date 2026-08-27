@@ -3140,7 +3140,9 @@ void ArpPanel::buildControls()
     keysBandButton.setTooltip("Does this line arpeggiate what you play on the keyboard at the "
                               "bottom? On, the keys you hold feed it. Off, it ignores the keybed "
                               "entirely and plays only the chord cards you hand it - which is "
-                              "what lets one line follow your hands while the other runs a card.");
+                              "what lets one line follow your hands while the other runs a card. "
+                              "MIDI arriving on the track is a separate question with a switch "
+                              "of its own: Track MIDI, on the arp bar, off by default.");
     keysBandButton.setTitle("Arp play");
 
     // Retrigger was a toggle that only answered "on a new chord". The list adds the clock

@@ -757,6 +757,26 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     };
     addAndMakeVisible(arpLightsButton);
 
+    // **Track MIDI** (2026-08-27). The per-line PLAY switch says "the keys you play" and also,
+    // silently, "and anything the DAW sends this track" - which is how six untouched Keys in one
+    // Live set all ended up listening, and pressing record started four of them arpeggiating on
+    // tracks nobody was looking at. This is that second question given a switch of its own:
+    // global, off by default, and here on the bar where it can be found and clicked once. An
+    // APVTS attachment, unlike Light keys beside it, because this one changes what is *heard*
+    // and belongs in the session and in host automation.
+    arpTrackMidiButton.setButtonText("Track MIDI");
+    arpTrackMidiButton.setTitle("Arp track MIDI");
+    arpTrackMidiButton.setTooltip("Off (the default): the arpeggiator ignores MIDI arriving on "
+                                  "this track, so a clip or another device cannot start it. The "
+                                  "notes still reach your instrument untouched. On: a clip on "
+                                  "this track drives the arp, which is how you feed it a "
+                                  "progression the host holds the timing of. Either way, PLAY on "
+                                  "each line still decides whether the keyboard you click feeds "
+                                  "that line.");
+    arpTrackMidiAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        processor.apvts, "arpTrackMidi", arpTrackMidiButton);
+    addAndMakeVisible(arpTrackMidiButton);
+
     // The A/B tabs, BPM and Launch Quantize, at the left end of the same bar (2026-08-02,
     // Owen: "move the bpm and the a b and all into the header also. remove the 'lines'
     // text" - and later the same day, "I want those to be on and off buttons to turn on or
@@ -1305,6 +1325,19 @@ void KeysEditor::ArpBarTab::paintButton(juce::Graphics& g, bool over, bool down)
         g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(7.0f, 0.0f)
                                    .removeFromBottom(3.0f), 1.5f);
     }
+    // **Sounding something nobody handed it** (2026-08-27). A line arpeggiating the track's own
+    // MIDI reports an empty held chord, by design - that field is only ever the chord you gave
+    // it - so an instance playing continuously with every readout blank was, until now,
+    // diagnosable only by ear. This is the same signal get_state publishes as
+    // soundingNoteCount, put where you would actually look: a dot on the letter of the line
+    // doing it. Top-right, the one corner the stripe below and the drop outline do not use.
+    if (line >= 0 && unhandedNotes)
+    {
+        auto dot = getLocalBounds().toFloat().removeFromTop(11.0f).removeFromRight(11.0f)
+                       .withSizeKeepingCentre(5.0f, 5.0f);
+        g.setColour(skin::lineAccent(line).base);
+        g.fillEllipse(dot);
+    }
     if (dropTarget)
     {
         g.setColour(skin::accentOf(*this).base);
@@ -1418,6 +1451,25 @@ void KeysEditor::refreshArpBarTabs()
     // click, a drop and a session load all agree.
     if (arpBarAllTab != nullptr)
         arpBarAllTab->setToggleState(processor.layout.arpMacro, juce::dontSendNotification);
+
+    // The dot that says "this line is playing something you did not hand it". Compared before
+    // it is written, the shape MacroRow::lastLineOn already uses: this runs on a timer, and a
+    // pull that repaints whether or not anything moved is a paint nobody profiles until it is
+    // a problem. `arpHeldNotes` empty is what makes it *unhanded* - a line chewing a chord you
+    // dropped on it is working, not surprising you - and the line has to be on, since an off
+    // line still takes chords in silently and is not making the noise you are hunting.
+    for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
+        if (auto* t = arpBarTabs[(size_t) n].get())
+        {
+            const bool flag = processor.arpLineOn(n)
+                           && processor.arpLine(n).uiHeldCount.load() > 0
+                           && processor.arpHeldNotes(n).empty();
+            if (flag != t->unhandedNotes)
+            {
+                t->unhandedNotes = flag;
+                t->repaint();
+            }
+        }
 
     // The page tabs are ours to drive too, and their *visibility* is derived here rather than
     // in syncSectionControls alone: entering or leaving the macro view has to show or hide
@@ -1693,6 +1745,15 @@ void KeysEditor::showSettingsMenu()
     // since a stale id landing on a neighbour's row is a bug nobody would look for here.
     menu.addSeparator();
 
+    // **Reset all settings** (2026-08-27, Owen: "we need reset button in settings"). Its own
+    // group, away from the three ticks above and the three links below, because it is the only
+    // row here that changes what you hear. It asks first: it is not undoable (undo is content -
+    // pads, lanes, slots - and this touches none of that), so the confirmation is the way back
+    // rather than a formality. It never empties a pad, and the dialog says so, since "reset" is
+    // a word people reasonably expect to mean more than it does here.
+    menu.addItem(2010, "Reset all settings...");
+    menu.addSeparator();
+
     // Greyed rather than missing when there is nothing to check: Keys Host never builds
     // updaterConfig (see the constructor - it is a different product, its own release
     // channel still to come), so releasesRepo reads empty there and only there.
@@ -1719,6 +1780,22 @@ void KeysEditor::showSettingsMenu()
                 break;
             case 2003:
                 e->processor.layout.sustainProposesChords = ! e->processor.layout.sustainProposesChords;
+                break;
+            case 2010:
+                juce::NativeMessageBox::showOkCancelBox(
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Reset all settings",
+                    "Put every setting in " + e->processor.getName() + " back to its default: "
+                    "key and scale, the keyboard, and all four arpeggiator lines.\n\n"
+                    "Your chord pads and arpeggiator patterns are NOT touched.\n\n"
+                    "This cannot be undone.",
+                    e,
+                    juce::ModalCallbackFunction::create([safe](int ok)
+                    {
+                        if (ok != 0)
+                            if (auto* self = safe.getComponent())
+                                self->processor.resetAllParameters();
+                    }));
                 break;
             case 3001:
                 e->checkForUpdatesNow();
@@ -3144,6 +3221,10 @@ void KeysEditor::resized()
         // Light keys last, so the two stop buttons sit together at the right end where the
         // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
         arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
+        bar.removeFromRight(6);
+        // Beside the two stop buttons, because that is where the hand goes when something is
+        // making a noise you did not ask for, and this is the switch that answers for it.
+        arpTrackMidiButton.setBounds(bar.removeFromRight(122).withSizeKeepingCentre(120, 24));
 
         // A and B, from the left (2026-08-02, second pass): the arp's own On switches now, so
         // - unlike All beside them - they are laid out whether or not the section is open,
