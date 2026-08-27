@@ -2776,8 +2776,15 @@ void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::S
     releaseArpChord(line);
     if (notes.empty())
         return;
-    // Exclusive works in both directions or it does not work: handing a card to the arp has
-    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold.
+    // Exclusive still reaches the pads and the live card from here: handing a card to the arp
+    // is a *drop*, and a drop replaces what the line was chewing, so the chord it displaces has
+    // to go quiet.
+    //
+    // **The other direction is no longer symmetric, as of 2026-08-26**, and that asymmetry is
+    // the feature rather than an oversight. A press on the strip leaves a running line alone
+    // while **Keep arp running** is ticked (LayoutState::padsKeepArpRunning, default on),
+    // because pressing a card is playing a chord and a line's held chord is not something you
+    // are playing. Untick it and the old both-directions reading comes back.
     //
     // **It does not reach the other arp lines** (2026-08-02, Owen: "I want each arpeggiator to
     // play different chords"). It used to, on the reading that Exclusive means one chord at a
