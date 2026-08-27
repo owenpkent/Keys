@@ -183,13 +183,24 @@ notes coming from" - a question this API could not answer at all until 2026-08-2
 - **`heldChord` is only the chord that was *handed* to the line.** A line audibly
   arpeggiating played notes reads as holding nothing, and that is correct rather
   than a fault. Only `hold_arp_chord`, a chord card, or a slot launch fills it.
-- **`heldNotes` and `sequence` are what the line is actually sounding**, whatever
-  the source. `heldNotes` counts the notes the engine holds; `sequence` is the
-  pitches the Note lane's indices `1..n` name, in the order the Shape and octave
-  stack put them. So a Note lane of `[4,3,2,1]` against a `sequence` of
-  `[57,60,64,67]` is a descending arpeggio, and **a line with an empty `heldChord`
-  and a non-empty `sequence` is arpeggiating notes that arrived some other way** -
-  which is the state to look for when a line plays and nothing explains why.
+- **`soundingNoteCount` and `sequence` are what the line is actually sounding**,
+  whatever the source. `soundingNoteCount` counts the notes the engine holds;
+  `sequence` is the pitches it walks, in the order the Shape and octave stack put
+  them. The Note lane's **fixed indices run 1..8** and name the first eight of those,
+  wrapping the way `fireStep` does; `sequence` itself can be longer (the held chord
+  times the octave range), and those further pitches are reachable only through a
+  shape walk, never through an index you can draw. So a Note lane of `[4,3,2,1]`
+  against a `sequence` of `[57,60,64,67]` is a descending arpeggio.
+  **A line with an empty `heldChord` and a non-empty `sequence` is arpeggiating notes
+  that arrived some other way** - the state to look for when a line plays and nothing
+  explains why. That test only fires when `heldChord` is *empty*, though, and the
+  likelier mess is **mixed**: a line holding a chord you handed it *and* picking up
+  stray track MIDI reads as fully explained while half its notes come from nowhere
+  anybody intended. The signal that catches both is
+  **`soundingNoteCount` larger than the chord you handed over**.
+  The field is not called `heldNotes` on purpose: `KeysProcessor::arpHeldNotes()` is
+  the note list of the *handed* chord, and a name colliding on that exact distinction
+  would send you to the opposite of the truth.
 - **`hold_arp_chord` can honestly report an empty hold**, for one call, when Launch
   Quantize is on: the whole gesture waits for the next boundary. Its reply carries
   `waitingForQuantize` so the two cases are told apart.

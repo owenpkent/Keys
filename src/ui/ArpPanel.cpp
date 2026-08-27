@@ -262,15 +262,17 @@ juce::String ArpPanel::LaneGrid::noteNameFor(int value) const
     if (lane != ArpEngine::laneNote || value < 1 || value > 8)
         return {}; // Prev / Hi / Low / Rnd name no fixed pitch, and neither does a rest
 
-    const auto& eng = processor.arpLine(owner.editLine());
-    const int n = eng.uiSeqCount.load(std::memory_order_relaxed);
+    // Through the engine's own snapshot rather than a load-count-then-index loop of our own:
+    // the acquire/release handshake with buildSequence is stated once, there, and the MCP
+    // get_state tool reads the same sequence the same way.
+    std::array<int, ArpEngine::maxHeld * 4> pitches {};
+    const int n = processor.arpLine(owner.editLine()).uiSequence(pitches);
     if (n <= 0)
         return {}; // nothing held: the index names nothing, so it stays a number
 
     // The same wrap the engine applies to a fixed index (fireStep: `(noteVal - 1) % seqCount`),
     // so a lane drawn past the end of a small chord says the note it will actually play.
-    const int pitch = eng.uiSeq[(size_t) ((value - 1) % n)].load(std::memory_order_relaxed);
-    return juce::MidiMessage::getMidiNoteName(pitch, true, true, 3);
+    return juce::MidiMessage::getMidiNoteName(pitches[(size_t) ((value - 1) % n)], true, true, 3);
 }
 
 juce::String ArpPanel::LaneGrid::cellText(int value) const

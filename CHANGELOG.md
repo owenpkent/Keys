@@ -7,10 +7,25 @@ All notable changes to Keys are documented here. Format follows
 
 ### Added: get_state says what a line is sounding, not just what it was handed
 
-`arpLines` entries gain **`heldNotes`** (how many notes the engine holds, from any source) and
-**`sequence`** (the pitches the Note lane's indices 1..n name, after the Shape and the octave
-stack). Both read off the same published atomics `ArpPanel` already draws note names from, so
-the API and the grid answer from one source rather than two.
+`arpLines` entries gain **`soundingNoteCount`** (how many notes the engine holds, from any
+source) and **`sequence`** (the pitches the line walks, after the Shape and the octave stack;
+the Note lane's fixed indices 1..8 name the first eight of them, wrapping). Both read off the
+atomics `ArpPanel` already draws note names from, through the engine's own `uiSequence()`
+accessor - the panel goes through it too now, so the API and the grid run one copy of the
+handshake rather than two.
+
+**Not `heldNotes`**: `KeysProcessor::arpHeldNotes()` already means the note list of the *handed*
+chord, and a field colliding on exactly the handed-versus-sounding distinction this reports would
+send a reader looking it up to the opposite of the truth.
+
+**The engine publishes a held count rather than the tool reading one.** `ArpEngine::heldCount` is
+a plain int the audio thread writes in four places; reading it from the message thread is a data
+race whatever the value looks like. There is a `uiHeldCount` atomic beside `uiSeqCount` now, and
+every write to `heldCount` goes through one setter so the two cannot drift. `uiSeqCount` also
+became a release store paired with an acquire load: relaxed on both sides gave no happens-before
+with the entries written just above it, so a reader could see a new count against the previous
+chord's pitches, or against the zero-initialised array - a line reported as playing C-1 four
+times.
 
 The gap they close: `heldChord` reports only the chord *handed* to a line, so a line arpeggiating
 notes that arrived any other way read as holding nothing. Every field `get_state` offered could
@@ -24,8 +39,17 @@ asking a human which one went quiet, because the one thing generating notes was 
 reported. With `sequence` it is one call.
 
 Covered by two tests that drive `processBlock` and inject MIDI at the track input, the way the
-real source did: notes arriving that way must show up in `heldNotes` and `sequence` while
-`heldChord` stays empty, and with `arpKeys` off they must not reach the line at all.
+real source did: notes arriving that way must show up in `soundingNoteCount` and `sequence` while
+`heldChord` stays empty, and with `arpKeys` off they must not reach the line at all. They share
+one setup so they differ in exactly that parameter, they assert a step actually fired rather than
+assuming the window was long enough, and they assert the field is *present* before reading it -
+a missing `juce::var` casts to 0, so the arpKeys-off half would otherwise have gone green just as
+happily with the field deleted.
+
+**The one-line diagnostic has a blind spot worth knowing.** An empty `heldChord` against a
+non-empty `sequence` catches a line running entirely on notes from elsewhere. The likelier mess
+is mixed - a chord you handed over *and* stray track MIDI - which reads as fully explained. The
+signal that catches both is `soundingNoteCount` larger than the chord you handed over.
 
 ### Added: a script can hand a chord to an arpeggiator line
 
