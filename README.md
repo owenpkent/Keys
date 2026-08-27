@@ -71,7 +71,7 @@ live nowhere else.
 |---------|--------------|
 | **Size** | 25 / 49 / 61 / 73 / 76 / 88 keys |
 | **Root** + **Scale** | The key and scale used by Scale Lock |
-| **Scale Lock** | Snap every played note to the nearest note in (Root, Scale) — you can't hit a wrong note. Out-of-scale keys are dimmed. |
+| **Scale Lock** | Snap every note Keys plays to the nearest note in (Root, Scale) — you can't hit a wrong note. Out-of-scale keys are dimmed. Since 2026-08-26 it reaches the **arpeggiator's output** and its harmony voices too, not only the keys you press; chord pads still play the chord you stored. |
 | **Octave** | Transpose the whole keyboard by -5..+5 octaves |
 | **Velocity** | A **range knob** in the pads strip, captioned Humanize. The knob is the band's centre: the ring opens the range equally either side of it and never moves the knob itself. The lamp beside it switches it. Lit, each note takes a random value inside the band; unlit, every note plays the knob's own value and the readout shows that one number |
 | **MIDI Ch** | Output channel, 1–16 |

@@ -157,6 +157,34 @@ public:
         return juce::jlimit(r.lo, r.hi, (int) std::llround(lo + u01 * (hi - lo)));
     }
 
+    // Round `note` onto the nearest in-scale pitch class, ties going *down* - the same walk
+    // the kit's `scales::snapToScale` does on the keybed, expressed against the mask so the
+    // engine stays free of the scale tables (which is the whole reason `scaleMask` is passed
+    // in). An in-scale note comes back untouched, and so does every note under a **chromatic**
+    // scale, where the mask is all twelve and there is nothing to snap to - checked explicitly
+    // rather than left to the `in(note)` early-out, because the answer is a property of the
+    // scale and saying so once is cheaper than proving it per note.
+    //
+    // The result can sit up to six semitones outside 0..127; `addHit` clamps, as it always has.
+    static int snapToMask(int note, unsigned int mask, int rootPc) noexcept
+    {
+        mask &= 0xFFFu;
+        if (mask == 0 || mask == 0xFFFu)
+            return note;
+        const auto in = [=](int n)
+        { return ((mask >> ((((n - rootPc) % 12) + 12) % 12)) & 1u) != 0u; };
+        if (in(note))
+            return note;
+        for (int d = 1; d <= 6; ++d)
+        {
+            if (in(note - d))
+                return note - d;
+            if (in(note + d))
+                return note + d;
+        }
+        return note;
+    }
+
     static LaneRange laneRange(int lane) noexcept
     {
         // ChordTable is declared below this point, so its count cannot appear in the
@@ -506,6 +534,13 @@ public:
         // Bit k set = the pitch class (rootPc + k) % 12 is in the current scale. Passed in
         // rather than looked up so the engine stays free of the scale tables (and testable).
         unsigned int scaleMask = 0xFFFu;
+        // Scale Lock, the keybed's own toggle, reaching the line's output (2026-08-26, Owen:
+        // "does the scale lock button at the top apply to arpeggiators and harmonies?" - it did
+        // not). It snaps in `addHit`, the one place every emitted pitch passes through, so it
+        // covers the walk, the octave stacking, a chord-lane slot, Stray's chromatic zone and
+        // the harmony voices in one rule rather than five. Root and Scale have always reached
+        // the engine whatever this says; what was missing is the *lock*.
+        bool scaleLock = false;
         // Velocity ramp: over `rampBeats` from the moment a chord starts, the played
         // velocity scales toward (100 + velRamp)%. Negative fades a run out, positive swells
         // it. 0 is off, and costs nothing.
@@ -1766,9 +1801,23 @@ private:
         // voice needs that index to name its source, and on the dedup path it must name the
         // hit that is *actually sounding* rather than the one that was refused: thickening a
         // hit that was dropped would leave the voice reading a velocity nobody drew.
+        // **Scale Lock lands here and nowhere else.** Every pitch the line emits is written
+        // through this lambda, so snapping on the way in covers the direction walk, Octave and
+        // Transpose, a chord called up by the Chord lane, Stray's chromatic zone and both
+        // harmony voices at once - and it snaps *before* the dedup, which is the half that
+        // matters: two notes that round onto one pitch have to collapse to one hit, and a
+        // harmony voice that lands on its own source has to be dropped, exactly as an interval
+        // that clamped there already is. Snapping is idempotent, so a keybed note that arrived
+        // pre-snapped passes through untouched.
+        //
+        // Locking Keys' output to the scale is what the toggle says, so it wins over Stray's
+        // upper zone rather than the other way about: with Lock on, Stray's chromatic strays
+        // round back into the key and its two zones read as one. That is the switch doing its
+        // job, not a collision - untick Lock to hear the wrong notes it exists to prevent.
         const auto addHit = [&](int note, int chan, int src = -1)
         {
-            const int n = juce::jlimit(0, 127, note);
+            const int n = juce::jlimit(
+                0, 127, p.scaleLock ? snapToMask(note, p.scaleMask, p.rootPc) : note);
             for (int i = 0; i < hitCount; ++i)
                 if (hits[i].note == n && hits[i].chan == chan)
                     return i;

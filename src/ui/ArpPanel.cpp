@@ -794,13 +794,26 @@ void ArpPanel::takeChordOnLine(int line, int padSlot)
     processor.holdArpChordFromPad(padSlot, line);
 }
 
+void ArpPanel::takeChordOnLine(int line, const chorddrag::Payload& dropped)
+{
+    // A pad still goes the pad way, so the line remembers which card it is holding. Everything
+    // else - the live card, a tray candidate, the reference box - is a chord and nothing more.
+    if (dropped.from == chorddrag::Payload::From::padSlot)
+        processor.holdArpChordFromPad(dropped.index, line);
+    else
+        processor.holdArpChord(dropped.chord.notes, dropped.chord.name, line);
+}
+
 // The panel as a whole is a drop target for a chord card. It hands the chord to the line the
 // panel is *editing*, which is the only line it could mean: in the All view a macro card is
 // under the pointer and wins, and on the Cards page a slot card does.
 bool ArpPanel::isInterestedInDragSource(const SourceDetails& details)
 {
-    auto* p = chorddrag::chordBeingDragged(details);
-    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+    // **Any chord, from anywhere** (2026-08-26). This read `from == padSlot` on all four arp
+    // targets, which is what made the live card undraggable into a line: the payload arrived
+    // with the chord already in it and was turned away for not carrying an index as well.
+    // `chordBeingDragged` is the whole test now - a drag of ours, with notes on it.
+    return chorddrag::chordBeingDragged(details) != nullptr;
 }
 
 void ArpPanel::itemDragEnter(const SourceDetails&) { panelDropTarget = true; repaint(); }
@@ -812,7 +825,7 @@ void ArpPanel::itemDropped(const SourceDetails& details)
     repaint();
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        takeChordOnLine(editLine(), p->index);
+        takeChordOnLine(editLine(), *p);
         p->taken = true;
     }
 }
@@ -1722,13 +1735,14 @@ void ArpPanel::SlotCard::setDropTarget(bool b)
     repaint();
 }
 
-// Chords from the pad strip only. A tray candidate is not offered a slot today - the tray's drag
-// went to the pads and the reference box and nowhere else - and widening that is a feature, not
-// something to let in sideways because the framework now makes it free.
+// A chord from anywhere, as of 2026-08-26 - the pad strip, the live card, the generator's tray
+// or its reference box. This was pad-strip-only, deliberately, on the reading that widening it
+// was a feature rather than something to let in sideways; Owen asked for the feature. Nothing
+// downstream had to change to take it: `takeChordOnSlot` has always read `p.chord` and has never
+// cared where it came from.
 bool ArpPanel::SlotCard::isInterestedInDragSource(const SourceDetails& details)
 {
-    auto* p = chorddrag::chordBeingDragged(details);
-    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+    return chorddrag::chordBeingDragged(details) != nullptr;
 }
 
 void ArpPanel::SlotCard::itemDragEnter(const SourceDetails&) { setDropTarget(true); }
@@ -2547,8 +2561,7 @@ void ArpPanel::MacroRow::setDropTarget(bool b)
 // is now the row's own visibility.
 bool ArpPanel::MacroRow::isInterestedInDragSource(const SourceDetails& details)
 {
-    auto* p = chorddrag::chordBeingDragged(details);
-    return p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+    return chorddrag::chordBeingDragged(details) != nullptr;
 }
 
 void ArpPanel::MacroRow::itemDragEnter(const SourceDetails&) { setDropTarget(true); }
@@ -2559,7 +2572,7 @@ void ArpPanel::MacroRow::itemDropped(const SourceDetails& details)
     setDropTarget(false);
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        owner.takeChordOnLine(line, p->index);
+        owner.takeChordOnLine(line, *p);
         p->taken = true;
     }
 }

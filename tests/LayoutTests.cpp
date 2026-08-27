@@ -14,6 +14,7 @@
 #include "../src/ui/ArpPanel.h"
 #include "../src/ui/KeysLookAndFeel.h"
 #include "../src/ui/RangeKnob.h"
+#include "../src/ui/ChordDrag.h"
 #include "../src/PluginEditor.h"
 #include <juce_events/juce_events.h>
 #include <iterator> // std::size, so the parallel arrays below cannot fall out of step
@@ -76,6 +77,19 @@ namespace
             collectTargets(*child, out);
         }
     }
+
+    // Every component in the tree, visible or not. `collectTargets` above is about what a user
+    // can reach and so skips the hidden; this is about what a *type* can be asked, which is a
+    // different question - a slot card is hidden in the macro view and its drop predicate is
+    // still the thing under test.
+    void collectAllComponents(juce::Component& c, juce::Array<juce::Component*>& out)
+    {
+        for (auto* child : c.getChildren())
+        {
+            out.add(child);
+            collectAllComponents(*child, out);
+        }
+    }
 }
 
 class LayoutTests : public juce::UnitTest
@@ -124,6 +138,167 @@ public:
                        "the popup row \"" + text + "\" is " + juce::String(w)
                            + " px wide but needs " + juce::String((int) std::ceil(drawn + 52.0f))
                            + " to draw its text inside its own gutters, so it ellipsises");
+            }
+        }
+
+        beginTest("the Pads bar still fits Play and Keep arp at the editor's floor");
+        {
+            // The Pads bar grew a second toggle on 2026-08-26 (Keep arp running, beside Play),
+            // and CLAUDE.md's rule for a bar outgrowing its floor is to raise the floor rather
+            // than let a control pay for it. This is the measurement that says which happened,
+            // instead of the arithmetic in minWidthForView()'s comment - which has drifted
+            // twice before, in opposite directions, and said so.
+            //
+            // Both toggles are checked, not just the new one: a fixed-width cell taken out of a
+            // bar starves its *neighbours*, so the interesting failure is Play going thin.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+
+            for (const char* title : { "Pads play on click", "Keep arp running" })
+            {
+                juce::Component* found = nullptr;
+                for (auto* t : targets)
+                    if (t->getTitle() == title)
+                        found = t;
+                expect(found != nullptr, juce::String("'") + title + "' is on screen at all");
+                if (found == nullptr)
+                    continue;
+
+                const auto b = found->getBounds();
+                expectEquals(b.getHeight(), 24, juce::String(title) + " is a bar-height chip");
+
+                // A ToggleButton draws its tick box and then its text beside it. Measured with
+                // GlyphArrangement, never Font::getStringWidth, which under-measures - the rule
+                // the chord library's `iim7`-drawn-as-`iim` bug wrote down.
+                auto* button = dynamic_cast<juce::Button*>(found);
+                expect(button != nullptr);
+                juce::GlyphArrangement ga;
+                // The size JUCE's own drawToggleButton picks: jmin(15, height * 0.75).
+                const juce::Font font { juce::FontOptions(
+                    (float) juce::jmin(15, b.getHeight() * 3 / 4)) };
+                ga.addLineOfText(font, button->getButtonText(), 0.0f, 0.0f);
+                const float text = ga.getBoundingBox(0, -1, true).getRight();
+                // The tick box plus its gap is the height-derived square JUCE lays out, and it
+                // is generous here on purpose: what this is guarding against is a cell squeezed
+                // to nothing, not a pixel of kerning.
+                expect((float) b.getWidth() >= text + (float) b.getHeight(),
+                       juce::String(title) + " is " + juce::String(b.getWidth())
+                           + " px wide, too narrow for its box plus \""
+                           + button->getButtonText() + "\"");
+            }
+        }
+
+        beginTest("every arp drop target takes a chord from any surface, not only a pad");
+        {
+            // The 2026-08-26 fix, pinned. All four arp targets - the panel, a macro card, a slot
+            // card and a letter on the arp bar - read `p->from == From::padSlot` and then looked
+            // the chord up by that slot's index, so the live card (index -1 by construction) was
+            // refused four times over and Owen could not drag the chord he was holding onto a
+            // line. The predicate is `chordBeingDragged` on all four now.
+            //
+            // This is the assertion the round shipped without: every other new test exercises
+            // `holdArpChord` at the processor level or the layout flag beside it, so reverting
+            // any one of the four predicates left the whole suite green. A fix that names its
+            // call sites one at a time is only as complete as that list, and nothing was
+            // checking the list.
+            //
+            // It asks the predicate directly rather than staging a drag: what regressed is the
+            // answer to "would you take this", and JUCE's own delivery (hit test, visibility,
+            // z-order) is not what broke and is not this file's to re-prove.
+            Host h;
+            // The arp section is folded by default (it is tall), and a folded section has no
+            // panel at all - `refreshArpPanel` destroys it, which is the whole point of the On
+            // switches staying out on the bar. Three of the four targets live inside that
+            // panel, so the section has to be open before the editor is built.
+            h.processor.layout.arp = true;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            KeysProcessor::ChordPad chord;
+            chord.notes = { 60, 63, 67 };
+            chord.name = "Cm";
+
+            // One payload per surface a chord can be carried from. `padSlot` is the control: it
+            // worked before the fix, so a target that refuses it has broken in some other way and
+            // should not be read as this bug returning.
+            struct Surface { chorddrag::Payload::From from; int index; const char* what; };
+            const Surface surfaces[] = {
+                { chorddrag::Payload::From::padSlot,  0,  "a pad on the strip" },
+                { chorddrag::Payload::From::liveCard, -1, "the live chord card" },
+                { chorddrag::Payload::From::trayCell, 3,  "a tray candidate" },
+                { chorddrag::Payload::From::refCard,  -1, "the reference box" },
+            };
+
+            // The targets, found by type rather than by name: `ArpPanel`, `MacroRow` and
+            // `SlotCard` are public, and the bar's letters are private to KeysEditor, so those
+            // are reached by the accessible name they already answer to for the capture script.
+            juce::Array<juce::Component*> all;
+            collectAllComponents(ed, all);
+
+            struct Target { juce::DragAndDropTarget* t; juce::String name; };
+            juce::Array<Target> targets;
+            bool sawPanel = false, sawMacro = false, sawSlot = false, sawTab = false;
+            for (auto* c : all)
+            {
+                if (dynamic_cast<ArpPanel*>(c) != nullptr)
+                { targets.add({ dynamic_cast<juce::DragAndDropTarget*>(c), "the arp panel" }); sawPanel = true; }
+                else if (dynamic_cast<ArpPanel::MacroRow*>(c) != nullptr)
+                { targets.add({ dynamic_cast<juce::DragAndDropTarget*>(c), "a macro card" }); sawMacro = true; }
+                else if (dynamic_cast<ArpPanel::SlotCard*>(c) != nullptr)
+                { targets.add({ dynamic_cast<juce::DragAndDropTarget*>(c), "a slot card" }); sawSlot = true; }
+                else if (c->getTitle().startsWith("Arp line "))
+                {
+                    if (auto* t = dynamic_cast<juce::DragAndDropTarget*>(c))
+                    { targets.add({ t, c->getTitle() }); sawTab = true; }
+                }
+            }
+
+            // Finding nothing must fail rather than pass by sweeping an empty list - the trap
+            // the macro knob count already pays for one file over.
+            expect(sawPanel, "the arp panel is in the tree");
+            expect(sawMacro, "at least one macro card is in the tree");
+            expect(sawSlot, "at least one slot card is in the tree");
+            expect(sawTab, "at least one arp bar letter is in the tree");
+
+            for (const auto& target : targets)
+            {
+                if (target.t == nullptr)
+                    continue;
+                for (const auto& s : surfaces)
+                {
+                    chorddrag::Payload::Ptr payload
+                        = new chorddrag::Payload(s.from, s.index, chord);
+                    const juce::DragAndDropTarget::SourceDetails details {
+                        juce::var(payload.get()), nullptr, {}
+                    };
+                    expect(target.t->isInterestedInDragSource(details),
+                           target.name + " refused a chord from " + s.what);
+                }
+            }
+
+            // And the guard that keeps the widening honest: an empty chord is still refused
+            // everywhere, because there is nothing to take and lighting a target for it would
+            // promise otherwise. `chordBeingDragged` is what draws that line, so a target that
+            // dropped the check entirely - rather than widening it - fails here.
+            for (const auto& target : targets)
+            {
+                if (target.t == nullptr)
+                    continue;
+                chorddrag::Payload::Ptr empty = new chorddrag::Payload(
+                    chorddrag::Payload::From::liveCard, -1, KeysProcessor::ChordPad {});
+                const juce::DragAndDropTarget::SourceDetails details {
+                    juce::var(empty.get()), nullptr, {}
+                };
+                expect(! target.t->isInterestedInDragSource(details),
+                       target.name + " took a drag carrying no notes");
             }
         }
 

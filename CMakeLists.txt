@@ -145,4 +145,18 @@ target_include_directories(Keys_tests PRIVATE src)
 # This link is what those two files cost, and it is worth naming why it was paid: the migration
 # mechanism was dead for months and nothing noticed, because no test could reach an APVTS.
 target_link_libraries(Keys_tests PRIVATE okstudio_kit juce::juce_audio_basics Keys)
+# **8 MB of stack, not the default 1 MB** (2026-08-26). ArpEngineTests::runTest is one function
+# holding eighty-odd `ArpEngine` locals - one per beginTest block - and MSVC lays out a frame
+# for the whole function rather than reusing the slots as the scopes close. At roughly 13 KB an
+# engine that frame had been sitting just under 1 MB for months, and the four Scale Lock tests
+# tipped it over: the binary died with 0xC00000FD (stack overflow) having printed *nothing*, so
+# it looked like the suite silently not running rather than like a crash.
+#
+# Raised here rather than worked around in the test file, because the cause is the frame and not
+# any one test: heap-allocating the new engines would have left the next person to add a
+# beginTest block to rediscover this from the same symptomless crash. Nothing about the product
+# needs it - in the plugin an ArpEngine is a member of the processor, never a local.
+if(MSVC)
+  target_link_options(Keys_tests PRIVATE /STACK:8388608)
+endif()
 add_test(NAME Keys_tests COMMAND Keys_tests)

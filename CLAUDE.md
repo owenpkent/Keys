@@ -74,6 +74,81 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**A chord reaches a line from wherever you were holding it, and Scale Lock reaches the line's
+output (2026-08-26).** Owen: *"I can't drag the held chord onto the arpeggiator"*, *"I wanna be
+able to hold the chord down to build it with my mouse, but then also to drag a new chord onto the
+arpeggiator"*, and *"does the scale lock button at the top apply to arpeggiators and harmonies?"*
+Three asks, and each one supersedes a claim below it.
+
+- **Every arp target takes any chord drag now, not only `From::padSlot`.** The four of them - a
+  macro card, a slot card, the panel itself, `ArpBarTab` - each read `p->from == padSlot` and then
+  looked the chord up by `p->index`, so the **live card** (index -1, by construction) was refused
+  four times over and its drop landed on nothing, with nothing lighting on the way to say why. The
+  predicate is `chorddrag::chordBeingDragged(details) != nullptr` in all four now: a drag of ours
+  with notes on it. **This retires "the arp's targets take `padSlot` alone and so refuse it"** in
+  the reference-card bullet below, and the tray's own "not offered a slot today" with it - Owen
+  asked for both.
+  **`holdArpChord(notes, name, line)` was already the general form** and `holdArpChordFromPad` is
+  the *pad* case of it, which is why this cost a predicate and a dispatch rather than an engine
+  change. The pad overload is kept rather than folded in: it is what writes `lines[line].padSlot`,
+  which is how a pad card wears its line's letter and how clicking a *cleared* card still feeding a
+  line releases it. A chord from the live card marks no card, so Hold off and All Off are what stop
+  it - and `ArpPanel::takeChordOnLine` / `KeysEditor::sendDroppedChordToArpLine` each carry two
+  overloads for exactly that reason. **The pad menu's Send to arp rows keep the slot overload**,
+  because they genuinely name one.
+  **A tray candidate dropped on a line is copied, never consumed.** `consumed` is what empties a
+  tray cell, and a line is not storage - a candidate that vanished into one would be
+  unrecoverable, where a pad keeps it. So an arp target sets `taken` and nothing else, which is
+  the reference box's own rule and is why the box needed no special case.
+- **`LayoutState::padsKeepArpRunning`, a tick beside Play, default on.** Ticked, pressing a card on
+  the strip - a pad or the live card - never releases an arp line's held chord, however Exclusive
+  is set. **This is the half of the Play toggle's story Play could not fix**, and the bullet below
+  telling you to turn Play *off* while dragging cards into the arpeggiator is superseded by it:
+  Play decides whether the strip makes a **sound**, and what actually cut the lines off was the
+  **choke**. The only way to avoid the choke was to give up the sound as well, so hold-to-build and
+  drag-into-the-arp were two settings you kept swapping between.
+  **It narrows one gesture, not the rule.** A *drop* on a line still replaces that line's chord and
+  still chokes the pads and the live card under Exclusive. The distinction is the one
+  `takeChordOnLine` already draws when it routes without navigating: **pressing a card is playing a
+  chord, and a line's held chord is not something you are playing** - it is what the machine is
+  chewing. Two call sites, `pressChordPad` and `pressLiveChord`, and `StateTests` pins both,
+  because a gate stuck open and a gate doing its job look identical from the ticked side alone.
+  **Two switches on one bar, and this is the case where that is not the `padHoldToPlay` mistake** -
+  neither answer implies the other, and Owen wants both halves at once. Off by default it would
+  have been a feature nobody found; on, an older session (whose layout tree has no such property)
+  takes it too, and nothing about that session changes visibly, because Exclusive is off by default
+  and the choke was only ever reachable with it on.
+- **Scale Lock reaches the line's output.** `scaleLock` was read in exactly one place -
+  `NoteMath.h`'s `resolveOutputNote`, at keybed press time - so it shaped what you played *into* a
+  line and nothing the line did afterwards. Root and Scale have always reached the engine
+  (`ap.rootPc` / `ap.scaleMask`, feeding the Transpose lane, Distance in degrees and Stray's lower
+  zone); the *lock* was the piece that never arrived. `Params::scaleLock` plus
+  `ArpEngine::snapToMask` snap **in `addHit`**, the one place every emitted pitch passes through -
+  the walk, Octave and Transpose, a Chord-lane slot, the octave stacking, both harmony voices and
+  Stray's strays, in one rule rather than five.
+  **It snaps *before* the dedup**, and that is the half that matters: two pitches that round onto
+  one have to collapse to one hit, because two hits on one pitch in one step is a **hung note**,
+  not a doubled one (see `addHit`'s own note on the tie branch). A harmony voice that rounds onto
+  its own source is dropped, exactly as one that clamped there already was.
+  **Two consequences, both deliberate.** Harmony voices stop being chromatic while Lock is on - the
+  entry below's "**Chromatic on purpose**" is now a statement about Lock *off*. And **Lock beats
+  Stray**: Stray's upper zone exists to leave the scale, locking the output is what the toggle
+  says, so under Lock its two zones read as one. Untick Lock to hear the wrong notes it exists to
+  prevent.
+  **Chord pads are untouched** and that is the line: a stored chord is a chord you built, and
+  snapping it would silently rewrite a borrowed one. Lock is about what Keys *plays*, and a pad
+  fired straight to the output is the chord you put there.
+  **Global, unlike everything else in that params loop**: a lock that held on one line and not
+  another would not be a lock.
+- **`Keys_tests` links with `/STACK:8388608`, and the reason is worth keeping.** Adding four
+  `beginTest` blocks made the binary die with `0xC00000FD` having printed **nothing**, which reads
+  as the suite silently not running rather than as a crash. `ArpEngineTests::runTest` is one
+  function holding eighty-odd `ArpEngine` locals, one per block, and MSVC lays out a frame for the
+  whole function rather than reusing the slots as scopes close - so it had been sitting just under
+  the default 1 MB for months. Raised at the link rather than worked around in the file, because
+  the cause is the frame and not any one test; nothing about the product needs it, since an
+  `ArpEngine` in the plugin is a member of the processor and never a local.
+
 **Four arps, colours, harmony voices, and Mutate off the leash (2026-08-19).** Owen: *"I want 4
 arps. and each one should have a color. and I want new knobs, 2 harmony drop down like the photo
 [BigSky's shimmer interval list]. and each of those has a chance knob which effects the harmony
@@ -211,7 +286,9 @@ cards, and per-line colours. Everything here supersedes the older bullets it con
   `ChordPads` is no longer a `juce::Timer` and `auditionMs` is gone from it - the generator's
   tray keeps its own 800 ms, which was always a different question.
   The button hides with the Pads fold like the page buttons; accessible name
-  `Pads play on click`, on-screen word "Play".
+  `Pads play on click`, on-screen word "Play". **Beside it since 2026-08-26**, `Keep arp running`
+  (on-screen word "Keep arp"), which decides whether a press on the strip may stop a running line;
+  it hides with the Pads fold for the same reason.
 - **The RangeKnob's face is the band's centre, and the halo only ever writes the span**
   (2026-08-19, two corrections in one afternoon: "it should expand in both directions. up is
   more", then "moving the halo shouldn't move knob. should be equal from center"). The band is
@@ -698,7 +775,10 @@ what is no longer true lives here in one place:
   `PianoKeyboard::refresh()` diffs that union against what's currently on and emits
   the delta. All state changes go through it, so notes never double-fire or stick.
 - **The played note is resolved at press time** (scale-lock snap, then octave) and
-  remembered, so note-off matches even if octave/scale change while it sounds.
+  remembered, so note-off matches even if octave/scale change while it sounds. This was the
+  **only** thing `scaleLock` reached until 2026-08-26, when it began snapping the arp's output too
+  (`ArpEngine::snapToMask`); a chord pad's stored notes are still fired exactly as stored. See the
+  round at the top of the Architecture section.
 - **Chord generation is a weighted pool.** `ChordGen.h` builds candidate chords in
   tiers (diatonic → borrowed → secondary dominants → chromatic); Scale Compliance
   decides which tiers enter it, Lock Influence re-weights it toward the families of
@@ -1951,7 +2031,9 @@ what is no longer true lives here in one place:
   `chorddrag::Payload::From::refCard`, a kind of its own rather than a reuse of `trayCell`,
   because the two are identical to every target except on `consumed` - and `consumed` is exactly
   what would have emptied the box the first time you used it, which is the opposite of a fixed
-  point. The arp's targets take `padSlot` alone and so refuse it, unchanged.
+  point. The arp's targets took `padSlot` alone and so refused it until 2026-08-26; they take a
+  chord from anywhere now, and copy rather than consume it - see the round at the top of this
+  section.
   A pad dropped there is **copied**: dragging a card off the strip normally clears it, so the
   card setting `taken` on the drag payload is what suppresses that clear, and a gesture that
   reached for the reference and deleted a chord instead would be the worst bug in the window.

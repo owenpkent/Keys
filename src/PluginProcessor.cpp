@@ -1149,7 +1149,12 @@ void KeysProcessor::pressChordPad(int i)
     // different instruments, so stacking them is a real thing to want; stacking two pads was not.
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
     {
-        stopAllChordPads(); // every source at once
+        // Every source at once - except the arp lines while **Keep arp running** is ticked
+        // (2026-08-26). See LayoutState::padsKeepArpRunning: a press on this strip is playing a
+        // chord, and a line's held chord is the input to a machine rather than something you
+        // are playing, so leaning on a card to hear it should not stop the lines. A *drop* on a
+        // line still replaces that line's chord, and still chokes the pads and the live card.
+        stopAllChordPads(/*includeArpHolds*/ ! layout.padsKeepArpRunning);
     }
     else
     {
@@ -1228,7 +1233,7 @@ void KeysProcessor::pressLiveChord(const std::vector<int>& notes)
         return;
     releaseLiveChord(true);
     if (apvts.getRawParameterValue("chordExclusive")->load() > 0.5f)
-        stopAllChordPads(/*includeArpHolds*/ true, /*includeKeybed*/ false);
+        stopAllChordPads(/*includeArpHolds*/ ! layout.padsKeepArpRunning, /*includeKeybed*/ false);
     liveChordOn = fireChord(notes, liveChordTag);
     lastChordSource = liveChordTag;
 }
@@ -2259,6 +2264,11 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
                     mask |= 1u << k;
             ap.scaleMask = mask != 0 ? mask : 0xFFFu; // an empty table would silence degree walking
         }
+        // Scale Lock reaches the line's output as well as the keybed's (2026-08-26). Global,
+        // like Root and Scale beside it and unlike everything else in this loop: it is the
+        // keybed's own toggle on the Controls bar, and a lock that held on one line and not
+        // another would not be a lock. See ArpEngine::snapToMask.
+        ap.scaleLock = apvts.getRawParameterValue("scaleLock")->load() > 0.5f;
 
         ArpEngine::HostClock hc;
         if (auto* playHead = getPlayHead())
@@ -2766,8 +2776,15 @@ void KeysProcessor::holdArpChordNow(const std::vector<int>& notes, const juce::S
     releaseArpChord(line);
     if (notes.empty())
         return;
-    // Exclusive works in both directions or it does not work: handing a card to the arp has
-    // to choke a sounding pad exactly the way pressing a pad now chokes the arp hold.
+    // Exclusive still reaches the pads and the live card from here: handing a card to the arp
+    // is a *drop*, and a drop replaces what the line was chewing, so the chord it displaces has
+    // to go quiet.
+    //
+    // **The other direction is no longer symmetric, as of 2026-08-26**, and that asymmetry is
+    // the feature rather than an oversight. A press on the strip leaves a running line alone
+    // while **Keep arp running** is ticked (LayoutState::padsKeepArpRunning, default on),
+    // because pressing a card is playing a chord and a line's held chord is not something you
+    // are playing. Untick it and the old both-directions reading comes back.
     //
     // **It does not reach the other arp lines** (2026-08-02, Owen: "I want each arpeggiator to
     // play different chords"). It used to, on the reading that Exclusive means one chord at a
@@ -3736,6 +3753,7 @@ juce::ValueTree KeysProcessor::layoutToTree() const
     tree.setProperty("dragWhileSustain", layout.dragWhileSustain, nullptr);
     tree.setProperty("sustainProposesChords", layout.sustainProposesChords, nullptr);
     tree.setProperty("padsPlayOnClick", layout.padsPlayOnClick, nullptr);
+    tree.setProperty("padsKeepArpRunning", layout.padsKeepArpRunning, nullptr);
     tree.setProperty("accent", layout.accent, nullptr);
     tree.setProperty("detachedBounds", layout.detachedBounds.toString(), nullptr);
     tree.setProperty("arpDetachedBounds", layout.arpDetachedBounds.toString(), nullptr);
@@ -3799,6 +3817,7 @@ void KeysProcessor::layoutFromTree(const juce::ValueTree& root)
     // has always cost - unlike an APVTS parameter, a layout property carries no index anybody
     // stores, so dropping one needs no migration.
     layout.padsPlayOnClick = flag("padsPlayOnClick", true);
+    layout.padsKeepArpRunning = flag("padsKeepArpRunning", true);
     // Older sessions carry keys nothing reads any more, and every one of them is simply
     // ignored: an unread ValueTree property is dropped, so the load cannot throw and the
     // rest of the layout still arrives.

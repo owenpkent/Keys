@@ -592,6 +592,20 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     { processor.layout.padsPlayOnClick = padsPlayButton.getToggleState(); };
     addAndMakeVisible(padsPlayButton);
 
+    // Keep arp running, beside Play, because it answers the other half of the same complaint.
+    padsKeepArpButton.setTitle("Keep arp running");
+    padsKeepArpButton.setTooltip("Ticked, pressing a chord card never stops a running "
+                                 "arpeggiator line, so you can lean on a card to hear it and "
+                                 "still drag one up into the arp without cutting the lines "
+                                 "off. Unticked, Chord Exclusive reaches the lines as it used "
+                                 "to. Dropping a chord on a line replaces that line's chord "
+                                 "either way, and this changes nothing while Exclusive is off.");
+    padsKeepArpButton.setToggleState(processor.layout.padsKeepArpRunning,
+                                     juce::dontSendNotification);
+    padsKeepArpButton.onClick = [this]
+    { processor.layout.padsKeepArpRunning = padsKeepArpButton.getToggleState(); };
+    addAndMakeVisible(padsKeepArpButton);
+
     // The generator's bulk actions, on the same bar. They were buttons on a panel that no
     // longer exists, and they had to survive it: a right-click menu is not a left click, so
     // without these the only way to fill a page would be sixteen New chords one card at a
@@ -1300,9 +1314,9 @@ void KeysEditor::ArpBarTab::paintButton(juce::Graphics& g, bool over, bool down)
 bool KeysEditor::ArpBarTab::isInterestedInDragSource(const SourceDetails& details)
 {
     // The All tab refuses everything: it selects a view, and there is no line behind it to
-    // hand a chord to.
-    auto* p = chorddrag::chordBeingDragged(details);
-    return line >= 0 && p != nullptr && p->from == chorddrag::Payload::From::padSlot;
+    // hand a chord to. Everything else takes any chord drag of ours (2026-08-26) - the pad
+    // strip, the live card, a tray candidate, the reference box - rather than only a pad.
+    return line >= 0 && chorddrag::chordBeingDragged(details) != nullptr;
 }
 
 void KeysEditor::ArpBarTab::itemDragEnter(const SourceDetails&) { dropTarget = true; repaint(); }
@@ -1314,8 +1328,8 @@ void KeysEditor::ArpBarTab::itemDropped(const SourceDetails& details)
     repaint();
     if (auto* p = isInterestedInDragSource(details) ? chorddrag::of(details) : nullptr)
     {
-        owner.sendPadToArpLine(p->index, line);
-        p->taken = true;
+        owner.sendDroppedChordToArpLine(*p, line);
+        p->taken = true; // and the card, cell or box it came from keeps its chord
     }
 }
 
@@ -1344,6 +1358,25 @@ void KeysEditor::sendPadToArpLine(int padSlot, int line)
     }
 
     processor.holdArpChordFromPad(padSlot, line);
+}
+
+// The same two routes for a chord that has no pad behind it (2026-08-26). The pad menu's "Send
+// to arp A" rows keep the overload above, because they genuinely name a slot and the line is
+// meant to remember it; a *drop* can come from the live card, the generator's tray or its
+// reference box, none of which is a slot. Both paths still have to exist for the same reason:
+// with the arp section folded there is no panel, and A through D stay on the bar.
+void KeysEditor::sendDroppedChordToArpLine(const chorddrag::Payload& dropped, int line)
+{
+    if (arpPanel != nullptr)
+    {
+        arpPanel->takeChordOnLine(line, dropped);
+        return;
+    }
+
+    if (dropped.from == chorddrag::Payload::From::padSlot)
+        processor.holdArpChordFromPad(dropped.index, line);
+    else
+        processor.holdArpChord(dropped.chord.notes, dropped.chord.name, line);
 }
 
 ArpPanel::Page KeysEditor::arpPageForTab(int tabIndex)
@@ -1828,6 +1861,7 @@ void KeysEditor::syncSectionControls()
     for (auto& b : pageButtons)
         b.setVisible(lay.pads); // pointless without pads
     padsPlayButton.setVisible(lay.pads); // acts on clicks the fold just hid
+    padsKeepArpButton.setVisible(lay.pads); // same: it qualifies a click on those same cards
     // Fill, Regen, the Generator button and the three combos beside them are deliberately
     // *not* in the list above, and are never hidden: they are the arp On of this bar. Fill and
     // Regen used to hide with the strip, on the reasoning that generating into cards you cannot
@@ -1904,10 +1938,12 @@ int KeysEditor::minWidthForView() const
     // side of it):
     //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 6, Library 80, 10,
     //             Mode 124, 4, Key 58                                          = 624
-    //     left    four pages at 46 + 4, 10, Play 64, 14                        = 288
-    //                                                                    total = 912
-    // 1280 hands it 1152 and the current 1320 floor hands it 1192, so the bar sits with 280 px
-    // of caption zone left over when the section is docked.
+    //     left    four pages at 46 + 4, 10, Play 64, 6, Keep arp 94, 14         = 388
+    //                                                                    total = 1012
+    // 1280 hands it 1152 and the current 1320 floor hands it 1192, so the bar sits with 180 px
+    // of caption zone left over when the section is docked. (Re-measured 2026-08-26 for the
+    // Keep arp toggle: 100 px off the caption zone, which is the elastic thing on this bar, and
+    // no change to the floor - Controls still asks for the most.)
     //
     // Re-measured 2026-08-19, twice over, and both halves of this line had drifted. It read
     // 644 / 858 on one side, itemising a Compliance chip at 74 and a Mode combo at 148 that
@@ -2608,6 +2644,8 @@ void KeysEditor::timerCallback()
     // no hook of its own to hang this on. setToggleState with dontSendNotification is a no-op
     // when it already agrees, so this costs nothing on the ticks where nothing changed.
     padsPlayButton.setToggleState(processor.layout.padsPlayOnClick, juce::dontSendNotification);
+    padsKeepArpButton.setToggleState(processor.layout.padsKeepArpRunning,
+                                     juce::dontSendNotification);
     arpLightsButton.setToggleState(processor.layout.arpLights, juce::dontSendNotification);
 
     const auto& apvts = processor.apvts;
@@ -3195,6 +3233,12 @@ void KeysEditor::resized()
         // like them it is pointless with the strip folded away (see syncSectionControls). A
         // toggle needs its box plus the word, the Light keys sizing.
         padsPlayButton.setBounds(bar.removeFromLeft(64).withSizeKeepingCentre(62, 24));
+        bar.removeFromLeft(6);
+        // Keep arp running, on the same fixed-width reserve as Play and for the same reason it
+        // sits next to it: it qualifies what a press on these cards does. 92 px for the box
+        // plus "Keep arp" - measured against the bar's own slack rather than guessed, and it
+        // does not move the editor's floor; see minWidthForView().
+        padsKeepArpButton.setBounds(bar.removeFromLeft(94).withSizeKeepingCentre(92, 24));
         bar.removeFromLeft(14);
         // Humanize and its velocity range rode this bar from 2026-08-02 to 2026-08-03, when
         // they became a range knob *in the strip* with Strum beside them. They are pad

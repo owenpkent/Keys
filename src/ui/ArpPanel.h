@@ -175,6 +175,19 @@ public:
     // numbers. See the definition for the reason the aim used to follow, and why it expired.
     void takeChordOnLine(int line, int padSlot);
 
+    // The same thing for a chord that has no pad behind it (2026-08-26, Owen: "I can't drag the
+    // held chord onto the arpeggiator"). Every arp target used to demand `From::padSlot` and
+    // then look the chord up by index, so the live card - index -1, by construction - was
+    // refused four times over, and a tray candidate and the reference box with it. A line does
+    // not need a slot to hold a chord: `holdArpChord` has taken plain notes since the day the
+    // lines were built, and `holdArpChordFromPad` is the *pad* case of it, not the general one.
+    //
+    // The pad overload above is kept rather than folded in, and that is not duplication: it is
+    // what writes `lines[line].padSlot`, which is how a pad card wears its line's letter and how
+    // clicking a cleared card still feeding a line releases it. A chord from the live card has
+    // no card to mark, so it marks none - Hold off and All Off are what stop it.
+    void takeChordOnLine(int line, const chorddrag::Payload& dropped);
+
     // **The panel itself takes a chord, anywhere on it** (2026-08-14, Owen: "need to be able to
     // drag chords to not just the main arp window"). Paging the deep view is what made this
     // necessary: the slot cards moved to the Cards page and the macro cards only exist in the

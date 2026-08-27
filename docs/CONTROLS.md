@@ -180,7 +180,7 @@ bar.
 | **Sync** | toggle | Tempo Sync (`bpmSync`, default on). On: a host that reports a tempo always wins, whether or not its transport is rolling. (Until 2026-08-16 that also required the transport to be *playing* - Owen: "bpm isn't syncing with daw" - which meant a DAW sitting stopped at its own tempo disagreed with Keys for exactly as long as you were setting up.) Off: the arp and the progression chain stay on the Tempo field above even while the host rolls, the escape hatch for someone who wants Keys' own clock regardless of the DAW's transport. While Sync is on and a host tempo is actually live, the Tempo field shows the host's own number and greys out - the field and its `<` `>` steppers cannot change anything in that state. No effect in the standalone, which has no host transport to defer to, and no effect on the arp rate while it is in Hz, which never reads a transport at all. On the *Controls bar*, beside Tempo. |
 | **Root** | dropdown | Tonic used by Scale Lock (C … B). On the *Controls bar*. |
 | **Scale** | dropdown | Scale used by Scale Lock (Major, Natural/Harmonic/Melodic Minor, the modes, pentatonics, Blues, Whole Tone, Chromatic). On the *Controls bar*. |
-| **Scale Lock** | toggle | On: each played note snaps to the nearest note in (Root, Scale); out-of-scale keys are dimmed so you see the shape. You cannot play a wrong note. The dimming follows **Root and Scale**, and since 2026-08-18 the generator's own **Key** and **Mode** move those two with them, so the keybed greys to the key you are generating in - they were independent settings that both read as "the key", which made the greying look wrong when it was merely answering a different question. One-way: every generator mode has a scale, but Whole Tone and Chromatic are scales the generator cannot express, so picking one of those leaves the generator where it is. Its on-screen text is just "Lock" (the bar has no room for both words); the accessible name stays "Scale Lock". On the *Controls bar*. |
+| **Scale Lock** | toggle | On: every note Keys plays snaps to the nearest note in (Root, Scale); out-of-scale keys are dimmed so you see the shape. You cannot play a wrong note. **It reaches the arpeggiator's output since 2026-08-26**, not only the keys you press - the run, its octave stacking, a Chord-lane slot, Stray's strays and the harmony voices all round into the key, so a harmony interval is chromatic only while Lock is off and Stray's chromatic zone has nothing to do while it is on. Chord pads are not snapped: a stored chord is the chord you put there. The dimming follows **Root and Scale**, and since 2026-08-18 the generator's own **Key** and **Mode** move those two with them, so the keybed greys to the key you are generating in - they were independent settings that both read as "the key", which made the greying look wrong when it was merely answering a different question. One-way: every generator mode has a scale, but Whole Tone and Chromatic are scales the generator cannot express, so picking one of those leaves the generator where it is. Its on-screen text is just "Lock" (the bar has no room for both words); the accessible name stays "Scale Lock". On the *Controls bar*. |
 | **Voices** | dropdown | Polyphony limit: **Off** (unlimited) or **1–8** notes. Playing past the limit steals the oldest note. On the *Controls bar*. |
 | **MIDI Ch** | dropdown | Output channel, 1–16. Its on-screen caption is "CH". On the *Controls bar*. |
 | **Instrument** | chip → menu | Keys Host only (2026-08-02, Owen: "the load instrument section with all that should go in the controls submenu"): Load instrument…, Show/Hide instrument GUI, and Eject, with the loaded instrument's name as the chip's own caption. Invisible in plain Keys, which never wires it up - the chip and its gap simply aren't reserved. The one *elastic* control on this bar: it gets whatever width the tempo group and the Root…MIDI Ch group leave over. |
@@ -210,7 +210,8 @@ the pad header", then "make smaller to fit" once it landed there):
 
 | Control | Type | What it does |
 |---------|------|--------------|
-| **Play** | toggle, on the *Pads bar* beside the page buttons | Whether clicking a chord card plays it (2026-08-19, Owen: "when I'm trying to drag a cord into the arpeggiator, it plays instead, and it stops everything"). Off, the strip goes **drag-only**: a click makes no sound, so a press that meant to become a drag up into the arpeggiator cannot fire a chord and - with Exclusive on - cut every running line off on the way past. Dragging, dropping on the arp and the right-click card menu all still work, and the one left-click arp behaviour that survives is the *stop* on a cleared card still feeding a line, which plays nothing either way. On is the default and today's behaviour; the setting rides the session. |
+| **Play** | toggle, on the *Pads bar* beside the page buttons | Whether clicking a chord card plays it (2026-08-19, Owen: "when I'm trying to drag a cord into the arpeggiator, it plays instead, and it stops everything"). Off, the strip goes **drag-only**: a click makes no sound, so a press that meant to become a drag up into the arpeggiator cannot fire a chord and - with Exclusive on - cut every running line off on the way past. Dragging, dropping on the arp and the right-click card menu all still work, and the one left-click arp behaviour that survives is the *stop* on a cleared card still feeding a line, which plays nothing either way. On is the default and today's behaviour; the setting rides the session. **Since 2026-08-26 you rarely want it off**: the choke it was protecting against has a switch of its own beside it. |
+| **Keep arp** | toggle, on the *Pads bar* beside **Play** | Whether pressing a chord card is allowed to stop a running arpeggiator line (2026-08-26, Owen: "I wanna be able to hold the chord down to build it with my mouse, but then also to drag a new chord onto the arpeggiator"). Ticked - the default - it is not: lean on a pad or the live card to hear it, drag it up into the arp, and whatever was already running is still running when you get there. Unticked, **Exclusive** reaches the lines as it used to. **Dropping** a chord on a line still replaces that line's chord either way, and this changes nothing at all while Exclusive is off. Accessible name `Keep arp running`; the setting rides the session. |
 | **Humanize** | range knob, in the *pads strip* | How hard Keys plays, in **MIDI velocity, 0-127** (it stopped at 1 until 2026-08-18; the wire never carries 0, since a note-on at velocity 0 is a note-off, so 0 means "as quiet as MIDI can say" and what leaves is velocity 1). The knob is the band's **centre**, not its ceiling: the ring opens equally either side of it (2026-08-19), so each note takes a random velocity that can land louder or quieter than the knob, and a part stops sounding typed in. The **lamp** beside it is the on/off: lit, notes are drawn from the band; unlit, the arc collapses to an ordinary one and every note plays the knob's **own value**, which is the single number the readout then shows. (It had a separate tick box until 2026-08-03; the lamp says the same thing without a second control.) |
 
 **All four range knobs open lit** (2026-08-23, Owen: *"I want the default strum up, humanize,
@@ -306,8 +307,10 @@ keyboard on each, and it went on 2026-07-31 once the note list fit under the nam
    note: it runs until you let go however far the hand travelled, because tying a chord's length
    to the hand staying inside a small circle is the one thing a mouse-only surface must not do.
    Dropping a card ends the note like any other release. The press has still *sounded* by then,
-   which is why **Play off** is the setting to use while you are dragging cards into the
-   arpeggiator: it makes the strip drag-only and silent at both ends. Turn **Sustain** on to keep a chord ringing after you let go. **A new pad always
+   and what that used to cost was a running arp line: with Exclusive on, firing a chord stopped
+   every one of them. **Keep arp** (below) is the answer to that now, so Play can stay on while
+   you drag; **Play off** still makes the strip drag-only and silent at both ends if you want
+   that. Turn **Sustain** on to keep a chord ringing after you let go. **A new pad always
    chokes the previous pad**, Sustain or not (2026-08-16, Owen: "when you click a pad it
    should clear other presses") - the strip is one voice, a palette you pick from, and
    stacking two pads only ever made a pile with no name. **Exclusive** decides whether a pad
@@ -1229,8 +1232,16 @@ Right-clicking a slot offers Launch, Clear chord, Copy and Randomize, if you pre
 you click on a pad, I don't want it to send it to the arpeggiator unless you drag it"). A click
 always just plays the pad for a short audition, whatever the lines are doing - clicking a card
 that is already feeding a line no longer retriggers the arp's hold, it just auditions the chord
-on top of it. Feeding a line is a drag, and there are three targets, all from the Pads section
-under the panel. Each one answers "which line?" differently.
+on top of it. Feeding a line is a drag, and there are three targets. Each one answers
+"which line?" differently.
+
+**And a chord can come from anywhere you can see one** (2026-08-26, Owen: "I can't drag the held
+chord onto the arpeggiator"). A pad on the strip, the **live chord card** beside it - the chord
+you are holding on the keybed right now, built one latched click at a time - a candidate in the
+generator's audition **tray**, or its **reference** box. Every arp target used to take a pad and
+nothing else, so the live card picked up, carried a ghost, and then had nowhere to land. A tray
+candidate or the reference chord dropped on a line is **copied**: a line is not storage, so
+taking the card away as payment would lose it.
 
 - **Drag a chord card onto a line's card in the macro view.** The whole card lights while the
   chord is over it, anywhere on it, knobs included. This is the way to build a polyrhythm out
@@ -1238,8 +1249,10 @@ under the panel. Each one answers "which line?" differently.
   when you let go; you dropped onto the line itself, and being thrown into that line's deep
   controls is not what the gesture asked for.
 - **Drag a chord card onto A, B, C or D on the Arp bar.** It goes to *that* line, whichever
-  letter you dropped it on, and that line becomes the current one - you aimed at it - whether
-  the letter is lit on or off.
+  letter you dropped it on, lit or not - a line that is off still takes chords in. The panel
+  does not follow it there: routing a chord is not navigating to a line (2026-08-18), and
+  watching every per-line read-out jump under the hand that was moving a chord reads exactly
+  like the drop having changed them.
 - **Drag a chord card onto a slot card.** It binds the chord to that slot, in whichever line's
   detail view is currently open, ready to launch later. **Send to arp slot**, in a pad's
   right-click menu, is the aimless twin of this: it parks a copy of that chord in one of the
@@ -1248,6 +1261,8 @@ under the panel. Each one answers "which line?" differently.
 Landing a chord on a line replaces whatever it was holding - drop **another** card on the same
 target to swap it. To stop a hold outright, use **Hold off** on the arp bar (or **Stop** in the
 panel, which is the same button); switching a line off releases whatever it was holding, too.
+A chord that came from the **live card**, the tray or the reference box wears no ring anywhere,
+because no pad was involved - those two buttons are its way out.
 A card that fed a line still wears that line's letter in a bright ring while it holds it, and
 **a click on a cleared card that is still feeding a line releases it** - there is nothing left
 to audition, so the click means the only other thing it can, and that is the ring's own way out.
