@@ -363,6 +363,87 @@ public:
 
         // A line that is off still takes a chord in, by design, so a hold that worked and a
         // line that will never sound are indistinguishable without this field.
+        // The same rule across every tool that takes a line, not just the two that got it
+        // first. A clamp is the validation failure nobody can see: the call lands on D and
+        // reports success, so a typo is a chord on the wrong arpeggiator with nothing to say
+        // so. Swept rather than spot-checked, because the failure mode here is a tool being
+        // *missed* when the rule was applied, and a list of names cannot notice its own gaps.
+        beginTest("every tool taking a line rejects one that does not exist");
+        {
+            Host h;
+            const juce::StringArray takesLine {
+                "hold_arp_chord", "release_arp_chord", "get_arp_pattern", "set_arp_pattern",
+                "recall_arp_pattern", "store_arp_pattern", "apply_euclid" };
+
+            // Enough of each tool's other required arguments to get past them to the line.
+            auto extras = [](const juce::String& tool) -> juce::var
+            {
+                if (tool == "hold_arp_chord")     return args({ { "notes", noteArray({ 60, 64 }) } });
+                if (tool == "recall_arp_pattern") return args({ { "slot", 0 } });
+                if (tool == "apply_euclid")       return args({ { "hits", 3 }, { "steps", 8 } });
+                if (tool == "set_arp_pattern")    return args({ { "note", noteArray({ 1, 2, 3, 4 }) } });
+                return args({});
+            };
+
+            for (const auto& tool : takesLine)
+                for (int bad : { -1, KeysProcessor::numArpLines, KeysProcessor::numArpLines + 4 })
+                {
+                    auto a = extras(tool);
+                    a.getDynamicObject()->setProperty("line", bad);
+                    juce::String err;
+                    call(h.processor, tool, a, err);
+                    // The message is checked, not merely its presence: with a tool that
+                    // rejects something *else* first, "an error came back" passes while the
+                    // line goes unvalidated, which is the vacuous pass this sweep exists to
+                    // avoid. set_arp_pattern did exactly that until its payload was filled in.
+                    expect(err.contains("line"), tool + " did not reject line "
+                                                     + juce::String(bad) + ", it said: " + err);
+                }
+
+            // The other half: a line that does exist still works, so the guard above is a
+            // guard and not a tool that stopped accepting its argument.
+            for (const auto& tool : takesLine)
+            {
+                auto a = extras(tool);
+                a.getDynamicObject()->setProperty("line", KeysProcessor::numArpLines - 1);
+                juce::String err;
+                call(h.processor, tool, a, err);
+                expect(err.isEmpty(), tool + " rejected the last real line: " + err);
+            }
+
+            // allLines documents `line` as ignored, so it must not be validated there.
+            juce::String err;
+            call(h.processor, "release_arp_chord",
+                 args({ { "allLines", true }, { "line", 99 } }), err);
+            expect(err.isEmpty(), "allLines validated a line it documents as ignored: " + err);
+        }
+
+        // Every one of these said "0..1 (A, B)" while Keys has had four lines since
+        // 2026-08-19, so a client reading the schema could not know C and D existed.
+        beginTest("the line parameter's description names every line that exists");
+        {
+            Host h;
+            const auto table = toolTable(h.processor);
+            auto* tools = table.getArray();
+            if (tools == nullptr)
+            {
+                expect(false, "tools/list returned no array");
+                return;
+            }
+            const auto last = juce::String(KeysProcessor::numArpLines - 1);
+            int seen = 0;
+            for (auto& t : *tools)
+            {
+                auto line = t["inputSchema"]["properties"]["line"];
+                if (! line.isObject())
+                    continue;
+                ++seen;
+                expect(line["description"].toString().contains("0.." + last),
+                       t["name"].toString() + " describes line as: " + line["description"].toString());
+            }
+            expect(seen >= 7, "no tool declared a line parameter, so this swept nothing");
+        }
+
         beginTest("hold_arp_chord reports whether the line it landed on is actually running");
         {
             Host h;
