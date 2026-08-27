@@ -735,6 +735,33 @@ public:
     std::atomic<int> uiSeqCount { 0 };
     std::array<std::atomic<int>, maxHeld * 4> uiSeq {};
 
+    // How many notes the engine is holding, for anything off the audio thread that wants to
+    // know whether this line is sounding at all. `heldCount` itself is a plain int written by
+    // noteArrived/noteReleased/the latch reset on the audio thread, so reading *that* from the
+    // message thread is a data race however harmless the value looks; this is the published
+    // copy, beside the two atomics that already exist for exactly this. Written wherever
+    // heldCount changes, through setHeldCount().
+    std::atomic<int> uiHeldCount { 0 };
+
+    // The sequence as a snapshot, taken the way it was published. Both readers - the Draw
+    // page's grid and the MCP get_state tool - go through here rather than each running their
+    // own load-count-then-index loop over the atomics: one copy of the handshake, so the
+    // memory ordering below is stated once and a future change to how the sequence is
+    // published (a seqlock, a double buffer, a generation counter) has one place to land.
+    //
+    // The count is loaded acquire against buildSequence's release, which is what makes the
+    // entries visible with it. Relaxed on both sides gave no happens-before at all, so a
+    // reader could legally see a new, larger count against the previous chord's entries - or,
+    // on the very first chord, against the zero-initialised array, which reads out as a line
+    // holding C-1 four times.
+    int uiSequence(std::array<int, maxHeld * 4>& out) const noexcept
+    {
+        const int n = juce::jlimit(0, (int) uiSeq.size(), uiSeqCount.load(std::memory_order_acquire));
+        for (int i = 0; i < n; ++i)
+            out[(size_t) i] = uiSeq[(size_t) i].load(std::memory_order_relaxed);
+        return n;
+    }
+
     // Where a lane reads on a given step: the engine's own index arithmetic, lifted out so the
     // UI runs this line rather than a second copy of it that can drift from it. `rel` is the
     // step index relative to the last restart; the divider shift happens before the offset,
@@ -837,7 +864,7 @@ public:
     {
         activeCount = 0;
         pendingCount = 0;
-        heldCount = 0;
+        setHeldCount(0);
         physicallyHeld = 0;
         stepCounter = 0;
         dirCursor = 0;
@@ -1086,6 +1113,8 @@ public:
             heldBeats += blockBeats;
     }
 
+    // Audio thread only: `heldCount` is a plain int this thread owns. Anything off it wants
+    // uiHeldCount, the published copy above.
     int heldNoteCount() const noexcept { return heldCount; }
 
 private:
@@ -1134,7 +1163,7 @@ private:
         // Latch with nothing physically held: a fresh chord starts over.
         if (p.latch && physicallyHeld == 0 && heldCount > 0)
         {
-            heldCount = 0;
+            setHeldCount(0);
             dirCursor = 0;
         }
         if (heldCount == 0)
@@ -1160,7 +1189,8 @@ private:
             }
         if (heldCount < maxHeld)
         {
-            held[(size_t) heldCount++] = { note, vel, channel, 1 };
+            held[(size_t) heldCount] = { note, vel, channel, 1 };
+            setHeldCount(heldCount + 1);
             ++physicallyHeld;
         }
     }
@@ -1180,7 +1210,7 @@ private:
                 {
                     for (int j = i; j < heldCount - 1; ++j)
                         held[(size_t) j] = held[(size_t) j + 1];
-                    --heldCount;
+                    setHeldCount(heldCount - 1);
                     permDirty = true;
                 }
                 return;
@@ -1456,7 +1486,9 @@ private:
             uiSeq[(size_t) i].store(held[(size_t) seq[(size_t) i].heldIndex].note
                                         + seq[(size_t) i].semitoneOffset,
                                     std::memory_order_relaxed);
-        uiSeqCount.store(seqCount, std::memory_order_relaxed);
+        // Release, paired with the acquire in uiSequence(): everything stored above becomes
+        // visible to a reader that sees this count, which is the whole handshake.
+        uiSeqCount.store(seqCount, std::memory_order_release);
     }
 
     // The sequence is always built ascending (or in arrival order); directions are
@@ -2208,6 +2240,14 @@ private:
     double sr = 44100.0;
     std::array<Held, maxHeld> held {};
     int heldCount = 0;
+    // heldCount and its published copy move together, always: two writers for one number is
+    // exactly how the copy goes stale, and a stale "is this line sounding" is worse than not
+    // reporting one. Every write to heldCount goes through here.
+    void setHeldCount(int n) noexcept
+    {
+        heldCount = n;
+        uiHeldCount.store(n, std::memory_order_relaxed);
+    }
     int physicallyHeld = 0;
     std::array<Active, maxActive> active {};
     int activeCount = 0;

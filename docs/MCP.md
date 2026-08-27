@@ -177,17 +177,43 @@ set_params    { "values": { "arpOn": true, "arpPattern": true, "arpLatch": true 
 play_notes    { "notes": [45, 48, 52, 55], "durationMs": 60000 }
 ```
 
-Two things about `heldChord` that follow from all this:
+Three things about what a line reports, which together answer "where are those
+notes coming from" - a question this API could not answer at all until 2026-08-26:
 
-- **An empty `heldChord` on a line running off `play_notes` is not a fault.**
-  `get_state` reports `chordName`, the *handed* chord, so a line audibly
-  arpeggiating played notes reads as holding nothing. Only a chord from
-  `hold_arp_chord` (or a card, or a slot launch) fills that field, which is what
-  makes it a reliable check now: fed the new way, a line that reports no held
-  chord really is holding none.
+- **`heldChord` is only the chord that was *handed* to the line.** A line audibly
+  arpeggiating played notes reads as holding nothing, and that is correct rather
+  than a fault. Only `hold_arp_chord`, a chord card, or a slot launch fills it.
+- **`soundingNoteCount` and `sequence` are what the line is actually sounding**,
+  whatever the source. `soundingNoteCount` counts the notes the engine holds;
+  `sequence` is the pitches it walks, in the order the Shape and octave stack put
+  them. The Note lane's **fixed indices run 1..8** and name the first eight of those,
+  wrapping the way `fireStep` does; `sequence` itself can be longer (the held chord
+  times the octave range), and those further pitches are reachable only through a
+  shape walk, never through an index you can draw. So a Note lane of `[4,3,2,1]`
+  against a `sequence` of `[57,60,64,67]` is a descending arpeggio.
+  **A line with an empty `heldChord` and a non-empty `sequence` is arpeggiating notes
+  that arrived some other way** - the state to look for when a line plays and nothing
+  explains why. That test only fires when `heldChord` is *empty*, though, and the
+  likelier mess is **mixed**: a line holding a chord you handed it *and* picking up
+  stray track MIDI reads as fully explained while half its notes come from nowhere
+  anybody intended. The signal that catches both is
+  **`soundingNoteCount` larger than the chord you handed over**.
+  The field is not called `heldNotes` on purpose: `KeysProcessor::arpHeldNotes()` is
+  the note list of the *handed* chord, and a name colliding on that exact distinction
+  would send you to the opposite of the truth.
 - **`hold_arp_chord` can honestly report an empty hold**, for one call, when Launch
   Quantize is on: the whole gesture waits for the next boundary. Its reply carries
   `waitingForQuantize` so the two cases are told apart.
+
+The usual "some other way" is the **track's own MIDI input**, which `arpKeys` feeds
+straight to the arp. In Ableton a track set to `MIDI From: All Ins / All Channels`
+hands every stray note in the session to a generative device, and none of it shows
+up as a held chord. That cost an afternoon: an instance played continuously while
+`heldChord` was blank, the chord lane was `0`, and there was no chain and no
+launched slot. Nothing survived the panic, because fresh note-ons arrived straight
+after it, and the only way to find it was muting lines one at a time and asking a
+human what stopped. `arpKeys` off, or `MIDI From: None`, shuts that door;
+`sequence` is what makes it visible without either.
 
 **Chord pads go out on the global MIDI Channel control** (the `channel` parameter), like
 anything else Keys plays: `fireChord` passes channel 0, which means "follow that

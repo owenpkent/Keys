@@ -116,6 +116,55 @@ namespace
     {
         return v.empty() ? -1 : *std::min_element(v.begin(), v.end());
     }
+
+    // arpLines[0] out of a get_state reply, or a void var when it is not there. Returned by
+    // value on purpose: juce::UnitTest::expect records a failure and *returns*, it does not
+    // abort, so `expect(ptr != nullptr, ...)` followed by a deref turns the one regression
+    // these tests exist to catch - a field being renamed or dropped - into a segfault that
+    // takes the whole binary down having printed nothing. Handing back a var means a missing
+    // field reads as void and asserts as a failure.
+    juce::var firstArpLine(const juce::var& state)
+    {
+        if (auto* lines = state["arpLines"].getArray())
+            if (! lines->isEmpty())
+                return (*lines)[0];
+        return {};
+    }
+
+    // Set line A up, send Am7 at the *track* input, and run the engine. Shared by the two
+    // arpKeys tests below so they differ in exactly one parameter: with two moving, a failure
+    // in the second does not uniquely implicate arpKeys. arpRate is set in both rather than
+    // left to its default, so the window below stays what this comment says it is even if the
+    // default moves.
+    void driveTrackMidi(KeysProcessor& p, bool arpKeysOn)
+    {
+        p.prepareToPlay(44100.0, 512);
+        call(p, "set_params", args({ { "values", args({
+            { "arpOn", true }, { "arpPattern", true }, { "arpRate", "1/16" },
+            { "arpKeys", arpKeysOn } }) } }));
+
+        const int chans = juce::jmax(1, p.getTotalNumOutputChannels());
+        juce::AudioBuffer<float> buf (chans, 512);
+
+        juce::MidiBuffer midi;
+        for (int n : { 45, 48, 52, 55 })              // Am7 arriving at the track input
+            midi.addEvent(juce::MidiMessage::noteOn(1, n, 0.8f), 0);
+        buf.clear();
+        p.processBlock(buf, midi);
+
+        // 64 blocks of 512 at 44100 is about 740 ms, against a 1/16 of 125 ms at the 120 bpm
+        // fallback. Deliberately not a tight window: `sequence` is published only from
+        // fireStep, and process() clears it on any block where no step is eligible, so a test
+        // that only just reaches its first step would report a timing regression as a missing
+        // field. The caller asserts the playhead moved, so if it ever does go quiet the
+        // failure says which of the two it was.
+        for (int i = 0; i < 64; ++i)
+        {
+            juce::MidiBuffer none;
+            buf.clear();
+            p.processBlock(buf, none);
+        }
+    }
 } // namespace
 
 class McpTests : public juce::UnitTest
@@ -372,6 +421,89 @@ public:
                  args({ { "notes", noteArray({ 45, 48, 52, 55 }) }, { "durationMs", 5000 } }));
             expect(h.processor.arpHeldNotes(0).empty(),
                    "play_notes populated the handed-chord field");
+        }
+
+        // WHAT A LINE IS SOUNDING, as opposed to what was handed to it. This pair is the
+        // regression from an afternoon spent hunting a Keys instance that played notes while
+        // every field get_state offered read as empty: heldChord blank, chord lane 0, no
+        // chain, no launched slot. The notes were arriving at the *track's MIDI input* and
+        // arpKeys was feeding them straight to the arp, which nothing reported. The only way
+        // to find it was to mute lines one at a time and ask a human what stopped.
+        //
+        // These drive processBlock directly because uiSeq is published by the audio thread,
+        // and they inject MIDI the way the mystery source did rather than via play_notes.
+        beginTest("get_state reports notes a line sounds from track MIDI, not just handed chords");
+        {
+            Host h;
+            driveTrackMidi(h.processor, true);
+
+            // The precondition the rest of this test rests on, asserted rather than assumed:
+            // `sequence` only exists once a step has fired.
+            expect(h.processor.arpLine(0).uiRelStep.load() >= 0,
+                   "no step fired in the window, so sequence has nothing to report yet");
+
+            auto st = call(h.processor, "get_state", args({}));
+            auto lineA = firstArpLine(st);
+            if (! lineA.isObject())
+            {
+                expect(false, "arpLines missing from get_state");
+                return;
+            }
+
+            expect(lineA.hasProperty("soundingNoteCount"),
+                   "get_state stopped reporting soundingNoteCount");
+            expect((int) lineA["soundingNoteCount"] >= 4,
+                   "soundingNoteCount did not report the four notes the engine is holding, it said "
+                       + lineA["soundingNoteCount"].toString());
+
+            auto* seq = lineA["sequence"].getArray();
+            expect(seq != nullptr && seq->size() >= 4,
+                   "sequence did not report the pitches the Note lane's indices name");
+
+            // The point of the pair: the handed-chord field is legitimately empty here, and
+            // on its own it says the line is holding nothing while it demonstrably is.
+            expect(lineA["heldChord"].toString().isEmpty(),
+                   "played notes should not populate heldChord");
+
+            // The sequence is the held chord, so every pitch in it must be one we sent (or an
+            // octave-stacked copy of one), not an arbitrary note. Guarded rather than
+            // dereferenced straight after the expect above, for the reason firstArpLine gives.
+            if (seq != nullptr)
+                for (auto& v : *seq)
+                {
+                    const int pitch = (int) v;
+                    bool derived = false;
+                    for (int n : { 45, 48, 52, 55 })
+                        for (int oct = 0; oct <= 3; ++oct)
+                            if (pitch == n + 12 * oct)
+                                derived = true;
+                    expect(derived, "sequence holds a pitch not derived from the held chord: "
+                                        + juce::String(pitch));
+                }
+        }
+
+        // The other half, and the actual fix for the afternoon above: arpKeys is the door.
+        // With it shut, the same track MIDI must not reach the line at all. Identical setup
+        // apart from that one parameter, so a failure here can mean nothing else.
+        beginTest("with arpKeys off, track MIDI does not reach the line");
+        {
+            Host h;
+            driveTrackMidi(h.processor, false);
+
+            auto st = call(h.processor, "get_state", args({}));
+            auto lineA = firstArpLine(st);
+            if (! lineA.isObject())
+            {
+                expect(false, "arpLines missing from get_state");
+                return;
+            }
+
+            // Asserted present before it is read: a missing juce::var casts to 0, so without
+            // this the test would go green just as happily if the field were deleted.
+            expect(lineA.hasProperty("soundingNoteCount"),
+                   "get_state stopped reporting soundingNoteCount");
+            expectEquals((int) lineA["soundingNoteCount"], 0,
+                         "arpKeys was off and the line still picked up track MIDI");
         }
 
         beginTest("with Launch Quantize on, the hold waits and the reply says so");
