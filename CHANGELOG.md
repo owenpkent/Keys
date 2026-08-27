@@ -693,6 +693,76 @@ The macro card's knob strip is **nine**, which is the width the 38 px knob floor
 survive: nine knobs plus the two rings and eight gaps is 422 px, so every knob clears the 34 px
 mouse-only floor in the docked editor. Note that is the *docked* case only - the detached Arp
 window is narrower and was not re-measured here.
+## [0.2.1] - 2026-08-20
+
+### Added: Keys has a logo
+
+Owen: *"need logo"*, then, shown twelve marks, *"10"*.
+
+**Three white keys, two black keys between them, and the middle one lit.** Keys is the
+played keyboard of the OK Studio line - you click a key and it sounds - so the mark is that
+gesture rather than the initial. It is drawn entirely from `src/ui/KeysLookAndFeel.h` -
+obsidian ground, ivory key faces, the one cyan - so the mark and the plugin are the same
+object rather than two things that happen to ship together.
+
+A letter **K** was drawn first, in eight variations, and abandoned. It said *Keys* and
+nothing about a piano; the "white key" its stem was documented as was a rounded rectangle
+that nobody would ever read as one; and below 32 px it came out as a lowercase k.
+
+`assets/Keys.svg` is the master. `installer/generate_brand.py` draws the same six shapes
+with Pillow and emits everything else: `assets/Keys.ico` (16 through 256), the two Inno
+wizard bitmaps, and `assets/logo-1024.png`. **All of it is committed**, so a build - and CI -
+never needs Pillow; the script runs only when the mark itself changes.
+
+Three things the drawing had to get right, and only the first is something a vector renderer
+would have done for free. **Each icon frame is drawn at its own size** rather than
+downsampled from one 256, because a resized 256 goes muddy at 16. **Keys are square at the
+shoulder and round at the foot** - Pillow rounds four corners or none, so the top pair is
+squared off by overdrawing - and that single detail is what separates a keyboard from three
+rounded bars. And **the block fills about 79% of the tile's width**, which is a legibility
+floor rather than a taste: drawn at half the width, three keys and two gaps across a 16 px
+icon put every gap under half a pixel and the keys blurred into one bar.
+
+### Added: release.py, because signing cannot be automated from here
+
+The EV certificate lives on the SafeNet token, and once its cached PIN expires the driver
+puts up a **GUI prompt**. A build launched by an agent runs non-interactively, so that prompt
+is never shown and signtool returns `ERROR_CANCELLED` (`0x800704c7`) at once - which reads
+exactly like a cancelled PIN and is not one. Double-clicking `release.py` runs the same
+`build.ps1 -Installer` from a session that can show the dialog.
+
+It also **verifies what came out**, because "signature valid" has already been misleading
+once here: a correctly signed installer from an earlier build sat in `release/` looking
+publishable while missing the branding entirely. It checks the file is fresh rather than
+left over, that it is signed, that the binary's reported version matches `CMakeLists.txt`
+(the JUCE `resources.rc` trap), and that the branding files exist at all.
+
+### Fixed: the installer never asked where to put the plug-in
+
+Owen, on the 0.2.0 installer: *"it didn't ask where to save the vst"*.
+
+`DisableDirPage=yes` meant the wizard went Welcome, License, Ready, with no say in the
+destination at all. That is defensible for a VST3, which has one canonical folder every host
+scans, right up until a DAW is pointed somewhere else - and Ableton's **VST3 Plug-In Custom
+Folder** is exactly that case, the one this machine has been using the whole time. An
+installer that cannot reach the folder your host actually scans is one that installs a
+plug-in you cannot load.
+
+There is now a **Select VST3 folder** page, defaulting to `{commoncf64}\VST3` with Browse
+alongside it, and the page's own text says to point Setup at a custom folder if the DAW uses
+one.
+
+**`{app}` changed meaning, and that is what makes this more than a one-line flag.** Until
+0.2.0 `{app}` *was* the bundle (`...\VST3\Keys.vst3`); it is now the VST3 **folder**, with
+`[Files]` appending `Keys.vst3` itself. So `UsePreviousAppDir` has to be **off**: Inno
+remembers a previous install's `{app}` and would otherwise hand 0.2.0's remembered bundle
+path to a rule that appends the bundle name again, installing to
+`...\VST3\Keys.vst3\Keys.vst3` - a path no host looks in, from an installer that reported
+success. `DirExistsWarning` is off for the same family of reason: the VST3 folder always
+already exists, so the "install to an existing folder anyway?" prompt would fire on the
+default path every time and train the user to click through it.
+
+
 
 ## [0.2.0] - 2026-08-20
 
