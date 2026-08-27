@@ -5,6 +5,60 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a script can hand a chord to an arpeggiator line
+
+`hold_arp_chord` and `release_arp_chord` over MCP. The entry below gave the *editor* every
+route onto a line; this gives the same thing to anything driving Keys as a tool, and it calls
+the same `holdArpChord`, so a drag and a script now arrive by one path.
+
+**It closes a trap that reads as a broken plugin.** A chord *pad* cannot feed a line and never
+could: `pressChordPad` fires through `fireChord` with `asChord` true, which on the track output
+takes the queue a listening line cannot lift. That is correct - a pad is a chord you are
+playing, not the input to a machine - but nothing said so, and `docs/MCP.md` asserted the
+opposite in one sentence about Launch Quantize. So a script would set up two lines, write every
+lane, press a pad, and get silence with **success on every call**. The only route in was
+`play_notes` held open, which is not a hold: it expires, and re-arming is another call, so a
+generative cue driven that way cannot be left running.
+
+Either shape of chord goes in - `notes` directly, or `padSlot` to take a pad's (which lights its
+card, same as the editor). One chord per line; a second call swaps it. `release_arp_chord` lets
+one line go, or every line with `allLines`.
+
+**The reply reports the hold it actually took**, including `waitingForQuantize`, because with
+Launch Quantize on the gesture waits for the next boundary and the line is briefly holding
+nothing. An empty hold and a deferred hold look identical otherwise, and telling them apart is
+most of the point: the failure this tool replaces was one where every reading looked right.
+
+`docs/MCP.md` also gains **"Which instance am I talking to?"**. Nothing in the API answers it -
+no track name, no device index - and the shim picks by recency, so a script can build a whole
+patch into a Keys on a track nobody is listening to and be told it succeeded at every step.
+Found the hard way: six discovery files for one Live process, four answering tool calls, and the
+routed instance among the two that did not. **A bound port is not evidence a Keys will answer,
+and neither is a discovery file** - only a reply is.
+
+### Fixed: an instance could be alive, bound, and deaf
+
+The two silent ports above were not stale files, which was the first and wrong theory. They were
+live instances holding bound sockets and answering nothing, and the cause was in the kit's
+transport: `Server::run()` served each connection **on the listener thread**, in a read that
+blocks until that client disconnects. The shim holds a long-lived connection and goes idle
+between calls by design, so **one idle shim owned a plugin's server forever** and every later
+connect sat unaccepted in the OS backlog. A session came up with no Keys tools at all while Keys
+ran fine, and a script built a whole patch into a reachable-but-unrouted instance and heard
+silence, with success reported at every step.
+
+Fixed in `okstudio-juce-kit`: one thread per connected client, capped, evicting the oldest rather
+than refusing the newest. Tool bodies are still marshalled onto the message thread, so nothing
+about handler serialization changes. The shim also quarantines a port that blows its timeout and
+reconnects to another instance, since accepting a connection never meant answering one.
+
+**The tests that would have caught it now exist**, and their absence had a clear shape: every MCP
+test called `handleLine` directly, with "no socket, no start()", and the whole failure lived in
+the transport those tests skipped. The kit gained its first socket-level coverage plus a shim
+scenario for a deaf peer advertised newer than a healthy one. Full account in `docs/MCP.md` under
+"An instance can be alive, bound, and deaf".
+
+
 ### Fixed: the chord you are holding can be dragged onto an arpeggiator line
 
 Owen: *"I can't drag the held chord onto the arpeggiator."*

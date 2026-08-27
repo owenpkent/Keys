@@ -256,6 +256,12 @@ splitting it back out afterwards is a job for Live, not for Keys.
 - **No sound.** Check the instrument track's **Monitor** is **In** and its **MIDI
   From** points at the Keys track → Keys. Keys itself never makes sound; it only
   sends notes.
+- **No sound, and I am driving Keys over MCP.** Check the routing above first, then
+  check *which instance* you are driving: with more than one Keys in the set the shim
+  picks by recency, and a script can build a whole patch into a Keys on an unrelated
+  track while every call reports success. `docs/MCP.md`, "Which instance am I talking
+  to?", has the way to tell. Also note a pad press cannot feed an arpeggiator line, so
+  a line fed that way is correctly silent.
 - **Keys disappears when I select another track.** Live's **Auto-Hide Plug-In Windows**,
   on by default. See "Keeping Keys on screen while you work on other tracks" above.
 - **I armed the Keys track, recorded, and got an empty clip.** Expected, and it is a

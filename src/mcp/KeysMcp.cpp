@@ -98,25 +98,21 @@ namespace
     }
 } // namespace
 
+std::vector<okstudio::mcp::Tool> KeysMcp::buildTools()
+{
+    return { toolGetState(), toolListParams(), toolSetParams(), toolPlayNotes(),
+             toolPlaySequence(), toolAllNotesOff(), toolGetChordPads(), toolSetChordPad(),
+             toolClearChordPad(), toolPressChordPad(), toolReleaseChordPad(),
+             toolHoldArpChord(), toolReleaseArpChord(), toolGetArpPattern(),
+             toolSetArpPattern(), toolRecallArpPattern(), toolStoreArpPattern(),
+             toolApplyEuclid() };
+}
+
 KeysMcp::KeysMcp(KeysProcessor& p)
     : processor(p), server(productSlug(), JucePlugin_VersionString)
 {
-    server.addTool(toolGetState());
-    server.addTool(toolListParams());
-    server.addTool(toolSetParams());
-    server.addTool(toolPlayNotes());
-    server.addTool(toolPlaySequence());
-    server.addTool(toolAllNotesOff());
-    server.addTool(toolGetChordPads());
-    server.addTool(toolSetChordPad());
-    server.addTool(toolClearChordPad());
-    server.addTool(toolPressChordPad());
-    server.addTool(toolReleaseChordPad());
-    server.addTool(toolGetArpPattern());
-    server.addTool(toolSetArpPattern());
-    server.addTool(toolRecallArpPattern());
-    server.addTool(toolStoreArpPattern());
-    server.addTool(toolApplyEuclid());
+    for (auto& t : buildTools())
+        server.addTool(std::move(t));
     server.start();
     // No timer here. 5 ms is the rate a *scheduled* note needs (30 ms was audibly loose), but
     // that is 200 message-thread wake-ups a second for a queue that is empty except while an
@@ -700,6 +696,121 @@ okstudio::mcp::Tool KeysMcp::toolReleaseChordPad()
         cancelPendingRelease(slot);
         processor.releaseChordPad(slot);
         return juce::var(true);
+    };
+    return t;
+}
+
+// The gap these two close: a chord *pad* cannot feed an arpeggiator line. pressChordPad fires
+// through fireChord with asChord true, which on the track output takes the queue a listening
+// line cannot lift, deliberately - a pad is a chord you are playing, not the input to a
+// machine. Until these existed, a script's only route to a running arp was play_notes held
+// open, which is not a hold: it expires, and re-arming is another call. The editor has always
+// had the real route (drop a chord card on a line), and holdArpChord is what it calls.
+okstudio::mcp::Tool KeysMcp::toolHoldArpChord()
+{
+    okstudio::mcp::Tool t;
+    t.name = "hold_arp_chord";
+    t.description = "Hand a chord to an arpeggiator line and hold it there, the same as "
+                     "dropping a chord card on that line in the editor. This is the route a "
+                     "script wants: the hold does not expire, so the line keeps arpeggiating "
+                     "until something replaces it or release_arp_chord lets go, whether or "
+                     "not that line's Latch is on. Give either notes or padSlot. Note that "
+                     "press_chord_pad canNOT do this: a pad fires as a chord you are playing "
+                     "and a line cannot lift it. One chord per line; a second call swaps it.";
+    t.params = {
+        { "notes", "array", "1..10 MIDI notes (0..127) to hold. Give this or padSlot, not both.", false },
+        { "padSlot", "integer", "Take the chord from this pad slot 0..63 instead (the strip lights it, same as the editor). Give this or notes.", false },
+        { "name", "string", "Label reported as the line's held chord, e.g. \"Am7\". Ignored with padSlot, which brings the pad's own name. Optional.", false },
+        { "line", "integer", "Arpeggiator line 0..3 (A, B, C, D). Omit for A.", false },
+    };
+    t.run = [this](const juce::var& args, juce::String& error) -> juce::var
+    {
+        const int line = juce::jlimit(0, KeysProcessor::numArpLines - 1,
+                                      (int) args.getProperty("line", 0));
+        const bool hasNotes = args.hasProperty("notes");
+        const bool hasPad = args.hasProperty("padSlot");
+        if (hasNotes == hasPad)
+        {
+            error = "give exactly one of notes or padSlot";
+            return {};
+        }
+
+        if (hasPad)
+        {
+            const int slot = (int) args.getProperty("padSlot", -1);
+            if (slot < 0 || slot >= KeysProcessor::numChordPads)
+            {
+                error = "padSlot out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+                return {};
+            }
+            if (processor.chordPad(slot).notes.empty())
+            {
+                error = "pad slot " + juce::String(slot) + " is empty";
+                return {};
+            }
+            processor.holdArpChordFromPad(slot, line);
+        }
+        else
+        {
+            std::vector<int> notes;
+            if (! readIntArray(args.getProperty("notes", juce::var()), notes) || notes.empty() || notes.size() > 10)
+            {
+                error = "notes must be an array of 1..10 integers";
+                return {};
+            }
+            for (int n : notes)
+            {
+                if (n < 0 || n > 127)
+                {
+                    error = "note out of range 0..127: " + juce::String(n);
+                    return {};
+                }
+            }
+            processor.holdArpChord(notes, args.getProperty("name", juce::String()).toString(), line);
+        }
+
+        // Launch Quantize defers the whole gesture to the next boundary, so straight after this
+        // call the line can honestly still be holding nothing. Say so rather than reporting an
+        // empty hold as if the call had failed - that ambiguity is what this tool exists to end.
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("line", line);
+        obj->setProperty("held", intVectorToVar(processor.arpHeldNotes(line)));
+        obj->setProperty("name", processor.arpHeldName(line));
+        obj->setProperty("heldPad", processor.arpHeldPad(line));
+        obj->setProperty("waitingForQuantize", processor.arpQuantizeOn());
+        return juce::var(obj);
+    };
+    return t;
+}
+
+okstudio::mcp::Tool KeysMcp::toolReleaseArpChord()
+{
+    okstudio::mcp::Tool t;
+    t.name = "release_arp_chord";
+    t.description = "Let go of the chord an arpeggiator line is holding, the same as the "
+                     "Hold off chip. Sustain has no say: a handed chord is held on purpose. "
+                     "With allLines, releases every line and drops anything still waiting on "
+                     "a quantize boundary, same as the panel's Stop.";
+    t.params = {
+        { "line", "integer", "Arpeggiator line 0..3 (A, B, C, D). Omit for A.", false },
+        { "allLines", "boolean", "Release every line instead of one. Ignores line.", false },
+    };
+    t.run = [this](const juce::var& args, juce::String& error) -> juce::var
+    {
+        juce::ignoreUnused(error);
+        const bool all = (bool) args.getProperty("allLines", false);
+        if (all)
+        {
+            processor.releaseArpHold();
+        }
+        else
+        {
+            processor.releaseArpChord(juce::jlimit(0, KeysProcessor::numArpLines - 1,
+                                                   (int) args.getProperty("line", 0)));
+        }
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("released", all ? juce::var("all lines") : juce::var(juce::jlimit(0, KeysProcessor::numArpLines - 1, (int) args.getProperty("line", 0))));
+        return juce::var(obj);
     };
     return t;
 }

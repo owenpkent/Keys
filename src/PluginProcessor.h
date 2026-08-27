@@ -1366,6 +1366,13 @@ private:
     // (src/mcp/KeysMcp.h) letting Claude Code or any local MCP client drive Keys
     // directly. Harmless during plugin scans (loopback-only, OS-assigned port).
     std::unique_ptr<KeysMcp> mcpBridge;
+public:
+    // The MCP bridge this processor already owns, for tests. Constructed last, so it is
+    // non-null for the whole life of the processor. Tests use it rather than making a
+    // KeysMcp of their own, which would bind a second port and write a second discovery
+    // file for one process. See tests/McpTests.cpp.
+    KeysMcp* mcp() const { return mcpBridge.get(); }
+private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeysProcessor)
 };

@@ -33,8 +33,10 @@ scheduled notes and fires delayed chord-pad releases. See `src/mcp/KeysMcp.h` an
 | `get_chord_pads` | List every chord pad that currently holds a chord. |
 | `set_chord_pad` | Write a chord into a pad slot by hand. |
 | `clear_chord_pad` | Empty a pad slot. |
-| `press_chord_pad` | Fire a pad now, optionally auto-releasing after a duration. |
+| `press_chord_pad` | Fire a pad now, optionally auto-releasing after a duration. **A pad cannot feed an arpeggiator line**; see "Getting a chord into a line" below. |
 | `release_chord_pad` | Stop a pad (unless Sustain is holding it). |
+| `hold_arp_chord` | **Hand a chord to an arpeggiator line and hold it**, from `notes` or a `padSlot`, same as dropping a chord card on that line. The hold does not expire. This, not `press_chord_pad`, is how a script feeds a running arp. |
+| `release_arp_chord` | Let go of a line's held chord, or every line with `allLines`. |
 | `get_arp_pattern` | Read a pattern's ten per-step lanes, its rhythm dividers and harmony mode: the live lanes, or a stored slot (0..11). |
 | `set_arp_pattern` | Write one or more lanes of a pattern, and/or its rhythm dividers and harmony mode: the live lanes, or a stored slot. Lane names are `note`, `octave`, `velocity`, `gate`, `ratchet`, `probability`, and — since 2026-07-30 — `transpose` (scale degrees), `late` (percent of a step), `harmony` (chord tones above) and `chord` (0 = off, 1..12 = play that arp slot's stored chord on this step). Three more since 2026-08-14: `rand` (−8..+8, how far this step's note selection may stray and which way), `mute` (0/1, silences a step without touching what it holds) and `chain` (0 always, 1 only if the step before it sounded, 2 only if it did not). Note also takes 9..12 now — Prev, Highest, Lowest, Random — which ask the held chord a question instead of counting into it. |
 | `recall_arp_pattern` | Make a stored slot's lanes the active/live ones. Not the same as clicking the slot in the editor: that *launches* it, which also applies the shape and rate the slot remembers and holds its chord. No tool here reaches a slot's chord, shape or rate. |
@@ -63,8 +65,10 @@ place from A's. `set_arp_pattern` and `get_arp_pattern` echo the `line` they act
 Two arp parameters are **not** per line, because they are about all four lines together:
 `bpm` (the tempo they run at with no transport to follow) and `arpQuantize` (Launch Quantize -
 Off, or the boundary a chord card, a slot launch or a drag onto a line waits for before it
-lands). Setting `arpQuantize` from a script is worth knowing about: with it on, a
-`press_chord_pad` that feeds a line will not sound until the next boundary.
+lands). Setting `arpQuantize` from a script is worth knowing about: with it on, a chord
+handed to a line will not sound until the next boundary. (`press_chord_pad` is not
+such a hand-off, whatever this file used to say here: see "Getting a chord into a
+line" below.)
 
 The parameters follow the same rule. Line A registers under the ids it always had — `arpOn`,
 `arpRate`, `arpSwing` - and B, C and D repeat that whole list as `arp2*`, `arp3*` and `arp4*`:
@@ -128,6 +132,59 @@ set_params { "values": { "arpOn": true,  "arpRate": "1/8" } }
 set_params { "values": { "arp2On": true, "arp2Rate": "1/8", "arp2Tuplet": "Triplet" } }
 play_notes { "notes": [60, 64, 67], "durationMs": 4000 }
 ```
+
+### Getting a chord into a line (a pad will not)
+
+**`hold_arp_chord` is the route.** Give it `notes` or a `padSlot` and a `line`, and
+that line holds the chord and keeps arpeggiating it until something replaces it or
+`release_arp_chord` lets go, whether or not its Latch is on:
+
+```
+set_params      { "values": { "arpOn": true, "arpPattern": true } }
+hold_arp_chord  { "notes": [45, 48, 52, 55], "name": "Am7", "line": 0 }
+hold_arp_chord  { "padSlot": 0, "line": 1 }
+```
+
+It calls the same `holdArpChord` the editor calls when you drop a chord card on a
+line, so a script and a drag now reach the arp the same way. **It was added on
+2026-08-26**, and before it existed the only route was `play_notes` held open,
+which is not a hold: it expires, and re-arming is another call. `play_notes` still
+works and is still right for auditioning a phrase.
+
+**The trap this closed** is worth knowing, because it cost an afternoon and it is
+the shape of thing that will recur: getting it wrong looked exactly like getting it
+right. Every call returned success, every value read back correct, and nothing
+sounded.
+
+`press_chord_pad` calls `pressChordPad`, which fires through `fireChord` with
+`asChord` **true**. On the track output that takes the queue a listening arp line
+cannot lift, deliberately: a pad is a chord you are *playing*, not the input to a
+machine. So a pad press never reaches a line, no matter what `arpKeys` says.
+
+`play_notes` calls `noteOn` with `asChord` false and `dest` 0, and a line with
+`arpKeys` on does lift those. Hold them (a long `durationMs`, or `arpLatch` on to
+keep them after the release) and the line arpeggiates:
+
+```
+set_params    { "values": { "arpOn": true, "arpPattern": true, "arpLatch": true } }
+play_notes    { "notes": [45, 48, 52, 55], "durationMs": 60000 }
+```
+
+Two things about `heldChord` that follow from all this:
+
+- **An empty `heldChord` on a line running off `play_notes` is not a fault.**
+  `get_state` reports `chordName`, the *handed* chord, so a line audibly
+  arpeggiating played notes reads as holding nothing. Only a chord from
+  `hold_arp_chord` (or a card, or a slot launch) fills that field, which is what
+  makes it a reliable check now: fed the new way, a line that reports no held
+  chord really is holding none.
+- **`hold_arp_chord` can honestly report an empty hold**, for one call, when Launch
+  Quantize is on: the whole gesture waits for the next boundary. Its reply carries
+  `waitingForQuantize` so the two cases are told apart.
+
+**`padChannel` defaults to 10**, the drum channel, so a script that writes and
+presses pads sends them where a normal instrument track is not listening. Set it
+if you expect to hear the pads themselves.
 
 ### Euclidean rhythms, rhythm dividers and subharmonic harmony
 
@@ -194,6 +251,105 @@ One `keys-mcp` shim serves Keys and Keys Host alike: it has no product filter. I
 the shim connects to whichever advertised itself most recently; pass `--port=N` to
 pin it to a specific instance's port instead (read the port from that instance's
 discovery file if you need to find it).
+
+## Which instance am I talking to? (2026-08-26)
+
+**Nothing in the API answers this**, and it is the first thing to establish before
+writing anything. `get_state` carries no track name, device name or index, and
+`list_params` cannot separate two instances sitting at the same settings. Four
+instances in one Live set read as interchangeable.
+
+That matters because the shim picks its instance by *recency*, not by anything you
+chose, so a script can build an entire patch into a Keys on a track nobody is
+listening to and be told it succeeded at every step. Verification over MCP proves
+a parameter took a value. It proves nothing about where the notes go.
+
+**Identify by ear, positionally.** Fire the same chord on each reachable port in a
+known order, a few seconds on and a longer gap between, printing the position as
+it goes, then ask which **position** sounded. Position is unambiguous where pitch
+and pattern are not, and it needs no state changes on instances holding work.
+
+An answer of "none of them" is the useful one: the instance you want is not in the
+set you can reach, and no further parameter checking will change that. Make it
+re-register (delete the Keys device and drag a fresh one in; or reopen the set,
+which re-registers every instance and keeps their state), and watch the discovery
+directory for a port that is not already known.
+
+### An instance can be alive, bound, and deaf (fixed 2026-08-26)
+
+Read this before diagnosing anything that looks like a hung plugin, because the
+symptom is maximally misleading and the cause was two layers below where it looked.
+
+**The symptom.** `%APPDATA%\OK Studio\mcp` held **six** files for one Live process.
+Four answered tool calls. Two accepted a TCP connection and never replied, and the
+newest of those was the one the shim chose, so a whole Claude Code session came up
+with **no Keys tools at all** while Keys was running fine. Worse, a script driving
+one of the four healthy instances built an entire patch, verified every value, and
+produced silence, because the instance it could reach was not the one routed to a
+synth. Every call returned success throughout.
+
+**The cause, and it was in the kit's transport.** `Server::run()` accepted a
+connection and then called `serve()` **on the listener thread**, and `serve()` blocks
+in a 1-byte read until that client disconnects. The shim holds a long-lived
+connection and goes idle between tool calls, by design. So **one idle shim owned the
+server forever**: every later connect completed into the OS backlog and was never
+accepted. `netstat` showed it plainly, and is the fastest way to recognise it again:
+
+```
+127.0.0.1:55286  LISTENING                      8616   <- the plugin
+127.0.0.1:55286  <- 127.0.0.1:60496 ESTABLISHED 8616
+127.0.0.1:60496  -> 127.0.0.1:55286 ESTABLISHED 47212  <- an abandoned keys-mcp.exe
+```
+
+A deaf port has an ESTABLISHED peer. A healthy one shows `LISTENING` alone.
+
+**The wrong theory, recorded because it was convincing.** The first explanation was
+stale discovery files whose ports had been reused by unrelated sockets, on the
+reasoning that all six instances share one message thread, so a blocked thread would
+have silenced all six rather than two. Both halves were wrong. The files were live:
+the plugin deletes its own file on destruction, and one of the deaf files vanished
+the instant its device was deleted from its track. And **each instance runs its own
+`Server` thread and its own socket** - only the final dispatch of a tool body is
+marshalled onto the shared message thread - so a per-instance failure is exactly what
+this could be, and was.
+
+**The fix, in `okstudio-juce-kit`.** One thread per connected client
+(`Server::ClientConnection`), so an idle client parks only its own thread. Serving
+concurrently is safe: the rendezvous state in `toolsCall` is heap-allocated per
+request, `tools` is read-only after `start()`, and every tool body is still
+marshalled onto the message thread, so handlers stay serialized against each other
+and against the editor exactly as before. Connections are capped, and at the cap the
+**oldest** is dropped rather than the newest refused, since the shim reconnects
+statelessly and on demand.
+
+**The shim gained a fallback too**, because "accepts a connection" was never evidence
+of "will answer" and now says so in code: a request that blows `--timeout-ms`
+quarantines that port, closes the socket and reconnects, preferring another instance.
+The quarantine clears if every candidate ends up in it, so one slow instance cannot
+leave the session with nothing. Closing rather than merely dropping the socket is
+load-bearing: the reader thread is parked in a blocking read that a deaf peer will
+never wake.
+
+**Regression tests exist now, and they are the first socket-level coverage the kit
+has had.** `tests/KitTests.cpp` gained `okstudio::mcp::Server transport`, whose
+central case is an idle client followed by a second one that must still be answered;
+it fails on the old serial loop. `tests/mcp_shim_reconnect.py` gained scenario 6, a
+deaf peer advertised newer than a healthy one, which must be abandoned for it. That
+this bug survived so long is a straightforward consequence of where the tests were:
+every MCP test called `handleLine` directly, with "no socket, no start()", and the
+entire failure lived in the transport those tests skipped.
+
+**What still holds regardless:**
+
+- **A bound port is not evidence a Keys will answer, and neither is a discovery
+  file.** Only a reply to a tool call is.
+- **Probe every port in the directory** when tools are missing or hanging.
+  `--port=N` pins the shim to one.
+- `tests/mcp_shim_reconnect.py` needs the discovery directory to itself, so it now
+  isolates into a temp dir via **`OKSTUDIO_MCP_DIR`**, which `Server::discoveryDir()`
+  honours. Before that it shared the real directory with whatever the developer had
+  open and failed every scenario against a live Ableton session, including "nothing
+  running at startup".
 
 ## Restarting Keys does not break the bridge (2026-08-18)
 

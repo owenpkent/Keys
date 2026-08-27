@@ -35,6 +35,11 @@ public:
     explicit KeysMcp(KeysProcessor& processor);
     ~KeysMcp() override;
 
+    // The tool table, built but not registered. The constructor hands it straight to the
+    // server; it is public so `tests/McpTests.cpp` can exercise a tool's `run` without a
+    // socket, a client or a second server. Building the table has no side effects.
+    std::vector<okstudio::mcp::Tool> buildTools();
+
 private:
     void timerCallback() override;
     void wake(); // start the poll timer if a queue just gained work; see the constructor
@@ -53,6 +58,8 @@ private:
     okstudio::mcp::Tool toolClearChordPad();
     okstudio::mcp::Tool toolPressChordPad();
     okstudio::mcp::Tool toolReleaseChordPad();
+    okstudio::mcp::Tool toolHoldArpChord();
+    okstudio::mcp::Tool toolReleaseArpChord();
     okstudio::mcp::Tool toolGetArpPattern();
     okstudio::mcp::Tool toolSetArpPattern();
     okstudio::mcp::Tool toolRecallArpPattern();
