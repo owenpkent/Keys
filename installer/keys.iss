@@ -42,8 +42,8 @@ OutputBaseFilename=KeysSetup-{#Version}
 ; Pillow - rerun the script only when the mark itself changes.
 SetupIconFile=..\assets\Keys.ico
 WizardStyle=modern
-WizardImageFile=..\installer\wizard_large.bmp
-WizardSmallImageFile=..\installer\wizard_small.bmp
+WizardImageFile=wizard_large.bmp
+WizardSmallImageFile=wizard_small.bmp
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; If the DAW has Keys loaded, Inno's restart-manager page asks the user to close it.

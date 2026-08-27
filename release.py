@@ -130,7 +130,18 @@ def verify(exe: Path, version: str, signed: bool) -> bool:
         / "Contents" / "x86_64-win" / "Keys.vst3"
     )
     reported = powershell(f"(Get-Item '{vst}').VersionInfo.FileVersion")
-    if reported == version:
+    # Compared component by component, not as a string. Windows carries a version resource as
+    # four numbers and JUCE writes three, so whether the fourth comes back as a trailing ".0"
+    # is the tool's choice rather than ours - and a gate that fails on a *correct* build is one
+    # that gets ignored, which is worse than not having it. Trailing zeros are the only slack
+    # allowed: 0.2.1.0 matches 0.2.1, and 0.2.10 does not.
+    def parts(v: str) -> list:
+        out = [int(n) for n in re.findall(r"\d+", v)]
+        while out and out[-1] == 0:
+            out.pop()
+        return out
+
+    if reported and parts(reported) == parts(version):
         print(f"{GREEN}  version  {reported}{RESET}")
     else:
         # The JUCE resources.rc trap, see docs/RELEASE.md step 1.
