@@ -44,6 +44,12 @@ public:
     // reasoning on Server::handleLine itself.
     juce::String handleLine(const juce::String& line) { return server.handleLine(line); }
 
+    // The loopback port this instance answers on, or 0 if the bind failed. It is the only
+    // thing that tells one Keys from another over MCP - every instance in a Live set shares a
+    // process, so the discovery file's pid is identical across all of them - and until it was
+    // shown in the About box there was no way to read it off an instance you were looking at.
+    int port() const { return server.getPort(); }
+
 private:
     // The tool table, built but not registered; the constructor hands it straight to the
     // server. Private, because handleLine above is the seam and a second public route into

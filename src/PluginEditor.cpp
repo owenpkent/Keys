@@ -1,6 +1,7 @@
 #include "PluginEditor.h"
 #include "Chords.h"
 #include "ScaleModes.h"
+#include "mcp/KeysMcp.h" // showAboutDialog names the port this instance answers on
 #include <okstudio/MouseOnly.h>
 #include <okstudio/Scales.h>
 
@@ -1789,7 +1790,23 @@ void KeysEditor::showAboutDialog()
     // Product name and version both read live rather than written out a second time here:
     // getName() is "Keys" or "Keys Host" by virtual dispatch (KeysHostProcessor overrides
     // it), and KEYS_VERSION is the exact macro updaterConfig.currentVersion is built from.
+    // The MCP port and the host track are here because this is the one place an instance can
+    // say *which* instance it is. Several Keys in one Live set are indistinguishable from
+    // outside: they share a process, so the discovery file's pid is the same for every one
+    // of them and only the port differs - a number nothing in the DAW ever shows. Reading it
+    // off the About box is what turns "a script says it is on port 64157" into a window you
+    // can point at. The track name is the same answer from the host's side, and blank
+    // whenever the host does not report one (always, in the standalone).
+    juce::String identity = "\n\nMCP port: ";
+    identity += processor.mcp() != nullptr && processor.mcp()->port() > 0
+              ? juce::String(processor.mcp()->port()) : juce::String("not listening");
+    if (processor.hostTrackName().isNotEmpty())
+        identity += "\nHost track: " + processor.hostTrackName()
+                  + (processor.hostTrackColour().isNotEmpty()
+                         ? " (" + processor.hostTrackColour() + ")" : juce::String());
+
     const juce::String text = processor.getName() + "\nVersion " + juce::String(KEYS_VERSION)
+        + identity
         + "\n\nPart of the OK Studio line: Undertow (bass), Beatform (drums), Keys (the played "
           "keyboard).";
     juce::NativeMessageBox::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,

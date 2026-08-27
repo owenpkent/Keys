@@ -281,6 +281,13 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
         auto* obj = new juce::DynamicObject();
         obj->setProperty("product", productSlug());
         obj->setProperty("version", JucePlugin_VersionString);
+        // Which instance this is, in the only terms a human can match to something on screen.
+        // Every Keys in one Live shares a process, so the discovery file's pid is the same for
+        // all of them and only the port differs - a number nothing in the DAW shows you. Empty
+        // means the host did not say (the standalone never does), which is a different answer
+        // from a track with no name.
+        obj->setProperty("trackName", processor.hostTrackName());
+        obj->setProperty("trackColour", processor.hostTrackColour());
         obj->setProperty("root", text("root"));
         obj->setProperty("scale", text("scale"));
         obj->setProperty("scaleLock", text("scaleLock"));
