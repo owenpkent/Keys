@@ -5,6 +5,35 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: an instance can say which track it is on, and which port it answers on
+
+**There was no answer to "which of these am I talking to".** Every Keys in one Live set shares a
+process, so the MCP discovery file's pid is identical across all of them and only the port differs
+- a number nothing in the DAW ever shows you. `get_state` carried no track name, device name or
+index. Six instances in one set read as interchangeable, and `docs/MCP.md` could only offer an
+audition ritual: fire a chord on each port in turn and say which position you heard.
+
+Verified against a real set of six: four were separable by their settings and **two were exact
+twins** on every readable field, so no amount of reading state could have told them apart.
+
+- `KeysProcessor` overrides `updateTrackProperties`. JUCE's VST3 wrapper already implements
+  `Vst::ChannelContext::IInfoListener` and marshals it to the message thread, so this override was
+  the only missing piece.
+- **It merges rather than replaces, and that is the whole trick.** Live makes three calls per
+  instance as a set loads - empty name with a default colour, the real name with a default colour,
+  then an empty name with the real colour - so storing what you are handed throws the name away on
+  the third call. Live's empty calls report a *present but empty* string, so testing for `nullopt`
+  alone is not enough.
+- `get_state` reports **`trackName`** and **`trackColour`**. Empty means the host did not say,
+  which is a different answer from a track with no name; the standalone is never told at all.
+- The **About** box names the **MCP port**, and the host track when there is one. That half needs
+  no host support and works in every DAW: the port is the only thing that distinguishes two
+  instances, and until now nothing on screen said what it was.
+
+Confirmed working in **Ableton Live 12**, which reports both name and colour: the two twins came
+back as `11-Keys` and `15-Keys`. The behaviour above was documented from Live 10/11 reports and
+still holds.
+
 ### Fixed: the MCP arp tools said there were two lines, and clamped onto the wrong one
 
 Five tools take a `line` argument - `get_arp_pattern`, `set_arp_pattern`, `recall_arp_pattern`,
