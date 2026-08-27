@@ -246,7 +246,16 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
                      "free-running Hz, plus which of the two is live)/direction/octaves/latch, which arp "
                      "pattern is active, and which chord-pad page is showing), plus how "
                      "many chord pads currently hold a chord. Call this first to orient "
-                     "before changing anything.";
+                     "before changing anything.\n\n"
+                     "Per arpeggiator line, arpLines reports what it is actually sounding, "
+                     "not only what was handed to it: heldNotes is how many notes the engine "
+                     "holds from ANY source (a handed chord, the keybed, or the track's MIDI "
+                     "input, which arpKeys feeds straight in), and sequence is the pitches "
+                     "the Note lane's indices 1..n name, in the order the Shape and octave "
+                     "stack put them. heldChord is only the *handed* chord, so a line with an "
+                     "empty heldChord and a non-empty sequence is arpeggiating notes that "
+                     "arrived some other way - which is the state to look for when a line "
+                     "plays and nothing explains where the notes came from.";
     t.run = [this](const juce::var&, juce::String&) -> juce::var
     {
         auto text = [this](const char* id) { return processor.apvts.getParameter(id)->getCurrentValueAsText(); };
@@ -290,6 +299,33 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
                 l->setProperty("heldChord", processor.arpHeldName(n));
                 l->setProperty("launchedSlot", processor.arpLaunchedSlot(n));
                 l->setProperty("chaining", processor.chainRunning(n));
+
+                // WHAT THIS LINE IS ACTUALLY SOUNDING, which until 2026-08-26 nothing here
+                // reported. `heldChord` above is only the chord *handed* to the line, so a
+                // line audibly arpeggiating notes that arrived any other way - played on the
+                // keybed, or from the track's MIDI input, which `arpKeys` feeds straight in -
+                // read as holding nothing. Every field in this object could be empty and
+                // correct while the plugin made sound, and diagnosing that from outside was
+                // impossible: the one thing generating notes was the one thing not reported.
+                //
+                // `heldNotes` is how many notes the engine is holding, whatever their source.
+                // `sequence` is what the Note lane's fixed indices 1..n actually name, in
+                // pitch order after the Shape and the octave stack: the engine is the only
+                // thing that knows it, and ArpPanel already draws note names from the same
+                // two atomics (see ArpPanel::noteNameFor). So a Note lane of [4,3,2,1] against
+                // a sequence of [57,60,64,67] is a descending arpeggio, and that is now
+                // answerable over MCP rather than only by ear.
+                //
+                // Read relaxed off the same published atomics the editor uses. Both are
+                // written by the audio thread; a torn read costs a stale note name in a
+                // diagnostic, which is the same trade the UI already takes.
+                const auto& eng = processor.arpLine(n);
+                l->setProperty("heldNotes", eng.heldNoteCount());
+                const int seqCount = eng.uiSeqCount.load(std::memory_order_relaxed);
+                juce::Array<juce::var> seq;
+                for (int i = 0; i < seqCount; ++i)
+                    seq.add(eng.uiSeq[(size_t) i].load(std::memory_order_relaxed));
+                l->setProperty("sequence", seq);
                 arpLines.add(juce::var(l));
             }
             obj->setProperty("arpLines", arpLines);

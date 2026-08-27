@@ -374,6 +374,104 @@ public:
                    "play_notes populated the handed-chord field");
         }
 
+        // WHAT A LINE IS SOUNDING, as opposed to what was handed to it. This pair is the
+        // regression from an afternoon spent hunting a Keys instance that played notes while
+        // every field get_state offered read as empty: heldChord blank, chord lane 0, no
+        // chain, no launched slot. The notes were arriving at the *track's MIDI input* and
+        // arpKeys was feeding them straight to the arp, which nothing reported. The only way
+        // to find it was to mute lines one at a time and ask a human what stopped.
+        //
+        // These drive processBlock directly because uiSeq is published by the audio thread,
+        // and they inject MIDI the way the mystery source did rather than via play_notes.
+        beginTest("get_state reports notes a line sounds from track MIDI, not just handed chords");
+        {
+            Host h;
+            h.processor.prepareToPlay(44100.0, 512);
+            call(h.processor, "set_params", args({ { "values", args({
+                { "arpOn", true }, { "arpPattern", true }, { "arpKeys", true },
+                { "arpRate", "1/16" } }) } }));
+
+            const int chans = juce::jmax(1, h.processor.getTotalNumOutputChannels());
+            juce::AudioBuffer<float> buf (chans, 512);
+
+            juce::MidiBuffer midi;
+            for (int n : { 45, 48, 52, 55 })              // Am7 arriving at the track input
+                midi.addEvent(juce::MidiMessage::noteOn(1, n, 0.8f), 0);
+            buf.clear();
+            h.processor.processBlock(buf, midi);
+
+            for (int i = 0; i < 16; ++i)                  // let the engine build its sequence
+            {
+                juce::MidiBuffer none;
+                buf.clear();
+                h.processor.processBlock(buf, none);
+            }
+
+            auto st = call(h.processor, "get_state", args({}));
+            auto* lines = st["arpLines"].getArray();
+            expect(lines != nullptr && lines->size() >= 1, "arpLines missing");
+            auto lineA = (*lines)[0];
+
+            expect((int) lineA["heldNotes"] >= 4,
+                   "heldNotes did not report the four notes the engine is holding, it said "
+                       + lineA["heldNotes"].toString());
+
+            auto* seq = lineA["sequence"].getArray();
+            expect(seq != nullptr && seq->size() >= 4,
+                   "sequence did not report the pitches the Note lane's indices name");
+
+            // The point of the pair: the handed-chord field is legitimately empty here, and
+            // on its own it says the line is holding nothing while it demonstrably is.
+            expect(lineA["heldChord"].toString().isEmpty(),
+                   "played notes should not populate heldChord");
+
+            // The sequence is the held chord, so every pitch in it must be one we sent (or an
+            // octave-stacked copy of one), not an arbitrary note.
+            for (auto& v : *seq)
+            {
+                const int pitch = (int) v;
+                bool derived = false;
+                for (int n : { 45, 48, 52, 55 })
+                    for (int oct = 0; oct <= 3; ++oct)
+                        if (pitch == n + 12 * oct)
+                            derived = true;
+                expect(derived, "sequence holds a pitch not derived from the held chord: "
+                                    + juce::String(pitch));
+            }
+        }
+
+        // The other half, and the actual fix for the afternoon above: arpKeys is the door.
+        // With it shut, the same track MIDI must not reach the line at all.
+        beginTest("with arpKeys off, track MIDI does not reach the line");
+        {
+            Host h;
+            h.processor.prepareToPlay(44100.0, 512);
+            call(h.processor, "set_params", args({ { "values", args({
+                { "arpOn", true }, { "arpPattern", true }, { "arpKeys", false } }) } }));
+
+            const int chans = juce::jmax(1, h.processor.getTotalNumOutputChannels());
+            juce::AudioBuffer<float> buf (chans, 512);
+
+            juce::MidiBuffer midi;
+            for (int n : { 45, 48, 52, 55 })
+                midi.addEvent(juce::MidiMessage::noteOn(1, n, 0.8f), 0);
+            buf.clear();
+            h.processor.processBlock(buf, midi);
+            for (int i = 0; i < 16; ++i)
+            {
+                juce::MidiBuffer none;
+                buf.clear();
+                h.processor.processBlock(buf, none);
+            }
+
+            auto st = call(h.processor, "get_state", args({}));
+            auto* lines = st["arpLines"].getArray();
+            expect(lines != nullptr && lines->size() >= 1);
+            auto lineA = (*lines)[0];
+            expectEquals((int) lineA["heldNotes"], 0,
+                         "arpKeys was off and the line still picked up track MIDI");
+        }
+
         beginTest("with Launch Quantize on, the hold waits and the reply says so");
         {
             Host h;

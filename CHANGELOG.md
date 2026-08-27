@@ -5,6 +5,28 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: get_state says what a line is sounding, not just what it was handed
+
+`arpLines` entries gain **`heldNotes`** (how many notes the engine holds, from any source) and
+**`sequence`** (the pitches the Note lane's indices 1..n name, after the Shape and the octave
+stack). Both read off the same published atomics `ArpPanel` already draws note names from, so
+the API and the grid answer from one source rather than two.
+
+The gap they close: `heldChord` reports only the chord *handed* to a line, so a line arpeggiating
+notes that arrived any other way read as holding nothing. Every field `get_state` offered could
+be empty and correct while the plugin made sound.
+
+That is not hypothetical. An instance played continuously with `heldChord` blank, the chord lane
+0, no chain and no launched slot; the notes were arriving at the **track's MIDI input**, which
+`arpKeys` hands straight to the arp, and nothing reported them. All Off could not stop it because
+fresh note-ons landed straight after the panic. Finding it took muting lines one at a time and
+asking a human which one went quiet, because the one thing generating notes was the one thing not
+reported. With `sequence` it is one call.
+
+Covered by two tests that drive `processBlock` and inject MIDI at the track input, the way the
+real source did: notes arriving that way must show up in `heldNotes` and `sequence` while
+`heldChord` stays empty, and with `arpKeys` off they must not reach the line at all.
+
 ### Added: a script can hand a chord to an arpeggiator line
 
 `hold_arp_chord` and `release_arp_chord` over MCP. The entry below gave the *editor* every
