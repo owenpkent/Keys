@@ -289,20 +289,35 @@ discovery file if you need to find it).
 
 ## Which instance am I talking to? (2026-08-26)
 
-**Nothing in the API answers this**, and it is the first thing to establish before
-writing anything. `get_state` carries no track name, device name or index, and
-`list_params` cannot separate two instances sitting at the same settings. Four
-instances in one Live set read as interchangeable.
+**`get_state` answers this now** (2026-08-27), and it did not until then. Read
+**`trackName`** and **`trackColour`**: in a host that reports them, that is the
+instance named in terms you can find on screen. Confirmed in Ableton Live 12, which
+sends both. Empty means the host did not say - which is a different answer from a
+track with no name, and always the case in the standalone.
+
+The **About** box (settings gear) names the **MCP port** as well, and that half
+needs no host support at all. It is the direction you usually want: a script says
+"port 64157", and you open an instance and read the number off it.
+
+**Why this needed a field of its own.** Every Keys in one Live set shares a process,
+so the discovery file's pid is identical across all of them and only the port
+differs - a number nothing in the DAW shows. Before this, `get_state` carried no
+track name, device name or index, and `list_params` could not separate two instances
+sitting at the same settings. That is not hypothetical: in a real set of six, four
+were separable by their settings and **two were exact twins** on every readable
+field - same key, same scale, same twelve pads under the same names.
 
 That matters because the shim picks its instance by *recency*, not by anything you
 chose, so a script can build an entire patch into a Keys on a track nobody is
 listening to and be told it succeeded at every step. Verification over MCP proves
 a parameter took a value. It proves nothing about where the notes go.
 
-**Identify by ear, positionally.** Fire the same chord on each reachable port in a
-known order, a few seconds on and a longer gap between, printing the position as
-it goes, then ask which **position** sounded. Position is unambiguous where pitch
-and pattern are not, and it needs no state changes on instances holding work.
+**The fallback, for a host that reports nothing.** Fire the same chord on each
+reachable port in a known order, a few seconds on and a longer gap between, printing
+the position as it goes, then ask which **position** sounded. Position is unambiguous
+where pitch and pattern are not, and it needs no state changes on instances holding
+work. This was the only method before `trackName` existed; reach for it when that
+field comes back empty.
 
 An answer of "none of them" is the useful one: the instance you want is not in the
 set you can reach, and no further parameter checking will change that. Make it

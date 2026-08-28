@@ -303,6 +303,20 @@ public:
     // Shorthand for the commonest read of all: is this line switched on.
     bool arpLineOn(int line) const;
 
+    // Which host track this instance sits on, when the host bothers to say. There is no other
+    // answer to "which of the six Keys in this Live set am I talking to": they share one
+    // process, so the MCP discovery file's pid is identical across all of them and only the
+    // port differs, and get_state carried nothing a human could match to a track.
+    //
+    // VST3 delivers it through Vst::ChannelContext::IInfoListener, which JUCE's wrapper
+    // already implements and marshals to the message thread - so this override is the only
+    // missing piece, and both fields below are plain members rather than atomics for that
+    // reason. Never called at all in the standalone, which has no host track; both stay empty
+    // there, and empty means "the host did not say", not "the track has no name".
+    void updateTrackProperties(const TrackProperties& props) override;
+    const juce::String& hostTrackName() const { return trackName; }
+    const juce::String& hostTrackColour() const { return trackColour; }
+
     // Every per-line parameter, in one list. It exists so the audio thread never has to build
     // an id: a juce::String per parameter per line per block would be twenty-odd allocations
     // a block, on the one thread that may not allocate at all. Each line caches the raw
@@ -1355,6 +1369,10 @@ private:
     // Set by allNotesOff on the message thread, consumed once by the audio thread; see
     // ArpMerge::reset for why a panic is the one thing the counts cannot absorb themselves.
     std::atomic<bool> arpOutClear { false };
+
+    // Merged across calls, never replaced - see updateTrackProperties for why that is the
+    // whole trick. Message thread only.
+    juce::String trackName, trackColour;
 
     std::array<ChordPad, numChordPads> chordPads;          // captured pad definitions
     std::array<std::vector<int>, numChordPads> chordPadOn;  // notes currently sounding per pad

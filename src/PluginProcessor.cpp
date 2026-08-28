@@ -903,6 +903,28 @@ KeysProcessor::~KeysProcessor()
     deferred.clear();
 }
 
+void KeysProcessor::updateTrackProperties(const TrackProperties& props)
+{
+    // **Merge, never replace, and that is the entire trick.** Ableton does not hand a plugin
+    // its track once: it makes three calls per instance as a set loads - an empty name with a
+    // default colour, then the real name with a default colour, then an empty name with the
+    // real colour. So the obvious implementation (store what you were given) is handed the
+    // name in call two and throws it away in call three, and the symptom is a track name that
+    // works until something else on the track changes and then silently goes blank.
+    //
+    // JUCE hands over a freshly constructed TrackProperties each call, filling only the fields
+    // the host actually provided (juce_audio_plugin_client_VST3.cpp, setChannelContextInfos),
+    // so an absent field is nullopt. But Live's own empty calls report a *present, empty*
+    // string, which is why nullopt alone is not enough of a test and the emptiness is checked
+    // as well. The colour is guarded the same way: a default-constructed juce::Colour is
+    // transparent black, and Live's placeholder is transparent, so alpha is what separates a
+    // real colour from a spacer.
+    if (props.name.has_value() && props.name->isNotEmpty())
+        trackName = *props.name;
+    if (props.colour.has_value() && props.colour->getAlpha() != 0)
+        trackColour = props.colour->toDisplayString(false);
+}
+
 int KeysProcessor::midiChannel() const
 {
     return (int) apvts.getRawParameterValue("channel")->load() + 1;
