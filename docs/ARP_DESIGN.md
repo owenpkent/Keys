@@ -287,6 +287,26 @@ There is no fourth step. There used to be - a disabled line's input was merged s
 through, so a chord held to a line that was off simply sustained - and it went on 2026-08-02;
 see **A line that is off holds its chord** below.
 
+**What is in that merged stream is itself a switch, since 2026-08-27.** Step 2 says "the merged
+stream", and until that date it held the keybed *and* whatever the DAW sent the track - one
+switch, `arpKeys`, answering both questions, defaulting on for all four lines. The global
+**`arpTrackMidi`** (the **Track MIDI** chip on the arp bar, **default false**) now decides the
+second half: with it off, `processBlock` lifts the track's MIDI aside *before* the collector
+drains and puts it back *after* `runArpLines`, so the arp never sees it and the instrument
+downstream cannot tell the difference. It has to happen there rather than inside `runArpLines`,
+because by then the collector has merged and a clip's C4 and a clicked C4 are the same
+`MidiMessage` - the same reason `dest` exists.
+
+**Closing that door has a falling edge, and it must release what the line took rather than what
+the track holds.** A line already holding a clip's pitches would otherwise arpeggiate them
+forever, their note-offs now routed around it - so the releases are synthesised into the lines'
+own input alone. Firing them for every pitch the track holds (`inputNoteOn`) is the obvious
+implementation and is wrong: `ArpEngine::Held::ons` is a refcount over every source that asked
+for a pitch and `noteLeft` matches on pitch alone, so an off for a clip note the line never
+received decrements whichever owner *is* there - hold C4 on the keybed over a clip already
+sounding C4 and closing the door drops the note under your hand. `trackHeldByLine` is a
+per-line mask, set where the notes are actually handed over.
+
 **The alternative was a per-pitch ownership mask** - publish which line owns which pitch, and
 let the audio thread route the merged stream by looking it up. It races: the message thread can
 clear a pitch's owner before the matching note-off has been drained, and that note is then
@@ -863,7 +883,8 @@ pattern that says nothing about it.
 
 **What it costs to load, and the three routes that exist.** Chain is one of three ways a
 sequence of chords reaches a line - the others being the Chord lane, at step resolution inside
-one pattern, and a clip on the track, which a line with Play on already arpeggiates. What none
+one pattern, and a clip on the track, which a line with Play on arpeggiates **once Track MIDI is
+switched on** (the arp bar's chip, off by default since 2026-08-27). What none
 of the three has is a *loading* gesture: filling twelve slots is one drag per chord, and the
 library's 355 progressions, which know their own chord order, can reach the tray and the pads
 but not the slots. `docs/CHORD_SEQUENCE.md` (2026-08-21) is the survey of that gap, what Scaler,

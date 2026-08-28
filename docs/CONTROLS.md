@@ -1297,12 +1297,14 @@ Scaler, Cthulhu, Kirnu and Ripchord each do instead, in `docs/CHORD_SEQUENCE.md`
   `1`..`12` swap in that slot's chord for that step alone. Draw `1` across steps 1 to 4 and `2`
   across 5 to 8 and the progression moves *inside* one pattern instead of on bar lines. It is
   the finest resolution Keys offers, and it is limited to one pattern's length.
-- **A clip on the track, at the DAW's own timeline.** Switch **Play** on for the line and the
-  chords in an ordinary MIDI clip on the Keys track drive it: the arpeggiator takes the notes
-  out of the stream and plays its pattern over them. The host owns the durations, the loop and
-  the arrangement, so a chord can last any length you can draw. This is how Cthulhu, Ripchord
-  and an Ableton MIDI-effect rack all work, and it needs nothing switched on in Keys but Play.
+- **A clip on the track, at the DAW's own timeline.** Switch **Track MIDI** on (the arp bar) and
+  **Play** on for the line, and the chords in an ordinary MIDI clip on the Keys track drive it:
+  the arpeggiator takes the notes out of the stream and plays its pattern over them. The host
+  owns the durations, the loop and the arrangement, so a chord can last any length you can draw.
+  This is how Cthulhu, Ripchord and an Ableton MIDI-effect rack all work. **Track MIDI is off by
+  default** (2026-08-27), so this is the one route of the three you have to opt into - the cost
+  of an instance never arpeggiating a clip you did not point it at.
 
 Chain cannot change chord in the middle of a bar, and the Chord lane cannot run a progression
 longer than one pattern. If you want two bars of one chord and then two beats of another, the
-clip on the track is the route that does it today.
+clip on the track is the route that does it today - with **Track MIDI** switched on.

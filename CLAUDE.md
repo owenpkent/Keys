@@ -74,6 +74,96 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**The track's own MIDI needs an invitation, and an instance can say which one it is
+(2026-08-27/28).** Owen: *"why do I start recording in Ableton? It starts playing in something
+different"*, then *"we need it to be easier to turn it off, and it's so unclear where that's
+hiding"*, *"we need reset button in settings"*, and, earlier the same evening, the problem
+underneath all of it: six Keys in one Live set that nothing could tell apart.
+
+- **`arpTrackMidi`, appended, global, default false. PARAMETER LAYOUT CHANGE.** A new parameter
+  is absent from every saved session, so **every existing set takes the new default** and a clip
+  that was driving an arp goes quiet until the chip is switched on. That was Owen's call with
+  both defaults in front of him, and the asymmetry is the argument: the new surprise is silent
+  and one click from fixed, where the old one was silent in the other direction and the fix was
+  **seven toggles across four windows**.
+  **One switch was answering two questions.** Per-line **PLAY** (`arpKeys`) says "Play", its
+  tooltip said *"what you play on the keyboard"*, and the stream it lifted was the keybed **and**
+  whatever the DAW sent the track. Chord pads were split out of that stream on 2026-08-18; the
+  track input never was. `arpKeys` also defaults **on** for all four lines, for a good reason of
+  its own - a line you just switched on that does nothing until you find a second toggle reads as
+  broken - so six untouched instances all had every line listening, and pressing record started
+  four of them arpeggiating on tracks nobody was looking at.
+  **Global rather than per line**, for Scale Lock's own reasoning: it is one door into the
+  instance, and a door shut for A and open for C is not shut. **On the arp bar**, beside All Off
+  and Hold off, because a control you reach for to make something *stop* cannot live two clicks
+  inside a line's detail view; it never hides with the fold, same rule as Hold off. The notes
+  still pass through to your instrument untouched either way - the chip decides what the
+  *arpeggiator* hears, not what the track plays.
+  **Held aside in `processBlock`, not gated in `runArpLines`**, and that ordering is the whole
+  implementation: by the time `runArpLines` runs, the collector has merged and a clip's C4 and a
+  clicked C4 are the same `MidiMessage`. Same reason `dest` exists. Everything goes aside,
+  note-offs included - keeping only the note-ons back would let a line lift a note-off whose
+  note-on passed straight through, hanging that note on the instrument for good.
+- **The falling edge must release what the *line* took, never what the *track* holds**, and the
+  first cut got this wrong in a way worth keeping. Closing the door strands any pitch a line had
+  already taken in, whose note-offs are now routed around it, so the releases have to be
+  synthesised - into the lines' own input alone, since the real note-offs still travel down the
+  output stream. Firing them off `inputNoteOn` (every pitch the track is holding) looks right and
+  is not: **`ArpEngine::Held::ons` is a refcount over every source that asked for a pitch, and
+  `noteLeft` matches on pitch alone**, so an off for a clip note the line never received
+  decrements whichever owner *is* there. Hold C4 on the keybed over a clip already sounding C4 -
+  a clip note that began while the door was shut, so the line never got its note-on - close the
+  door, and the line drops the note under your hand. `trackHeldByLine` is a per-line mask set
+  where the notes are actually handed over, so a line that was not listening when they arrived
+  never acquires a bit for them, and every off fired has an owner of its own to spend.
+  **The shape to remember: "who is holding this pitch" and "who asked me to hold it" are
+  different questions, and a refcount can only answer the first.** `StateTests` pins both halves,
+  and the keybed one fails against the `inputNoteOn` version - which is the only thing that makes
+  it a regression test rather than a description.
+- **`KeysProcessor::updateTrackProperties`, and merge, never replace.** Every Keys in one Live
+  set shares a process, so the MCP discovery file's pid is identical across all of them and
+  **only the port differs** - a number nothing in the DAW ever shows you. Probing a real set of
+  six, four were separable by their settings and **two were exact twins** on every readable
+  field. JUCE's VST3 wrapper already implements `Vst::ChannelContext::IInfoListener` and marshals
+  it to the message thread, so this override was the only missing piece: the information was
+  arriving and being dropped. Both fields are plain `juce::String` members for that reason, not
+  atomics.
+  **Live makes three calls per instance as a set loads** - empty name + default colour, then the
+  real name + default colour, then an empty name + the real colour - so storing what you are
+  handed throws the name away on the third call, and the symptom is a track name that works until
+  anything else on the track changes and then silently goes blank. Live's empty calls report a
+  *present but empty* string, so testing `nullopt` alone is not enough; the colour is guarded the
+  same way, since a default-constructed `juce::Colour` is transparent and Live's placeholder is
+  transparent. `get_state` reports `trackName` / `trackColour` (empty means the host did not say,
+  which is a different answer from a track with no name; the standalone is never told at all),
+  and **the About box names the MCP port** and the host track, which is the only thing on screen
+  that tells one instance from another.
+- **Reset all settings, and it takes the settings in its own menu.** `resetAllParameters()` walks
+  every parameter back to its default **and** the six behaviour switches that are not parameters:
+  the three ticks in the settings menu itself, Light keys, and the Pads bar's Play and Keep arp.
+  Parameters alone was the first cut, and a row named "Reset all settings" that leaves the
+  settings six pixels above itself exactly as they were is wrong in the one place its name is
+  read. It stops there: the theme, the folds, the detached windows, the current page and the
+  library favourites are **where you left the furniture** rather than how the instrument behaves.
+  It never touches chord pads, arp patterns or slots - that is work you made, undo covers it, and
+  a Reset that quietly emptied a page would be the worst button in the plugin. It **releases
+  every sounding note first** (`allNotesOff`), because a reset moves Root, Octave and the arp's
+  whole routing underneath anything still ringing and the played note is resolved at press time
+  and remembered. It asks first, since undo is content and this is not content.
+- **A dot on the A/B/C/D letter when a line is sounding something nobody handed it**, the
+  on-screen half of `get_state`'s `soundingNoteCount`: `heldChord` is only ever the chord you
+  *gave* a line, so an instance playing continuously with every readout blank was diagnosable
+  only by ear. **The keybed counts as handing it something** - gated on that line's own PLAY -
+  or the dot lit for the commonest case there is and said nothing about the case it exists for.
+- **The arp bar's floor did not move.** Track MIDI added 128 px to a bar that already carried
+  four chips; measured at the 1320 px minimum the right end wants 440 and the deep view's left
+  end ~591, leaving ~159 for a fold zone needing 92. `LayoutTests` sweeps it - and **the first
+  version of that sweep could not fail**, which is the lesson: every chip is placed with
+  `withSizeKeepingCentre`, which forces the size whatever cell it is given, and `removeFromRight`
+  clamps rather than going negative, so `getBounds().getWidth()` is a constant and a width
+  assertion compares two constants. A starved bar produces chips of exactly the right size
+  sitting on top of each other. **Overlap and containment are the only things that can see it.**
+
 **A chord reaches a line from wherever you were holding it, and Scale Lock reaches the line's
 output (2026-08-26).** Owen: *"I can't drag the held chord onto the arpeggiator"*, *"I wanna be
 able to hold the chord down to build it with my mouse, but then also to drag a new chord onto the
@@ -1065,7 +1155,10 @@ what is no longer true lives here in one place:
   `MidiMessageCollector`; a chord handed to it is fired through the ordinary note path (so
   Exclusive, the Voices cap, Strum and the keybed lights all still apply) but queued there, and
   only that engine drains it. `runArpLines` lifts the keybed's notes out of the merged stream for
-  the lines with **Keys** on, runs each enabled line into its own buffer, and merges them back;
+  the lines with **Keys** on, runs each enabled line into its own buffer, and merges them back
+  (**and since 2026-08-27 the track's own MIDI is not in that stream at all unless Track MIDI is
+  on** - it is held aside in `processBlock` and put back after, so the arp cannot see it and the
+  instrument downstream cannot tell; see the round at the top of this section);
   a *disabled* line's input passed straight through, so a chord held to it sustained (**no longer
   true from 2026-08-02** - see the entry above; the engine now runs every block and takes the
   chord in silently). A per-pitch
@@ -1452,7 +1545,8 @@ what is no longer true lives here in one place:
   reason Tempo and Root don't. **The floor moves again, 1280 -> 1320**, to reserve the button
   plus the gap it puts between itself and Theme, ahead of the elastic Instrument chip, the same
   "raise the floor rather than starve a control" rule the bpmSync entry above already states.
-  Four groups, nothing else added: **Hold visuals during sustain** (default on, and exactly
+  Three groups: the three ticks, **Reset all settings...** alone (2026-08-27 - see the round at
+  the top of this section), then the links. **Hold visuals during sustain** (default on, and exactly
   today's behaviour - `PianoKeyboard::paint` reads `LayoutState::holdVisualsOnSustain`, and off
   makes a key held only by the pedal rest visually while it keeps sounding, paint only, nothing
   about what is actually heard); **Sustained drag leaves a trail** (default on, also today's
@@ -1604,9 +1698,12 @@ what is no longer true lives here in one place:
   **A sequence of chords already reaches a line three ways, and the third one surprises people**
   (2026-08-21, Owen: *"for arpeggiators if I wanted to feed in a sequence of chords for it to
   play. How would we do that?"*). Chain walks the slots at **bar** resolution; the Chord lane
-  swaps a slot's chord in for a single **step**; and a line with **Play** on arpeggiates *"the
-  keybed and a clip on the track"* (`runArpLines`), so a progression drawn into an Ableton clip
-  drives the arp with the **host** owning the durations. Nothing was written for that third one -
+  swaps a slot's chord in for a single **step**; and a line with **Play** on **plus Track MIDI on**
+  arpeggiates a clip on the track (`runArpLines`), so a progression drawn into an Ableton clip
+  drives the arp with the **host** owning the durations. **Track MIDI is the part of that
+  sentence which is new and off by default** (2026-08-27, see the round at the top of this
+  section): until then Play alone did it, which is exactly why this route "surprises people" -
+  it surprised six instances into arpeggiating at once. Nothing was written for that third one -
   it falls out of the routing - and it is the only route that can hold a chord for two bars and
   the next for two beats, which neither of the other two can express. What is genuinely missing
   is a **loading gesture**: filling twelve slots is one drag per chord, and `ChordLibrary.h`'s
@@ -2549,8 +2646,8 @@ Four things will bite otherwise:
   card rather than a second control. `Macro latch A`, `Macro keys A` and `Macro chain A` went
   with the row controls on 2026-08-02; the per-line band's Play toggle answers to `Arp play`
   (the parameter is still `arpKeys` - the accessible name follows the label here because
-  "keys" already means two other things in this window). On the arp bar: `Arp all off` and
-  `Arp light keys`.
+  "keys" already means two other things in this window). On the arp bar: `Arp all off`,
+  `Arp light keys` and, from 2026-08-27, `Arp track MIDI` (on-screen words "Track MIDI").
 - **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
   applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in
   the same run - unfold in one call with `-KeepOpen`, set in the next. And a `-SetValues` that

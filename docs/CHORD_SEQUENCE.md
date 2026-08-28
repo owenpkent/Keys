@@ -16,8 +16,8 @@ different time scales, and two of the three are undocumented outside the code.
 ### Chain, at the bar
 
 Each line's twelve slots hold a chord, a pattern, a shape, a rate and a bar count
-(`ArpPattern::bars`, 1..16, [PluginProcessor.h:624](../src/PluginProcessor.h#L624)).
-`startChain` ([PluginProcessor.cpp:2766](../src/PluginProcessor.cpp#L2766)) walks the slots that
+(`ArpPattern::bars`, 1..16, in `src/PluginProcessor.h`).
+`KeysProcessor::startChain` walks the slots that
 hold a chord, gives each its bars, and launches each in turn; slots with no chord are skipped,
 because a pattern-only slot is a place to keep a rhythm rather than a step of a progression. The
 bar count runs on the audio thread and the launch on the 50 Hz heartbeat, with an epoch counter
@@ -32,20 +32,26 @@ reachable only by building the slots one at a time.
 ### The Chord lane, at the step
 
 Lane value 0..12; nonzero means "this step plays the chord in that slot instead of a note of the
-held set" ([ArpEngine.h:1681-1694](../src/ArpEngine.h#L1681-L1694)). Draw Cm on steps 1-4 and Ab
+held set" (`ArpEngine::fireStep`, the `laneChord` branch). Draw Cm on steps 1-4 and Ab
 on 5-8 and the progression moves inside the pattern rather than on bar lines. It is the only
-part of the engine that reads anything outside itself, through the `ChordTable` atomic mirror
-([ArpEngine.h:337](../src/ArpEngine.h#L337)), which is why *the call sites of
+part of the engine that reads anything outside itself, through the `ArpEngine::ChordTable`
+atomic mirror, which is why *the call sites of
 `syncArpChordTable` are the contract*.
 
 ### A clip on the track, at the host's timeline
 
 Least known of the three, and it is the idiom the rest of the industry is built on. A line with
 **Play** on lifts note events out of the incoming stream and arpeggiates them, and that stream
-is "the keybed **and a clip on the track**"
-([PluginProcessor.cpp:1854](../src/PluginProcessor.cpp#L1854)). So a chord progression drawn into
-an Ableton clip on the Keys track already drives the arp, with the host owning the timeline,
-the durations and the loop. No feature was ever written for this; it falls out of the routing.
+is the keybed **and a clip on the track**. So a chord progression drawn into an Ableton clip on
+the Keys track drives the arp, with the host owning the timeline, the durations and the loop.
+No feature was ever written for this; it falls out of the routing.
+
+**Since 2026-08-27 it needs one switch: Track MIDI, on the arp bar, off by default.** That is
+the same routing wearing a door, and the door exists because the route being free also made it
+*unasked for* - `arpKeys` defaults on for all four lines, so every untouched instance in a set
+was arpeggiating whatever the DAW sent its track, and pressing record started four of them at
+once. Switch **Track MIDI** on for the instance you actually mean and this route is exactly what
+it always was. Per-line **Play** still governs the keybed half.
 
 | Route | Granularity | Who owns the timeline | Can change pattern per chord |
 |---|---|---|---|

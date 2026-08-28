@@ -262,6 +262,18 @@ splitting it back out afterwards is a job for Live, not for Keys.
   track while every call reports success. `docs/MCP.md`, "Which instance am I talking
   to?", has the way to tell. Also note a pad press cannot feed an arpeggiator line, so
   a line fed that way is correctly silent.
+- **I pressed record (or armed a track) and Keys started arpeggiating on its own.** Fixed at
+  the source on 2026-08-27, and worth knowing if you open an older set: a line's per-line
+  **PLAY** switch used to mean the keybed *and* whatever Live sent the track, and it defaults
+  on for all four lines - so an instance nobody had touched would arpeggiate anything routed
+  its way, and a track set to **MIDI From: All Ins** hands it every stray note in the session.
+  The track's MIDI now has a switch of its own, **Track MIDI** on the arp bar, **off by
+  default**. If an instance is making a noise you did not ask for, that chip is the first
+  thing to look at; **All Off** beside it stops everything in one click. Turn Track MIDI back
+  **on** for the instance you actually want a clip to drive.
+- **A clip on the Keys track used to drive the arpeggiator and now does nothing.** Same
+  change, seen from the other side: switch **Track MIDI** on for that instance. It is off by
+  default, so a set saved before 2026-08-27 takes the new default when you open it.
 - **Keys disappears when I select another track.** Live's **Auto-Hide Plug-In Windows**,
   on by default. See "Keeping Keys on screen while you work on other tracks" above.
 - **I armed the Keys track, recorded, and got an empty clip.** Expected, and it is a

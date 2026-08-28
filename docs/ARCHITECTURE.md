@@ -1146,6 +1146,14 @@ from 2026-08-19 the range knobs are centred on the knob's own value instead, ope
 either side of it, and `arpHumanVelSpan` is registered but no longer read by the engine at all
 - Vel's ring reads `arpHumanVel` directly - while `arpHumanizeSpan` still drives H.Time's ring,
 default 100 = the whole scale) - every one of them appended.
+
+**`arpTrackMidi` (2026-08-27) is appended after all of those and is not per line**: whether MIDI
+arriving on the track reaches the arpeggiator at all. **Default false, which is a behaviour
+change with teeth** - a new parameter is absent from every saved session, so every existing set
+takes it and a clip that was driving an arp goes quiet until the **Track MIDI** chip on the arp
+bar is switched on. It needs no migration for exactly that reason: there is nothing to convert,
+only a default to accept. Per-line `arpKeys` keeps the other half of the question, whether the
+*keybed* feeds that line, and still defaults on.
 The six after
 `arpChance` arrived on 2026-07-30 and are appended; the rate's two arrived the same day and
 sit beside `arpRate` instead, which costs nothing, because what a session and an automation
@@ -1153,11 +1161,13 @@ lane follow is a parameter's string id and not its position (JUCE hashes that id
 What is load-bearing is what lives *inside* a parameter (a choice's list of values, an int's
 range), and `arpRate`'s eleven divisions are byte-identical, so nothing about it moved.
 
-**Two arp parameters are deliberately not per line**, because they are about the lines
-together: `bpm` (the tempo they run at when there is no transport to follow) and `arpQuantize`
+**Three arp parameters are deliberately not per line**, because they are about the lines
+together: `bpm` (the tempo they run at when there is no transport to follow), `arpQuantize`
 (Launch Quantize - Off, or the boundary a chord card, a slot launch or a drag onto a line waits
-for before it lands). A quantize setting per line would be one more way for the lines to miss
-each other, which is the opposite of what it is for.
+for before it lands) and, from 2026-08-27, `arpTrackMidi`. A quantize setting per line would be
+one more way for the lines to miss each other, which is the opposite of what it is for; and
+Track MIDI is one door into the *instance*, where a door shut for A and open for C is not shut
+- Scale Lock's own reasoning.
 
 **That whole set exists four times**, once per arpeggiator line, since line D was appended
 2026-08-19. `createLayout` calls `addArpLineParams` four times rather than writing it out four
