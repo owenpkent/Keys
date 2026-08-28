@@ -1461,9 +1461,18 @@ void KeysEditor::refreshArpBarTabs()
     for (int n = 0; n < KeysProcessor::uiArpLines; ++n)
         if (auto* t = arpBarTabs[(size_t) n].get())
         {
+            // **The keybed counts as having handed it something.** `arpHeldNotes` is only ever
+            // a chord *dropped* on the line, so on its own this lit for the commonest case
+            // there is - PLAY defaults on, and holding keys is how most lines are driven - and
+            // a dot that is lit whenever you play says nothing about the case it was added for.
+            // It has to be this line's own PLAY: a line with PLAY off is not being fed by your
+            // hands however many keys are down, and the dot is right to light for it.
+            const bool fedByKeys = processor.arpParam(n, KeysProcessor::apKeys) > 0.5f
+                                && ! keyboard.soundingOutputNotes().empty();
             const bool flag = processor.arpLineOn(n)
                            && processor.arpLine(n).uiHeldCount.load() > 0
-                           && processor.arpHeldNotes(n).empty();
+                           && processor.arpHeldNotes(n).empty()
+                           && ! fedByKeys;
             if (flag != t->unhandedNotes)
             {
                 t->unhandedNotes = flag;
@@ -1751,6 +1760,12 @@ void KeysEditor::showSettingsMenu()
     // pads, lanes, slots - and this touches none of that), so the confirmation is the way back
     // rather than a formality. It never empties a pad, and the dialog says so, since "reset" is
     // a word people reasonably expect to mean more than it does here.
+    //
+    // **It resets the three ticks above it as well**, which is the half that is easy to leave
+    // out and reads as a bug the moment anyone tries it: a row named "Reset all settings" that
+    // leaves the settings six pixels above itself exactly as they were is wrong in the one
+    // place its name is read. See KeysProcessor::resetAllParameters for the line between what
+    // it takes (behaviour) and what it leaves (the theme, the folds, where the windows are).
     menu.addItem(2010, "Reset all settings...");
     menu.addSeparator();
 
@@ -1786,8 +1801,10 @@ void KeysEditor::showSettingsMenu()
                     juce::MessageBoxIconType::WarningIcon,
                     "Reset all settings",
                     "Put every setting in " + e->processor.getName() + " back to its default: "
-                    "key and scale, the keyboard, and all four arpeggiator lines.\n\n"
-                    "Your chord pads and arpeggiator patterns are NOT touched.\n\n"
+                    "key and scale, the keyboard, all four arpeggiator lines, and the "
+                    "switches in this menu.\n\n"
+                    "Your chord pads, arpeggiator patterns and slots are NOT touched, and "
+                    "neither is your theme or which sections are open.\n\n"
                     "This cannot be undone.",
                     e,
                     juce::ModalCallbackFunction::create([safe](int ok)
@@ -1875,7 +1892,10 @@ void KeysEditor::showAboutDialog()
     // can point at. The track name is the same answer from the host's side, and blank
     // whenever the host does not report one (always, in the standalone).
     juce::String identity = "\n\nMCP port: ";
-    identity += processor.mcp() != nullptr && processor.mcp()->port() > 0
+    // No null test on mcp(): it is constructed last in the processor's constructor and lives
+    // as long as the processor, which outlives this editor - the header says so at the
+    // accessor. A port of 0 is the case that actually happens, which is the bind failing.
+    identity += processor.mcp()->port() > 0
               ? juce::String(processor.mcp()->port()) : juce::String("not listening");
     if (processor.hostTrackName().isNotEmpty())
         identity += "\nHost track: " + processor.hostTrackName()
