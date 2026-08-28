@@ -83,11 +83,17 @@ public:
     void noteOff(int midiNote, int channelOverride = 0, double delaySeconds = 0.0, int dest = 0);
     void allNotesOff();
 
-    // **Every parameter back to its default, and nothing else.** Deliberately does not
-    // touch chord pads, arp patterns or slots: those are work you made, undo already
-    // covers them, and a Reset that quietly emptied a page would be the worst button in
-    // the plugin. What it does cover is the settings that can leave an instance behaving
-    // in a way you did not ask for and cannot find - which is the case it exists for.
+    // **Every parameter back to its default, plus the six behaviour switches that are not
+    // parameters** (the three ticks in the settings menu itself, Light keys, and the Pads
+    // bar's Play and Keep arp). The name says "settings" and three of them share the popup
+    // the row sits in, so leaving them behind made it wrong where it is read.
+    //
+    // Deliberately does not touch chord pads, arp patterns or slots: those are work you made,
+    // undo already covers them, and a Reset that quietly emptied a page would be the worst
+    // button in the plugin. Nor the rest of LayoutState - theme, folds, detached windows, the
+    // current page, library favourites - which is where you left the furniture rather than how
+    // the instrument behaves. What it does cover is everything that can leave an instance
+    // behaving in a way you did not ask for and cannot find, which is the case it exists for.
     // Pushes no undo entry, because it changes no undoable content.
     void resetAllParameters();
 
@@ -1361,8 +1367,20 @@ private:
     // The track's own MIDI, held out of the arp's reach for a block when the Track MIDI
     // chip is off, then put back so it still passes through untouched. Audio thread.
     juce::MidiBuffer trackMidiAside;
+    // The track's own note on/offs for this block, captured only while the door is open -
+    // taken in processBlock, where `midi` is still the track's input alone and a note from
+    // the DAW is still told apart from one the keybed queued. Audio thread.
+    juce::MidiBuffer trackNotesForArp;
     bool lastTrackMidiToArp = false;   // for the falling edge; see runArpLines
     bool trackMidiJustClosed = false;  // set for exactly one block by processBlock
+    // Which track pitches each line actually took in and has not been handed a release for.
+    // The falling edge releases exactly this and nothing else, and the reason it cannot be
+    // `inputNoteOn` instead is ownership: ArpEngine::Held::ons is a *count* over every source
+    // that asked for a pitch, and noteLeft matches on pitch alone - so an off synthesised for
+    // a pitch the line took from the keybed or from a dropped chord decrements that owner and
+    // drops a note you are still holding. Set where the notes are handed to the line, so a
+    // line that was not listening when they arrived never acquires a bit for them.
+    std::array<std::array<bool, 128>, (size_t) numArpLines> trackHeldByLine {};
 
     // Every line's output, merged in time order before any of it reaches the outgoing stream
     // (2026-08-18, Owen: "when there's two arpeggiators happening, how does it handle when

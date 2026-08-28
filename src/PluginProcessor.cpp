@@ -970,6 +970,28 @@ void KeysProcessor::resetAllParameters()
     for (auto* p : getParameters())
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(p))
             ranged->setValueNotifyingHost(ranged->getDefaultValue());
+
+    // **The six settings that are not parameters, because the row says "settings" and three of
+    // them are in the same popup it is on.** A Reset that leaves *Sustained notes propose
+    // chords* ticked three rows above itself is a button whose name is wrong in the one place
+    // anybody reads it. These six are behaviour - they change what a click does or what the
+    // keybed shows - which is what puts them in and keeps the rest of LayoutState out: the
+    // theme, the folds, the detached windows, the current page and the library favourites are
+    // *where you left the furniture*, and a reset that rearranged the window would be doing
+    // something nobody asked a settings reset for. The defaults are LayoutState's own, taken
+    // from a default-constructed one rather than written out a second time here, so they cannot
+    // drift from the struct.
+    const LayoutState d {};
+    layout.holdVisualsOnSustain  = d.holdVisualsOnSustain;
+    layout.dragWhileSustain      = d.dragWhileSustain;
+    layout.sustainProposesChords = d.sustainProposesChords;
+    layout.arpLights             = d.arpLights;
+    layout.padsPlayOnClick       = d.padsPlayOnClick;
+    layout.padsKeepArpRunning    = d.padsKeepArpRunning;
+    // No refresh call: all three of these that have a control on screen (Light keys, Play,
+    // Keep arp) are pulled from `layout` by KeysEditor::timerCallback, and the other three are
+    // read at the moment they are used - the settings menu rebuilds its ticks every time it
+    // opens. Nothing here has a stale copy to invalidate.
 }
 
 bool KeysProcessor::arpTrackMidiOn() const
@@ -1783,6 +1805,9 @@ void KeysProcessor::prepareToPlay(double sampleRate, int)
     // lifted out of the merged stream for the lines that listen to it.
     keyNotes.ensureSize(8192);
     trackMidiAside.ensureSize(8192);
+    trackNotesForArp.ensureSize(8192);
+    for (auto& line : trackHeldByLine) // nothing is held across a prepare, the track included
+        line.fill(false);
     streamRest.ensureSize(8192);
     arpMerged.ensureSize(8192);
     arpOut.reset(); // nothing is sounding across a prepare
@@ -1830,10 +1855,25 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     lastTrackMidiToArp = trackMidiToArp;
 
     trackMidiAside.clear();
+    trackNotesForArp.clear();
     if (! trackMidiToArp)
     {
         trackMidiAside.addEvents(midi, 0, -1, 0);
         midi.clear();
+    }
+    else
+    {
+        // Open: nothing is held back, but the notes are noted, because this is the last point
+        // at which they are still distinguishable. One block later the collector has merged and
+        // a clip's C4 and a clicked C4 are the same MidiMessage - the same reason `dest` exists.
+        // runArpLines turns this into per-line ownership so the falling edge can release what a
+        // line took from the *track* without touching what it took from anywhere else.
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            if (m.isNoteOn() || m.isNoteOff())
+                trackNotesForArp.addEvent(m, meta.samplePosition);
+        }
     }
 
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
@@ -2225,20 +2265,49 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
                 lines[(size_t) n].in.addEvents(keyNotes, 0, numSamples, 0);
     }
 
+    // Ownership, kept per line, and it is what the falling edge below is allowed to release.
+    // Updated inside the same `listens` gate that hands the notes over, so a line that was not
+    // listening when a clip's note arrived never acquires a bit for it, and a line that stops
+    // listening keeps the bits for what it is still holding - which is exactly the set that
+    // would otherwise hang. Walked in event order rather than folded into two masks, because a
+    // block can carry an off and a fresh on for one pitch and only the order says which won.
+    if (! trackNotesForArp.isEmpty())
+        for (int n = 0; n < numArpLines; ++n)
+            if (listens[(size_t) n])
+                for (const auto meta : trackNotesForArp)
+                {
+                    const auto m = meta.getMessage();
+                    const int note = m.getNoteNumber();
+                    if (note >= 0 && note < 128)
+                        trackHeldByLine[(size_t) n][(size_t) note] = m.isNoteOn();
+                }
+
     // The falling edge of the Track MIDI chip, and it is the one thing that switch cannot be
     // implemented without. A line that had already taken a clip's notes in is holding pitches
     // whose note-offs are now being routed around it for good, so it would arpeggiate them
     // forever under a switch that says the door is shut. Their releases are synthesised here,
     // into the lines' own input and nowhere else: the real note-offs still travel down the
-    // output stream when the clip lets go, so the instrument downstream never notices. Matching
-    // is by pitch (ArpEngine::noteReleased ignores the channel), and a note-off for a pitch no
-    // engine holds costs a scan and does nothing, which is what makes this safe to fire wide.
+    // output stream when the clip lets go, so the instrument downstream never notices.
+    //
+    // **It fires from the ownership mask above, never from `inputNoteOn`, and that is not
+    // tidying.** `inputNoteOn` is every pitch the *track* is holding, whether or not any line
+    // ever received its note-on - a clip note that began while the door was shut is in it. But
+    // ArpEngine::Held::ons is a count over every source that asked for a pitch and noteLeft
+    // matches on pitch alone, so an off synthesised for one of those decrements whichever owner
+    // is there: hold C4 on the keybed over a clip already sounding C4, close the door, and the
+    // line drops the note under your hand. The mask holds only what this line actually took
+    // from the track, so every off fired here has an owner of its own to spend.
     if (trackMidiJustClosed)
         for (int n = 0; n < numArpLines; ++n)
-            if (listens[(size_t) n])
-                for (int note = 0; note < 128; ++note)
-                    if (inputNoteOn[(size_t) note].load())
-                        lines[(size_t) n].in.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+        {
+            auto& held = trackHeldByLine[(size_t) n];
+            for (int note = 0; note < 128; ++note)
+                if (held[(size_t) note])
+                {
+                    lines[(size_t) n].in.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                    held[(size_t) note] = false;
+                }
+        }
 
     for (int n = 0; n < numArpLines; ++n)
     {

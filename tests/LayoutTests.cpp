@@ -215,6 +215,15 @@ public:
             juce::Array<juce::Component*> targets;
             collectTargets(ed, targets);
 
+            // Where each chip actually landed, for the overlap pass below. The per-chip width
+            // check further down cannot answer that question: every one of these is placed
+            // with withSizeKeepingCentre, which forces the size whatever the cell it was given
+            // - and removeFromRight clamps to what is left rather than going negative - so a
+            // starved bar produces chips of exactly the right width sitting on top of each
+            // other. Geometry is the only thing that can see it.
+            juce::Array<juce::Rectangle<int>> chips;
+            juce::StringArray chipNames;
+
             int seen = 0;
             for (const char* title : { "Arp track MIDI", "Arp light keys",
                                        "Arp all off", "Arp hold off" })
@@ -229,6 +238,8 @@ public:
                 ++seen;
 
                 const auto b = found->getBounds();
+                chips.add(b);
+                chipNames.add(title);
                 expectEquals(b.getHeight(), 24, juce::String(title) + " is a bar-height chip");
 
                 auto* button = dynamic_cast<juce::Button*>(found);
@@ -255,6 +266,34 @@ public:
             // Counted, so a rename that stops matching fails here instead of passing by
             // finding nothing - the trap the macro-knob sweep already paid for.
             expectEquals(seen, 4, "the arp bar lost a chip, or one was renamed");
+
+            // **The starvation half, and it is the only part of this test that can see it.**
+            // Two chips on one pixel is what running out of bar looks like here, and neither
+            // the width check above nor a UIA sweep would notice: both chips are the right
+            // size, both are visible, and the one underneath simply never takes a click.
+            for (int i = 0; i < chips.size(); ++i)
+                for (int j = i + 1; j < chips.size(); ++j)
+                    expect(! chips[i].intersects(chips[j]),
+                           chipNames[i] + " overlaps " + chipNames[j] + " - the arp bar has run "
+                           "out of width at the editor's minimum, and CLAUDE.md's rule is to "
+                           "raise the floor rather than let a control pay for it");
+
+            // And that none of them has been pushed left into the group at the other end of the
+            // bar. Launch Quantize is the rightmost thing over there, so its right edge is the
+            // line the four chips must stay clear of.
+            juce::Component* quantize = nullptr;
+            for (auto* t : targets)
+                if (t->getTitle() == "Arp launch quantize")
+                    quantize = t;
+            expect(quantize != nullptr, "'Arp launch quantize' is on screen at all");
+            if (quantize != nullptr)
+                for (int i = 0; i < chips.size(); ++i)
+                {
+                    expect(chips[i].getX() >= quantize->getBounds().getRight(),
+                           chipNames[i] + " has been pushed back over Launch Quantize");
+                    expect(chips[i].getRight() <= ed.getWidth(),
+                           chipNames[i] + " runs off the right-hand edge of the window");
+                }
         }
 
         beginTest("every arp drop target takes a chord from any surface, not only a pad");

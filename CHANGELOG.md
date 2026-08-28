@@ -37,6 +37,11 @@ the *arpeggiator* hears, not what the track plays.
 in is holding pitches whose note-offs are now routed around it, so closing the door has to let go of
 them or the line arpeggiates forever under a switch that says it is shut. Those releases are
 synthesised into the lines' own input alone; the real note-offs still travel down the output stream.
+Those releases are driven by a **per-line record of what that line actually took from the track**,
+not by every pitch the track happens to be holding: `ArpEngine::Held::ons` is a count over every
+source that asked for a pitch and matches on pitch alone, so an off fired for a clip note the line
+never received would decrement whichever owner *is* there - hold C4 on the keybed over a clip
+already sounding C4, close the door, and the line would drop the note under your hand.
 `StateTests` pins both that and the door itself, and the suite caught the behaviour change on the
 first run - six existing tests drove lines from the track input and now open the door explicitly.
 
@@ -59,6 +64,14 @@ It asks first, and that confirmation is the way back rather than a formality: un
 not parameters, so this is not undoable. It releases every sounding note before it runs, because a
 reset moves Root, Octave and the arp's whole routing underneath anything still ringing, and the
 played note is resolved at press time and remembered.
+
+It also resets the three switches in that same menu (*Hold visuals during sustain*, *Sustained
+drag leaves a trail*, *Sustained notes propose chords*) plus **Light keys** and the Pads bar's
+**Play** and **Keep arp** - behaviour that is stored in the layout tree rather than as a
+parameter. A row named "Reset all settings" that left the settings six pixels above it exactly
+as they were would be wrong in the one place its name is read. It stops there: your theme, which
+sections are open, where the detached windows are and your library favourites are all kept.
+
 ### Added: an instance can say which track it is on, and which port it answers on
 
 **There was no answer to "which of these am I talking to".** Every Keys in one Live set shares a
