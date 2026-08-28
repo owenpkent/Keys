@@ -489,6 +489,11 @@ private:
     // Keyboard bar because it is a fact about the arp: it is the arp's notes it shows, and it
     // is meaningless with both lines off.
     juce::ToggleButton arpLightsButton;
+    // The track's own MIDI into the arp, global and off by default. On the bar rather than
+    // in a line's detail view because it is a control you reach for to make something
+    // *stop*, and it never hides with the fold for the same reason Hold off does not.
+    juce::ToggleButton arpTrackMidiButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> arpTrackMidiAtt;
     // The A/B tabs are the arp's own On switches now (2026-08-02, Owen: "the A and B on the
     // left side of the header, I want those to be on and off buttons to turn on or off the
     // ARP ... we can remove the a and b check mark on the right side of the header"). A
@@ -521,6 +526,10 @@ private:
         KeysEditor& owner;
         int line;
         bool dropTarget = false;
+        // Set by refreshArpBarTabs when this line is sounding notes nobody handed it -
+        // the on-screen half of get_state's soundingNoteCount. Cached so the 10 Hz pull
+        // repaints on a change and not every tick.
+        bool unhandedNotes = false;
         // Only for line >= 0: the On/off switch itself, bound to that line's `On` parameter.
         // Null on the All tab, which is a plain view toggle with no parameter behind it.
         std::unique_ptr<ButtonAtt> onAtt;

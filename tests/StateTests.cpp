@@ -667,6 +667,9 @@ public:
                 h.processor.layout.arpLights = true;
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+                // These tests drive a line from the *track* input, which needs the door
+                // opened explicitly since 2026-08-27: arpTrackMidi is off by default.
+                setParam(h.processor, "arpTrackMidi", 1.0f);
 
                 juce::AudioBuffer<float> audio(2, 512);
                 int litNotes = 0, wrongLine = 0;
@@ -706,6 +709,9 @@ public:
             {
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+                // These tests drive a line from the *track* input, which needs the door
+                // opened explicitly since 2026-08-27: arpTrackMidi is off by default.
+                setParam(h.processor, "arpTrackMidi", 1.0f);
                 // Chord shape on both, so every step sounds the whole chord and the two lines
                 // are guaranteed to overlap on a pitch rather than happening to miss.
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apDirection),
@@ -764,6 +770,164 @@ public:
             expectEquals(h.processor.arpLitLine(60), 1, "so B now owns the colour");
         }
 
+        // **The Track MIDI door** (2026-08-27). Per-line PLAY says "the keys you play" and used
+        // to also mean "and anything the DAW sends this track", which is how six untouched Keys
+        // in one Live set all listened and pressing record started four arpeggiating at once.
+        // The track input has its own switch now, global and off by default.
+        // **Reset all settings.** The row's name says settings, and three of the settings it
+        // shares a popup with are not parameters at all - so the test has to cover both halves,
+        // and the promise it must *not* break is the one printed in the dialog: content is
+        // untouched.
+        beginTest("Reset all settings restores parameters and the menu's own switches");
+        {
+            Host h;
+            const juce::String rootId = "root";
+            auto* rootParam = h.processor.apvts.getParameter(rootId);
+            expect(rootParam != nullptr);
+            const float rootDefault = rootParam->convertFrom0to1(rootParam->getDefaultValue());
+
+            setParam(h.processor, rootId, rootDefault == 0.0f ? 5.0f : 0.0f);
+            setParam(h.processor, "arpTrackMidi", 1.0f);
+            expect(h.processor.arpTrackMidiOn(), "the parameter did not move, so nothing is set up");
+
+            // Not parameters, and the whole point of the second half: three of these are rows in
+            // the very menu the Reset sits in.
+            h.processor.layout.sustainProposesChords = true;  // default false
+            h.processor.layout.arpLights = false;             // default true
+            h.processor.layout.padsPlayOnClick = false;       // default true
+
+            // Content, which must survive: a chord pad and a drawn arp lane.
+            h.processor.setChordPad(0, { 60, 64, 67 }, "C");
+            h.processor.arpLine(0).lanes.value[(size_t) ArpEngine::laneVelocity][3].store(42);
+
+            h.processor.resetAllParameters();
+
+            expectEquals(h.processor.apvts.getRawParameterValue(rootId)->load(), rootDefault,
+                         "a parameter was left where it was");
+            expect(! h.processor.arpTrackMidiOn(), "arpTrackMidi was left on");
+            expect(! h.processor.layout.sustainProposesChords,
+                   "the settings menu's own tick survived a Reset named after it");
+            expect(h.processor.layout.arpLights, "Light keys was left off");
+            expect(h.processor.layout.padsPlayOnClick, "Pads Play was left off");
+
+            expectEquals((int) h.processor.chordPad(0).notes.size(), 3,
+                         "Reset emptied a chord pad, which the dialog promises it never does");
+            expectEquals(h.processor.arpLine(0).lanes.value[(size_t) ArpEngine::laneVelocity][3].load(),
+                         42, "Reset flattened a drawn arp lane");
+        }
+
+        beginTest("with Track MIDI off, a clip on the track does not reach a line");
+        {
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apOn), 1.0f);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apKeys), 1.0f);
+            // arpTrackMidi deliberately left at its default, which is what is under test.
+            expect(! h.processor.arpTrackMidiOn(), "arpTrackMidi should default off");
+
+            juce::AudioBuffer<float> audio(2, 512);
+            juce::MidiBuffer first;
+            for (int note : { 60, 64, 67 })
+                first.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+            h.processor.processBlock(audio, first);
+
+            // The notes still leave Keys: the chip decides what the *arpeggiator* hears, not
+            // what the track plays, so an instrument downstream must be unaffected by it.
+            int passedThrough = 0;
+            for (const auto meta : first)
+                if (meta.getMessage().isNoteOn())
+                    ++passedThrough;
+            expectEquals(passedThrough, 3, "the track's own notes stopped passing through");
+
+            for (int blk = 0; blk < 20; ++blk)
+            {
+                juce::MidiBuffer none;
+                h.processor.processBlock(audio, none);
+            }
+            expectEquals(h.processor.arpLine(0).uiHeldCount.load(), 0,
+                         "the line picked up track MIDI with the door shut");
+        }
+
+        // The edge that makes the switch implementable at all: a line that already took a
+        // clip's notes in is holding pitches whose note-offs are about to be routed around it
+        // for good, so closing the door has to let go of them or the line arpeggiates forever
+        // under a switch that says it is shut.
+        beginTest("closing Track MIDI lets go of what the track was holding");
+        {
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apOn), 1.0f);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apKeys), 1.0f);
+            setParam(h.processor, "arpTrackMidi", 1.0f);
+
+            juce::AudioBuffer<float> audio(2, 512);
+            juce::MidiBuffer first;
+            for (int note : { 60, 64, 67 })
+                first.addEvent(juce::MidiMessage::noteOn(1, note, 0.8f), 0);
+            h.processor.processBlock(audio, first);
+            for (int blk = 0; blk < 4; ++blk)
+            {
+                juce::MidiBuffer none;
+                h.processor.processBlock(audio, none);
+            }
+            expect(h.processor.arpLine(0).uiHeldCount.load() > 0,
+                   "the line never took the track's notes in, so this proves nothing");
+
+            // The notes are still physically held - no note-off has been sent - and the door
+            // closes underneath them. That is the whole hazard.
+            setParam(h.processor, "arpTrackMidi", 0.0f);
+            for (int blk = 0; blk < 4; ++blk)
+            {
+                juce::MidiBuffer none;
+                h.processor.processBlock(audio, none);
+            }
+            expectEquals(h.processor.arpLine(0).uiHeldCount.load(), 0,
+                         "closing the door left the line holding notes nothing can ever release");
+        }
+
+        // The other half of that edge, and the one the first cut got wrong: the releases have
+        // to be *this line's own* track notes, not every pitch the track happens to be holding.
+        beginTest("closing Track MIDI does not release what the keybed is holding");
+        {
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apOn), 1.0f);
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apKeys), 1.0f);
+
+            juce::AudioBuffer<float> audio(2, 512);
+
+            // A clip holds C4 while the door is shut, so the line never saw its note-on - but
+            // `inputNoteOn` did, because watchInputNotes runs ahead of the door either way.
+            // That is the trap: firing the falling edge off `inputNoteOn` releases this pitch
+            // from whoever *is* holding it, since ArpEngine::Held::ons is a count and noteLeft
+            // matches on pitch alone.
+            expect(! h.processor.arpTrackMidiOn(), "arpTrackMidi should default off");
+            juce::MidiBuffer fromClip;
+            fromClip.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+            h.processor.processBlock(audio, fromClip);
+
+            // Now open the door - mid-note, so no note-on for C4 ever reaches the line through
+            // it - and give the line a C4 of its own from the keybed.
+            setParam(h.processor, "arpTrackMidi", 1.0f);
+            h.processor.noteOn(60, 0.8f);
+            for (int blk = 0; blk < 4; ++blk)
+            {
+                juce::MidiBuffer none;
+                h.processor.processBlock(audio, none);
+            }
+            expect(h.processor.arpLine(0).uiHeldCount.load() > 0,
+                   "the line never took the keybed's note, so this proves nothing");
+
+            setParam(h.processor, "arpTrackMidi", 0.0f);
+            for (int blk = 0; blk < 4; ++blk)
+            {
+                juce::MidiBuffer none;
+                h.processor.processBlock(audio, none);
+            }
+            expect(h.processor.arpLine(0).uiHeldCount.load() > 0,
+                   "closing the door dropped a note the keybed is still holding");
+        }
+
         beginTest("Light keys off means no line is lighting anything");
         {
             // The gate is on the *reader*, so that one flag turns the whole feature off without
@@ -774,6 +938,8 @@ public:
             h.processor.layout.arpLights = false;
             setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apOn), 1.0f);
             setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apKeys), 1.0f);
+            // Driven from the track input, so the door has to be opened: see above.
+            setParam(h.processor, "arpTrackMidi", 1.0f);
 
             juce::AudioBuffer<float> audio(2, 512);
             int lit = 0;
@@ -822,6 +988,9 @@ public:
                 h.processor.prepareToPlay(48000.0, 512);
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
                 setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+                // These tests drive a line from the *track* input, which needs the door
+                // opened explicitly since 2026-08-27: arpTrackMidi is off by default.
+                setParam(h.processor, "arpTrackMidi", 1.0f);
 
                 juce::AudioBuffer<float> audio(2, 512);
                 int ons = 0;

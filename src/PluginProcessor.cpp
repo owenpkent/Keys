@@ -315,6 +315,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout KeysProcessor::createLayout(
     // a host's generic parameter list order does.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "bpmSync", 1 }, "Tempo Sync", true));
 
+    // **Track MIDI -> arp, and it is shut by default** (2026-08-27, Owen: "why do I start
+    // recording in Ableton? It starts playing in something different", then "we need it to be
+    // easier to turn it off, and it's so unclear where that's hiding").
+    //
+    // Per-line "Play" (apKeys) defaults ON and always has, for a good reason: a line you just
+    // switched on that does nothing until you find a second toggle reads as broken. But that
+    // one switch was answering two questions at once. It says "Play", its tooltip says "what
+    // you play on the keyboard", and the stream it lifts is the keybed AND whatever the DAW
+    // sends the track. Chord pads were split out of that stream on 2026-08-18 and the track
+    // input never was. So six Keys in one Live set, none of them touched, all had every line
+    // listening to the track - and pressing record started four of them arpeggiating at once,
+    // on tracks nobody was looking at, with nothing on screen saying why. That is the same
+    // afternoon docs/MCP.md is written about.
+    //
+    // So the keybed keeps its per-line switch, and the *track* input gets one of its own:
+    // global, because it is one door into the instance and a door shut for A and open for C is
+    // not shut (Scale Lock's own reasoning), and on the arp bar, because a control you reach
+    // for to make something stop cannot be two clicks inside a line's detail view.
+    //
+    // **Default false, and that is a behaviour change with teeth.** A new parameter is absent
+    // from every saved session, so every existing set takes this default and a clip driving an
+    // arp goes quiet until the chip is switched back on. That is deliberate and was Owen's
+    // call when shown both: the surprise is silent and the fix is one click, where the old
+    // default was silent in the other direction and the fix was seven toggles across four
+    // windows. Appended last, the usual rule.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrackMidi", 1 },
+                                                    "Track MIDI to Arp", false));
+
     return layout;
 }
 
@@ -923,6 +951,52 @@ void KeysProcessor::updateTrackProperties(const TrackProperties& props)
         trackName = *props.name;
     if (props.colour.has_value() && props.colour->getAlpha() != 0)
         trackColour = props.colour->toDisplayString(false);
+}
+
+void KeysProcessor::resetAllParameters()
+{
+    // Silence first, and it is not politeness. A reset moves Root, Octave, Scale Lock and the
+    // arp's whole routing underneath whatever is currently sounding, and the played note is
+    // resolved at press time and remembered - so a note held across this would be released
+    // against settings that no longer exist, or not released at all. allNotesOff() is the one
+    // choke point that clears every source: the pads, the live card, each line's held chord,
+    // the chain and anything waiting on a quantize boundary.
+    allNotesOff();
+
+    // setValueNotifyingHost, not a direct write: the host has to see these move or its
+    // automation lane and its own generic editor go on showing the old values, and every
+    // attachment in the editor is listening for exactly this notification. The value is
+    // normalised 0..1, which is what getDefaultValue already returns.
+    for (auto* p : getParameters())
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(p))
+            ranged->setValueNotifyingHost(ranged->getDefaultValue());
+
+    // **The six settings that are not parameters, because the row says "settings" and three of
+    // them are in the same popup it is on.** A Reset that leaves *Sustained notes propose
+    // chords* ticked three rows above itself is a button whose name is wrong in the one place
+    // anybody reads it. These six are behaviour - they change what a click does or what the
+    // keybed shows - which is what puts them in and keeps the rest of LayoutState out: the
+    // theme, the folds, the detached windows, the current page and the library favourites are
+    // *where you left the furniture*, and a reset that rearranged the window would be doing
+    // something nobody asked a settings reset for. The defaults are LayoutState's own, taken
+    // from a default-constructed one rather than written out a second time here, so they cannot
+    // drift from the struct.
+    const LayoutState d {};
+    layout.holdVisualsOnSustain  = d.holdVisualsOnSustain;
+    layout.dragWhileSustain      = d.dragWhileSustain;
+    layout.sustainProposesChords = d.sustainProposesChords;
+    layout.arpLights             = d.arpLights;
+    layout.padsPlayOnClick       = d.padsPlayOnClick;
+    layout.padsKeepArpRunning    = d.padsKeepArpRunning;
+    // No refresh call: all three of these that have a control on screen (Light keys, Play,
+    // Keep arp) are pulled from `layout` by KeysEditor::timerCallback, and the other three are
+    // read at the moment they are used - the settings menu rebuilds its ticks every time it
+    // opens. Nothing here has a stale copy to invalidate.
+}
+
+bool KeysProcessor::arpTrackMidiOn() const
+{
+    return apvts.getRawParameterValue("arpTrackMidi")->load() > 0.5f;
 }
 
 int KeysProcessor::midiChannel() const
@@ -1730,6 +1804,10 @@ void KeysProcessor::prepareToPlay(double sampleRate, int)
     // Seven of them now rather than one: three inputs, three outputs, and the keybed's notes
     // lifted out of the merged stream for the lines that listen to it.
     keyNotes.ensureSize(8192);
+    trackMidiAside.ensureSize(8192);
+    trackNotesForArp.ensureSize(8192);
+    for (auto& line : trackHeldByLine) // nothing is held across a prepare, the track included
+        line.fill(false);
     streamRest.ensureSize(8192);
     arpMerged.ensureSize(8192);
     arpOut.reset(); // nothing is sounding across a prepare
@@ -1765,6 +1843,39 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
 
     // Drain queued UI note events into the outgoing buffer. Anything already on the
     // track's MIDI (a clip, another device) is left in place and passes through.
+    // **The track's MIDI is a door of its own, and the chip on the arp bar is the handle.**
+    // Held aside here rather than gated inside runArpLines, because by the time that runs the
+    // collector has merged and a note from the keybed is indistinguishable from one the DAW
+    // sent - the same reason `dest` exists, and the same shape as the chordCollector split one
+    // step further down. Everything goes aside, note-offs included: keeping only the note-ons
+    // back would let the arp lift a note-off out of the stream whose note-on passed straight
+    // through, and the instrument downstream would hang that note for good.
+    const bool trackMidiToArp = arpTrackMidiOn();
+    trackMidiJustClosed = lastTrackMidiToArp && ! trackMidiToArp;
+    lastTrackMidiToArp = trackMidiToArp;
+
+    trackMidiAside.clear();
+    trackNotesForArp.clear();
+    if (! trackMidiToArp)
+    {
+        trackMidiAside.addEvents(midi, 0, -1, 0);
+        midi.clear();
+    }
+    else
+    {
+        // Open: nothing is held back, but the notes are noted, because this is the last point
+        // at which they are still distinguishable. One block later the collector has merged and
+        // a clip's C4 and a clicked C4 are the same MidiMessage - the same reason `dest` exists.
+        // runArpLines turns this into per-line ownership so the falling edge can release what a
+        // line took from the *track* without touching what it took from anywhere else.
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            if (m.isNoteOn() || m.isNoteOff())
+                trackNotesForArp.addEvent(m, meta.samplePosition);
+        }
+    }
+
     collector.removeNextBlockOfMessages(midi, buffer.getNumSamples());
 
     // Arp stage: one engine per line, each consuming its own note stream and emitting its own; CCs
@@ -1772,6 +1883,13 @@ void KeysProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuf
     // old never-reads-the-playhead rule; see docs/ARP_DESIGN.md) and free-run on an internal
     // clock at the last-known tempo when the transport is stopped.
     runArpLines(midi, buffer.getNumSamples());
+
+    // Back into the stream, after the arp has taken its copy of what was played and before the
+    // chords join it. Untouched and in sample order, so a clip on this track reaches the
+    // instrument exactly as it always did - the chip decides what the *arpeggiator* hears, not
+    // what the track plays.
+    if (! trackMidiToArp)
+        midi.addEvents(trackMidiAside, 0, -1, 0);
 
     // Chords last, and that is the whole of "a click never feeds the arpeggiator" (2026-08-18).
     // A pad, the live card and the generator's audition queue here instead of into `collector`,
@@ -2146,6 +2264,50 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             if (listens[(size_t) n])
                 lines[(size_t) n].in.addEvents(keyNotes, 0, numSamples, 0);
     }
+
+    // Ownership, kept per line, and it is what the falling edge below is allowed to release.
+    // Updated inside the same `listens` gate that hands the notes over, so a line that was not
+    // listening when a clip's note arrived never acquires a bit for it, and a line that stops
+    // listening keeps the bits for what it is still holding - which is exactly the set that
+    // would otherwise hang. Walked in event order rather than folded into two masks, because a
+    // block can carry an off and a fresh on for one pitch and only the order says which won.
+    if (! trackNotesForArp.isEmpty())
+        for (int n = 0; n < numArpLines; ++n)
+            if (listens[(size_t) n])
+                for (const auto meta : trackNotesForArp)
+                {
+                    const auto m = meta.getMessage();
+                    const int note = m.getNoteNumber();
+                    if (note >= 0 && note < 128)
+                        trackHeldByLine[(size_t) n][(size_t) note] = m.isNoteOn();
+                }
+
+    // The falling edge of the Track MIDI chip, and it is the one thing that switch cannot be
+    // implemented without. A line that had already taken a clip's notes in is holding pitches
+    // whose note-offs are now being routed around it for good, so it would arpeggiate them
+    // forever under a switch that says the door is shut. Their releases are synthesised here,
+    // into the lines' own input and nowhere else: the real note-offs still travel down the
+    // output stream when the clip lets go, so the instrument downstream never notices.
+    //
+    // **It fires from the ownership mask above, never from `inputNoteOn`, and that is not
+    // tidying.** `inputNoteOn` is every pitch the *track* is holding, whether or not any line
+    // ever received its note-on - a clip note that began while the door was shut is in it. But
+    // ArpEngine::Held::ons is a count over every source that asked for a pitch and noteLeft
+    // matches on pitch alone, so an off synthesised for one of those decrements whichever owner
+    // is there: hold C4 on the keybed over a clip already sounding C4, close the door, and the
+    // line drops the note under your hand. The mask holds only what this line actually took
+    // from the track, so every off fired here has an owner of its own to spend.
+    if (trackMidiJustClosed)
+        for (int n = 0; n < numArpLines; ++n)
+        {
+            auto& held = trackHeldByLine[(size_t) n];
+            for (int note = 0; note < 128; ++note)
+                if (held[(size_t) note])
+                {
+                    lines[(size_t) n].in.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                    held[(size_t) note] = false;
+                }
+        }
 
     for (int n = 0; n < numArpLines; ++n)
     {

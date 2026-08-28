@@ -139,9 +139,12 @@ namespace
     void driveTrackMidi(KeysProcessor& p, bool arpKeysOn)
     {
         p.prepareToPlay(44100.0, 512);
+        // arpTrackMidi is the door the *track's* MIDI comes through, and it is off by default
+        // since 2026-08-27; these tests inject at the track input, so they open it explicitly.
+        // arpKeys is still the per-line switch under test.
         call(p, "set_params", args({ { "values", args({
             { "arpOn", true }, { "arpPattern", true }, { "arpRate", "1/16" },
-            { "arpKeys", arpKeysOn } }) } }));
+            { "arpTrackMidi", true }, { "arpKeys", arpKeysOn } }) } }));
 
         const int chans = juce::jmax(1, p.getTotalNumOutputChannels());
         juce::AudioBuffer<float> buf (chans, 512);
