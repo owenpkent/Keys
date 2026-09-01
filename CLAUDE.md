@@ -121,6 +121,15 @@ rather than every-note-to-the-next.
   `LayoutTests` measures the five chips and the readout at both floors by overlap and
   containment, since `takeMod` clamps rather than going negative - the arp bar's own lesson one
   level down.
+- **`docs/MACRO_KNOBS.md` is the design for the harmony strip's second knob row, proposed and
+  unbuilt** (same day, Owen looking at the strip: *"I feel like we could shrink this area so we
+  can add more knobs. What other knobs could we add?"*, then *"document options. accent? target
+  velocity?"*). The room is eight cells at no height cost - the CHANCE row is already a knob row
+  the width of ten - and the file weighs ten candidates: three faces on parameters that exist
+  (STACK, DRIFT, RAMP), five one-parameter features (REPEAT, STRUM, ACCENT, ECHO, CLIMB) and two
+  held back (GLIDE, RANGE). **ACCENT is a target velocity, not a boost, 0 reads Off**, and the
+  reasoning is in the file. Do not describe any of it as shipping, and read it before adding a
+  knob to a card for any other reason: it is where the second-row layout rules are written.
 
 **The track's own MIDI needs an invitation, and an instance can say which one it is
 (2026-08-27/28).** Owen: *"why do I start recording in Ableton? It starts playing in something
