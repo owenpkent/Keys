@@ -205,7 +205,13 @@ public:
             // Appended, never inserted: a per-line parameter's index is what arpParamId names
             // it by and what a saved session stores it under - the genSource rule.
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
-                         juce::String("Legato"), "Legato is the last per-line parameter");
+                         juce::String("Duck"), "Duck is the last per-line parameter, after Follow, after Legato");
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
+                         juce::String("Follow"));
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 3)),
+                         juce::String("Legato"));
+            expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apFollow), juce::String("arp2Follow"));
+            expectEquals(KeysProcessor::arpParamId(3, KeysProcessor::apDuck), juce::String("arp4Duck"));
             expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apLegato), juce::String("arpLegato"));
             expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apLegato), juce::String("arp2Legato"));
             Host h;
@@ -220,6 +226,58 @@ public:
             expect(chance != nullptr, "the Chance parameter still registers under its old id");
             if (chance != nullptr)
                 expect(chance->getName(64).endsWith("Density"), "the host-facing name follows the UI");
+        }
+
+        beginTest("a line cannot follow a letter below it: the rule holds in the processor, not only the UI");
+        {
+            // Both lines lift the same chord off the track and run at the same rate, B an octave
+            // up so the merged output tells them apart. First the legal direction: B follows A
+            // at DUCK 100 and plays only its warm-up step. Then the illegal one: A set to follow
+            // C, which the UI would grey and a host lane can write anyway - the processor hands
+            // A nothing, so A plays every step exactly as B does.
+            const auto runPair = [&](int followerLine, int followValue) -> std::pair<int, int>
+            {
+                Host h;
+                h.processor.prepareToPlay(48000.0, 512);
+                setParam(h.processor, "arpTrackMidi", 1.0f);
+                for (int line : { 0, 1 })
+                {
+                    setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
+                    setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+                }
+                setParam(h.processor, KeysProcessor::arpParamId(1, KeysProcessor::apOctShift), 1.0f);
+                setParam(h.processor, KeysProcessor::arpParamId(followerLine, KeysProcessor::apFollow),
+                         (float) followValue);
+                setParam(h.processor, KeysProcessor::arpParamId(followerLine, KeysProcessor::apDuck), 100.0f);
+
+                juce::AudioBuffer<float> audio(2, 512);
+                juce::MidiBuffer first;
+                first.addEvent(juce::MidiMessage::noteOn(1, 60, 0.8f), 0);
+                h.processor.processBlock(audio, first);
+                int low = 0, high = 0; // A's notes sit under 72, B's on or above it
+                for (int blk = 0; blk < 240; ++blk)
+                {
+                    juce::MidiBuffer none;
+                    h.processor.processBlock(audio, none);
+                    for (const auto meta : none)
+                        if (meta.getMessage().isNoteOn())
+                            (meta.getMessage().getNoteNumber() < 72 ? low : high)++;
+                }
+                return { low, high };
+            };
+
+            // Legal: B follows A (choice index 1 is "From A").
+            {
+                const auto [a, b] = runPair(1, 1);
+                expect(a >= 10, "A ran for the whole test (" + juce::String(a) + " steps)");
+                expect(b <= 1, "B ducked every step but its warm-up (" + juce::String(b) + " played)");
+            }
+            // Illegal: A "follows" C (index 3). Nothing is handed over, so A plays as B does.
+            {
+                const auto [a, b] = runPair(0, 3);
+                expect(a >= 10, "A ran for the whole test");
+                expectWithinAbsoluteError(a, b, 1, "A ducked to a letter below it, which the processor must refuse");
+            }
         }
 
         beginTest("migrateStray dates the session before it decides what absence means");

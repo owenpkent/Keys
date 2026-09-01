@@ -1939,3 +1939,38 @@ what reviewers praise in the third-party tools. No practitioner timing-engine
 claims survived either (one was refuted), so the engine section is first-principles
 plus Serum's documented Anchor model. Open questions logged: swing math consensus,
 tied notes across pattern boundaries, transport-stop policy, Serum 2 gestures.
+
+## Lines that listen to each other
+
+Phase one of `docs/LINE_INTERACTION.md`, built 2026-09-01. The rest of that file is design.
+
+- **`ArpEngine::LineRecord`, one per engine, written as the engine runs.** The steps it fired
+  this block (`firedAt`, one entry per *step* - a ratchet or a chord-shape step is one fire),
+  the running total of fires in every block before this one (`firedBefore`), the walk pass the
+  last fired step was in (`walkPass`, the same function LOCK's era comes from), the Chain lane's
+  own bit as the block left it, the note and velocity the last step landed on, the step length,
+  and whether the line is enabled and holding a chord. **The total rolls over at the top of
+  `process()`, not the end**: a follower running later in the same block reads
+  `firedBefore + this block's firedAt`, so this block's fires must not be in both.
+- **`Params::follow` is a read-only pointer to another line's record, or null.** The `chords`
+  precedent. `runArpLines` hands over only a line that ran *before* this one in its loop
+  (`src < n`), whatever the parameter says - a later letter's record would be last block's, and
+  A ducking to B ducking to A is the loop the rule forbids. That makes the letter order on the
+  bar the signal flow, top to bottom.
+- **DUCK** (`Params::duck`, 0-100) runs in `fireStep` after chain, mute and rest and **before**
+  the chance draw, so a ducked step spends none. The window is a count, not a flag: the source's
+  `firedBefore` plus its fires *at or before this step's offset* (the source ran first, so its
+  record may hold fires later in this block than this step, which have not happened yet from
+  here), compared with the count this line saw at its own previous step. That is what makes the
+  window exact across blocks the follower had no step in - `ArpTests` pins it with a follower
+  whose every step lands a block after the source's. Rolled on Mutate's (step, era) cell with a
+  salt of its own, so LOCK holds the hocket and DUCK and Mutate never draw the same number on
+  one cell. The first step after Follow or DUCK comes up never ducks: `seenValid` is false until
+  a step has looked.
+- **What the record cannot do yet**: Legato's lookahead asks the next step's four questions
+  early and cannot ask about a duck, since the source's next step is not decided; a ducked step
+  under Legato is a gap when the note before it had a gate under 100. Documented, not fixed:
+  running every line's lookahead whether or not Legato is on would change the chance stream of
+  lines with Legato off, which "off is byte-for-byte what it was" forbids.
+- **Every mechanism keeps two rules**, and every phase adds a test for each: signal flows
+  downward, and a source that is off or silent leaves its follower playing as today.

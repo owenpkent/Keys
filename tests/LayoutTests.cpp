@@ -481,7 +481,7 @@ public:
                 juce::Component* row = nullptr;
                 int seen = 0;
                 for (const char* title : { "Macro dot A", "Macro tuplet A", "Macro anchor A",
-                                           "Macro legato A", "Macro details A" })
+                                           "Macro legato A", "Macro follows A", "Macro details A" })
                 {
                     juce::Component* found = nullptr;
                     for (auto* t : targets)
@@ -515,8 +515,26 @@ public:
                                    + button->getButtonText() + "\" which needs "
                                    + juce::String(juce::roundToInt(needed)));
                     }
+                    else if (auto* combo = dynamic_cast<juce::ComboBox*>(found))
+                    {
+                        // A combo shows its longest entry closed, plus a chevron: the Shape
+                        // combo's own measurement, applied to the strip's two.
+                        float longest = 0.0f;
+                        for (int i = 0; i < combo->getNumItems(); ++i)
+                        {
+                            juce::GlyphArrangement ga;
+                            ga.addLineOfText(juce::Font { juce::FontOptions(14.0f) },
+                                             combo->getItemText(i), 0.0f, 0.0f);
+                            longest = juce::jmax(longest, ga.getBoundingBox(0, -1, true).getRight());
+                        }
+                        expect((float) b.getWidth() >= longest + 28.0f,
+                               juce::String(title) + " is " + juce::String(b.getWidth())
+                                   + " px wide at panel " + juce::String(w)
+                                   + ", too narrow for its longest entry, which needs "
+                                   + juce::String(juce::roundToInt(longest + 28.0f)));
+                    }
                 }
-                expectEquals(seen, 5, "the strip lost a chip, or one was renamed");
+                expectEquals(seen, 6, "the strip lost a chip, or one was renamed");
 
                 for (int i = 0; i < chips.size(); ++i)
                     for (int j = i + 1; j < chips.size(); ++j)

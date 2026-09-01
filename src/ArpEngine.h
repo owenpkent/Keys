@@ -370,6 +370,32 @@ public:
         std::array<std::atomic<int>, numSlots> count {};
     };
 
+    // **The line bus** (2026-09-01, Owen: "can we get the arpeggiators to interact with each
+    // other, like the step sequencers, so we can get interesting variations"). What this line
+    // did, written as it runs and readable by the lines that run *after* it in the same block:
+    // runArpLines walks the lines in letter order on the audio thread, so by the time B runs
+    // everything A decided this block is already here. That ordering is the whole mechanism -
+    // the same one arpNoteLines leans on - and it is why a line may only follow a letter above
+    // it (see Params::follow). Per block and recomputed, so a transport jump has nothing to
+    // reconstruct; the one thing that persists is firedBefore, a running count, so a follower
+    // can tell "did the source fire since my last step" across blocks it had no step in.
+    // `firedAt` is one entry per *step*, not per hit: a ratchet or a chord-shape step is one
+    // fire. Design and the rest of the mechanisms over it: docs/LINE_INTERACTION.md.
+    static constexpr int maxStepsPerBlock = 32; // a 9-tuplet 1/64 at 300 bpm in a 4096 buffer is 15
+    struct LineRecord
+    {
+        long long firedBefore = 0;   // steps fired in every block before this one
+        std::array<int, maxStepsPerBlock> firedAt {}; // this block's step fire offsets, in order
+        int firedCount = 0;
+        long long pass = 0;          // the Note lane's walk pass the last fired step was in
+        bool lastStepFired = false;  // the Chain lane's own bit, as this block left it
+        int lastNote = -1;           // the pitch the last fired step landed on
+        int lastVelocity = 0;        // 1..127
+        double stepSamples = 0.0;    // this line's step length, for a clocked follower later
+        bool sounding = false;       // enabled and holding a chord
+    };
+    LineRecord record {};
+
     // Per-step values, editor-writable. Meanings per lane:
     //   note:        0 = follow the direction mode, 1..8 = fixed chord-note index,
     //                -1 = muted step
@@ -681,6 +707,16 @@ public:
         // The slot chords, for the Chord lane. Null means the lane does nothing, which is
         // what every caller that has no slots (the tests) wants.
         const ChordTable* chords = nullptr;
+        // **Who this line listens to** - another line's record, or null for nobody, which is
+        // what every mechanism tests first. The `chords` shape above: a read-only pointer into
+        // something the processor owns. runArpLines hands over only a line that ran *before*
+        // this one (docs/LINE_INTERACTION.md, "signal flows downward"), so a record here is
+        // always this block's, never last block's.
+        const LineRecord* follow = nullptr;
+        // **DUCK**: the odds this step is skipped when the source fired a step since this
+        // line's previous one - the hocket. 0 is off and the default. Rolled on the same
+        // (step, era) cell as Mutate, so LOCK holds an interlock the machine found.
+        int duck = 0;             // 0..100
     };
 
     struct HostClock
@@ -842,6 +878,7 @@ public:
         lastStepFired = false; // a restart has no step before it
         prerollStep = noPreroll;
         nextSkips = false;
+        seenValid = false;
         lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
@@ -877,12 +914,14 @@ public:
         pendingCount = 0;
         setHeldCount(0);
         physicallyHeld = 0;
+        record = LineRecord {};
         stepCounter = 0;
         dirCursor = 0;
         stepBase = 0;
         lastStepFired = false; // a restart has no step before it
         prerollStep = noPreroll;
         nextSkips = false;
+        seenValid = false;
         lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
@@ -913,6 +952,14 @@ public:
             else
                 out.addEvent(m, meta.samplePosition);
         }
+
+        // The bus rolls over here, at the top, and not at the end: a follower running later in
+        // this same block reads firedBefore + this block's firedAt, so this block's fires must
+        // not be in both. `sounding` is read after the input loop, so a chord that arrived in
+        // this block counts.
+        record.firedBefore += record.firedCount;
+        record.firedCount = 0;
+        record.sounding = p.enabled && heldCount > 0;
 
         // Legato switched off mid-hold: what it was holding ends now, at the top of this block,
         // rather than waiting for a step that will never release it with the flag down.
@@ -954,6 +1001,7 @@ public:
         const double beatsPerSample = bpm / 60.0 / sr;
         const double stepBeats = stepLengthBeats(p);
         const double blockBeats = beatsPerSample * numSamples;
+        record.stepSamples = stepBeats / beatsPerSample;
 
         // Position in beats at the start of this block. Hz mode never takes the anchored
         // branch: following the bar grid is the one thing a free-running rate cannot do.
@@ -1127,6 +1175,7 @@ public:
         // on time instead of hanging until the next flush.
         retireDue(numSamples - 1, out);
         advanceBlock(numSamples);
+        record.lastStepFired = lastStepFired; // as this block leaves it, for a follower's Chain lane
 
         // How long this chord has been up, which is what the velocity ramp rides on. It
         // counts beats rather than seconds so a ramp written at one tempo means the same
@@ -1336,24 +1385,11 @@ private:
     void mutateCell(const Params& p, long long globalStep, int& stepOut, long long& eraOut) const noexcept
     {
         const auto sh = lanes.shapeOf(laneNote);
-        const int len = juce::jlimit(1, maxSteps, sh.len);
-        int from = juce::jlimit(0, len - 1, sh.loopFrom);
-        int to = juce::jlimit(0, len - 1, sh.loopTo);
-        if (to < from)
-            std::swap(from, to);
-        const int span = juce::jmax(1, to - from + 1);
-
-        // **Counted in lane cells, not raw steps.** Both of these used to come off `rel`
-        // directly, which is only the same thing while the lane runs at x1 with no Offset:
-        // at Speed x2 one pass of an eight-step window takes sixteen raw steps, so the era
-        // advanced twice per pass and a "locked" variation audibly changed halfway round the
-        // loop - the opposite of what the comment above promises. `k` is laneStepIndex's own
-        // walk position (divider first, then Offset, exactly as it orders them), and the step
-        // is the cell that function actually reads, so a stored variation belongs to the cell
-        // it is drawn on rather than to a raw step index that drifts away from it.
         const long long rel = globalStep - stepBase;
-        const long long k = (rel >> juce::jlimit(0, 2, sh.div)) + p.offset;
-        const long long pass = (k >= 0 ? k : k - span + 1) / span;
+        // The pass is walkPass's - one function since 2026-09-01, because the line bus publishes
+        // the same number for a follower's RESET to watch, and two copies of "where does a
+        // pass begin" would be two answers.
+        const long long pass = walkPass(p, globalStep);
         const int lock = juce::jlimit(0, 100, p.mutateLock);
         // 0 -> a new era every pass; 99 -> one every ~62; 100 -> one era, ever.
         eraOut = lock >= 100 ? 0 : pass / (1 + (long long) lock * lock / 160);
@@ -1687,6 +1723,29 @@ private:
             if (hi > lo)
                 noteVal = lo + (int) (rng() % (unsigned) (hi - lo + 1));
         }
+        // **DUCK** (2026-09-01): skip this step if the line we follow fired a step since our
+        // previous one. Counted, not flagged, so the window is exact across blocks this line
+        // had no step in: the source's running total at the top of the block plus the fires it
+        // has made so far *at or before this offset* - the source ran first, so its record may
+        // hold fires later in this block than this step, and those have not happened yet from
+        // here. Before the chance draw, like the chain condition: a ducked step did not happen
+        // and must not spend a draw. The first step after Follow or DUCK comes up never ducks
+        // (there is no "since my last step" yet), which is one step of warm-up and no more.
+        if (p.follow != nullptr && p.duck > 0)
+        {
+            const long long seenNow = p.follow->firedBefore + countAtOrBefore(*p.follow, offset);
+            const bool sourceFired = seenValid && seenNow > seenAtMyLastStep;
+            seenAtMyLastStep = seenNow;
+            seenValid = true;
+            if (sourceFired && rollsCell(p, globalStep, p.duck, duckSalt))
+            {
+                lastStepFired = false;
+                return;
+            }
+        }
+        else
+            seenValid = false;
+
         if (chanceFails(p, globalStep))
         {
             lastStepFired = false;
@@ -1713,6 +1772,12 @@ private:
         buildSequence(p);
         if (seqCount == 0)
             return;
+
+        // On the bus: this step fired. After the empty-sequence return above, since a step that
+        // sounds nothing is not something a follower should duck to.
+        record.pass = walkPass(p, globalStep);
+        if (record.firedCount < maxStepsPerBlock)
+            record.firedAt[(size_t) record.firedCount++] = offset;
 
         // Which sequence entries this step plays. One, normally. All of them on the Chord
         // shape, which is what makes it a comping engine rather than a walk order - a fixed
@@ -2149,6 +2214,11 @@ private:
                 // release lands just after this note-on, so the two overlap by a sample and a
                 // synth in legato mode glides across the join instead of restarting.
                 const bool closeHeld = r == 0 && k == 0;
+                if (closeHeld) // the step's first hit is what the bus calls "the note it landed on"
+                {
+                    record.lastNote = note;
+                    record.lastVelocity = juce::jmax(1, juce::roundToInt(vel * 127.0f));
+                }
                 if (on < numSamples)
                     emitHit(note, hit.chan, vel, on, durSamples, numSamples, out, hold, closeHeld);
                 else if (pendingCount < maxPending)
@@ -2352,6 +2422,59 @@ private:
     long long prerollStep = noPreroll;
     bool prerollFails = false;
     bool nextSkips = false;
+
+    // **DUCK's window** (2026-09-01): the source's fire count as this line last saw it at one of
+    // its own steps. `seenValid` is false until a step has looked, so the first step after
+    // Follow or DUCK comes up compares against nothing and never ducks.
+    long long seenAtMyLastStep = 0;
+    bool seenValid = false;
+    static constexpr unsigned int duckSalt = 0x9E3779B9u; // so DUCK and Mutate never roll the same number on one cell
+
+    // Which pass of the Note lane's walk window `globalStep` is in. **Counted in lane cells,
+    // not raw steps.** This used to live inside mutateCell and came off `rel` directly, which
+    // is only the same thing while the lane runs at x1 with no Offset: at Speed x2 one pass of
+    // an eight-step window takes sixteen raw steps, so the era advanced twice per pass and a
+    // "locked" variation audibly changed halfway round the loop. `k` is laneStepIndex's own
+    // walk position (divider first, then Offset, exactly as it orders them). Since 2026-09-01
+    // it is also what the line bus publishes as `record.pass`, so LOCK's era and a follower's
+    // RESET measure a pass the same way.
+    long long walkPass(const Params& p, long long globalStep) const noexcept
+    {
+        const auto sh = lanes.shapeOf(laneNote);
+        const int len = juce::jlimit(1, maxSteps, sh.len);
+        int from = juce::jlimit(0, len - 1, sh.loopFrom);
+        int to = juce::jlimit(0, len - 1, sh.loopTo);
+        if (to < from)
+            std::swap(from, to);
+        const int span = juce::jmax(1, to - from + 1);
+        const long long rel = globalStep - stepBase;
+        const long long k = (rel >> juce::jlimit(0, 2, sh.div)) + p.offset;
+        return (k >= 0 ? k : k - span + 1) / span;
+    }
+
+    // A percentage roll on this step's (step, era) cell - Mutate's own cell, so LOCK holds the
+    // answer - salted so two rolls on one cell are two numbers.
+    bool rollsCell(const Params& p, long long globalStep, int pct, unsigned int salt) const noexcept
+    {
+        int step; long long era;
+        mutateCell(p, globalStep, step, era);
+        const unsigned int h = hash32((unsigned int) step * 2654435761u
+                                      ^ (unsigned int) (era * 40503u)
+                                      ^ (unsigned int) (p.mutateSeed * 2246822519u)
+                                      ^ salt);
+        return (int) (h % 100u) < juce::jlimit(0, 100, pct);
+    }
+
+    // How many of the source's fires this block landed at or before `offset` - the ones that
+    // have happened from the point of view of a step at that offset.
+    static int countAtOrBefore(const LineRecord& r, int offset) noexcept
+    {
+        int n = 0;
+        for (int i = 0; i < r.firedCount; ++i)
+            if (r.firedAt[(size_t) i] <= offset)
+                ++n;
+        return n;
+    }
 
     // The step's chance draw, or the one made ahead of it by prerollNext when Legato is on.
     bool chanceFails(const Params& p, long long globalStep)

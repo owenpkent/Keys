@@ -691,6 +691,20 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // bottom strip beside Dot, Tuplet and Anchor: a per-line switch you flip while listening.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Legato"), 1 },
                                                     nm + " Legato", false));
+
+    // **The line bus, phase one** (2026-09-01, Owen: "can we get the arpeggiators to interact
+    // with each other, like the step sequencers, so we can get interesting variations").
+    // Follow names the line this one listens to; Duck is the hocket - how often this line skips
+    // a step when the line it follows just played one. Four lines, one source each, and only a
+    // letter above this one: runArpLines hands the engine nothing for any other value, so a host
+    // lane or a script writing "From C" into line B gets a line that follows nobody rather than
+    // one that reads last block's record. Both default off, which is four lines exactly as deaf
+    // to each other as they were. The rest of the mechanisms - Reset, Neighbour, Clock - are
+    // designed in docs/LINE_INTERACTION.md and not built.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Follow"), 1 }, nm + " Follow",
+                                                      followChoices(), 0));
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Duck"), 1 },
+                                                   nm + " Duck", 0, 100, 0));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -796,7 +810,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
         "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
-        "Stray", "Legato"
+        "Stray", "Legato", "Follow", "Duck"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -2417,6 +2431,15 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
         ap.stray = (int) arpParam(n, apStray);
         ap.legato = arpParam(n, apLegato) > 0.5f;
+        // The line bus: a record is handed over only for a line that ran *before* this one in
+        // this loop, whatever the parameter says. A later letter's record would be last block's,
+        // and A ducking to B ducking to A is the loop the downward rule exists to forbid. The UI
+        // greys the letters it may not pick; this is the rule for everything that is not the UI.
+        {
+            const int src = (int) arpParam(n, apFollow) - 1;
+            ap.follow = (src >= 0 && src < n) ? &lines[(size_t) src].engine.record : nullptr;
+            ap.duck = (int) arpParam(n, apDuck);
+        }
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;

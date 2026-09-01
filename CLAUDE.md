@@ -74,6 +74,54 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**The lines can hear each other, phase one: the bus, From, and DUCK (2026-09-01, later the same
+day).** Owen: *"can we get the arpeggiators to interact with each other, like the step sequencers,
+so we can get interesting variations"*, then *"just plan it out"*, then *"start"*. The design and
+the plan are `docs/LINE_INTERACTION.md`; this is what phase one actually did and where it
+departed from the plan.
+
+- **`ArpEngine::LineRecord`, written by each engine as it runs, read by the lines that run after
+  it.** `runArpLines` walks the lines in letter order on the audio thread - the same fact
+  `arpNoteLines` leans on - so by the time B runs, everything A decided this block is on A's
+  record: the steps it fired (one per *step*, not per hit), its running total, the walk pass, the
+  Chain bit, the note it landed on. `Params::follow` is a read-only pointer to it, the `chords`
+  shape. **`runArpLines` hands over only a line that ran before this one, whatever the parameter
+  says** - a host lane or a script can write any index, and a later letter's record would be
+  last block's, which is the loop the downward rule exists to forbid. The UI greys the letters;
+  the processor is the rule. **The total rolls over at the top of `process()`, not the end**, or
+  a follower would count this block's fires twice.
+- **`arpFollow` (Off / From A / From B / From C) and `arpDuck` (0-100), appended after `apLegato`,
+  both default off. PARAMETER LAYOUT CHANGE.** DUCK runs in `fireStep` after chain, mute and
+  rest and **before** the chance draw, so a ducked step spends none - the chain condition's own
+  rule. **The window is a count, not a flag**: the source's `firedBefore` plus its fires *at or
+  before this offset*, against what this line saw at its own previous step, which is what makes
+  it exact across blocks the follower had no step in; `ArpTests` pins that with a follower whose
+  every step lands a block late. Rolled on Mutate's (step, era) cell with a salt of its own, so
+  **LOCK holds the hocket** and the two never draw one number. The first step after From or DUCK
+  comes up never ducks - `seenValid` - which is one step of warm-up and the tests all skip it.
+- **Both controls moved home before they were built, and the reason is the deep page's floor.**
+  The plan put From beside Retrigger and Duck beside Drift; the band is exactly full at
+  `arpDeepPageMinW` (970) - PLAYBACK's two rows spend every pixel, and FEEL's five sliders are
+  already at their 120 px floor - so either home meant raising that floor and re-weighting the
+  groups. The card had the room: its floor is the bottom strip's 598 px, and eleven knobs need
+  486, so **DUCK is the eleventh knob, beside DENSITY, at no cost**, and **From is the sixth chip
+  on the strip**, which is what moved the detached Arp window's floor to 1288 (from 1108) and
+  nothing else. Next to the knob it enables is the better home anyway. `followChoices()` is
+  worded "From A" because the strip has no caption to say what a bare letter means, and every
+  entry the parameter can hold is in the list - the attachment maps index to item - with the
+  letters this line may not pick **greyed in place**; line A opens to Off and three greyed rows.
+  DUCK is live on line A's card too, since nothing on a card is ever disabled; the From chip is
+  what says whether it is doing anything.
+- **Legato cannot foresee a duck**, and it is written down rather than fixed: the lookahead asks
+  the next step's four questions early, and the source's next step is not decided yet. A ducked
+  step under Legato is a gap when the note before had a gate under 100. The fix - every line's
+  lookahead running whether or not Legato is on - would change the chance stream of lines with
+  Legato off, and "off is byte-for-byte what it was" is the older promise.
+- **`get_state` reports `follows`**, the letter *in effect* or empty - empty for a value naming a
+  letter at or below the line, because that is what the processor does with it. `StateTests`
+  pins the downward rule at the processor level with two lines on one chord: B following A at
+  DUCK 100 plays only its warm-up step; A "following" C plays every step B does.
+
 **A line can be thinned from its card, and a thinned line can hold through the gaps
 (2026-09-01).** Owen: *"a density knob where it controls, like, how much notes there are, and also
 a legato button. So when the density is lower or a note is skipped, it continues nicely"* - then,
@@ -2571,6 +2619,16 @@ is the polyrhythm dividers and the undertone series; **MatrixBrute** has ties an
 and the source of `docs/ACID_DESIGN.md` (added 2026-08-16, proposed and unbuilt).
 `docs/REFERENCES.md` ranks the three unbuilt ideas worth having.
 
+**`docs/LINE_INTERACTION.md` is the design for the four lines listening to each other; its bus,
+From and DUCK are built, everything from RESET on is proposed and unbuilt** (2026-09-01, Owen: *"can we get the arpeggiators to interact with each other, like
+the step sequencers, so we can get interesting variations"*). One piece of plumbing - a per-line
+record written in letter order on the audio thread and readable by the lines that run after it,
+the same ordering `arpNoteLines` already leans on - and eight mechanisms over it: DUCK (the
+hocket), NEIGHBOUR (the Chain lane reading another line), RESET, CLOCK, SHADOW, LOCK SYNC,
+HANDOVER (deferred: it needs a runtime state beside On) and VEL FOLLOW. Two rules every one of
+them keeps: **signal flows downward, A to D, so nothing can loop**, and **a source that is off
+or silent leaves its follower playing as today**. Do not describe any of it as shipping.
+
 **Eleven more arrived 2026-08-17** (Owen: "get the manuals. wide research") and they are surveyed
 in `docs/SEQUENCER_LANDSCAPE.md`, not here: REFERENCES.md is the record of what Keys **took** from
 a manual, and nothing has been taken from these yet. That file is the layer above it - the map of
@@ -2678,14 +2736,16 @@ Four things will bite otherwise:
   `juce::Button` and does offer an InvokePattern, but it is **disabled on every shape but Random
   Once**, and a disabled control is absent from the UIA tree entirely, so "element not found" is
   the expected answer there rather than evidence it is missing),
-  `Macro dot A` / `Macro tuplet A` / `Macro anchor A` / `Macro legato A` (the last from
-  2026-09-01; `Macro trip A` until 2026-08-03, when
+  `Macro dot A` / `Macro tuplet A` / `Macro anchor A` / `Macro legato A` / `Macro follows A` (the
+  last two from 2026-09-01 - the From chip is a combo, so it is also reachable by its current text,
+  "Off" or "From A"; `Macro trip A` until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
   first-match caveat), and `Macro OCT A` / `Macro GATE A` /
-  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **ten from 2026-09-01**, when
+  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **eleven from 2026-09-01**, when
   `Macro DENSITY A` joined the row between GATE and MUTATE (it is `arpChance`, the Play page's
-  slider, under the name it reads as on a card); nine from 2026-08-21, when
+  slider, under the name it reads as on a card) and, later that day, `Macro DUCK A` beside it;
+  nine from 2026-08-21, when
   `Macro STRAY A` joined the row between MUTATE and LOCK. It was eight from 2026-08-18:
   `Macro H.VEL A` retired on 2026-08-17 when Humanize Velocity folded into VEL's own ring (see
   the RangeKnob bullet above), and `Macro CHANCE A` was replaced the next day by `Macro MUTATE A`
