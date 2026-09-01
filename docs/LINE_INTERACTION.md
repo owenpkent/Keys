@@ -233,3 +233,187 @@ afternoon. G waits on a state design.
 What every mechanism keeps: **a line off or silent leaves its followers playing as today**, and
 **signal flows downward, A to D**. Break either and the four lines stop being four instruments
 you can reason about one at a time.
+
+---
+
+## 6. Build plan
+
+Owen: *"just plan it out."* Four phases, each a PR of its own, in the order section 5
+recommends. Every anchor below is a real line in the code on 2026-09-01; they will drift, the
+shapes will not.
+
+### Phase 0 - the bus, and the picker (no audible change)
+
+**Engine, `src/ArpEngine.h`.**
+
+- A public POD the engine writes about itself every block:
+
+  ```cpp
+  struct LineRecord
+  {
+      long long firedBefore;        // steps fired in every block before this one
+      int       firedAt[maxStepsPerBlock]; // this block's step fire offsets, in order
+      int       firedCount;
+      long long pass;               // the Note lane's walk pass this step is in
+      bool      lastStepFired;      // the Chain lane's own bit, published
+      int       lastNote;           // -1 until a step has sounded
+      int       lastVelocity;       // 1..127
+      double    stepSamples;        // the source's step length, for CLOCK's gate later
+      bool      sounding;           // enabled and holding a chord
+  };
+  LineRecord record {};
+  ```
+
+  `firedAt` is **one entry per step, not per hit**: a ratcheted or chord-shape step is one
+  fire. `maxStepsPerBlock` is a small constant (16 covers a 1/64 at 300 bpm in a 4096 buffer)
+  and the array is fixed, so the audio thread allocates nothing.
+- `process()` zeroes `firedAt`/`firedCount` at the top and sets `record.sounding`. `fireStep`
+  writes `firedAt` where it publishes `uiRelStep` today (one line above the `fireStep` call in
+  the step loop is the cleaner spot, since a step the chord could not fill is not a fire: write
+  it where `lastStepFired = true` is set). `lastNote` / `lastVelocity` are written beside the
+  first `emitHit` of the step. `firedBefore += firedCount` in `advanceBlock`.
+- `pass` comes from the expression `mutateCell` already computes (`ArpEngine.h:1336`, the
+  `pass` local at ~:1350). Factor it into `long long walkPass(const Params&, long long
+  globalStep) const` and call it from both, so LOCK's era and the bus's pass can never disagree
+  about where a pass begins.
+- `Params::follow`, `const LineRecord* follow = nullptr;` - the `chords` precedent at
+  `ArpEngine.h:683`: null means nobody, and every mechanism tests it.
+- `restart()` and `hardReset()` zero the record.
+
+**Processor, `src/PluginProcessor.cpp`.**
+
+- `arpFollow`, appended (after whatever is last on the day - `apLegato` today): a choice
+  parameter, list `Off / A / B / C`, default Off. **Append-only forever** once a session stores
+  an index into it; D is not on it because nothing runs after D.
+- In `runArpLines`' main loop (`:2329`), where `ap` is built (`:2391`):
+  ```cpp
+  const int src = (int) arpParam(n, apFollow) - 1;
+  ap.follow = (src >= 0 && src < n) ? &lines[(size_t) src].engine.record : nullptr;
+  ```
+  **`src < n` is enforced here, not only in the UI**: an MCP client or a host automation lane
+  can write any index, and a line reading a later letter's record would read last block's,
+  which is the loop the rule exists to forbid. Silently nobody, and `get_state` says so.
+- `get_state` (`src/mcp/KeysMcp.cpp:358`): `follows` (the letter or `""`) beside
+  `soundingNoteCount`, and `sounding` from the record.
+
+**UI, `src/ui/ArpPanel.cpp`.**
+
+- The picker is a combo on the Play page's PLAYBACK row A, beside Retrigger. **Reserve its
+  cell off the right first** (the comment at `:4380` already says why: Retrigger is the elastic
+  one with a 120 px floor, Play's 64 px cell is taken first for that reason, and this is a
+  second fixed cell taken the same way). Caption `Follows`, entries only the letters above this
+  line - on line A it shows `Off` greyed. `LayoutTests`' starvation sweep at `arpDeepPageMinW`
+  (970) is the check; if Retrigger drops under its floor there, the floor rises.
+- The card says who it listens to: a small `< A` in the source's own colour at the left end of
+  the caption strip whose right end draws `LINE B` (`:2649`; the deep view's twin at `:4126`).
+  First time one line's colour appears on another's card, and it means exactly this.
+- Accessible names: `Arp follows` on the page.
+
+**Tests.** `tests/ArpTests.cpp` gains its first two-engine block: run A then B in the same
+"block" (two `process` calls on two engines), B with `p.follow = &a.record`, and assert the
+record says what A's events say - `firedCount` and offsets against `collect(outA)`, `lastNote`
+against the last note-on, `pass` stepping once per walk length, `firedBefore` accumulating
+across three blocks of uneven size. `tests/StateTests.cpp`: `arpFollow` appended last, Off by
+default, and a value naming a *later* letter leaves `follow` null (a processor-level test, the
+`processBlock` shape at `StateTests.cpp:854`).
+
+**Cost.** A day, with the tests. Ships inside Phase 1's PR - a bus nobody reads is not a
+release.
+
+### Phase 1 - DUCK
+
+- `arpDuck`, appended, int 0-100, default 0. `Params::duck`.
+- In `fireStep`, after the rest test and **before** `chanceFails`:
+  ```cpp
+  if (p.follow != nullptr && p.duck > 0)
+  {
+      const long long seenNow = p.follow->firedBefore + countAtOrBefore(*p.follow, offset);
+      const bool sourceFired = seenNow > seenAtMyLastStep;
+      seenAtMyLastStep = seenNow;
+      if (sourceFired && rollsCell(p, globalStep, p.duck)) { lastStepFired = false; return; }
+  }
+  ```
+  `countAtOrBefore` counts the source's `firedAt` entries at or before this step's offset -
+  the source ran first, so its record may hold fires *later* in this block than this step,
+  and those have not happened yet from here. `firedBefore` is what makes the window exact
+  across blocks the follower had no step in. `seenAtMyLastStep` is one `long long` of state,
+  zeroed in `restart()`/`hardReset()`. `rollsCell` is the (step, era) hash Mutate and Stray
+  roll on, so **LOCK holds the hocket**.
+- Before `chanceFails` on purpose: a ducked step must not spend a chance draw, the same rule the
+  chain condition states at the top of `fireStep`.
+- `prerollNext` (Legato's lookahead) does **not** ask about ducking - the source's next step is
+  not decided yet. Documented limit; tooltip says "a ducked step is a gap under Legato when the
+  note before it had a gate under 100".
+- UI: a `bar()` slider **Duck** in the Play page's FEEL group beside Drift for now (`:3140` is
+  Drift's), and a cell on the card's second row when `docs/MACRO_KNOBS.md` is built. Not a chip:
+  it is an amount.
+- Tests: equal rates, Chance lane on A silencing steps 1 and 3, DUCK 100 - B fires exactly
+  where A did not; DUCK 0 byte-identical; unequal rates (A at 1/16, B at 1/8) - B ducks the step
+  after any window with an A hit in it; LOCK 100 holds the same hocket across two passes;
+  source off - B plays as today.
+- Docs: CHANGELOG (**PARAMETER LAYOUT CHANGE**, two parameters), CONTROLS.md rows for Follows
+  and Duck, ARP_DESIGN.md a "Lines that listen" section, CLAUDE.md the round's bullet.
+- **PR 1 = Phase 0 + Phase 1.** Two days.
+
+### Phase 2 - RESET and NEIGHBOUR
+
+- **RESET.** `arpResetFollow`, appended, bool, default off. `Params::resetFollow`. In the step
+  loop in `process()`, immediately before `if (pendingRetrig)`:
+  ```cpp
+  if (p.resetFollow && p.follow != nullptr && p.follow->pass != seenSourcePass)
+  {
+      seenSourcePass = p.follow->pass;
+      pendingRetrig = true;
+  }
+  ```
+  so a reset *is* a Retrigger restart (`stepBase = stepIndex; dirCursor = 0;`) and Launch
+  Quantize, Offset and every lane see the restart they already understand. `seenSourcePass` is
+  initialised to the source's pass on the first block it is read, not to zero, or switching
+  RESET on resets the line at once. A step late at worst when both lines land in one block
+  with the follower's offset before the source's; equal-rate anchored lines share offsets, and
+  the source ran first.
+  UI: a chip on the card's bottom strip after Legato, on-screen word `Reset`, accessible name
+  `Macro reset follow A`. `arpMacroModsW` grows by a cell and a gap (76 + 8), which the docked
+  card's 614 px still holds (584 needed); the detached floor rises to what the arithmetic says.
+  Tests: seven against sixteen, RESET on - B's step 1 coincides with A's step 1 every sixteen
+  steps for four passes; RESET off - they drift exactly as today; switching RESET on mid-run
+  does not reset.
+- **NEIGHBOUR.** `laneRanges[laneChain]` `{0, 2}` -> `{0, 4}` (`ArpEngine.h:135`); lane data,
+  no parameter, an old session's 0-2 unchanged. In `fireStep`'s chain test and in
+  `prerollNext` (both, or Legato's lookahead disagrees with the step): `3` is
+  `p.follow ? p.follow->lastStepFired : true`, `4` its negation, and with no source both read
+  as `0`. `LaneGrid::cellText` (`:299`) keeps digits - a cell is too narrow for a word - and the
+  tooltip at `:3238` grows two clauses. The lane's tab dot already lights for any non-default
+  value.
+  Tests: two engines, A's Chance lane alternating, B's Chain lane all 3 - B fires only after
+  A's fires; all 4 - only after A's skips; source off - every step.
+- **PR 2 = Phase 2.** A day and a half.
+
+### Phase 3 - CLOCK
+
+- `arpClockFollow`, appended, bool, default off. `Params::clockFollow`. The record already
+  carries `stepSamples`.
+- In `process()`, the step loop is bypassed when `clockFollow && follow != nullptr`: for each
+  `follow->firedAt[i]`, `stepIndex = follow->firedBefore + i` (the `firedCountBefore` shape the
+  dividers use), then the same retrigger handling, `firePendingBefore(offset, ...)`, the
+  `uiRelStep` publish and `fireStep(p, stepIndex, offset, follow->stepSamples, ...)`. Swing and
+  the Late lane are the source's, since the offsets are the source's; this line's Rate, Swing,
+  Dot, Tuplet and Anchor are greyed on the card and the page (`refreshRateMode`'s greying
+  already answers a question of this shape for Hz).
+- With no source, or a silent one: no steps. That is what a sequencer without a clock is.
+- Tests: B advances one lane cell per A fire; A's ratchets do not double-step B; A silent, B
+  silent; B's gate at 50 % is half of A's step, not B's own rate.
+- **PR 3 = Phase 3.** Two to three days. Build after PR 1 has been played with.
+
+### Later, in this order
+
+SHADOW (a day; listen first - it is the one that changes pitches), LOCK SYNC (an afternoon,
+global), VEL FOLLOW (half a day), HANDOVER (needs the runtime-state design; write that up
+before any code).
+
+### What every phase repeats
+
+Append the parameter, default off, flag **PARAMETER LAYOUT CHANGE** in the changelog; a
+`StateTests` line that the parameter is last and off; the accessible name in CLAUDE.md's
+screenshots section; the rule that **a source off or silent leaves the follower as today**
+pinned by a test in every phase, because it is the rule most easily broken by the next one.
