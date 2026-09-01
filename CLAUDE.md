@@ -2571,6 +2571,16 @@ is the polyrhythm dividers and the undertone series; **MatrixBrute** has ties an
 and the source of `docs/ACID_DESIGN.md` (added 2026-08-16, proposed and unbuilt).
 `docs/REFERENCES.md` ranks the three unbuilt ideas worth having.
 
+**`docs/LINE_INTERACTION.md` is the design for the four lines listening to each other, proposed
+and unbuilt** (2026-09-01, Owen: *"can we get the arpeggiators to interact with each other, like
+the step sequencers, so we can get interesting variations"*). One piece of plumbing - a per-line
+record written in letter order on the audio thread and readable by the lines that run after it,
+the same ordering `arpNoteLines` already leans on - and eight mechanisms over it: DUCK (the
+hocket), NEIGHBOUR (the Chain lane reading another line), RESET, CLOCK, SHADOW, LOCK SYNC,
+HANDOVER (deferred: it needs a runtime state beside On) and VEL FOLLOW. Two rules every one of
+them keeps: **signal flows downward, A to D, so nothing can loop**, and **a source that is off
+or silent leaves its follower playing as today**. Do not describe any of it as shipping.
+
 **Eleven more arrived 2026-08-17** (Owen: "get the manuals. wide research") and they are surveyed
 in `docs/SEQUENCER_LANDSCAPE.md`, not here: REFERENCES.md is the record of what Keys **took** from
 a manual, and nothing has been taken from these yet. That file is the layer above it - the map of
