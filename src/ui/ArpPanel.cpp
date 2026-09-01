@@ -94,12 +94,14 @@ namespace
     constexpr int arpMacroModTuplet = 92;
     constexpr int arpMacroModAnchor = 84;
     constexpr int arpMacroModLegato = 84; // "Legato" is "Anchor"'s length: the same cell
+    constexpr int arpMacroModFollows = 82; // "From C" plus a chevron, measured in LayoutTests
     constexpr int arpMacroModDetails = 76;
     constexpr int arpMacroModGap = 8;
     constexpr int arpMacroChordW = 64;    // the held-chord readout; ellipsises gracefully
     constexpr int arpMacroChordGap = 6;
     constexpr int arpMacroModsW = arpMacroModDot + arpMacroModTuplet + arpMacroModAnchor
-                                + arpMacroModLegato + arpMacroModDetails + 5 * arpMacroModGap
+                                + arpMacroModLegato + arpMacroModFollows + arpMacroModDetails
+                                + 6 * arpMacroModGap
                                 + arpMacroChordGap + arpMacroChordW;
     // What the *deep* pages need, which is more than the macro view (2026-08-21). Measured
     // rather than derived, and honestly so: the band groups share the width by weight and the
@@ -1816,6 +1818,14 @@ namespace
           "How many of this line's steps actually play. At 100 every step fires; turn it down "
           "and steps drop out at random, thinning the run. Multiplies the Chance lane. With "
           "LEGATO on, the note before a dropped step holds through it instead of leaving a gap." },
+        // DUCK (2026-09-01): the first knob of the line bus - see the Knob enum for why it is
+        // here and not on the Play page. Live on every card, line A included, rather than greyed
+        // when there is nothing to follow: the card's rule is that nothing on it is ever
+        // disabled, and the From chip below says whether it is doing anything.
+        { KeysProcessor::apDuck, "DUCK",
+          "How often this line skips a step right after the line it follows played one - the "
+          "hocket: where that line plays, this one leaves the gap. Pick the line with From on "
+          "the strip below. At 0, or with From off, nothing changes. LOCK holds what it finds." },
         // MUTATE and LOCK replaced CHANCE here on 2026-08-18 (Owen: "explore the chance knob
         // being a drift instead where it explores other patterns and notes... could be multiple
         // knobs. want notes. mutations"). Chance lost nothing by it: it is still a step lane and
@@ -2050,6 +2060,21 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                             "fires; this only fills the gaps.");
     addAndMakeVisible(legatoButton);
     legatoAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apLegato), legatoButton);
+
+    // From: who this line listens to (2026-09-01, the line bus). Every entry the parameter can
+    // hold is in the list - the attachment maps index to item - and the ones this line may not
+    // pick are greyed in place: item 2 is A, item 3 is B, item 4 is C, and a line may only
+    // follow a letter above it, which the processor enforces as well (see runArpLines).
+    followsBox.addItemList(KeysProcessor::followChoices(), 1);
+    for (int src = 0; src < 3; ++src)
+        followsBox.setItemEnabled(src + 2, src < line);
+    followsBox.setTitle("Macro follows " + letter);
+    followsBox.setTooltip("Which line this one listens to - only a letter above it, so nothing "
+                          "can loop. What it does with what it hears is DUCK, on the knob strip. "
+                          "A line that is off or silent leaves this one playing as if it followed "
+                          "nobody." + juce::String(line == 0 ? " Line A has nothing above it." : ""));
+    addAndMakeVisible(followsBox);
+    followsAtt = std::make_unique<ComboAtt>(processor.apvts, id(KeysProcessor::apFollow), followsBox);
 
     // Opens this line's own detailed view - the band, and the step editor once Shape is
     // Pattern. With the A/B tabs gone as navigation (they are the section bar's On switches
@@ -2854,6 +2879,7 @@ void ArpPanel::MacroRow::resized()
     tupletBox.setBounds(takeMod(arpMacroModTuplet));
     anchorButton.setBounds(takeMod(arpMacroModAnchor));
     legatoButton.setBounds(takeMod(arpMacroModLegato));
+    followsBox.setBounds(takeMod(arpMacroModFollows));
     detailsButton.setBounds(takeMod(arpMacroModDetails));
 }
 

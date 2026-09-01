@@ -5,6 +5,43 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the line bus - a line can follow another, and DUCK is the first thing it does with it
+
+**PARAMETER LAYOUT CHANGE.** `arpFollow` (Off / From A / From B / From C) and `arpDuck` (0-100)
+are appended per line, both default **off** - four lines exactly as deaf to each other as they
+were, so every saved session opens as it was saved.
+
+Owen: *"can we get the arpeggiators to interact with each other, like the step sequencers, so we
+can get interesting variations."*
+
+The four lines run in letter order every block, and until now nothing a line did was visible to
+the next one. Each line now writes a small record as it runs - the steps it fired this block, its
+running total, the note it landed on, whether its last step sounded, which pass of its walk it is
+on - and a line may read the record of a line **above** it. **Signal flows downward, A to D, so
+nothing can loop**, and the processor enforces that whatever the parameter says: a host lane
+writing "From C" into line B gets a line that follows nobody, not one reading last block's record.
+**A source that is off or silent leaves its follower playing exactly as today.**
+
+**From** is a chip on each card's bottom strip beside Legato: Off, or a letter above this line;
+the letters it may not pick are greyed in the popup rather than missing, since the attachment
+maps index to entry. **DUCK** is the eleventh knob on the card, beside DENSITY: how often this line
+skips a step right after the line it follows played one - the hocket. Two Up runs on one chord
+become one interlocking part that neither is playing. The window is exact across blocks the
+follower had no step in, the roll is made on Mutate's own cell so **LOCK holds an interlock the
+machine found**, and a ducked step spends no chance draw, the chain condition's own rule. The
+first step after From or DUCK comes up never ducks: there is no "since my last step" yet.
+
+**Both moved home before they were built.** The design put From beside Retrigger and Duck beside
+Drift on the Play page, and the band is exactly full at its floor - PLAYBACK's two rows and FEEL's
+five sliders spend every pixel at 970 - where the card's floor is its bottom strip's 598 px and
+the knob strip needs 486 of that for eleven, so the eleventh cell and the sixth chip were free.
+The detached Arp window's minimum width is 1288 px, from 1108, for the chip.
+
+**One honest limit.** Legato's one-step lookahead cannot foresee a duck, since the source's next
+step is not decided yet, so a ducked step under Legato is a gap when the note before it had a
+gate under 100. `get_state` reports `follows`, the letter in effect or empty. Reset, Neighbour and
+Clock are designed in `docs/LINE_INTERACTION.md` and not built.
+
 ### Added: a Legato switch on every arp line
 
 **PARAMETER LAYOUT CHANGE.** `arpLegato` (and `arp2Legato`, `arp3Legato`, `arp4Legato`) is

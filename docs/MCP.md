@@ -183,6 +183,10 @@ notes coming from" - a question this API could not answer at all until 2026-08-2
 - **`heldChord` is only the chord that was *handed* to the line.** A line audibly
   arpeggiating played notes reads as holding nothing, and that is correct rather
   than a fault. Only `hold_arp_chord`, a chord card, or a slot launch fills it.
+- **`follows`** (2026-09-01) is the letter of the line this one listens to, or empty - empty
+  also when the parameter names a letter at or below the line, since the processor hands the
+  engine nothing for those and the answer here is what is in effect. See
+  `docs/LINE_INTERACTION.md`.
 - **`soundingNoteCount` and `sequence` are what the line is actually sounding**,
   whatever the source. `soundingNoteCount` counts the notes the engine holds;
   `sequence` is the pitches it walks, in the order the Shape and octave stack put

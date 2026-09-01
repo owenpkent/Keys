@@ -244,6 +244,174 @@ public:
             expectEquals(offs, 1, "only the first ends inside the step");
         }
 
+        // **The line bus** (2026-09-01, docs/LINE_INTERACTION.md). Two engines in one "block":
+        // A runs, then B with B's `follow` pointing at A's record, which is exactly the order
+        // runArpLines runs them in. The first two-engine tests in this file.
+        beginTest("a line's record says what its events say");
+        {
+            ArpEngine a;
+            a.prepare(sr);
+            a.lanes.value[ArpEngine::laneProbability][1].store(0); // step 1 never fires
+            a.lanes.value[ArpEngine::laneNote][0].store(1); // pin the pitches: 60, then 64
+            a.lanes.value[ArpEngine::laneNote][2].store(2);
+            juce::MidiBuffer b0, b1, b2;
+            clock.ppq = 0.0;
+            a.process(lp, clock, block, chordOn({ 60, 64, 67 }), b0);
+            expectEquals(a.record.firedCount, 1, "one step fired in block 0");
+            expectEquals(a.record.firedAt[0], 0, "at offset 0");
+            expectEquals(a.record.lastNote, 60, "and the record says which note");
+            expect(a.record.lastVelocity >= 1 && a.record.lastVelocity <= 127);
+            expect(a.record.sounding, "enabled and holding a chord");
+            expectEquals((long long) a.record.firedBefore, 0LL, "nothing before block 0");
+            clock.ppq = 0.25;
+            a.process(lp, clock, block, {}, b1);
+            expectEquals(a.record.firedCount, 0, "the skipped step is not a fire");
+            expectEquals((long long) a.record.firedBefore, 1LL, "block 0's fire rolled into the total");
+            expect(! a.record.lastStepFired, "the Chain bit says the last step did not fire");
+            clock.ppq = 0.5;
+            a.process(lp, clock, block, {}, b2);
+            expectEquals(a.record.firedCount, 1);
+            expectEquals((long long) a.record.firedBefore, 1LL, "the total counts fires, not steps");
+            expect(a.record.lastStepFired);
+            expectEquals(a.record.lastNote, 64, "the walk moved on");
+            expectWithinAbsoluteError(a.record.stepSamples, 6000.0, 1.0, "a 1/16 at 120 bpm, 48 kHz");
+        }
+
+        beginTest("duck at 100 is the hocket: B plays exactly where A does not");
+        {
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            a.lanes.value[ArpEngine::laneProbability][1].store(0); // A fires on even steps only
+            a.lanes.value[ArpEngine::laneProbability][3].store(0);
+            a.lanes.value[ArpEngine::laneProbability][5].store(0);
+            a.lanes.value[ArpEngine::laneProbability][7].store(0);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.duck = 100;
+            bp.mutateSeed = 1;
+            for (int step = 0; step < 8; ++step)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                int onsA = 0, onsB = 0;
+                for (auto& x : collect(outA)) if (x.on) ++onsA;
+                for (auto& x : collect(outB)) if (x.on) ++onsB;
+                expectEquals(onsA, step % 2 == 0 ? 1 : 0, "A's own pattern at step " + juce::String(step));
+                if (step == 0)
+                    expectEquals(onsB, 1, "the first step after Follow comes up never ducks: nothing to compare with");
+                else
+                    expectEquals(onsB, step % 2 == 0 ? 0 : 1, "B fills A's gaps at step " + juce::String(step));
+            }
+        }
+
+        beginTest("duck's window spans the blocks the follower had no step in");
+        {
+            // B fires half a step late (Late lane at 50), so every B step lands in the block
+            // *after* A's. The hocket has to hold anyway, which only firedBefore can do: by the
+            // time B's step runs, A's fire has rolled out of firedAt and into the total.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            for (int s : { 1, 3, 5, 7 })
+                a.lanes.value[ArpEngine::laneProbability][s].store(0);
+            for (int s = 0; s < 8; ++s)
+                b.lanes.value[ArpEngine::laneLate][s].store(50);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.duck = 100;
+            bp.mutateSeed = 1;
+            constexpr int half = 3000;
+            int onsB[16] = {};
+            for (int blk = 0; blk < 16; ++blk)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.125 * blk;
+                a.process(lp, clock, half, blk == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, half, blk == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                for (auto& x : collect(outB)) if (x.on) ++onsB[blk];
+            }
+            // B's step n lands in block 2n + 1. Step 0 is the warm-up; A fired at step 2 (block
+            // 4), so B's step 2 (block 5) ducks; A was silent at steps 1 and 3, so B's steps 1
+            // and 3 (blocks 3 and 7) play.
+            expectEquals(onsB[1], 1, "B's step 0 plays (warm-up)");
+            expectEquals(onsB[3], 1, "B's step 1 plays: A was silent at step 1");
+            expectEquals(onsB[5], 0, "B's step 2 ducks: A fired at step 2, a block earlier");
+            expectEquals(onsB[7], 1, "B's step 3 plays");
+            expectEquals(onsB[9], 0, "B's step 4 ducks");
+            expectEquals(onsB[11], 1, "B's step 5 plays");
+        }
+
+        beginTest("lock holds the hocket duck found");
+        {
+            // A's pattern repeats every eight steps and B's duck at 50 rolls on Mutate's cell;
+            // with LOCK at 100 the era never moves, so the second pass ducks exactly the steps
+            // the first did.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            for (int s : { 2, 5 })
+                a.lanes.value[ArpEngine::laneProbability][s].store(0);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.duck = 50;
+            bp.mutateLock = 100;
+            bp.mutateSeed = 2;
+            int ons[16] = {};
+            for (int step = 0; step < 16; ++step)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                for (auto& x : collect(outB)) if (x.on) ++ons[step];
+            }
+            for (int step = 1; step < 8; ++step)
+                expectEquals(ons[step + 8], ons[step],
+                             "step " + juce::String(step) + " ducks the same way on the second pass");
+        }
+
+        beginTest("a source that is off, or duck at zero, leaves the follower playing as today");
+        {
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            auto ap = lp;
+            ap.enabled = false; // A holds its chord silently: no fires on the bus
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.duck = 100;
+            int onsB = 0;
+            for (int step = 0; step < 8; ++step)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(ap, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                for (auto& x : collect(outB)) if (x.on) ++onsB;
+            }
+            expectEquals(onsB, 8, "nothing to duck to: every step plays");
+
+            ArpEngine c, d;
+            c.prepare(sr);
+            d.prepare(sr);
+            auto dp = lp;
+            dp.follow = &c.record;
+            dp.duck = 0;
+            int onsD = 0;
+            for (int step = 0; step < 8; ++step)
+            {
+                juce::MidiBuffer outC, outD;
+                clock.ppq = 0.25 * step;
+                c.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outC);
+                d.process(dp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outD);
+                for (auto& x : collect(outD)) if (x.on) ++onsD;
+            }
+            expectEquals(onsD, 8, "duck at zero: following changes nothing by itself");
+        }
+
         beginTest("lanes are ignored unless usePattern is on");
         {
             ArpEngine e;

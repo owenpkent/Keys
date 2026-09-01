@@ -403,7 +403,15 @@ public:
                     // step's note-on, so a synth in legato mode glides instead of restarting.
                     // Off by default, and off is exactly what the engine did before it existed:
                     // a skipped step is silence. See ArpEngine::Params::legato.
-                    apLegato, numArpParams };
+                    apLegato,
+                    // Appended 2026-09-01, the first two of the line bus (docs/LINE_INTERACTION.md;
+                    // Owen: "can we get the arpeggiators to interact with each other"). Follow
+                    // names the line this one listens to - Off, or a letter *above* it, which
+                    // runArpLines enforces whatever the value says - and Duck is the first thing
+                    // it does with what it hears: skip a step when the source just played one.
+                    // Both default off, so a saved session opens with four lines as deaf to each
+                    // other as they were.
+                    apFollow, apDuck, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).
@@ -420,6 +428,13 @@ public:
         return { "Straight", "Triplet", "5-tuplet", "7-tuplet", "9-tuplet" };
     }
     static int tupletFor(int choiceIndex);
+    // The line bus's source list (2026-09-01). Off, then A to C: D is not on it because nothing
+    // runs after D. Append only - the index is what a saved session stores - and the entries
+    // are worded for the card's bottom strip, where there is no caption to say what "A" means.
+    static juce::StringArray followChoices()
+    {
+        return { "Off", "From A", "From B", "From C" };
+    }
     // The per-line harmony interval list (2026-08-19): BigSky's shimmer intervals, minus its
     // two cents rows, which MIDI semitones cannot say. **Built from the one table that also
     // holds both semitone columns** (2026-08-21), so the names and the intervals cannot drift:

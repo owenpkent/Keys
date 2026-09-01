@@ -1,6 +1,8 @@
 # Lines that listen to each other
 
-**Status: proposed and unbuilt (2026-09-01).** Nothing in this file ships. Owen:
+**Status (2026-09-01): Phase 0 and Phase 1 are built - the bus, the From picker and DUCK.**
+Everything from RESET on is proposed and unbuilt. Section 4 below records where the two built
+controls actually went, which is not where this file first put them. Owen:
 
 > *"can we get the arpeggiators to interact with each other, like the step sequencers, so we
 > can get interesting variations."*
@@ -202,6 +204,18 @@ default is off.
 ---
 
 ## 4. Where the controls go
+
+**Where phase one actually put them (built 2026-09-01).** The Play page is exactly full at its
+floor: PLAYBACK's two rows spend every pixel at `arpDeepPageMinW` and FEEL's five sliders are at
+their 120 px minimum, so the picker beside Retrigger and the knob beside Drift both meant raising
+that floor and re-weighting the band's groups. The card had the room instead - its floor is the
+bottom strip's, and the knob strip needed 486 of that 598 for eleven - so **DUCK is the eleventh
+knob beside DENSITY** and **From is the sixth chip on the bottom strip beside Legato**, worded
+"From A" because the strip has no caption. The letters a line may not pick are greyed in the
+popup rather than removed (the attachment maps index to item). The detached Arp window's floor
+rose to 1288 px for the chip; nothing else moved. The `< A` caption mark is not built: the chip
+says it. The paragraphs below are the design as first written and stand for the mechanisms not
+yet built.
 
 - **The source picker** (`arpFollow`) is a combo on the line's Play page, PLAYBACK group, next
   to Retrigger - a thing you set once. It reads "Follows: Off / A / B / C" and lists only the

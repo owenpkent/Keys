@@ -356,6 +356,17 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
                 // be a plain int the audio thread writes, read from the message thread.
                 const auto& eng = processor.arpLine(n);
                 l->setProperty("soundingNoteCount", eng.uiHeldCount.load(std::memory_order_relaxed));
+                // The line bus (2026-09-01): the letter this line listens to, or empty. Empty
+                // also for a value naming a letter at or below this line, since the processor
+                // hands the engine nothing for those - the answer here is what is *in effect*.
+                {
+                    const auto* raw = processor.apvts.getRawParameterValue(
+                        KeysProcessor::arpParamId(n, KeysProcessor::apFollow));
+                    const int src = raw != nullptr ? (int) raw->load() - 1 : -1;
+                    l->setProperty("follows", (src >= 0 && src < n)
+                                                  ? juce::String::charToString((juce::juce_wchar) ('A' + src))
+                                                  : juce::String());
+                }
                 std::array<int, ArpEngine::maxHeld * 4> pitches {};
                 const int seqCount = eng.uiSequence(pitches);
                 juce::Array<juce::var> seq;

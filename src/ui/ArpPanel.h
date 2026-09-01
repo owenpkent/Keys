@@ -273,8 +273,15 @@ public:
         // name it reads as here: how long each note is, then how many of them there are, then
         // how the run explores. No new parameter; the tenth cell is the whole cost, and
         // minMacroWidth() moved on its own the moment numKnobs did.
-        enum Knob { kOctShift = 0, kGate, kDensity, kMutate, kStray, kLock, kSwing, kOffset, kVel,
-                    kHTime, numKnobs };
+        // **Eleven from 2026-09-01, later the same day**: DUCK beside DENSITY, the first knob of
+        // the line bus (docs/LINE_INTERACTION.md). Designed for the Play page's FEEL group and
+        // moved here before it was built, because the band is exactly full at its floor - both
+        // PLAYBACK rows and all five FEEL sliders spend every pixel at arpDeepPageMinW - where
+        // the card's floor is its bottom strip's 598 px and the knob strip needs 486 of that
+        // for eleven, so the eleventh cell was free. Read as a sentence with its neighbour: how
+        // many of my steps play, how many I give up to the line I follow.
+        enum Knob { kOctShift = 0, kGate, kDensity, kDuck, kMutate, kStray, kLock, kSwing, kOffset,
+                    kVel, kHTime, numKnobs };
 
     private:
         void applyShape();
@@ -321,6 +328,15 @@ public:
         // same kind of thing - a per-line switch you flip while listening - at the full 34 px,
         // on the strip that exists for exactly those. Card-only, like Mutate, Stray and Lock.
         juce::ToggleButton legatoButton { "Legato" };
+        // The line bus's source picker (2026-09-01): Off, or a letter above this one, worded
+        // "From A" because the strip has no caption to say what a bare letter would mean. Here
+        // rather than on the Play page beside Retrigger, where the design put it, because that
+        // row is exactly full at the deep floor and this strip had a cell to spare at the docked
+        // one; being next to DUCK's card is the better home anyway. Letters at or below this
+        // line are greyed in the popup rather than missing from it - the attachment maps index
+        // to item, so the list must hold every entry the parameter can - and on line A that is
+        // all three, so the combo opens to Off and three reasons why.
+        juce::ComboBox followsBox;
         // Tuplet is a combo, not a tick: it picks one of five, and a check box that cycled its
         // own text was a control lying about its own shape (2026-08-03, Owen: "it's a check box
         // but it changes"). A combo is what Keys already means by "pick from a list" - Shape,
@@ -393,7 +409,7 @@ public:
 
         std::unique_ptr<ButtonAtt> rateModeAtt;
         std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, legatoAtt;
-        std::unique_ptr<ComboAtt> tupletAtt;
+        std::unique_ptr<ComboAtt> tupletAtt, followsAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
         // What VEL's ring puts back when its lamp switches Humanize Velocity back on - the
