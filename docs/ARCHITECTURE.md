@@ -29,6 +29,10 @@ src/
 │                             # A *library* pad asks chordlib::numeralAt instead - `degree` is an
 │                             # index into the mode a chord was generated in, and a library row is
 │                             # generated against its own
+├── ChordVoicing.h            # the three voicing passes (applyMajorMinorBias, fitVoicing,
+│                             # applyVoicingPipeline) as free functions, so the ordering
+│                             # trap is pinned by a test rather than reproduced in one
+├── EuclidGen.h               # Bjorklund, for the Euclid strip's fill of the Chance lane
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync.
 │                             # The processor holds *three* of these since 2026-08-01,
@@ -65,7 +69,18 @@ src/
 │   │                         # pass - the letters on the editor's arp bar are each line's
 │   │                         # own On switch now, not a way to pick one; the macro view
 │   │                         # (all four lines in a 2x2 grid, four lines from 2026-08-19)
-│   │                         # is the extra choice on the bar
+│   │                         # is the extra choice on the bar. The card and the grid are
+│   │                         # files of their own since 2026-09-02, below - do not look
+│   │                         # for MacroRow or LaneGrid in here
+│   ├── MacroRow.{h,cpp}      # the macro card and its layout constants (arpMacroModsW and
+│   │                         # the rest), lifted out of ArpPanel.cpp
+│   ├── LaneGrid.{h,cpp}      # the lane grid, the loop bar and the MUTE strip, lifted out
+│   │                         # of ArpPanel.cpp
+│   ├── ArpRateMode.h         # the rate dial's Sync/Hz attachment swap, written once for
+│   │                         # the two surfaces that turn one (the band and every card)
+│   ├── TakePanel.{h,cpp}     # the take before it leaves: a view of KeysProcessor::takeNotes(),
+│   │                         # built from the same sequence the written file holds. Never
+│   │                         # an editor - editing a take belongs in Lattice
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── StepComboBox.h        # a combo that reports every pick, including one already
@@ -398,9 +413,18 @@ samples it. That one idea carries both sliders that are still the pool's own:
 Note count and inversions **used to be pool properties too, and are not any more**
 (2026-08-01, Owen: "all of their options should have the option for how many notes and
 what inversion"). Both are facts about the *voicing* a chord arrives in rather than about
-which chord it is, so `ChordGenMenu::fitVoicing` now applies them as a post-pass over
-whatever any of the eight sources produced. `fitPads` is the same pass for the Markov
-path, which arrives as pads rather than `chordgen::Chord`s.
+which chord it is, so `fitVoicing` now applies them as a post-pass over whatever any of
+the eight sources produced. `fitPads` is the same pass for the Markov path, which arrives
+as pads rather than `chordgen::Chord`s.
+
+**The three passes live in `src/ChordVoicing.h`** (`keys::chordvoicing`), not on the
+generator: `applyMajorMinorBias`, `fitVoicing` and `applyVoicingPipeline` are free
+functions taking their settings as arguments, so a test reaches them without a live
+`KeysProcessor`. `ChordGenMenu::fitVoicing` and `applyMajorMinorBias` are still there and
+are still what the generator calls, but they now do one job only: resolve the settings off
+the APVTS and hand them to the pure pass. Any doc saying the ordering can only be pinned
+by reproducing its shape in a test, because `fitVoicing` is private to a class needing a
+live processor, is describing the arrangement before that move.
 
 Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is
 still in key; shrinking one drops from the top, which keeps the root and the third (the
@@ -1094,11 +1118,17 @@ coming back:
   back onto it. That wiring left with Compliance; `StepComboBox.h` is unused now, kept for
   whichever future control needs the same trick (see **Files** above). All four remaining
   controls stay live with the Pads section folded, so folding the strip cannot take the card
-  menu and the bar together, which would be the whole generator. The Pads bar's own arithmetic
-  in `minWidthForView()` still wants 1070, the floor set the day the Generator chip joined Fill
-  and Regen (2026-07-30) - but the function itself returns 1280 now, since the Controls bar
-  overtook it as the binding constraint on 2026-08-02, the day the Tempo Sync chip and three
-  more captions joined that bar. Keys Host asks for that number rather than copying it.
+  menu and the bar together, which would be the whole generator. **The Pads bar answers for its
+  own width now, and so does every other one**: `minWidthForView()` is no longer a hand sum
+  ending in a literal (1070, then 1280) but the max over each bar's own `contentWidth()` - the
+  `controlsbar` / `arpbar` / `padbar` / `keyboardbar` namespaces at the head of
+  `PluginEditor.cpp`, off the same constants `resized()` spends, with Controls measured at its
+  *tight* cell set because that is the layout it has to be able to reach - together with
+  `ArpPanel::minPanelWidth()` plus the editor's two margins, and a 1320 shipped-floor term.
+  The floor stays a term rather than the answer so that the day a bar genuinely outgrows it,
+  the bar wins instead of a literal. Two costs sit deliberately outside the Controls figure,
+  the update button's 170 px and the Instrument chip, since most instances show neither.
+  Keys Host asks for that number rather than copying it.
 - **Clear page is removed** (2026-08-01). It had already moved once, from a chip on the Pads
   bar to a button in the generator's window (2026-07-30), because it wiped every unlocked pad
   on the page with no `juce::UndoManager` anywhere in Keys to catch a slip. The tray gave the
