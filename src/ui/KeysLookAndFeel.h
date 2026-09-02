@@ -27,10 +27,25 @@ namespace skin
     const juce::Colour control    { 0xff262a31 };  // raised control top
     const juce::Colour controlBot { 0xff1f2227 };
 
+    // The mod/pitch wheel's groove and grab bar (KeysEditor::WheelLookAndFeel::drawLinearSlider
+    // in PluginEditor.cpp). Hardware-wheel chrome rather than a panel control - a deeper well
+    // than `well` and a differently-lit bar than `control` - so it gets its own pair rather than
+    // being bent onto either.
+    const juce::Colour wheelGrooveTop { 0xff0c0e11 };
+    const juce::Colour wheelGrooveBot { 0xff16191d };
+    const juce::Colour wheelThumbTop  { 0xff3f444c };
+    const juce::Colour wheelThumbBot  { 0xff22252a };
+
     // The chord card's raised face: an unfilled/unpressed pad, tray card or library row, all
     // drawn with skin::raisedFill(). Was the same literal pair typed out at four call sites.
     const juce::Colour cardFace    { 0xff272b32 };
     const juce::Colour cardFaceBot { 0xff1e2126 };
+
+    // A small floating surface tracking the pointer: the Draw grid's drag-value readout
+    // (LaneGrid). The same byte value KeysLookAndFeel.cpp already uses for the tooltip and
+    // popup menu backgrounds, kept as its own token rather than nudged onto cardFaceBot (one
+    // bit off in the blue channel) and quietly changing what either paints.
+    const juce::Colour floatingBg { 0xff1e2127 };
 
     // Armed REC. The one red in Keys, and deliberately *not* part of the Accent family below:
     // the accent is per instance and this must not be, because "recording" has to read the same

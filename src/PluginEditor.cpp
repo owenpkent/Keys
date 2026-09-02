@@ -483,8 +483,7 @@ void KeysEditor::buildControlsSection()
 {
     // --- Controls section ------------------------------------------------------------
     title.setText("KEYS", juce::dontSendNotification);
-    title.setFont(juce::Font(juce::FontOptions("Segoe UI", 24.0f, juce::Font::bold))
-                      .withExtraKerningFactor(0.10f));
+    title.setFont(skin::ui(24.0f).boldened().withExtraKerningFactor(0.10f));
     title.setColour(juce::Label::textColourId, skin::text);
     controlsHolder.addAndMakeVisible(title);
 
@@ -1375,8 +1374,8 @@ void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, in
 
     g.setColour(juce::Colours::black.withAlpha(0.5f));
     g.drawRoundedRectangle(groove.expanded(0.5f), corner + 0.5f, 1.0f);
-    g.setGradientFill({ juce::Colour(0xff0c0e11), 0.0f, groove.getY(),
-                        juce::Colour(0xff16191d), 0.0f, groove.getBottom(), false });
+    g.setGradientFill({ skin::wheelGrooveTop, 0.0f, groove.getY(),
+                        skin::wheelGrooveBot, 0.0f, groove.getBottom(), false });
     g.fillRoundedRectangle(groove, corner);
 
     {
@@ -1403,8 +1402,8 @@ void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, in
 
     g.setColour(juce::Colours::black.withAlpha(0.35f));
     g.fillRoundedRectangle(thumb.translated(0.0f, 2.0f), 4.0f);
-    g.setGradientFill({ juce::Colour(0xff3f444c), 0.0f, thumb.getY(),
-                        juce::Colour(0xff22252a), 0.0f, thumb.getBottom(), false });
+    g.setGradientFill({ skin::wheelThumbTop, 0.0f, thumb.getY(),
+                        skin::wheelThumbBot, 0.0f, thumb.getBottom(), false });
     g.fillRoundedRectangle(thumb, 4.0f);
     g.setColour(juce::Colours::white.withAlpha(0.08f));
     g.fillRoundedRectangle(thumb.withHeight(1.5f).reduced(3.0f, 0.0f), 0.75f);

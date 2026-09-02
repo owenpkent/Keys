@@ -363,7 +363,7 @@ void LaneGrid::paint(juce::Graphics& g)
         auto box = juce::Rectangle<int>(juce::roundToInt(cursorPos.x) - tw / 2,
                                         juce::roundToInt(cursorPos.y) - 28, tw, 20)
                       .constrainedWithin(getLocalBounds());
-        g.setColour(juce::Colour(0xff1e2127));
+        g.setColour(skin::floatingBg);
         g.fillRoundedRectangle(box.toFloat(), 4.0f);
         g.setColour(skin::accentOf(*this).base);
         g.drawRoundedRectangle(box.toFloat(), 4.0f, 1.0f);

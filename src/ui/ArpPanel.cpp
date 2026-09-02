@@ -1554,7 +1554,7 @@ void ArpPanel::buildControls()
     styleLabel(dirLabel, "Dir");
     addAndMakeVisible(dirLabel);
     dirReadout.setJustificationType(juce::Justification::centred);
-    dirReadout.setFont(juce::Font(juce::FontOptions(13.0f)));
+    dirReadout.setFont(skin::ui(13.0f));
     addAndMakeVisible(dirReadout);
     dirPrev.onClick = [this] { nudgeLaneDir(-1); };
     dirNext.onClick = [this] { nudgeLaneDir(1); };
@@ -1588,7 +1588,7 @@ void ArpPanel::buildControls()
     addAndMakeVisible(speedLabel);
 
     stepsReadout.setJustificationType(juce::Justification::centred);
-    stepsReadout.setFont(juce::Font(juce::FontOptions(14.0f)));
+    stepsReadout.setFont(skin::ui(14.0f));
     addAndMakeVisible(stepsReadout);
 
     stepsMinus.onClick = [this] { nudgeLength(-1); };
@@ -1669,7 +1669,7 @@ void ArpPanel::buildControls()
     addAndMakeVisible(chainButton);
 
     barsReadout.setJustificationType(juce::Justification::centred);
-    barsReadout.setFont(juce::Font(juce::FontOptions(14.0f)));
+    barsReadout.setFont(skin::ui(14.0f));
     addAndMakeVisible(barsReadout);
     barsMinus.onClick = [this] { nudgeBars(-1); };
     barsPlus.onClick = [this] { nudgeBars(1); };
@@ -1708,7 +1708,7 @@ void ArpPanel::buildControls()
         addChildComponent(minus);
         addChildComponent(plus);
         readout.setJustificationType(juce::Justification::centred);
-        readout.setFont(juce::Font(juce::FontOptions(13.0f)));
+        readout.setFont(skin::ui(13.0f));
         addChildComponent(readout);
     };
     buildStepper(euclidHitsLabel, "Hits", euclidHitsMinus, "Fewer hits", euclidHitsPlus, "More hits", euclidHitsReadout);
@@ -1792,7 +1792,7 @@ void ArpPanel::buildControls()
     addChildComponent(rollMinus);
     addChildComponent(rollPlus);
     rollReadout.setJustificationType(juce::Justification::centred);
-    rollReadout.setFont(juce::Font(juce::FontOptions(13.0f)));
+    rollReadout.setFont(skin::ui(13.0f));
     addChildComponent(rollReadout);
     rollReadout.setText(juce::String(rollAmount) + "%", juce::dontSendNotification);
 
@@ -2400,7 +2400,7 @@ void ArpPanel::paint(juce::Graphics& g)
     if (! inlineMode)
         g.fillAll(juce::Colours::black.withAlpha(0.78f)); // dim whatever is behind the overlay
     const auto b = cardBounds().toFloat();
-    g.setColour(juce::Colour(0xff1c1f24));
+    g.setColour(skin::headerTop);
     g.fillRoundedRectangle(b, skin::panelRadius);
     g.setColour(juce::Colours::white.withAlpha(0.05f));
     g.fillRoundedRectangle(b.withHeight(1.5f).reduced(skin::panelRadius, 0.0f), 0.75f);
