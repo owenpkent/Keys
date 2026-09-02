@@ -428,7 +428,7 @@ public:
     // uses, so the two everyone already knows read as they do everywhere else; the rest carry
     // the number, since there is no household word for a 7. The combo names the *family* and
     // the dial's readout names the resulting length ("1/10"), which is the division of labour
-    // the fraction notation makes possible - see ArpEngine::rateSyncText.
+    // the fraction notation makes possible - see ArpRateText.h's rateSyncText.
     static juce::StringArray tupletChoices()
     {
         return { "Straight", "Triplet", "5-tuplet", "7-tuplet", "9-tuplet" };

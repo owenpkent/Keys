@@ -1129,15 +1129,17 @@ coming back:
   the bar wins instead of a literal. Two costs sit deliberately outside the Controls figure,
   the update button's 170 px and the Instrument chip, since most instances show neither.
   Keys Host asks for that number rather than copying it.
-- **Clear page is removed** (2026-08-01). It had already moved once, from a chip on the Pads
-  bar to a button in the generator's window (2026-07-30), because it wiped every unlocked pad
-  on the page with no `juce::UndoManager` anywhere in Keys to catch a slip. The tray gave the
-  window a destructive action that costs nothing - **Clear**, on the tray's own header - and
-  once that existed, a button that could still erase all sixteen live pads at once had no
-  reason left to be a click away inside the same window. Nothing in Keys now empties a whole
-  page in one gesture: per-pad clearing is still **Clear pad** on that pad's menu or dragging
-  its card off the strip, and the page can still be replaced wholesale, one pad at a time as
-  it decides each, by **Regen** on the Pads bar.
+- **Clear page lives on a pad's card menu**, alone in a group at the foot of the right-click
+  list. `KeysProcessor::clearChordPadPage()` empties every unlocked pad on the current page in
+  one undo entry - see **Undo** below - which is what makes the gesture affordable: a click
+  that could erase up to twelve live pads at once is one click back rather than gone for good.
+  It is the only row on that menu that acts on anything but the card it was opened from, which
+  is why it sits apart rather than beside **Clear pad**, whose name it would otherwise read as
+  the plural of. It is deliberately not a method on `ChordGenMenu`: a page wipe is data work on
+  the pad table and has no business living on the thing that generates chords. Per-pad clearing
+  is still **Clear pad** on that pad's own menu or dragging its card off the strip, and the page
+  can still be replaced wholesale, one pad at a time as it decides each, by **Regen** on the
+  Pads bar.
 - **Fill never overwrites** (2026-07-30, Owen: "new generations shouldn't overwrite
   existing"). `fillPage()` writes the *empty* pads and only those, locked or not - a blank
   needs no protection. `regeneratePage()` is the destructive one and the only one: it rerolls

@@ -438,7 +438,7 @@ private:
     juce::TextButton shapePrev { "<" }, shapeNext { ">" }, ratePrev { "<" }, rateNext { ">" };
     juce::ToggleButton dotButton { "Dot" }, anchorButton { "Anchor" };
     // Tuplet is a combo box, not a toggle: it picks one of five, and it writes a choice
-    // parameter. See MacroRow's twin, and ArpEngine::rateSyncText for what the dial then says.
+    // parameter. See MacroRow's twin, and ArpRateText.h's rateSyncText for what the dial then says.
     juce::ComboBox tupletBox;
     juce::Label tupletLabel;
     juce::Slider octavesSlider, swingSlider, gateSlider, densitySlider;

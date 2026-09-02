@@ -1,4 +1,5 @@
 #include "../src/ArpEngine.h"
+#include "../src/ArpRateText.h"
 #include "../src/EuclidGen.h"
 #include <juce_core/juce_core.h>
 #include <map>
@@ -1665,7 +1666,7 @@ public:
             // what makes it so. The invariant worth pinning is that the *straight* readings are
             // byte-identical to the division names the parameter carries, since that is what
             // stops this from being a second, drifting copy of the rate list.
-            const auto text = [](int i, bool dot, int tup) { return ArpEngine::rateSyncText(i, dot, tup); };
+            const auto text = [](int i, bool dot, int tup) { return arptext::rateSyncText(i, dot, tup); };
             expectEquals(text(0, false, 0), juce::String("16 bars"));
             expectEquals(text(4, false, 0), juce::String("1 bar"), "singular at one");
             expectEquals(text(5, false, 0), juce::String("1/2"));

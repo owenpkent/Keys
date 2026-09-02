@@ -91,6 +91,8 @@ reasoning is one search away.
   and the window's own floors (`minWidthForView`, `idealHeight`).
 - `ArpEngine.h` - the arpeggiator core, one per line. Pure and header-only so it unit-tests;
   the only playhead reader in Keys, and only while its rate is in Sync.
+- `ArpRateText.h` - the rate dial's two `juce::String` formatters (Sync's exact fraction of a
+  bar, Hz's decimals by decade), split out of `ArpEngine.h` so that header stays UI-free.
 - `NoteMath.h` - which MIDI note a drawn key sends: the scale-lock snap, then the octave.
 - `Chords.h` - naming a chord from its sounding notes. `ChordSuggest.h` - where one could go next.
 - `ScaleModes.h` - the modes generation reads. Not the kit's scale table: it answers a quality

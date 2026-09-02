@@ -1,5 +1,6 @@
 #include "MacroRow.h"
 #include "ArpPanel.h"
+#include "../ArpRateText.h" // arptext::rateSyncText, for this card's own rate readout
 #include "KeysLookAndFeel.h"
 #include <okstudio/MouseOnly.h>
 #include <cmath>
@@ -649,7 +650,7 @@ void MacroRow::installRateText()
             KeysProcessor::arpParamId(line, KeysProcessor::apTuplet))->load());
         const bool dot = apvts.getRawParameterValue(
                              KeysProcessor::arpParamId(line, KeysProcessor::apDot))->load() > 0.5f;
-        return ArpEngine::rateSyncText((int) std::lround(v), dot, n);
+        return arptext::rateSyncText((int) std::lround(v), dot, n);
     };
     rateKnob.updateText();
 }

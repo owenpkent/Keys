@@ -1,4 +1,5 @@
 #include "ArpPanel.h"
+#include "../ArpRateText.h" // arptext::rateSyncText / rateHzText, for the dial and the slot card
 #include "KeysLookAndFeel.h"
 #include "ComboMenu.h"
 #include <okstudio/MouseOnly.h>
@@ -863,7 +864,7 @@ void ArpPanel::installRateText()
         const int n = KeysProcessor::tupletFor(
             (int) processor.apvts.getRawParameterValue(paramId(KeysProcessor::apTuplet))->load());
         const bool dot = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apDot))->load() > 0.5f;
-        return ArpEngine::rateSyncText((int) std::lround(v), dot, n);
+        return arptext::rateSyncText((int) std::lround(v), dot, n);
     };
     rateKnob.updateText();
 }
@@ -1213,7 +1214,7 @@ void ArpPanel::SlotCard::paintButton(juce::Graphics& g, bool over, bool down)
         // "0.1Hz", so a card naming a rate could name a stopped arp - which is the one thing
         // printing the rate at all is here to prevent.
         sub += (sub.isEmpty() ? "" : " ")
-             + (slot.rateFree ? ArpEngine::rateHzText(slot.rateHz) + "Hz"
+             + (slot.rateFree ? arptext::rateHzText(slot.rateHz) + "Hz"
                               : juce::String(rateNames[slot.rate]));
     g.setColour(skin::textDim);
     g.setFont(skin::ui(10.0f));

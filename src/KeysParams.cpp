@@ -1,4 +1,5 @@
 #include "KeysParams.h"
+#include "ArpRateText.h" // arptext::rateHzText, for the arpRateHz parameter's own text function
 #include "ChordSources.h" // the Progression picker's item list is that table's own
 #include "PluginProcessor.h" // the ArpParam enum, arpParamId and numArpLines; see KeysParams.h
 #include "ScaleModes.h"
@@ -402,11 +403,11 @@ void addArpLineParams(juce::AudioProcessorValueTreeState::ParameterLayout& layou
                 // No .withLabel("Hz"): the suffix is already in the text below, and a host
                 // that renders value-plus-unit printed "8.00 Hz Hz". The in-plugin readout is
                 // this string, so the suffix has to stay in it rather than move to the label.
-                // Decimals by decade, one copy of the rule (see ArpEngine::rateHzText): 0.031
-                // and 32.0 both have to read as themselves, and a fixed 2 would print the
+                // Decimals by decade, one copy of the rule (see ArpRateText.h's rateHzText):
+                // 0.031 and 32.0 both have to read as themselves, and a fixed 2 would print the
                 // bottom of the range as "0.03" for a whole octave of the dial.
                 .withStringFromValueFunction([](float v, int) {
-                    return ArpEngine::rateHzText(v) + " Hz";
+                    return arptext::rateHzText(v) + " Hz";
                 })
                 .withValueFromStringFunction([](const String& s) { return s.getFloatValue(); })));
     }
