@@ -267,8 +267,14 @@ public:
         // appended to the end of the row. This enum is UI indexing and nothing stores it, so
         // inserting here is free; the *parameter* was appended, which is the order that is
         // not free (see KeysProcessor::apStray).
-        enum Knob { kOctShift = 0, kGate, kMutate, kStray, kLock, kSwing, kOffset, kVel, kHTime,
-                    numKnobs };
+        // **Ten from 2026-09-01**, DENSITY between GATE and MUTATE (Owen: "a density knob
+        // where it controls, like, how much notes there are"). It is `arpChance` - the per-line
+        // slider the Play page has carried since 2026-08-18 - given a face on the card and the
+        // name it reads as here: how long each note is, then how many of them there are, then
+        // how the run explores. No new parameter; the tenth cell is the whole cost, and
+        // minMacroWidth() moved on its own the moment numKnobs did.
+        enum Knob { kOctShift = 0, kGate, kDensity, kMutate, kStray, kLock, kSwing, kOffset, kVel,
+                    kHTime, numKnobs };
 
     private:
         void applyShape();
@@ -309,6 +315,12 @@ public:
         // height: putting them beside the rate would drive the knobs under the mouse-only
         // minimum, and height is the cheap axis inside a card.
         juce::ToggleButton dotButton { "Dot" }, anchorButton { "Anchor" };
+        // Legato (2026-09-01, Owen: "a legato button. So when the density is lower or a note is
+        // skipped, it continues nicely"): holds a note through the steps that do not fire and
+        // lets it go just after the next one that does. Beside Dot and Anchor because it is the
+        // same kind of thing - a per-line switch you flip while listening - at the full 34 px,
+        // on the strip that exists for exactly those. Card-only, like Mutate, Stray and Lock.
+        juce::ToggleButton legatoButton { "Legato" };
         // Tuplet is a combo, not a tick: it picks one of five, and a check box that cycled its
         // own text was a control lying about its own shape (2026-08-03, Owen: "it's a check box
         // but it changes"). A combo is what Keys already means by "pick from a list" - Shape,
@@ -380,7 +392,7 @@ public:
         juce::Label chordLabel;
 
         std::unique_ptr<ButtonAtt> rateModeAtt;
-        std::unique_ptr<ButtonAtt> dotAtt, anchorAtt;
+        std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, legatoAtt;
         std::unique_ptr<ComboAtt> tupletAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
@@ -702,8 +714,8 @@ private:
     // parameter. See MacroRow's twin, and ArpEngine::rateSyncText for what the dial then says.
     juce::ComboBox tupletBox;
     juce::Label tupletLabel;
-    juce::Slider octavesSlider, swingSlider, gateSlider, chanceSlider;
-    juce::Label octavesLabel, swingLabel, gateLabel, chanceLabel;
+    juce::Slider octavesSlider, swingSlider, gateSlider, densitySlider;
+    juce::Label octavesLabel, swingLabel, gateLabel, densityLabel;
     juce::ToggleButton latchButton { "Latch" };
     // PLAY's home on the band since the macro rows slimmed down (2026-08-02): whether this
     // line arpeggiates what you play on the keybed. Same parameter the macro rows carried
@@ -896,7 +908,7 @@ private:
     std::unique_ptr<ComboAtt> distanceAtt, tupletAtt;
     // Exactly one of these two is ever non-null; refreshRateMode() owns that invariant.
     std::unique_ptr<SliderAtt> rateSyncAtt, rateHzAtt;
-    std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, chanceAtt;
+    std::unique_ptr<SliderAtt> octavesAtt, swingAtt, gateAtt, densityAtt;
     std::unique_ptr<SliderAtt> offsetAtt, rampAtt, rampTimeAtt, humanAtt, humanVelAtt, driftAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpPanel)

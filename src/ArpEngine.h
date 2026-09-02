@@ -606,6 +606,15 @@ public:
         // held by the same Lock: a wrong-note lick the machine finds can still harden into the
         // part. See `mutatedPitch`.
         int stray = 0;      // 0..100
+        // **Legato** (2026-09-01, Owen: "a legato button. So when the density is lower or a
+        // note is skipped, it continues nicely"). A step that does not fire - Density (the
+        // `chance` above), the Chance lane, a mute, a rest, a Chain condition - is silence with
+        // this off: the note before it ends at its own gate. On, that note is held open through
+        // the gap and released just after the next fired step's note-on, the overlap a synth's
+        // legato or glide mode needs to slide rather than restart. Gate is still honoured on a
+        // step whose successor fires; fireStep looks one step ahead to know which. Off is
+        // byte-for-byte what the engine did before the flag existed.
+        bool legato = false;
         // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): an interval
         // in semitones added to every note the step resolved - Mutate's stray included, so the
         // voice follows the run - and how often it fires, rolled per step per voice off the
@@ -831,6 +840,8 @@ public:
         dirCursor = 0;
         stepBase = 0;
         lastStepFired = false; // a restart has no step before it
+        prerollStep = noPreroll;
+        nextSkips = false;
         lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
@@ -870,6 +881,8 @@ public:
         dirCursor = 0;
         stepBase = 0;
         lastStepFired = false; // a restart has no step before it
+        prerollStep = noPreroll;
+        nextSkips = false;
         lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
@@ -900,6 +913,11 @@ public:
             else
                 out.addEvent(m, meta.samplePosition);
         }
+
+        // Legato switched off mid-hold: what it was holding ends now, at the top of this block,
+        // rather than waiting for a step that will never release it with the flag down.
+        if (! p.legato)
+            releaseLegato();
 
         // Switching between Hz and Sync is a change of *timebase*, not of speed: one counts
         // seconds and the other beats, so the phase carried across means nothing on the far
@@ -1089,6 +1107,10 @@ public:
             // die with the step that decided them rather than firing into a silence, and
             // dropping them here is also what keeps them from surfacing a block later.
             pendingCount = 0;
+            // A note Legato is holding waits for the next step that fires, and there is no
+            // next step: the chord came up or the line went off. End it here, or it rings for
+            // good - the one hang the held-open state makes possible, closed at its one exit.
+            releaseLegato();
             uiRelStep.store(-1, std::memory_order_relaxed); // no playhead, not step 0
             // The note names go with the playhead. uiSeq is written only by buildSequence, and
             // buildSequence only runs from fireStep, so nothing cleared it when the chord came
@@ -1125,11 +1147,19 @@ private:
     // permanently - which disabled latch's fresh-chord reset and left chords arpeggiating
     // forever, stacking every card you handed it afterwards.
     struct Held { int note; float velocity; int channel; int ons; };
-    struct Active { int note; int channel; int samplesLeft; };
+    // `legato`: held open by Legato until the next step that fires closes it (see emitHit's
+    // closeHeld and fireStep's lookahead). While set, `samplesLeft` is not a due time - neither
+    // retireDue nor emitHit's due branch may end the note, and advanceBlock leaves it alone -
+    // so a note held for an hour cannot count its way into the negative.
+    struct Active { int note; int channel; int samplesLeft; bool legato; };
     // A ratchet sub-hit whose fire time landed past the end of the block that decided it.
     // `at` is in the same frame as Active::samplesLeft and is rebased by the same
     // advanceBlock(); see the contract note below.
-    struct PendingHit { int note; int channel; float velocity; int at; int durSamples; };
+    // `hold` / `closeHeld` travel with a carried sub-hit exactly as they would have reached
+    // emitHit directly: a step's first hit closes what Legato was holding *when it fires*, and
+    // if that hit is parked for a later block the release has to wait with it.
+    struct PendingHit { int note; int channel; float velocity; int at; int durSamples;
+                        bool hold; bool closeHeld; };
 
     double stepLengthBeats(const Params& p) const
     {
@@ -1657,14 +1687,21 @@ private:
             if (hi > lo)
                 noteVal = lo + (int) (rng() % (unsigned) (hi - lo + 1));
         }
-        const int chance = driftedLane(p, laneProbability, globalStep)
-                         * juce::jlimit(0, 100, p.chance) / 100;
-        if ((int) (rng() % 100u) >= chance)
+        if (chanceFails(p, globalStep))
         {
             lastStepFired = false;
             return; // 100 always fires, 0 never does
         }
         lastStepFired = true; // everything below this point sounds
+
+        // **Legato looks one step ahead** (2026-09-01). Whether this step's notes are held open
+        // or end at their gate depends on what the *next* step does, and by the time the next
+        // step is decided a gated note has already ended - so the decision has to be made now.
+        // The deterministic parts (chain, mute, rest) are simply read early; the chance draw is
+        // made early and kept, and chanceFails() hands the same answer back when that step
+        // arrives, so the note is held for exactly the skip that was foreseen. Only with Legato
+        // on: off, no draw is made ahead and the step is decided where it always was.
+        nextSkips = p.legato && prerollNext(p, globalStep);
 
         // Position Reset, after the step has survived mute, rest, chain and chance, and before
         // anything asks the walk where it is: a step that did not sound did not reach its reset
@@ -2041,6 +2078,10 @@ private:
         {
             const int at = offset + (int) std::floor(subLen * r);
             const int durSamples = juce::jmax(1, (int) std::floor(subLen * gate));
+            // Legato holds only the *last* sub-hit of a ratchet: the earlier repeats end at
+            // their own gate so the ratchet still reads as one, and it is the last one that
+            // would otherwise leave a silence before the next step that fires.
+            const bool hold = nextSkips && r == ratchets - 1;
 
             for (int k = 0; k < hitCount; ++k)
             {
@@ -2104,10 +2145,15 @@ private:
                 // still decided exactly once, here: the RNG draw, the sequence walk and
                 // stepCounter must not be repeated, which is why this parks the resolved hit
                 // rather than re-deriving the step later.
+                // The step's first hit is what releases whatever Legato was holding: the
+                // release lands just after this note-on, so the two overlap by a sample and a
+                // synth in legato mode glides across the join instead of restarting.
+                const bool closeHeld = r == 0 && k == 0;
                 if (on < numSamples)
-                    emitHit(note, hit.chan, vel, on, durSamples, numSamples, out);
+                    emitHit(note, hit.chan, vel, on, durSamples, numSamples, out, hold, closeHeld);
                 else if (pendingCount < maxPending)
-                    pending[(size_t) pendingCount++] = { note, hit.chan, vel, on, durSamples };
+                    pending[(size_t) pendingCount++] = { note, hit.chan, vel, on, durSamples,
+                                                         hold, closeHeld };
                 // else: out of carry slots, and the hit is dropped rather than mistimed. The
                 // capacity is a chord's worth of ratchets over several steps; a step's carry is
                 // drained before the next step fires, so nothing that fits reaches it.
@@ -2120,7 +2166,7 @@ private:
     // in active[]. Shared by fireStep and by the carry-over drain, so a sub-hit that waited a
     // block behaves identically to one that fired immediately.
     void emitHit(int note, int channel, float vel, int on, int durSamples, int numSamples,
-                 juce::MidiBuffer& out)
+                 juce::MidiBuffer& out, bool hold = false, bool closeHeld = false)
     {
         // Close whatever this hit lands on top of, before its note-on goes in, so a
         // note-off can never sort after a note-on it precedes. Two different closes:
@@ -2128,10 +2174,13 @@ private:
         //   - the pitch being retriggered, if it is still owed *past* this hit (a tie,
         //     gate > 100%), is pulled back to just before the retrigger instead, so one
         //     pitch never stacks two note-ons with nothing between them.
+        // A note Legato is holding has no due time (see Active::legato), so the due branch
+        // skips it; the tie branch does not, because a held pitch retriggered on itself is
+        // still two note-ons for one pitch unless the first is closed before the second.
         for (int i = 0; i < activeCount;)
         {
             auto& a = active[(size_t) i];
-            if (a.samplesLeft <= on)
+            if (! a.legato && a.samplesLeft <= on)
             {
                 out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note),
                              juce::jmax(0, a.samplesLeft));
@@ -2146,6 +2195,29 @@ private:
                 ++i;
         }
         out.addEvent(juce::MidiMessage::noteOn(channel, note, vel), on);
+
+        // Legato's release: every note it was holding ends one sample *after* this note-on -
+        // the other way round from the tie branch above, and on purpose. A tie is the same
+        // pitch, where the off must come first or the voice stacks; this is a different pitch,
+        // where the on must come first or a synth in legato mode hears a gap and restarts its
+        // envelope instead of gliding. Clamped to the buffer's last sample, where insertion
+        // order still puts the off after the on. Runs before this hit is parked, so a hit that
+        // is itself held (the next step skips too) is never released by its own arrival.
+        if (closeHeld)
+        {
+            const int offAt = juce::jmin(on + 1, numSamples - 1);
+            for (int i = 0; i < activeCount;)
+            {
+                auto& a = active[(size_t) i];
+                if (a.legato)
+                {
+                    out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, offAt));
+                    a = active[(size_t) --activeCount];
+                }
+                else
+                    ++i;
+            }
+        }
 
         // Where this note ends, as an offset from the start of *this* block, which is
         // the frame active[] is kept in all the way through process(); advanceBlock()
@@ -2165,7 +2237,7 @@ private:
             // gate (the due branch) or, if it is a tie, pulls it back under the retrigger
             // (the tie branch), and retireDue() at the end of process() emits whatever is
             // still owed inside this block.
-            active[(size_t) activeCount++] = { note, channel, offAt };
+            active[(size_t) activeCount++] = { note, channel, hold ? 0 : offAt, hold };
         }
         else
         {
@@ -2187,7 +2259,8 @@ private:
         {
             const auto& h = pending[(size_t) i];
             if (h.at < limit)
-                emitHit(h.note, h.channel, h.velocity, h.at, h.durSamples, numSamples, out);
+                emitHit(h.note, h.channel, h.velocity, h.at, h.durSamples, numSamples, out,
+                        h.hold, h.closeHeld);
             else
                 pending[(size_t) kept++] = h; // shift down: pending stays in time order
         }
@@ -2209,7 +2282,7 @@ private:
         for (int i = 0; i < activeCount;)
         {
             auto& a = active[(size_t) i];
-            if (a.samplesLeft <= limit)
+            if (! a.legato && a.samplesLeft <= limit)
             {
                 out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, a.samplesLeft));
                 a = active[(size_t) --activeCount];
@@ -2225,7 +2298,8 @@ private:
     void advanceBlock(int numSamples) noexcept
     {
         for (int i = 0; i < activeCount; ++i)
-            active[(size_t) i].samplesLeft -= numSamples;
+            if (! active[(size_t) i].legato) // a held note has no due time to rebase
+                active[(size_t) i].samplesLeft -= numSamples;
         // Carried ratchet hits live in the same frame and rebase with it. firePendingBefore
         // has already fired everything below numSamples, so every survivor stays >= 0.
         for (int i = 0; i < pendingCount; ++i)
@@ -2265,6 +2339,67 @@ private:
     // the only thing in this engine that a transport jump cannot reconstruct from the step
     // index. It self-corrects within one step, which is why it is affordable.
     bool lastStepFired = false;
+
+    // **Legato's lookahead** (2026-09-01). `prerollStep` names the step whose chance draw has
+    // already been made, `prerollFails` is that draw, and `nextSkips` is what fireStep decided
+    // about the step after the one it is firing: hold this step's notes open, or let them end
+    // at their gate. The draw is made ahead only with Legato on, and a preroll for a step that
+    // never arrives (a transport jump) is simply discarded - chanceFails() rolls afresh for any
+    // step it has no answer for. This is the second thing in the engine, after `lastStepFired`,
+    // that is not stateless from the playhead, and like it the damage of being wrong is bounded
+    // to one step: a note held for a skip that fired is closed by that step's own note-on.
+    static constexpr long long noPreroll = std::numeric_limits<long long>::min();
+    long long prerollStep = noPreroll;
+    bool prerollFails = false;
+    bool nextSkips = false;
+
+    // The step's chance draw, or the one made ahead of it by prerollNext when Legato is on.
+    bool chanceFails(const Params& p, long long globalStep)
+    {
+        if (prerollStep == globalStep)
+        {
+            prerollStep = noPreroll;
+            if (p.legato)
+                return prerollFails;
+        }
+        const int chance = driftedLane(p, laneProbability, globalStep)
+                         * juce::jlimit(0, 100, p.chance) / 100;
+        return (int) (rng() % 100u) >= chance;
+    }
+
+    // Will the step after `globalStep` skip? The same four questions fireStep asks at its top,
+    // in the same order, read one step early: chain against the step now firing (so
+    // lastStepFired is already this step's answer), mute, rest, then the chance draw - which is
+    // kept for chanceFails() to hand back, so the step that was foreseen to skip does skip.
+    bool prerollNext(const Params& p, long long globalStep)
+    {
+        const long long next = globalStep + 1;
+        if (const int chain = laneValue(p, laneChain, next); chain != 0)
+            if ((chain == 1) != lastStepFired)
+                return true;
+        if (laneValue(p, laneMute, next) > 0)
+            return true;
+        if (laneValue(p, laneNote, next) <= noteRest)
+            return true;
+        const int chance = driftedLane(p, laneProbability, next)
+                         * juce::jlimit(0, 100, p.chance) / 100;
+        prerollFails = (int) (rng() % 100u) >= chance;
+        prerollStep = next;
+        return prerollFails;
+    }
+
+    // Turn every note Legato is holding into one due at the top of this block; retireDue at
+    // the end of process() then ends it. Called when the flag goes off and when nothing is
+    // left to release it (the chord released, the line switched off).
+    void releaseLegato() noexcept
+    {
+        for (int i = 0; i < activeCount; ++i)
+            if (active[(size_t) i].legato)
+            {
+                active[(size_t) i].legato = false;
+                active[(size_t) i].samplesLeft = 0;
+            }
+    }
     // Which sequence entry last sounded, for the Note lane's Prev. -1 until something has.
     int lastPlayedIdx = -1;
 
