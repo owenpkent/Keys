@@ -5,6 +5,34 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: Reset from the line you follow, and a Chain lane that reads that line too
+
+**PARAMETER LAYOUT CHANGE.** `arpResetFollow` is appended per line, default **off**. The Chain
+lane's range grows from 0-2 to 0-4 - lane data, not a parameter, so an old session's cells read
+exactly as they did.
+
+Phase two of `docs/LINE_INTERACTION.md`, the same day as phase one.
+
+**Reset** is the **Follow** entry of the Play page's Retrigger list: when the line this one
+follows (From, on the card) comes round to the top of its walk, this line goes back to its own
+step 1, through the same restart Retrigger already owns - so Launch Quantize, Offset and every
+lane see a restart they understand. What it bounds is polymeter: a seven-step lane against a
+sixteen-step one drifts for a bar and snaps home, which is most of what makes a modular patch
+with a reset cable sound composed rather than random. It lives in that list rather than as a
+seventh chip on the card, because "when does the pattern start over" already had its control
+there and the card's strip is full at the docked floor. The source's pass is published at every
+step it *decides*, not only every step that fires, so a source whose boundary step is muted or
+ducked still turns the page. The first look at the source records where it is rather than
+restarting, so switching Follow on mid-run does not jolt the line. A silent source resets nobody.
+
+**Neighbour** is two more values on the Chain lane: **3** plays the step only if the line this
+one follows just sounded, **4** only if it did not - Digitakt's NEI condition, drawn per step
+where DUCK is a knob over the whole line. For two lines on one rate "just sounded" is the same
+step, since the source ran first in the block; on different rates it is the source's most recent.
+With nobody to follow, 3 and 4 read as 0 and play every step, so a lane drawn for a source that
+was switched off plays rather than falls silent. The condition is one function for the step and
+for Legato's lookahead, so the two cannot disagree.
+
 ### Added: the line bus - a line can follow another, and DUCK is the first thing it does with it
 
 **PARAMETER LAYOUT CHANGE.** `arpFollow` (Off / From A / From B / From C) and `arpDuck` (0-100)

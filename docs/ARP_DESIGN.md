@@ -1974,3 +1974,18 @@ Phase one of `docs/LINE_INTERACTION.md`, built 2026-09-01. The rest of that file
   lines with Legato off, which "off is byte-for-byte what it was" forbids.
 - **Every mechanism keeps two rules**, and every phase adds a test for each: signal flows
   downward, and a source that is off or silent leaves its follower playing as today.
+- **RESET** (`Params::resetFollow`, phase two, same day) sits at the one place a restart is
+  decided: immediately before `pendingRetrig` is consumed in the step loop. When the source's
+  `record.pass` differs from the pass this line last saw, the step becomes step 1 through the
+  Retrigger path, and nothing is reimplemented. Two details carry it: **the source publishes its
+  pass at the top of `fireStep`, before any condition can return**, so a boundary step that is
+  muted or ducked still turns the page; and **the first look records the pass without
+  restarting** (`seenPassValid`), so switching it on mid-run does not jolt the line. Surfaced as
+  the **Follow** entry of the Retrigger list, a third parameter behind that one combo -
+  picking it clears the clock window exactly as a clock window clears the note retrigger.
+- **NEIGHBOUR** is `chainAllows`, one function for `fireStep` and for `prerollNext`: 1 and 2
+  ask about this line's own last step, 3 and 4 about `follow->lastStepFired`, which the source
+  writes as its block ends. For two lines on one rate that is the *same* step (the source ran
+  first); on different rates, the source's most recent. With no source, 3 and 4 allow - a lane
+  drawn for a source that was switched off plays rather than falls silent. `laneRanges` says
+  0-4 now and the grid reads that table, so the Draw page needed no change of its own.

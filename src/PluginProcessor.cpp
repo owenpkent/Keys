@@ -705,6 +705,14 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
                                                       followChoices(), 0));
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Duck"), 1 },
                                                    nm + " Duck", 0, 100, 0));
+    // **Reset from the line it follows** (phase two, same day): when the source's walk comes
+    // round, this line goes back to step 1 through the restart Retrigger owns - so a seven-step
+    // lane against a sixteen-step one drifts for a bar and snaps home. Surfaced as the Follow
+    // entry of the Play page's Retrigger list rather than a control of its own: "when does the
+    // pattern start over" is one question, and that list is where it was already answered.
+    // Default off.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("ResetFollow"), 1 },
+                                                    nm + " Reset Follow", false));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -810,7 +818,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
         "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
-        "Stray", "Legato", "Follow", "Duck"
+        "Stray", "Legato", "Follow", "Duck", "ResetFollow"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -2439,6 +2447,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             const int src = (int) arpParam(n, apFollow) - 1;
             ap.follow = (src >= 0 && src < n) ? &lines[(size_t) src].engine.record : nullptr;
             ap.duck = (int) arpParam(n, apDuck);
+            ap.resetFollow = arpParam(n, apResetFollow) > 0.5f;
         }
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);

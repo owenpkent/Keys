@@ -1,7 +1,7 @@
 # Lines that listen to each other
 
-**Status (2026-09-01): Phase 0 and Phase 1 are built - the bus, the From picker and DUCK.**
-Everything from RESET on is proposed and unbuilt. Section 4 below records where the two built
+**Status (2026-09-01): Phases 0 to 2 are built - the bus, the From picker, DUCK, RESET and
+NEIGHBOUR.** CLOCK and everything after it is proposed and unbuilt. Section 4 below records where the two built
 controls actually went, which is not where this file first put them. Owen:
 
 > *"can we get the arpeggiators to interact with each other, like the step sequencers, so we
@@ -214,8 +214,11 @@ knob beside DENSITY** and **From is the sixth chip on the bottom strip beside Le
 "From A" because the strip has no caption. The letters a line may not pick are greyed in the
 popup rather than removed (the attachment maps index to item). The detached Arp window's floor
 rose to 1288 px for the chip; nothing else moved. The `< A` caption mark is not built: the chip
-says it. The paragraphs below are the design as first written and stand for the mechanisms not
-yet built.
+says it. **RESET (phase two) is the Follow entry of the Play page's Retrigger list**, not a
+chip beside Legato: with From on the strip there was no seventh cell at the docked floor, and
+"when does the pattern start over" already had its control, so the list grew one answer.
+**NEIGHBOUR** landed exactly as designed. The paragraphs below are the design as first written
+and stand for the mechanisms not yet built.
 
 - **The source picker** (`arpFollow`) is a combo on the line's Play page, PLAYBACK group, next
   to Retrigger - a thing you set once. It reads "Follows: Off / A / B / C" and lists only the

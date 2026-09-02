@@ -133,7 +133,8 @@ public:
         { 0, 12 },   // Chord: 0 is off, 1..12 call up that slot's chord
         { -8, 8 },   // Rand: how far this step's note selection may stray, and which way
         { 0, 1 },    // Mute: 1 silences the step without touching what it holds
-        { 0, 2 },    // Chain: 0 always, 1 only after a step that fired, 2 only after one that did not
+        { 0, 4 },    // Chain: 0 always, 1 only after a step that fired, 2 only after one that did not,
+                     //        3 only if the line it follows just sounded, 4 only if it did not (2026-09-01)
         { 0, 1 },    // Reset: 1 restarts the shape's walk on this step
     };
     // Stray from `value` by up to `reach`, staying inside `r`. `u01` is a draw in [0, 1).
@@ -387,7 +388,7 @@ public:
         long long firedBefore = 0;   // steps fired in every block before this one
         std::array<int, maxStepsPerBlock> firedAt {}; // this block's step fire offsets, in order
         int firedCount = 0;
-        long long pass = 0;          // the Note lane's walk pass the last fired step was in
+        long long pass = 0;          // the Note lane's walk pass of the last step decided
         bool lastStepFired = false;  // the Chain lane's own bit, as this block left it
         int lastNote = -1;           // the pitch the last fired step landed on
         int lastVelocity = 0;        // 1..127
@@ -717,6 +718,11 @@ public:
         // line's previous one - the hocket. 0 is off and the default. Rolled on the same
         // (step, era) cell as Mutate, so LOCK holds an interlock the machine found.
         int duck = 0;             // 0..100
+        // **RESET** (phase two): when the source comes round to the top of its walk, this line
+        // goes back to its own step 1 - through the same restart Retrigger uses, so Launch
+        // Quantize, Offset and every lane see the restart they already understand. What it
+        // bounds is polymeter: seven against sixteen drifts for a bar and snaps home.
+        bool resetFollow = false;
     };
 
     struct HostClock
@@ -879,6 +885,7 @@ public:
         prerollStep = noPreroll;
         nextSkips = false;
         seenValid = false;
+        seenPassValid = false;
         lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
@@ -922,6 +929,7 @@ public:
         prerollStep = noPreroll;
         nextSkips = false;
         seenValid = false;
+        seenPassValid = false;
         lastPlayedIdx = -1;
         lastRetrigWindow = std::numeric_limits<long long>::min();
         pendingRetrig = false;
@@ -1126,6 +1134,29 @@ public:
                             pendingRetrig = true;
                         }
                     }
+                    // **RESET from the line we follow** (2026-09-01, phase two of the line bus):
+                    // when the source's walk pass changes, this step becomes step 1, through
+                    // the restart Retrigger already owns. The first look at the source records
+                    // its pass without restarting, or switching Reset on would reset at once.
+                    // A step late at worst when both lines land in one block with this line's
+                    // offset before the source's; equal-rate anchored lines share offsets, and
+                    // the source ran first.
+                    if (p.resetFollow && p.follow != nullptr)
+                    {
+                        if (! seenPassValid)
+                        {
+                            seenSourcePass = p.follow->pass;
+                            seenPassValid = true;
+                        }
+                        else if (p.follow->pass != seenSourcePass)
+                        {
+                            seenSourcePass = p.follow->pass;
+                            pendingRetrig = true;
+                        }
+                    }
+                    else
+                        seenPassValid = false;
+
                     if (pendingRetrig)
                     {
                         pendingRetrig = false;
@@ -1680,15 +1711,18 @@ private:
     void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
                   int numSamples, juce::MidiBuffer& out)
     {
+        // On the bus first, before any condition can return: a follower's RESET watches this
+        // number, and a source whose boundary step is muted or ducked must still turn the page.
+        record.pass = walkPass(p, globalStep);
+
         // The chain condition, first of all: a step whose condition fails did not happen, and
         // must not spend a chance draw or advance anything. `lastStepFired` is the one bit of
         // playhead-dependent state in this engine - see laneChain for why that is affordable.
-        if (const int chain = laneValue(p, laneChain, globalStep); chain != 0)
-            if ((chain == 1) != lastStepFired)
-            {
-                lastStepFired = false;
-                return;
-            }
+        if (! chainAllows(p, laneValue(p, laneChain, globalStep)))
+        {
+            lastStepFired = false;
+            return;
+        }
 
         // The mute lane first, and before anything else is resolved: a muted step costs
         // nothing and must leave no trace. Separate from the Note lane's own -1 on purpose -
@@ -1775,7 +1809,6 @@ private:
 
         // On the bus: this step fired. After the empty-sequence return above, since a step that
         // sounds nothing is not something a follower should duck to.
-        record.pass = walkPass(p, globalStep);
         if (record.firedCount < maxStepsPerBlock)
             record.firedAt[(size_t) record.firedCount++] = offset;
 
@@ -2428,6 +2461,28 @@ private:
     // Follow or DUCK comes up compares against nothing and never ducks.
     long long seenAtMyLastStep = 0;
     bool seenValid = false;
+    // **RESET's window**: the source's walk pass as this line last saw it. Valid only after
+    // one look, so Reset coming up mid-run records where the source is rather than restarting.
+    long long seenSourcePass = 0;
+    bool seenPassValid = false;
+
+    // The Chain lane's condition, in one place for fireStep and for Legato's lookahead - two
+    // copies would be two answers. 1 and 2 ask about this line's own last step; 3 and 4 ask
+    // about the line it follows (NEIGHBOUR, 2026-09-01), and with no source read as 0, so a
+    // lane drawn for a source that was switched off plays every step rather than none. For two
+    // lines on one rate the source's "last step" is the *same* step, since the source ran first
+    // in this block; on different rates it is the source's most recent.
+    bool chainAllows(const Params& p, int chain) const noexcept
+    {
+        switch (chain)
+        {
+            case 1:  return lastStepFired;
+            case 2:  return ! lastStepFired;
+            case 3:  return p.follow == nullptr || p.follow->lastStepFired;
+            case 4:  return p.follow == nullptr || ! p.follow->lastStepFired;
+            default: return true;
+        }
+    }
     static constexpr unsigned int duckSalt = 0x9E3779B9u; // so DUCK and Mutate never roll the same number on one cell
 
     // Which pass of the Note lane's walk window `globalStep` is in. **Counted in lane cells,
@@ -2497,9 +2552,8 @@ private:
     bool prerollNext(const Params& p, long long globalStep)
     {
         const long long next = globalStep + 1;
-        if (const int chain = laneValue(p, laneChain, next); chain != 0)
-            if ((chain == 1) != lastStepFired)
-                return true;
+        if (! chainAllows(p, laneValue(p, laneChain, next)))
+            return true;
         if (laneValue(p, laneMute, next) > 0)
             return true;
         if (laneValue(p, laneNote, next) <= noteRest)

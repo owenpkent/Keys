@@ -1305,6 +1305,10 @@ void ArpPanel::applyShapeChoice()
 // control (Ableton's Retrigger is one choice for the same reason).
 void ArpPanel::applyRetrigChoice()
 {
+    // Three parameters behind one list since 2026-09-01: item 7, Follow, is arpResetFollow and
+    // nothing else, so picking it clears the clock window exactly as a clock window clears the
+    // note retrigger - one answer to "when does the pattern start over".
+    constexpr int followItem = 7;
     const int chosen = retrigBox.getSelectedItemIndex();
     auto& apvts = processor.apvts;
     if (auto* on = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter(paramId(KeysProcessor::apRetrigger))))
@@ -1316,8 +1320,14 @@ void ArpPanel::applyRetrigChoice()
     if (auto* bars = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(paramId(KeysProcessor::apRetrigBars))))
     {
         bars->beginChangeGesture();
-        *bars = chosen >= 2 ? chosen - 1 : 0;
+        *bars = (chosen >= 2 && chosen != followItem) ? chosen - 1 : 0;
         bars->endChangeGesture();
+    }
+    if (auto* reset = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter(paramId(KeysProcessor::apResetFollow))))
+    {
+        reset->beginChangeGesture();
+        *reset = chosen == followItem;
+        reset->endChangeGesture();
     }
 }
 
@@ -1325,7 +1335,10 @@ void ArpPanel::refreshRetrig()
 {
     const int bars = (int) processor.apvts.getRawParameterValue(paramId(KeysProcessor::apRetrigBars))->load();
     const bool onNote = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apRetrigger))->load() > 0.5f;
-    const int wanted = bars > 0 ? bars + 1 : (onNote ? 1 : 0);
+    const bool follow = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apResetFollow))->load() > 0.5f;
+    // Follow wins if a host set both it and a clock window: the list can show one thing, and a
+    // line following another is the more specific answer. The engine honours both regardless.
+    const int wanted = follow ? 7 : (bars > 0 ? bars + 1 : (onNote ? 1 : 0));
     if (retrigBox.getSelectedItemIndex() != wanted)
         retrigBox.setSelectedItemIndex(wanted, juce::dontSendNotification);
 }
@@ -2070,7 +2083,10 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
         followsBox.setItemEnabled(src + 2, src < line);
     followsBox.setTitle("Macro follows " + letter);
     followsBox.setTooltip("Which line this one listens to - only a letter above it, so nothing "
-                          "can loop. What it does with what it hears is DUCK, on the knob strip. "
+                          "can loop. What it does with what it hears: DUCK on the knob strip, "
+                          "Follow in the Play page's Retrigger list (restart when that line comes "
+                          "round), and 3 and 4 on the Draw page's Chain lane (play only with, or "
+                          "only against, that line's last step). "
                           "A line that is off or silent leaves this one playing as if it followed "
                           "nobody." + juce::String(line == 0 ? " Line A has nothing above it." : ""));
     addAndMakeVisible(followsBox);
@@ -3224,8 +3240,14 @@ void ArpPanel::buildControls()
     // alternatives on one control rather than two switches that can disagree.
     styleLabel(retrigLabel, "Retrigger");
     addAndMakeVisible(retrigLabel);
-    retrigBox.addItemList({ "Off", "Note", "1 Beat", "2 Beats", "1 Bar", "2 Bars", "4 Bars" }, 1);
-    retrigBox.setTooltip("When the pattern starts over: never, on a new chord, or on the clock.");
+    // "Follow" (2026-09-01): restart when the line this one follows (From, on its card) comes
+    // round to the top of its walk. Appended last, and it maps to a parameter of its own
+    // (arpResetFollow) rather than to a bars value - see applyRetrigChoice.
+    retrigBox.addItemList({ "Off", "Note", "1 Beat", "2 Beats", "1 Bar", "2 Bars", "4 Bars", "Follow" }, 1);
+    retrigBox.setTooltip("When the pattern starts over: never, on a new chord, on the clock, or "
+                         "when the line this one follows comes round to the top of its own walk "
+                         "(Follow - pick that line with From on the card). Follow is what bounds "
+                         "a polymeter: seven steps against sixteen drift for a bar, then snap home.");
     retrigBox.onChange = [this] { applyRetrigChoice(); };
     addAndMakeVisible(retrigBox);
 
@@ -3263,7 +3285,9 @@ void ArpPanel::buildControls()
         "down the line it went up rather than starting over.");
     laneRows[(size_t) ArpEngine::laneChain].tab.setTooltip(
         "Play this step only on a condition: 0 always, 1 only if the step before it sounded, "
-        "2 only if it did not. Chance says maybe; this says only if.");
+        "2 only if it did not, 3 only if the line this one follows just sounded, 4 only if it "
+        "did not (pick that line with From on the card; with none, 3 and 4 play every step). "
+        "Chance says maybe; this says only if.");
     laneRows[(size_t) ArpEngine::laneReset].tab.setTooltip(
         "Restart the shape's walk on this step, so it plays the note the walk starts on again. "
         "Cthulhu's Position Reset. It restarts the walk, not the lanes - everything else keeps "
