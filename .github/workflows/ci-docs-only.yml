@@ -1,0 +1,32 @@
+name: CI
+
+# The other half of ci.yml's paths-ignore. That workflow skips docs-only changes to save
+# 2x-billed Windows minutes, and the main branch's ruleset requires a check named
+# windows-latest before anything merges - so a docs-only pull request would wait forever
+# for a check that was never going to run. This workflow fires on exactly the paths the
+# other one ignores, reports a job of the same name, and passes without building anything.
+# GitHub's own pattern for a required check that is allowed to be skipped. Keep the two
+# path lists identical: a path in one and not the other is a PR that either builds for
+# nothing or never merges.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.md'
+      - 'assets/**'
+      - 'docs/**'
+  pull_request:
+    paths:
+      - '**.md'
+      - 'assets/**'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: windows-latest
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only change, no build required."
