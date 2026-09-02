@@ -5,6 +5,90 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Under the hood: the structural half of the 2026-09-02 architecture review
+
+- `src/ui/ArpPanel.cpp` carried the whole arpeggiator UI in one translation unit and had reached
+  4,687 lines, so the two largest self-contained pieces of it moved into files of their own: the
+  macro card into `src/ui/MacroRow.{h,cpp}` with the layout constants the All view measures itself
+  by, and the Draw page's three step views - the lane grid, the loop bar and the MUTE strip - into
+  `src/ui/LaneGrid.{h,cpp}`, where the step geometry all three share is written down once. The
+  Sync/Hz attachment swap the band and every macro card each had a copy of is now one function,
+  `arprate::applyMode` in `src/ui/ArpRateMode.h`, drag guard and reasoning included. Nothing moved
+  that a caller can see: `ArpPanel` re-exports all four classes as member aliases, so
+  `ArpPanel::MacroRow` and `ArpPanel::MacroRow::numKnobs` still name what they always did, and the
+  three private members the grids used to reach into their enclosing class for are four narrow
+  accessors on the panel rather than a `friend` declaration. No behaviour change.
+- **The editor's constructor and its 30 Hz poll are readable again, and the window's floor is
+  derived rather than recited.** `KeysEditor`'s constructor built every control, attachment and
+  callback in one 937-line function; it is ten named functions now (`buildSections`,
+  `buildControlsSection`, `buildPadStripControls`, `buildKeyboardSection`, `buildPadsBar`,
+  `buildArpBar`, `buildTempoAndQuantize`, `buildPluginChrome`, `wireChordPadCallbacks`,
+  `startUpdater`), called from it in the order it always built things in. Each is a contiguous
+  run of what was there before rather than a regrouping of it: a section bar is a full-width
+  Button and the controls riding it are its siblings, so the order they are added in is their
+  z-order, and two of the ten therefore build across a bar boundary rather than move a control
+  to a tidier neighbour.
+- `timerCallback` was fifteen unrelated concerns on one clock, and is now thirteen named pulls
+  in the same order, each with its own note on how it compares before it writes. Most of that
+  comparing was already being done for free by JUCE (`setEnabled`, `setToggleState`,
+  `Label::setText` and every `NoteSurface` setter early-out on an unchanged value); the one that
+  was not is the tempo field, which asked for a repaint on all thirty ticks a second for as long
+  as a host was rolling, and now repaints only when the number it draws actually moves. The pad
+  strip's own repaint stays unconditional and says why: it is the strip's whole frame clock.
+- **`minWidthForView()` derives the floor from the same cells `resized()` spends**, the move
+  `ArpPanel::minMacroWidth()` already made one level down. It was ninety lines of hand
+  arithmetic ending in a literal, and the comment admitted to having drifted twice - it had in
+  fact drifted three times, since Undo and Redo joined the Controls bar in August and their 142
+  px were never added to the sum. Every fixed cell on the four bars is a named constant now, and
+  the function takes the largest of what the four bars need, what the arp panel asks for, and the
+  1320 the plugin has shipped since the settings gear arrived. **The returned number is
+  unchanged**: 1320 is above every derived requirement, and it stays in as a term so that the day
+  a bar genuinely outgrows it, the bar wins instead of a literal. `LayoutTests` now lays a real
+  editor out at that width and measures the Controls bar by overlap and containment, which is the
+  only thing that can see a starved bar - every control on it is placed with
+  `withSizeKeepingCentre`, so running out of width produces controls of exactly the right size
+  sitting on top of each other.
+- **The arpeggiator engine's two long functions came apart into named phases, and nothing it
+  plays moved.** `ArpEngine::fireStep` was 564 lines fusing the gating, the walk, the lane reads,
+  the harmony passes and the ratchet loop, with three lambdas in the middle of it; `process` was
+  259 with the block's whole step scan inline. Both are a sequence of named calls now: `fireStep`
+  is 97 lines and `process` 156, over nine private helpers - `scanStepsInBlock`,
+  `stepSurvivesGates`, `chooseSequenceIndices`, `addStepHit`, `resolveStepHits`,
+  `addHarmonyVoices`, `humanizeWindow`, `humanisedVelocity` and `emitStepHits`. Every block moved
+  whole and in place, so each helper's body is byte-identical to the code it came from bar the
+  handful of lines that name their new parameters, and the order of side effects - every hash,
+  every `rng` draw, every write to `lastStepFired`, `record`, `stepBase` and the published
+  playhead - is the order it was. **A draw moved past another draw is a different arpeggio**,
+  which is why the split lines fall between phases rather than inside one: the four gating
+  questions, Rand's draw and DUCK's roll travel together in `stepSurvivesGates` because their
+  order is the stream, and the timing and velocity draws stay together inside the ratchet loop.
+  No allocation, no lock and no `juce::String` reached the process path; the hit table is the same
+  array on the same stack, named by a `maxHits` constant rather than the expression spelled twice.
+  `ArpTests`' 133 cases pin the behaviour and pass unchanged.
+- The chord generator's three post-passes (Lean, note count/register/inversion, voice-leading
+  smoothing) moved out of `ChordGenMenu` and into a new UI-free header, `src/ChordVoicing.h`
+  (`keys::chordvoicing::applyMajorMinorBias`, `fitVoicing`, `applyVoicingPipeline`), so they
+  unit-test without a live processor. `ChordGenMenu` now resolves the same settings it always
+  did (genMajMin, the note-count and octave ranges, the tick boxes, the inversion set) and hands
+  them to the pure functions; nothing about what a generated chord sounds like changes. Tests
+  now pin the pass order directly (Lean before fitVoicing, fitVoicing before smoothing), the
+  Lean pass's identity-at-zero and third-only behaviour, and that `fitVoicing` genuinely reaches
+  the note count it is asked for rather than silently collapsing it, closing a gap the test
+  suite's own comments had flagged as unreachable. `ChordNumerals.h`'s roman-numeral resolution
+  also gained direct coverage (degree casing, diminished's degree sign, numeral pass-through
+  priority, root-only resolution, and the empty answer for a non-diatonic root).
+  One draw moved: with Scale Compliance and Inversions both unticked, an incidental random draw
+  now lands before Lean rather than between Lean and the fit; the generator's random source is
+  time-seeded and never saved, so no output anyone can reproduce changes.
+- Moved the last per-file hex chrome into the skin, no visual change. The chord card's raised
+  face (`skin::cardFace` / `cardFaceBot`) was the same colour pair typed out four times across
+  the pads, the tray and the library; it is now two tokens in `KeysLookAndFeel.h`. The keybed's
+  ivory, ebony, lip, C-marker, fallboard and instrument-body colours (~20 literals in
+  `PianoKeyboard::paint`) moved into a new `// Keybed` token group in the skin, byte for byte, so
+  a session cannot see any difference and the file no longer breaks the "every colour is a
+  `skin::` token" rule. The chord library window's title font, the one place left drawing a raw
+  `juce::Font` instead of the shared Segoe UI Semibold, now matches its sibling generator window.
+
 ### Fixed: `arpLineOn` no longer builds a string on the audio thread
 
 `KeysProcessor::arpLineOn` built a `juce::String` through `arpParamId` and looked it up by name
