@@ -7,6 +7,42 @@ All notable changes to Keys are documented here. Format follows
 
 ### Under the hood: the structural half of the 2026-09-02 architecture review
 
+- `KeysProcessor` gave up three of the twelve jobs it was carrying, and none of them was ever
+  really the processor's. **`src/LayoutState.h`** holds the `LayoutState` struct and the two
+  functions that write it into a session and read it back: message-thread UI state the audio
+  thread never touches, and a pair of walks over a `ValueTree` whose only fact about the
+  instance was how many arp lines there are, which is an argument now.
+  **`src/KeysParams.{h,cpp}`** holds the parameter layout, the per-line block, the choice lists
+  and the eight session migrations - six hundred lines that never touched an instance either
+  (`createLayout` is called from the member initialiser list, before there is a processor to
+  touch). **`src/TakeRecorder.{h,cpp}`** holds the take: the ring the audio thread writes, the
+  vector the message thread drains it into, and the MIDI file both agree on. The processor owns
+  one as a member and hands it the two facts it cannot know on its own - this instance's sample
+  rate, and its tempo at the moment you arm.
+- **Nothing moved that anybody calls.** Every public name the editor, the MCP bridge, Keys Host
+  and the tests already spell is still on `KeysProcessor`, as a forwarder where its body left:
+  `createLayout`, `harmonyChoices`, `harmonySemisFor`, `harmonySemisSecondFor`, `tupletFor`, the
+  whole take API, `layoutToTree`/`layoutFromTree` and the eight migrations. `KeysProcessor::
+  TakeNote` is an alias onto the recorder's struct, so `TakePanel` is untouched. The `ArpParam`
+  enum, `arpParamId`, `arpParamSuffix` and the cached-pointer table stay put: they are what the
+  audio thread reads through.
+- **The layout registers every id in exactly the order it always did**, which is the whole
+  session-compatibility contract and is checked against `StateTests`' golden list. The two
+  audio-thread tables - the harmony intervals and the tuplet Ns - are in `KeysParams.h` rather
+  than its .cpp on purpose, so `harmonySemisFor` stays an indexed read of a constant table with
+  nothing allocated, exactly as it was beside its one caller.
+- **One thing genuinely changed shape, and it is the acquire.** `captureBlock` makes its own
+  armed check now instead of being called behind one, so the `memory_order_acquire` that pairs
+  with arming's release store lives with the ring rather than at a call site where the next
+  person to touch it could reach for `isRecording()` and get relaxed ordering by accident. Same
+  one atomic load per block either way.
+- `PluginProcessor.h` is 1203 lines from 1464, `PluginProcessor.cpp` 2856 from 4306.
+- finished the skin sweep in the arp/keyboard side of the UI. The mod and pitch
+  wheels' groove and grab-bar gradients, the Draw grid's drag-value readout background, and the
+  Controls band's "KEYS" title font moved out of PluginEditor.cpp and into named skin:: tokens
+  (`wheelGrooveTop/Bot`, `wheelThumbTop/Bot`, `floatingBg`) or existing font helpers, alongside a
+  handful of stray readout fonts and a header fill left over from the last pass through
+  ArpPanel.cpp and LaneGrid.cpp. No painted pixel moves; this is bookkeeping only.
 - `src/ui/ArpPanel.cpp` carried the whole arpeggiator UI in one translation unit and had reached
   4,687 lines, so the two largest self-contained pieces of it moved into files of their own: the
   macro card into `src/ui/MacroRow.{h,cpp}` with the layout constants the All view measures itself
