@@ -69,6 +69,13 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --target Keys_VST3
 
+      # Keys Host (okstudio_add_plugin(KeysHost ...) -> target KeysHost_VST3) and the keys-mcp
+      # stdio shim (okstudio_add_mcp_shim(keys-mcp) -> target keys-mcp) are both KEYS_BUILD_HOST /
+      # KEYS_BUILD_MCP_SHIM default ON in CMakeLists.txt, but neither was ever built here - CI
+      # only proved plain Keys compiled.
+      - name: Build Keys Host and the MCP shim
+        run: cmake --build build --config Release --target KeysHost_VST3 keys-mcp
+
       - name: Build tests
         run: cmake --build build --config Release --target Keys_tests
 

@@ -11,6 +11,7 @@
 // layout and `setStateInformation`. `Keys_tests` therefore links `Keys_SharedCode`, and each
 // test constructs a processor of its own so nothing leaks between them.
 
+#include "../src/ChordGen.h"
 #include "../src/PluginProcessor.h"
 #include <juce_events/juce_events.h>
 
@@ -1191,6 +1192,159 @@ public:
             expectEquals(h.processor.arpHeldPad(1), -1,
                          "and marks no pad, because no pad was involved");
             expect(h.processor.arpLineHoldingPad(0) < 0, "nor does it claim somebody's slot");
+        }
+
+        beginTest("parameter layout is append-only");
+        {
+            // The contract every parameter-layout comment in PluginProcessor.cpp is stating one
+            // at a time: APVTS matches a saved parameter by *id*, a choice parameter is saved as
+            // a plain denormalised index into its own choice list, and a host's automation lane
+            // addresses a parameter by its *position* in the generic list createLayout() builds.
+            // So a parameter id may only ever be APPENDED - never inserted, reordered or
+            // removed - or an old session silently lands on the wrong control, or a host
+            // automation lane silently repoints onto a different one.
+            //
+            // This pins the whole layout, in order, as one golden list and is the test that
+            // would actually catch a layout accident landing anywhere but the end. It is built
+            // the same shape createLayout() itself is - a block of globals, the four arp lines
+            // in letter order (addArpLineParams, called once per line), then a second block of
+            // globals appended after the per-line loop - rather than as 243 hand-typed strings,
+            // because a golden list built by copying the same shape the source has is far less
+            // likely to acquire a transcription error than one typed out flat, and is just as
+            // able to catch a real insertion, reorder or removal: whichever block moves is what
+            // fails. Extend a block by appending to its array here, in the same place the real
+            // parameter was appended in createLayout()/addArpLineParams().
+            //
+            // The per-line suffix order below is the order addArpLineParams() actually calls
+            // layout.add() in - NOT KeysProcessor::arpParamSuffix()'s order (the ArpParam enum,
+            // used for the audio thread's cached-pointer index), which has already drifted from
+            // creation order once (Drift/Mutate/MutateLock land before VelLevel there; VelLevel
+            // is appended after MutateLock in createLayout). Line 0 registers under the bare id
+            // ("arpOn"); lines 1-3 take "arp2"/"arp3"/"arp4" (see arpParamId).
+            static const char* const globalsBeforeLines[] = {
+                "root", "scale", "scaleLock", "octave", "size", "polyphony", "channel",
+                "sustain", "humanize", "humanizeVelMin", "humanizeVelMax", "chordExclusive",
+                "chordStrum", "chordStrumMax", "chordStrumDir", "padPage",
+                "genRoot", "genMode", "genOctave",
+                "genInv0", "genInv1", "genInv2", "genInv3",
+                "genCompliance", "genLockInfluence",
+                "surface", "curve", "velocity", "latch", "humanizeTime", "padChannel",
+                "faderCC1", "faderCC2", "faderCC3", "faderCC4",
+                "faderCC5", "faderCC6", "faderCC7", "faderCC8",
+                "xyCCX", "xyCCY",
+                "genSource",
+                "genCircleDir", "genPlrP", "genPlrL", "genPlrR", "genProgression",
+                "genPlaningDiatonic", "genSmooth",
+                "genNotesMin", "genNotesMax", "genOctaveMax", "genMajMin",
+                "genUseKey", "genUseMode", "genUseOctave", "genUseNotes",
+                "genUseInversions", "genUseCompliance",
+                "markovMode", "markovTemp", "markovLength",
+                "uiLayout",
+            };
+            static const char* const perLineSuffixes[] = {
+                "On", "Rate", "RateFree", "RateHz", "Dot", "Trip", "Anchor", "Direction",
+                "Pattern", "LinkLanes", "Octaves", "Swing", "Latch", "Retrigger", "Gate",
+                "Chance", "Distance", "Offset", "RetrigBars", "VelRamp", "RampBeats",
+                "Humanize", "Keys", "Channel", "OctShift", "Volume", "HumanVel", "VelTrim",
+                "Tuplet", "HumanizeSpan", "HumanVelSpan", "Drift", "Mutate", "MutateLock",
+                "VelLevel", "Harm1", "Harm1Chance", "Harm2", "Harm2Chance", "Stray",
+                "Legato", "Follow", "Duck", "ResetFollow",
+            };
+            static const char* const globalsAfterLines[] = {
+                "arpQuantize", "bpm", "bpmSync", "arpTrackMidi",
+            };
+            expectEquals((int) (sizeof(perLineSuffixes) / sizeof(perLineSuffixes[0])),
+                         (int) KeysProcessor::numArpParams,
+                         "the golden suffix list has one entry per per-line parameter");
+
+            juce::StringArray golden;
+            for (const auto* s : globalsBeforeLines)
+                golden.add(s);
+            for (int line = 0; line < KeysProcessor::numArpLines; ++line)
+                for (const auto* suffix : perLineSuffixes)
+                    golden.add(KeysProcessor::arpParamId(line, suffix));
+            for (const auto* s : globalsAfterLines)
+                golden.add(s);
+
+            Host h;
+            juce::StringArray live;
+            for (auto* param : h.processor.getParameters())
+                if (auto* rap = dynamic_cast<juce::RangedAudioParameter*>(param))
+                    live.add(rap->getParameterID());
+
+            int mismatchAt = -1;
+            for (int i = 0; i < juce::jmax(golden.size(), live.size()); ++i)
+            {
+                if (i >= golden.size() || i >= live.size() || golden[i] != live[i])
+                {
+                    mismatchAt = i;
+                    break;
+                }
+            }
+
+            if (mismatchAt >= 0)
+            {
+                logMessage("parameter layout mismatch at index " + juce::String(mismatchAt)
+                           + ": golden has \""
+                           + (mismatchAt < golden.size() ? golden[mismatchAt] : juce::String("<none>"))
+                           + "\", live has \""
+                           + (mismatchAt < live.size() ? live[mismatchAt] : juce::String("<none>"))
+                           + "\"");
+                juce::String dump = "live parameter order (paste to update the golden list above):\n{\n";
+                for (const auto& id : live)
+                    dump << "    \"" << id << "\",\n";
+                dump << "}";
+                logMessage(dump);
+            }
+
+            expectEquals(live.size(), golden.size(),
+                         "the live parameter count matches the golden append-only list");
+            expect(mismatchAt < 0, "the live parameter order matches the golden append-only list");
+        }
+
+        beginTest("the genSource choice list is append-only: a saved session stores its index");
+        {
+            // createLayout()'s own comment on this parameter: "Never reorder or insert into this
+            // list - that is what would silently reopen a session on the wrong brain." Pinned
+            // separately from the parameter-layout test above because this is a choice list's
+            // *contents* drifting, not a parameter appearing in the wrong place - reordering
+            // these eight strings costs nothing at compile time and a saved session's generator
+            // brain at load time.
+            static const juce::StringArray golden {
+                "Algorithmic", "Markov", "Circle of Fifths", "Neo-Riemannian",
+                "Progressions", "Negative Harmony", "Planing", "Library",
+            };
+            Host h;
+            auto* choice = dynamic_cast<juce::AudioParameterChoice*>(h.processor.apvts.getParameter("genSource"));
+            expect(choice != nullptr, "genSource is a choice parameter");
+            if (choice != nullptr)
+            {
+                expectEquals(choice->choices.size(), golden.size(),
+                             "genSource has not silently grown or shrunk");
+                for (int i = 0; i < juce::jmin(choice->choices.size(), golden.size()); ++i)
+                    expectEquals(choice->choices[i], golden[i],
+                                 "genSource[" + juce::String(i) + "] moved");
+            }
+        }
+
+        beginTest("chordgen::types() is append-only: a saved chord pad stores its type index");
+        {
+            // ChordGen.h's own comment on this table: "Order is load-bearing only in that saved
+            // pads store the type index, so append new types at the end rather than inserting."
+            // Same rationale as genSource above, pinned here because nothing else in this file
+            // reads the whole table in order.
+            static const juce::StringArray golden {
+                "Major", "Minor", "Diminished", "Augmented", "Sus2", "Sus4",
+                "Major 7th", "Minor 7th", "Dominant 7th", "Diminished 7th",
+                "Half Diminished", "Minor Major 7th", "Major 6th", "Minor 6th",
+                "Add9", "Minor Add9", "Major 9th", "Minor 9th", "Dominant 9th", "6/9",
+            };
+            const auto& live = chordgen::types();
+            expectEquals((int) live.size(), golden.size(),
+                         "chordgen::types() has not silently grown or shrunk");
+            for (int i = 0; i < juce::jmin((int) live.size(), golden.size()); ++i)
+                expectEquals(juce::String(live[(size_t) i].name), golden[i],
+                             "chordgen::types()[" + juce::String(i) + "] moved");
         }
     }
 };
