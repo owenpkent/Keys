@@ -74,6 +74,20 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**The keybed switch is on the card, and it says Keybed (2026-09-01, last thing that evening).**
+Owen, with line A's `arpKeys` off and nothing on screen to say so: *"The notes I'm playing on the
+keyboard aren't being sent to the arpeggiator"*, then *"I thought it was on."* Found by asking the
+running instance (`play_notes` + `get_state`, see the MCP note in memory) rather than the code:
+lines A and B had it off, C and D on, Track MIDI on - toggles left from testing the 2026-08-27
+round, persisted by Keys Host between launches, and invisible from the All view. The fix is the
+switch itself on the card, not a mark: `MacroRow::keybedButton`, a `ButtonAttachment` on
+`apKeys`, on the top row **after the dice in the slack Shape's cap leaves** - reserved out of the
+row before Shape takes its cut, the dice's own rule, so it costs no width at either floor and no
+height. **One word on both surfaces, Keybed**: "Play" read as the line's own On switch, which is
+the confusion both rounds paid for, and "Keys" collided with the bar's Light keys (the 2026-08-02
+record). The parameter id and the band's member name are untouched. `LayoutTests` measures the
+chip at both floors and that it sits clear of the dice and the shape combo.
+
 **The lines can hear each other, phase one: the bus, From, and DUCK (2026-09-01, later the same
 day).** Owen: *"can we get the arpeggiators to interact with each other, like the step sequencers,
 so we can get interesting variations"*, then *"just plan it out"*, then *"start"*. The design and
@@ -2786,9 +2800,11 @@ Four things will bite otherwise:
   view now that A and B on the bar no longer do. **`Macro line A` / `B` no longer exist**: that
   was the macro card's own On toggle, deleted the same pass, replaced by a scrim over the whole
   card rather than a second control. `Macro latch A`, `Macro keys A` and `Macro chain A` went
-  with the row controls on 2026-08-02; the per-line band's Play toggle answers to `Arp play`
-  (the parameter is still `arpKeys` - the accessible name follows the label here because
-  "keys" already means two other things in this window). On the arp bar: `Arp all off`,
+  with the row controls on 2026-08-02; the per-line band's keybed toggle answers to `Arp keybed`
+  (the parameter is still `arpKeys`; it answered to `Arp play` and read "Play" until 2026-09-01,
+  when the same switch came back onto the card as `Macro keybed A` and both took the word for the
+  thing they gate - "Play" had read as the line's On, and "Keys" collides with the bar's Light
+  keys). On the arp bar: `Arp all off`,
   `Arp light keys` and, from 2026-08-27, `Arp track MIDI` (on-screen words "Track MIDI").
 - **Two known traps in this script, hit on 2026-08-01 and not yet fixed.** `-SetValues` is
   applied *before* `-InvokeButtons`, so a value inside a folded section cannot be reached in

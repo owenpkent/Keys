@@ -5,6 +5,21 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: the switch that lets the keyboard feed a line is on the card, and it says Keybed
+
+Owen, with line A's switch off and nothing on screen to say so: *"The notes I'm playing on the
+keyboard aren't being sent to the arpeggiator"*, then *"I thought it was on."*
+
+Per-line **Play** (`arpKeys`) decides whether what you play on the keybed feeds that line, and it
+lived on the Play page alone - two clicks inside a view that neither the card nor the bar reports
+on. The 2026-08-27 round found the same switch hiding from the other side ("it's so unclear where
+that's hiding"). It is a chip on each macro card now, on the top row after the dice, in the slack
+Shape's width cap leaves at every floor, so it costs no width and no height. One parameter, one
+name on both surfaces: **Keybed**. "Play" read as the line's own On switch, which is exactly the
+confusion; "Keys" collided with the bar's Light keys, the reason logged when the toggle was
+named. The accessible names are `Macro keybed A` and `Arp keybed`. `LayoutTests` measures the
+chip at both floors.
+
 ### Added: Reset from the line you follow, and a Chain lane that reads that line too
 
 **PARAMETER LAYOUT CHANGE.** `arpResetFollow` is appended per line, default **off**. The Chain

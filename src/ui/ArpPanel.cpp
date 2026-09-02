@@ -2156,6 +2156,19 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
                           "so there is nothing stored for this to change.");
     diceButton.onClick = [this] { processor.rerollArpRandom(line); };
     addAndMakeVisible(diceButton);
+
+    // Keybed: whether what you play feeds this line, where you can see it (2026-09-01). The
+    // same parameter as the Play page's toggle, one name on both. Live on every card, off line
+    // or on, like everything else here.
+    keybedButton.setTitle("Macro keybed " + letter);
+    keybedButton.setTooltip("Does this line arpeggiate what you play on the keybed? On, the keys "
+                            "you hold feed it. Off, it ignores the keybed and plays only the chord "
+                            "cards you hand it - which is what lets one line follow your hands "
+                            "while another runs a card. The same switch as Keybed on this line's "
+                            "Play page. MIDI arriving on the track is a separate question: Track "
+                            "MIDI, on the arp bar.");
+    addAndMakeVisible(keybedButton);
+    keybedAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apKeys), keybedButton);
     // Seed the combo *before* asking the dice about it. `addItemList` selects nothing and the
     // shape has no attachment to seed it either (applyShape writes two parameters by hand), so
     // the selection is -1 until something sets it - and refreshDice reading -1 opened the
@@ -2784,16 +2797,23 @@ void ArpPanel::MacroRow::resized()
         // px gap is wider than the 6 px between the shape's own parts, which is what keeps it
         // from being mistaken for a third stepper. Whatever the row has left over then falls
         // at the end, where empty space costs nothing.
+        // The Keybed chip (2026-09-01) takes the slack after the dice - reserved out of the row
+        // before Shape takes its cut, the same rule as the dice's own cell, so Shape shrinks
+        // toward its cap rather than the chip being starved. At the docked floor the row has
+        // over a hundred pixels past the dice; LayoutTests measures the chip at both floors.
         const int diceW = 34;
+        const int keybedW = 88;
         shapePrev.setBounds(centred(r.removeFromLeft(26)));
         r.removeFromLeft(6);
         const int shapeW = juce::jmin(arpMacroShapeMaxW,
-                                      juce::jmax(0, r.getWidth() - 26 - 6 - 14 - diceW));
+                                      juce::jmax(0, r.getWidth() - 26 - 6 - 14 - diceW - 14 - keybedW));
         shapeBox.setBounds(centred(r.removeFromLeft(shapeW)));
         r.removeFromLeft(6);
         shapeNext.setBounds(centred(r.removeFromLeft(26)));
         r.removeFromLeft(14);
         diceButton.setBounds(centred(r.removeFromLeft(diceW)));
+        r.removeFromLeft(14);
+        keybedButton.setBounds(centred(r.removeFromLeft(keybedW)));
     }
     // The RATE / SHAPE names span their whole group, steppers included, so the arrows can
     // only be read as belonging to the word above them. Placed from the controls, as ever.
@@ -3223,17 +3243,21 @@ void ArpPanel::buildControls()
     // Keyboard bar in the same window, and UI Automation takes the first name that matches.
     latchButton.setTitle("Arp latch");
 
-    // PLAY moved here from the macro rows when they slimmed down (2026-08-02). The word is
-    // Play rather than Keys for the reason logged the same day: "KEYS" collided head-on with
-    // the bar's Light keys, two controls one word apart with nothing to say which was which.
+    // PLAY moved here from the macro rows when they slimmed down (2026-08-02), and went back
+    // onto the card as a chip on 2026-09-01 (Owen, with it off and nothing to say so: "I
+    // thought it was on"). The word is Keybed on both surfaces since then: "Play" read as the
+    // line's own On switch, which is the confusion the Track MIDI round paid for, and "Keys"
+    // collided head-on with the bar's Light keys, the reason logged on 2026-08-02. Keybed is
+    // the thing the switch gates.
     addAndMakeVisible(keysBandButton);
-    keysBandButton.setTooltip("Does this line arpeggiate what you play on the keyboard at the "
-                              "bottom? On, the keys you hold feed it. Off, it ignores the keybed "
-                              "entirely and plays only the chord cards you hand it - which is "
-                              "what lets one line follow your hands while the other runs a card. "
-                              "MIDI arriving on the track is a separate question with a switch "
-                              "of its own: Track MIDI, on the arp bar, off by default.");
-    keysBandButton.setTitle("Arp play");
+    keysBandButton.setTooltip("Does this line arpeggiate what you play on the keybed? On, the "
+                              "keys you hold feed it. Off, it ignores the keybed entirely and "
+                              "plays only the chord cards you hand it - which is what lets one "
+                              "line follow your hands while the other runs a card. The same "
+                              "switch as Keybed on the line's card. MIDI arriving on the track is "
+                              "a separate question with a switch of its own: Track MIDI, on the "
+                              "arp bar, off by default.");
+    keysBandButton.setTitle("Arp keybed");
 
     // Retrigger was a toggle that only answered "on a new chord". The list adds the clock
     // half, so a five-step lane can still be made to land on the bar, and the two are
