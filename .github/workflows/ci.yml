@@ -2,6 +2,9 @@ name: CI
 
 # Docs/screenshot-only pushes don't need a build; every skipped run saves
 # 2x-billed Windows minutes.
+# ci-docs-only.yml is this list's twin: it runs on exactly these paths and reports a
+# passing job of the same name, so the ruleset's required windows-latest check is
+# satisfied on a docs-only PR. Change one list and change the other.
 on:
   push:
     branches: [main]
