@@ -48,8 +48,6 @@ CYAN = "\033[96m" if _ANSI else ""
 DIM = "\033[2m" if _ANSI else ""
 RESET = "\033[0m" if _ANSI else ""
 
-THUMBPRINT = "FC22B5221318F3F3F6B3EB2D969D7F99091557BF"
-
 
 def console_is_ours() -> bool:
     """True when double-clicked from Explorer, so the window dies with us."""
@@ -77,11 +75,21 @@ def hold_window_open() -> None:
 
 
 def project_version() -> str:
-    text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    match = re.search(r"project\(Keys VERSION ([0-9.]+)", text)
-    if not match:
-        raise RuntimeError("no project(Keys VERSION ...) in CMakeLists.txt")
-    return match.group(1)
+    """Ask build.ps1 for the version rather than keeping a second copy of the
+    project(Keys VERSION ...) regex - build.ps1 -PrintVersion reads CMakeLists.txt
+    and exits immediately, before touching any build state."""
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-File", str(ROOT / "build.ps1"), "-PrintVersion"],
+        capture_output=True,
+        text=True,
+    )
+    version = out.stdout.strip()
+    if out.returncode != 0 or not version:
+        raise RuntimeError(
+            f"build.ps1 -PrintVersion failed (exit {out.returncode}): {out.stderr.strip()}"
+        )
+    return version
 
 
 def powershell(script: str) -> str:
@@ -93,10 +101,19 @@ def powershell(script: str) -> str:
     return out.stdout.strip()
 
 
+def thumbprint() -> str:
+    """installer/signing-thumbprint.txt - the one copy of the OK Studio EV cert's
+    thumbprint; build.ps1 reads the same file rather than each script pinning its
+    own. A function rather than a module-level constant so a missing file raises
+    inside main()'s own try/except (see __main__ below) instead of before it -
+    the double-clicked-window case this file exists to keep readable."""
+    return (ROOT / "installer" / "signing-thumbprint.txt").read_text(encoding="utf-8").strip()
+
+
 def token_present() -> bool:
     return powershell(
         f"[bool](Get-ChildItem Cert:\\CurrentUser\\My,Cert:\\LocalMachine\\My "
-        f"-EA SilentlyContinue | ? {{ $_.Thumbprint -eq '{THUMBPRINT}' -and $_.HasPrivateKey }})"
+        f"-EA SilentlyContinue | ? {{ $_.Thumbprint -eq '{thumbprint()}' -and $_.HasPrivateKey }})"
     ).lower().startswith("true")
 
 
