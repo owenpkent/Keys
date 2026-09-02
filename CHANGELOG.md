@@ -5,6 +5,42 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: `arpLineOn` no longer builds a string on the audio thread
+
+`KeysProcessor::arpLineOn` built a `juce::String` through `arpParamId` and looked it up by name
+through `apvts::getRawParameterValue` on every call, and `runArpLines` calls it once per line
+every block - an allocation and a string-keyed lookup on the one thread that may not do either.
+It reads `arpParam(line, apOn)` now, the same cached atomic pointer every other per-block arp
+read already goes through, resolved once for every line at construction.
+
+### Fixed: the Chord lane's chord count is an acquire read
+
+`syncArpChordTable` (message thread) stores a slot's notes relaxed and then its count with
+`memory_order_release` on purpose - the count is what admits the notes below it to the Chord
+lane, so a chord must be fully written before the count says it is there. The lane's own read
+of that count was `memory_order_relaxed`, which does not carry the release's guarantee across to
+the audio thread; a relaxed load could in principle observe the new count before the notes it
+gates. Made an acquire load, matching the release it pairs with.
+
+### Fixed: a harmony voice's chance roll no longer shares Mutate's draw
+
+The per-line fixed harmony voices' chance roll used the same three hash constants as Mutate's
+`mutatedIndex`, on inputs (the raw step and a voice index, against Mutate's wrapped step and era) that nothing
+kept apart by construction. Working through the arithmetic shows they cannot coincide today,
+but DUCK was already salted against exactly this rather than resting on such an argument. Given the harmony roll a salt of its own, in the same
+spirit. **Existing sessions**: any line with Harm 1 or Harm 2's chance below 100 now fires that
+voice on a different set of steps than it used to - a different random pattern, nothing else.
+Chance 100 (the default) and chance 0 are untouched, since neither ever rolls.
+
+### Docs: reconciled ArpEngine's "one thing not stateless" comment
+
+The comment beside `laneChain` said Chain was the only thing in the engine not stateless from
+the playhead; DUCK, RESET, Legato's one-step lookahead, Random Once's shuffled order and the
+live rng feeding the feel draws have all joined it since, each documented at its own declaration
+but never gathered against the class-level claim. Named the categories there so the comment
+still says something true, and restated the design intent it was making: everything else is
+still a function of the step index alone.
+
 ### Changed: the switch that lets the keyboard feed a line is on the card, and it says Keybed
 
 Owen, with line A's switch off and nothing on screen to say so: *"The notes I'm playing on the
