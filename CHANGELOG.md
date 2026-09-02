@@ -7,6 +7,13 @@ All notable changes to Keys are documented here. Format follows
 
 ### Under the hood: the structural half of the 2026-09-02 architecture review
 
+- `ArpEngine.h` no longer holds a `juce::String` anywhere in it. Its two rate-dial text
+  formatters, `rateHzText` and `rateSyncText`, moved to a new `src/ArpRateText.h`
+  (`keys::arptext`) with their bodies and comments unchanged, so the engine header's own
+  claim of being UI-free is now true of every line in it, not just the ones on the audio
+  thread's process path. Every call site (the `arpRateHz` parameter's text function, the arp
+  panel's dial and slot card, the macro card's dial, and the rate-readout test) now reads
+  `arptext::rateSyncText` / `arptext::rateHzText`.
 - `KeysProcessor` gave up three of the twelve jobs it was carrying, and none of them was ever
   really the processor's. **`src/LayoutState.h`** holds the `LayoutState` struct and the two
   functions that write it into a session and read it back: message-thread UI state the audio
