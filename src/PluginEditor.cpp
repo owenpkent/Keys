@@ -60,6 +60,165 @@ namespace
     constexpr int dockedKeybedH = 189;
     constexpr int detachWidth = 104;                  // the Detach / Re-dock button
 
+    // The editor's own outer margin, spent by resized() before any bar is laid out, and added
+    // back by minWidthForView() when it turns "what a bar costs" into "how wide the window has
+    // to be for it".
+    constexpr int editorMargin = 10;
+
+    // --- What the four section bars spend ------------------------------------------------
+    // Every fixed-width control on a bar, named once so resized() and minWidthForView() read
+    // the same numbers instead of one of them restating the other in prose. **The prose is
+    // what drifted**, three times over: it itemised a Compliance chip and a Mode combo that had
+    // left the Pads bar, never accounted for the Mode combo that came back, and never
+    // accounted for Undo and Redo at all. `ArpPanel::minMacroWidth()` had already made this
+    // move one level down - it walks the same constants its own layout spends - and this is
+    // that move on the bars.
+    //
+    // Each `contentWidth()` is resized()'s block for that bar read as a sum, in the same order,
+    // with the same gaps between the same cells, so the two can be read side by side. The gaps
+    // stay as literals in both places on purpose: what moves when a control is added is a
+    // control's own width, and a named `g6` would be noise rather than a fact.
+    namespace controlsbar
+    {
+        constexpr int gap = 8, lblGap = 4, bigGap = 14;
+        constexpr int themeW = 112;  // the theme swatch
+        constexpr int gearW = 34;    // the settings gear, the mouse-only floor exactly
+        constexpr int updateW = 170; // only on the day the updater finds a release
+        constexpr int undoW = 62, redoW = 62;
+
+        // Root, Scale, Lock, Voices and MIDI Ch's two sizes, decided by measuring rather than
+        // assuming (2026-08-02, Owen's ask - and "I think we can resize the elements down"
+        // when they would not fit at his window width). Measured *before* anything is laid out
+        // on the left of the bar: the Instrument chip is elastic and needs to know how much
+        // this group and the tempo group are about to claim.
+        //
+        // Root keeps a caption in the roomy set alone now - "C" says nothing on its own, but
+        // it is the one caption Owen did not ask for (2026-08-02: "BPM and Off and [Voices]
+        // ... needs labels"), so it is the one that drops first under width pressure. Voices
+        // and CH are captioned in *both* sets: Keys Host runs in tight, and a caption that
+        // only ever showed in the roomy set nobody reaches was not a caption Owen could see.
+        // Scale and Lock never get one: "Major" and "Lock" are their own labels.
+        struct Cell { int label, box; };
+        // Voices is the widest of the small boxes because "Off" plus a chevron is wider
+        // than the digits either side of it in the list - measured, not guessed: at 52 it
+        // drew "..." while every other value fitted, which is the failure a combo makes
+        // instead of complaining.
+        //
+        // Root and CH were 48 and 48 here (44 and 44 tight) and both drew "..." in every
+        // state, which is the same failure again and had been there since they moved to the
+        // bar: a chevron plus JUCE's own padding costs a combo about 38 px before a single
+        // glyph is drawn, so 48 cannot hold even "C". Root has to fit "A#" and CH has to fit
+        // "16", so they are sized for their *widest* value, not the one selected when you
+        // happen to look. The 44/26 label widths are proven at this same font from the
+        // roomy set they were built for - reused rather than re-guessed for tight's copies.
+        constexpr Cell roomy[] = { { 34, 58 }, { 0, 96 }, { 0, 62 }, { 44, 68 }, { 26, 56 } };
+        constexpr Cell tight[] = { {  0, 54 }, { 0, 76 }, { 0, 56 }, { 44, 62 }, { 26, 52 } };
+        constexpr int widthOf(const Cell (&cells)[5])
+        {
+            int w = gap * 4;
+            for (const auto& c : cells)
+                w += c.box + (c.label > 0 ? c.label + lblGap : 0);
+            return w;
+        }
+
+        // BPM's caption and the Sync chip (2026-08-02) grew this group from 114 to 222: label
+        // "BPM" (34, reusing Root's own roomy width - both are three-to-four letters at the
+        // same font, and Root's is already proven not to ellipsise) + 4 px gap, then the same
+        // prev/field/next as always, then an 8 px gap and Sync at 62 (Fill and Regen's own
+        // proven width for a four-letter bar chip, not a checkbox-style ToggleButton - there
+        // is no width here for one).
+        constexpr int bpmLabelW = 34;  // "BPM", reusing Root's own roomy width
+        constexpr int bpmStepW = 26;   // the < and > either side of the field
+        constexpr int bpmFieldW = 56;
+        constexpr int bpmSyncW = 62;
+        constexpr int bpmGroupW = bpmLabelW + lblGap
+                                + bpmStepW + 3 + bpmFieldW + 3 + bpmStepW
+                                + gap + bpmSyncW;
+        // chipMin stays 60 (unchanged since the update-button corner it was built for) - see
+        // minWidthForView() for why the floor, not this clamp, absorbs what the bar has grown
+        // by. Everywhere but that one corner the clamp still lands on chipMax.
+        constexpr int chipMin = 60, chipMax = 150;
+
+        // The Controls block of resized(), read as a sum. `instrumentChip` and `updateButton`
+        // say whether those two are on the bar this run; the chip is charged at its *floor*,
+        // since it is the elastic one and shrinking to chipMin is what it is allowed to do.
+        constexpr int contentWidth(const Cell (&cells)[5], bool instrumentChip, bool updateButton)
+        {
+            return detachWidth
+                 + 6 + themeW + 6 + gearW + 6
+                 + (updateButton ? updateW : 0)
+                 + undoW + 4 + redoW + bigGap
+                 + (instrumentChip ? chipMin + bigGap : 0)
+                 + bpmGroupW + bigGap
+                 // widthOf counts the four gaps *between* the five cells; place() spends one
+                 // after the last as well, and 6 px more go before the caption takes the rest.
+                 + widthOf(cells) + gap + 6;
+        }
+    }
+
+    namespace arpbar
+    {
+        constexpr int holdOffW = 88, allOffW = 84, lightsW = 120, trackMidiW = 122;
+        constexpr int lineTabW = 40, allTabW = 44, pageTabW = 62, foldBottomW = 96;
+        constexpr int quantizeLabelW = 56, quantizeBoxW = 92;
+
+        // Measured in a line's *deep* view, which is the wide case: All is laid out in every
+        // view, and the three page tabs cost more than the bottom-row fold that stands in for
+        // them in the All view. A folded section is narrower again and needs no floor of its
+        // own, since a floor is what the widest layout asks for.
+        constexpr int contentWidth()
+        {
+            return detachWidth
+                 + 6 + holdOffW + 4 + allOffW + 10 + lightsW + 6 + trackMidiW
+                 + KeysProcessor::uiArpLines * (lineTabW + 4)
+                 + allTabW + 6 + 3 * (pageTabW + 3)
+                 + 14 + quantizeLabelW + quantizeBoxW + 8;
+        }
+    }
+
+    namespace padbar
+    {
+        constexpr int regenW = 70, fillW = 62, genW = 90, libW = 80;
+        constexpr int modeW = 124, keyW = 58;
+        constexpr int pageW = 46, playW = 64, keepArpW = 94;
+
+        constexpr int contentWidth()
+        {
+            return detachWidth
+                 + 6 + regenW + 4 + fillW + 6 + genW + 6 + libW + 10 + modeW + 4 + keyW
+                 + KeysProcessor::numPadPages * (pageW + 4)
+                 + 10 + playW + 6 + keepArpW + 14;
+        }
+    }
+
+    namespace keyboardbar
+    {
+        constexpr int wheelsW = 84; // the one traveller: it follows the keybed into its window
+        constexpr int panicW = 84, latchW = 78, sustainW = 96, exclusiveW = 104;
+        constexpr int sizeW = 104, octLabelW = 30, octStepW = 26, octReadoutW = 42;
+        constexpr int recW = 62, takeW = 116;
+
+        // The traveller is on the bar while the section is docked, and layoutDetachRow puts a
+        // 6 px gap before it - so a docked Keyboard bar is the wide case here too.
+        constexpr int contentWidth()
+        {
+            return detachWidth + 6 + wheelsW
+                 + 14 + panicW + 6 + latchW + 6 + sustainW + 6 + exclusiveW
+                 + sizeW + 6 + octLabelW + octStepW + 3 + octReadoutW + 3 + octStepW
+                 + 14 + recW + 6 + takeW;
+        }
+    }
+
+    // The window width a bar needs before resized() starts clamping its cells into each other.
+    // A bar lays out inside SectionBar::contentArea(), which is the bar less its fold zone and
+    // 8 px at each end; the bar itself is the window less the editor's two margins. The fold
+    // zone is *asked for* rather than assumed, because it is as wide as that section's caption
+    // draws - the one term here that no constant can state.
+    int barMinWidth(const SectionBar& b, int content)
+    {
+        return content + b.foldZone().getWidth() + 8 + 8 + 2 * editorMargin;
+    }
+
     // The tallest the editor may be dragged. It has to clear idealHeight()'s worst case,
     // because applyLayout() passes that same worst case in as the *minimum*: at 1400 the two
     // crossed over and every fully-open layout asked JUCE for a minimum above its maximum.
@@ -135,6 +294,68 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     setLookAndFeel(&lnf); // the Keys "Obsidian" skin; palette lives in KeysLookAndFeel.h
     okstudio::ui::makeMouseOnly(*this);
 
+    // Every control, attachment and callback in this editor, in the order it has always been
+    // built in. **The order is the contract, not the grouping**: a SectionBar is a full-width
+    // Button and the controls riding it are its siblings rather than its children, so the order
+    // things are added in is their z-order, which is what the toBack() loop below then corrects
+    // for the bars themselves. Each call is one contiguous run of what used to be written out
+    // here, so nothing has moved past anything else.
+    buildSections();
+    buildControlsSection();
+    buildPadStripControls();
+    buildKeyboardSection();
+    buildPadsBar();
+    buildArpBar();
+    buildTempoAndQuantize();
+    buildPluginChrome();
+    wireChordPadCallbacks();
+    startUpdater();
+
+    // The bars are full-width and translucent, and the controls that ride on them are
+    // siblings, not children: a SectionBar is a Button, and it stays full-width so it can
+    // paint the caption and the fold state across the whole strip, even though only the
+    // chevron end answers a click (SectionBar::hitTest). Whichever was added last paints
+    // last, so without this the bars wash out the buttons and captions sitting on them.
+    for (int i = 0; i < numSections; ++i)
+        sections[(size_t) i].bar->toBack();
+
+    setResizable(true, true);
+    // The floor is everything folded away: four bars and the margins. What used to be
+    // the minimum (560) is now roughly the *default*, and Owen can go far below it.
+    // The ceiling is stated once, in maxEditorHeight - see there for why 1400 was a bug.
+    setResizeLimits(820, 150, 2600, maxEditorHeight);
+    setSize(980, 724);
+
+    // Children configured before they were parented (slider textboxes especially)
+    // baked colours from the default LookAndFeel; re-resolve everything under ours.
+    sendLookAndFeelChange();
+
+    // Restore the folds this session was saved with, then pop back out whichever sections
+    // were left in windows of their own.
+    applyAccent(processor.layout.accent); // before the first layout, so nothing paints cyan then repaints
+    syncSectionControls();
+    refreshSectionPanels();
+    applyLayout();
+    for (int i = 0; i < numSections; ++i)
+        if (*sections[(size_t) i].detached)
+            setSectionDetached((SectionId) i, true);
+    // And the generator's window, if the session was saved with it up. After the sections, so
+    // it opens in front of them.
+    if (processor.layout.chordGen)
+        setChordGenWindowOpen(true);
+    // And the library's, after it, so the generator sits in front of the library the way it did
+    // when the session was saved - the library is what you browse *from*.
+    if (processor.layout.chordLib)
+        setChordLibWindowOpen(true);
+
+    startTimerHz(30);
+}
+
+// The section table, and the two holders that paint a band behind their own content.
+// First of all of these, because every wire() call parents a bar and a holder into the
+// editor and everything below is parented into one of those.
+void KeysEditor::buildSections()
+{
     // --- The section table ---------------------------------------------------------
     // Every section is the same three things: a fold flag, a window frame it remembers, and
     // a floor below which its controls stop being clickable (which for a one-mouse player is
@@ -222,7 +443,7 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // but a close box. Size travelled the same way here until 2026-08-02, via a second combo
     // built for the detached window alone; it is a plain bar control now (sizeBox, laid out
     // above) and travels through the ordinary bar mechanism instead.
-    section(secKeyboard).travellers = { { &wheelsButton, 84 } };
+    section(secKeyboard).travellers = { { &wheelsButton, keyboardbar::wheelsW } };
 
     // The pad strip paints no card of its own, so its holder draws one behind it.
     padsHolder.painter = [this](juce::Graphics& g)
@@ -252,11 +473,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         if (knobBank.isVisible())
             paintModule(g, knobBank.getBounds().expanded(4, 4));
     };
+}
 
+// The Controls band's title, and the keyboard-settings group that rides the Controls
+// *bar* beside it - Root, Scale, Lock, Voices and MIDI Ch. Sustain, Latch and Exclusive
+// ride the Keyboard bar and are built here anyway, because they have been added in this
+// run since they moved to that bar on 2026-08-02, and the order is what may not change.
+void KeysEditor::buildControlsSection()
+{
     // --- Controls section ------------------------------------------------------------
     title.setText("KEYS", juce::dontSendNotification);
-    title.setFont(juce::Font(juce::FontOptions("Segoe UI", 24.0f, juce::Font::bold))
-                      .withExtraKerningFactor(0.10f));
+    title.setFont(skin::ui(24.0f).boldened().withExtraKerningFactor(0.10f));
     title.setColour(juce::Label::textColourId, skin::text);
     controlsHolder.addAndMakeVisible(title);
 
@@ -316,7 +543,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, "latch", latchButton);
     humanizeAtt = std::make_unique<ButtonAtt>(processor.apvts, "humanize", humanizeButton);
     chordExclusiveAtt = std::make_unique<ButtonAtt>(processor.apvts, "chordExclusive", chordExclusiveButton);
+}
 
+// Strum and Humanize, the two RangeKnobs that live *in* the pad strip, and the strum
+// direction steppers beside them. Children of the pads holder rather than of a bar, so
+// they travel with the section - unlike everything in buildPadsBar() below.
+void KeysEditor::buildPadStripControls()
+{
     // Humanize amounts: each note picks a random velocity in the [min, max] range (a
     // two-handle slider) and a micro-timing offset up to Timing ms. The range slider has
     // no APVTS attachment (two values), so it is synced to the params by hand.
@@ -452,7 +685,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // this section's *bar* now (2026-08-02, Owen: "the bpm should live in the controls
     // header. I want it to be like the bpm in ableton, just a number"), which also means it
     // survives folding the Controls section - see bpmField.
+}
 
+// The Keyboard bar (Size, Octave, REC, the take chip, All Off), the wheels and the keybed
+// inside the holder, and - last - the knob bank, which is a row of the *Controls* band and
+// is added here because this is where it has always been added.
+void KeysEditor::buildKeyboardSection()
+{
     // --- Keyboard section ------------------------------------------------------------
     // Size and Octave, on this bar (2026-08-02, Owen: "the size can go down to the header of
     // the keyboard button"). Editor children, not the holder's, so both stay on the bar when
@@ -556,7 +795,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // else once the arp and the generator moved out, and a bar plus a gap plus a caption is
     // 44 px the window was spending on a chevron for one row (2026-07-30).
     controlsHolder.addAndMakeVisible(knobBank);
+}
 
+// The Pads bar: the four page buttons, Play and Keep arp, the generator's four chips and
+// its Key and Mode combos. None of them hides with the fold; see the member declarations.
+void KeysEditor::buildPadsBar()
+{
     // Chord-pad pages: four pages of sixteen (Octavium's 4x4 per page), so a session can
     // hold several keys' worth of chords without the strip shrinking below a comfortable
     // target. Four explicit page buttons, sat with the pads rather than a "1/4" transport
@@ -710,7 +954,12 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // needed on a bar - a ParameterAttachment reading and `onPick` writing, because a
     // ComboBoxAttachment made picking the step already showing a no-op - went with it; the
     // window drives that parameter with a plain slider and never needed it.
+}
 
+// The arp bar: Hold off, All Off, Light keys and Track MIDI off the right end, then the
+// four line switches, All, the bottom-row fold and the three page tabs from the left.
+void KeysEditor::buildArpBar()
+{
     // The arp's power switch used to be a separate lettered chip here, one per line, right
     // beside the A/B/All tabs that also named a line - Owen called that redundant on
     // 2026-08-02 and it is gone. The tabs (`arpBarTabs`, built below) are the switch now.
@@ -860,7 +1109,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
             arpPageTabs[(size_t) i] = std::move(b);
         }
     }
+}
 
+// The tempo group and Launch Quantize, and they are one function on purpose. BPM, its two
+// steppers and Sync ride the *Controls* bar and Launch Quantize the arp bar, but the two
+// have been added in one run since the tempo left the arp bar on 2026-08-02, and the order
+// controls are added in is the one thing this split may not change.
+void KeysEditor::buildTempoAndQuantize()
+{
     bpmBarLabel.setText("BPM", juce::dontSendNotification);
     bpmBarLabel.setFont(skin::micro(9.0f));
     bpmBarLabel.setColour(juce::Label::textColourId, skin::textFaint);
@@ -906,7 +1162,14 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     addAndMakeVisible(quantizeBarBox);
     quantizeBarAtt = std::make_unique<ComboAtt>(processor.apvts, "arpQuantize", quantizeBarBox);
     refreshArpBarTabs();
+}
 
+// The plugin-level end of the Controls bar - the theme swatch, the settings gear, Undo and
+// Redo, and the Instrument chip a host may light up - plus two chips that have always been
+// added beside them: Wheels, which belongs to the keybed and travels with it, and the
+// update button, which stays hidden until the updater finds a newer release.
+void KeysEditor::buildPluginChrome()
+{
     themeButton.setTooltip("Colour this instance, to tell it from Keys on other tracks.");
     themeButton.setTitle("Theme");
     themeButton.onClick = [this] { showThemeMenu(); };
@@ -954,11 +1217,17 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         b.onClick = [this, &b, &flag] { flag = b.getToggleState(); applyLayout(); };
         addAndMakeVisible(b);
     };
-    chip(wheelsButton, lay.wheels, "Show or hide the mod and pitch wheels.");
+    chip(wheelsButton, processor.layout.wheels, "Show or hide the mod and pitch wheels.");
 
     updateButton.setColour(juce::TextButton::buttonColourId, okstudio::theme::good.withAlpha(0.85f));
     addChildComponent(updateButton); // hidden until the updater finds a newer release
+}
 
+// The pad strip itself, and every callback that reaches out of it: recall, the keyboard
+// edit link, the generator's two card-menu items, Send to arp, and the keybed's half of
+// Exclusive, which the processor cannot reach on its own.
+void KeysEditor::wireChordPadCallbacks()
+{
     const auto velocity = [this] { return processor.baseVelocity01(); };
     keyboard.getVelocity = velocity;
     padsHolder.addAndMakeVisible(chordPads);
@@ -1000,7 +1269,13 @@ KeysEditor::KeysEditor(KeysProcessor& p)
     // over sendPadToArpLine's definition for why the followAim flag went.
     chordPads.onSendToArpLine = [this](int slot, int line)
     { sendPadToArpLine(slot, line); };
+}
 
+// The updater's one ambient check. Its own function because it is the only thing this
+// constructor starts a *thread* for, and the only thing a unit test has to be able to skip
+// (see skipUpdateCheckForTest, and the note over it in the header).
+void KeysEditor::startUpdater()
+{
    #if ! (defined(KEYS_HOST) && KEYS_HOST)
     // Auto-update: check the pinned releases repo once, surface a button if newer.
     // Skipped when this editor is embedded inside Keys Host, which is a different
@@ -1020,46 +1295,8 @@ KeysEditor::KeysEditor(KeysProcessor& p)
         });
     }
    #endif
-
-    // The bars are full-width and translucent, and the controls that ride on them are
-    // siblings, not children: a SectionBar is a Button, and it stays full-width so it can
-    // paint the caption and the fold state across the whole strip, even though only the
-    // chevron end answers a click (SectionBar::hitTest). Whichever was added last paints
-    // last, so without this the bars wash out the buttons and captions sitting on them.
-    for (int i = 0; i < numSections; ++i)
-        sections[(size_t) i].bar->toBack();
-
-    setResizable(true, true);
-    // The floor is everything folded away: four bars and the margins. What used to be
-    // the minimum (560) is now roughly the *default*, and Owen can go far below it.
-    // The ceiling is stated once, in maxEditorHeight - see there for why 1400 was a bug.
-    setResizeLimits(820, 150, 2600, maxEditorHeight);
-    setSize(980, 724);
-
-    // Children configured before they were parented (slider textboxes especially)
-    // baked colours from the default LookAndFeel; re-resolve everything under ours.
-    sendLookAndFeelChange();
-
-    // Restore the folds this session was saved with, then pop back out whichever sections
-    // were left in windows of their own.
-    applyAccent(lay.accent); // before the first layout, so nothing paints cyan then repaints
-    syncSectionControls();
-    refreshSectionPanels();
-    applyLayout();
-    for (int i = 0; i < numSections; ++i)
-        if (*sections[(size_t) i].detached)
-            setSectionDetached((SectionId) i, true);
-    // And the generator's window, if the session was saved with it up. After the sections, so
-    // it opens in front of them.
-    if (lay.chordGen)
-        setChordGenWindowOpen(true);
-    // And the library's, after it, so the generator sits in front of the library the way it did
-    // when the session was saved - the library is what you browse *from*.
-    if (lay.chordLib)
-        setChordLibWindowOpen(true);
-
-    startTimerHz(30);
 }
+
 
 KeysEditor::~KeysEditor()
 {
@@ -1137,8 +1374,8 @@ void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, in
 
     g.setColour(juce::Colours::black.withAlpha(0.5f));
     g.drawRoundedRectangle(groove.expanded(0.5f), corner + 0.5f, 1.0f);
-    g.setGradientFill({ juce::Colour(0xff0c0e11), 0.0f, groove.getY(),
-                        juce::Colour(0xff16191d), 0.0f, groove.getBottom(), false });
+    g.setGradientFill({ skin::wheelGrooveTop, 0.0f, groove.getY(),
+                        skin::wheelGrooveBot, 0.0f, groove.getBottom(), false });
     g.fillRoundedRectangle(groove, corner);
 
     {
@@ -1165,8 +1402,8 @@ void KeysEditor::WheelLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, in
 
     g.setColour(juce::Colours::black.withAlpha(0.35f));
     g.fillRoundedRectangle(thumb.translated(0.0f, 2.0f), 4.0f);
-    g.setGradientFill({ juce::Colour(0xff3f444c), 0.0f, thumb.getY(),
-                        juce::Colour(0xff22252a), 0.0f, thumb.getBottom(), false });
+    g.setGradientFill({ skin::wheelThumbTop, 0.0f, thumb.getY(),
+                        skin::wheelThumbBot, 0.0f, thumb.getBottom(), false });
     g.fillRoundedRectangle(thumb, 4.0f);
     g.setColour(juce::Colours::white.withAlpha(0.08f));
     g.fillRoundedRectangle(thumb.withHeight(1.5f).reduced(3.0f, 0.0f), 0.75f);
@@ -2042,81 +2279,52 @@ int KeysEditor::idealHeight() const
 
 int KeysEditor::minWidthForView() const
 {
-    // 1280 now (2026-08-02, sixth pass): the Controls bar overtook the Pads bar as the
-    // binding constraint the day BPM's caption, Voices' and CH's captions, and the Sync chip
-    // joined it. The Pads bar's own arithmetic (below, unchanged) still wants 1070; Controls
-    // wants more, and the floor is whichever bar asks for the most.
+    // **Derived, not written down.** This was ninety lines of hand arithmetic in a comment
+    // ending in a literal, and the comment said of itself that it had drifted twice. It had in
+    // fact drifted three times: Undo and Redo joined the Controls bar on 2026-08-14 and their
+    // 142 px were never added to the sum. So the bars answer for themselves now, off the same
+    // constants resized() spends (the `controlsbar` / `arpbar` / `padbar` / `keyboardbar`
+    // namespaces at the head of this file), which is the move `ArpPanel::minMacroWidth()`
+    // already made for the macro card one level down.
     //
-    // The Pads bar, as it has since 2026-07-30 - the arithmetic, at the bar's own
-    // contentArea() (the window less 20 of margin, less the 92 px fold zone and the 8 px each
-    // side of it):
-    //     right   Detach 104, 6, Regen 70, 4, Fill 62, 6, Generator 90, 6, Library 80, 10,
-    //             Mode 124, 4, Key 58                                          = 624
-    //     left    four pages at 46 + 4, 10, Play 64, 6, Keep arp 94, 14         = 388
-    //                                                                    total = 1012
-    // 1280 hands it 1152 and the current 1320 floor hands it 1192, so the bar sits with 180 px
-    // of caption zone left over when the section is docked. (Re-measured 2026-08-26 for the
-    // Keep arp toggle: 100 px off the caption zone, which is the elastic thing on this bar, and
-    // no change to the floor - Controls still asks for the most.)
+    // Each bar is measured at the layout it has to be able to reach, not at its most generous:
+    //   * **Controls** at the *tight* cell set. The bar has two tiers and picks between them by
+    //     measuring (see resized()); tight is the one it degrades to, so "tight fits" is
+    //     exactly the statement "no cell is clamped". Roomy is taken only where there is room.
+    //   * **Arp** in a line's deep view, the wide case: All is laid out in every view and the
+    //     three page tabs cost more than the bottom-row fold that stands in for them.
+    //   * **Pads** and **Keyboard** have one layout each.
+    // The arp *panel* is asked rather than copied: `ArpPanel::minPanelWidth()` plus the
+    // editor's two margins, since a docked panel is handed the window less those.
     //
-    // Re-measured 2026-08-19, twice over, and both halves of this line had drifted. It read
-    // 644 / 858 on one side, itemising a Compliance chip at 74 and a Mode combo at 148 that
-    // both left this bar on 2026-08-02 while never accounting for the 124 px Mode combo that
-    // came back; and 730 / 944 on the other, which carried those same two stale figures forward
-    // and concluded from them that the Library chip had pushed the bar two pixels past what a
-    // 1070 px window hands it. It had not: against the real widths the bar is 912, which fits
-    // 942 with 30 px to spare, so the Pads bar never became the binding constraint. Controls
-    // (1320) is still what sets the floor. The "measure, do not assume" rule this file states,
-    // broken by this file, in two places, in opposite directions.
+    // **Two costs are deliberately outside the Controls figure**, and they are why the shipped
+    // floor is a term of its own rather than the answer:
+    //   * the **update button**, 170 px that exist only on the day the updater finds a release;
+    //   * the **Instrument chip**, which only a host supplying onBuildInstrumentMenu shows.
+    // Both at once want about 1440. Charging every instance for two controls most of them never
+    // show is what the chip's own `if` in resized() already refuses to do. The price, stated
+    // rather than fixed: in Keys Host on an update day this bar is short and the last combo
+    // pays for it. Fixing that means moving the floor, which is a change to what the window
+    // does, and this is not the pass for it.
     //
-    // The Controls bar, measured off the running app rather than assumed (Owen's window is
-    // 1072 px, essentially the old 1070 floor): at that width, after Detach 104 and Theme's
-    // 6 + 112 + 6, the bar hands resized() 711 px, of which 624 was spent (instrument chip
-    // 150 + 14, tempo group 114 + 14, tight combos 332) - 87 px of slack.
-    //
-    // What grew and by how much, all fixed-width and reserved before the elastic Instrument
-    // chip (see resized() - "reserve the fixed-size control first, always"):
-    //     bpm group   34 ("BPM") + 4, then the same prev/field/next as always (114),
-    //                 then 8 + 62 (Sync)              114 -> 222      (+108)
-    //     tight cells Voices and CH each gain their roomy label (44+4, 26+4)
-    //                                                  332 -> 410      (+78)
-    //                                                              total  +186
-    // 186 px more than before against 87 px of slack - the shortfall is 99, and CLAUDE.md's
-    // rule is that it must not be a starved control that pays it, so the floor rises instead.
-    //
-    // The floor has to clear two cases at once, both at the *same* window width - Owen's
-    // 1070-ish, since that is what "the editor's minimum width" means:
-    //   normal day     bar = F - 359 (the offset the 1072-wide/711-bar pair above fixes),
-    //                  fixed cost with the tight cells = 222 + 14 + 14 + 410 = 660, and the
-    //                  Instrument chip absorbs whatever the bar has beyond that.
-    //   update-button  the button itself still costs 170, plus the 6 px gap already
-    //   day            reserved ahead of it, so this day has 176 px less bar to spend.
-    // Solving for the chip to still clear its own floor (60, unchanged - the one corner it
-    // was built for) on the update-button day, with a margin rather than the bare minimum
-    // (an estimate this close to the wall is not worth trusting without Owen's own window to
-    // measure against): F = 60 + 660 + 176 + 359 = 1255 at zero margin; 1280 leaves the chip
-    // at 85 px that day (25 px of slack above its floor) rather than pinned to it.
-    //
-    // What 1280 buys, worked back out at that width: the normal day actually clears the
-    // *roomy* cells (Root's caption too, the one Owen did not ask for and did not need to
-    // drop) with the chip at its full 150 px max and 33 px of bar left spare; the
-    // update-button day falls back to the tight cells - dropping Root's caption, exactly the
-    // one CLAUDE.md says to drop first - and the chip shrinks to 85 px rather than its 60 px
-    // floor. One clearly-documented degrade, and it is a tier the bar was already choosing
-    // between rather than a third one invented for this.
-    //
-    // 1400 (checked, not assumed): plenty of slack either way, same as it always was here.
-    //
-    // 1320 now (2026-08-17, the settings gear): the gear is reserved out of the bar in the
-    // same right-to-left block as Detach and Theme, before anything below it measures what
-    // is left - "reserve the fixed-size control first, always" applies to a *new* fixed
-    // control exactly as it does to an existing one. It costs the bar 34 px for the button
-    // plus the 6 px gap that now separates it from Theme: 40 px added to the offset term
-    // above (359 -> 399), so the zero-margin floor is 60 + 660 + 176 + 399 = 1295. Same
-    // margin as before rather than the bare minimum, for the same reason: 1320 leaves the
-    // chip 25 px above its floor on the update-button day, exactly as 1280 left it 25 px
-    // above on the day before the gear existed.
-    return 1320;
+    // 1320 is the floor Keys has shipped since the settings gear joined the Controls bar
+    // (2026-08-17). It is above everything derived here, so it is what this returns today - and
+    // it stays a term rather than the answer, so that the day a bar genuinely outgrows it, the
+    // bar wins instead of a literal. `LayoutTests` lays a real editor out at whatever this
+    // returns and measures the Controls bar by overlap and containment, which is the only thing
+    // that can see a starved bar: every control on it is placed with `withSizeKeepingCentre`,
+    // so running out of width produces controls of exactly the right size on top of each other.
+    constexpr int shippedFloor = 1320;
+
+    int need = shippedFloor;
+    for (const int w : { barMinWidth(controlsBar,
+                                     controlsbar::contentWidth(controlsbar::tight, false, false)),
+                         barMinWidth(arpBar, arpbar::contentWidth()),
+                         barMinWidth(padsBar, padbar::contentWidth()),
+                         barMinWidth(keyboardBar, keyboardbar::contentWidth()),
+                         ArpPanel::minPanelWidth() + 2 * editorMargin })
+        need = juce::jmax(need, w);
+    return need;
 }
 
 void KeysEditor::applyLayout()
@@ -2743,12 +2951,34 @@ void KeysEditor::refreshTakeControls()
 
 void KeysEditor::timerCallback()
 {
+    // Fifteen unrelated concerns sharing one 30 Hz clock, in the order they have always run
+    // in. Each is named for what it pulls, and each compares before it writes - see the list
+    // in the header for why that is a rule here and not an optimisation, and the 2026-08-23
+    // note inside pullPadStripKnobs() for what a second writer on this clock has cost.
     refreshTakeControls();
-
     refreshUndoButtons(); // cheap: early-outs on an unchanged generation counter
+    syncPadRangeKnobs();  // cheap: early-outs unless the stored pair changed under the knob
+    pullLayoutToggles();
+    pullKeyboardBar();
+    pullHostTempo();
+    pullKeybedModes();
+    pullArpHoldOff();
+    pullGeneratorChips();
+    pullMidiChannel();
+    pullPadStripKnobs();
+    pullPadPages();
+    pullPadEditLink();
+    animatePitchReturn();
+    animatePanicFlash();
+    // Keep the CC assignment labels current (they are parameters; automation or another
+    // editor instance can move them). Left inline: KnobBank::refreshAssignments() already
+    // compares every caption before it writes one, so there is nothing for a pull to add.
+    knobBank.refreshAssignments();
+    pullCurrentChord();
+}
 
-    syncPadRangeKnobs(); // cheap: early-outs unless the stored pair changed under the knob
-
+void KeysEditor::pullLayoutToggles()
+{
     // **The layout toggles, which no attachment drives.** These read `LayoutState` rather than
     // a parameter, so nothing pushed a session's saved value back into them: load a set saved
     // with Play off and the button still showed ticked, while ChordPads::mouseDown read the
@@ -2761,7 +2991,14 @@ void KeysEditor::timerCallback()
     padsKeepArpButton.setToggleState(processor.layout.padsKeepArpRunning,
                                      juce::dontSendNotification);
     arpLightsButton.setToggleState(processor.layout.arpLights, juce::dontSendNotification);
+}
 
+// The Keyboard bar: how many keys the keybed draws, and the octave read-out beside Size.
+// Neither is on an attachment - one is a keybed geometry call and the other a plain Label -
+// so both are pulled. PianoKeyboard::setRange and Label::setText each early-out on an
+// unchanged value, which is the comparing this pull would otherwise have to do itself.
+void KeysEditor::pullKeyboardBar()
+{
     const auto& apvts = processor.apvts;
     const int sizeIdx = juce::jlimit(0, 5, (int) apvts.getRawParameterValue("size")->load());
     keyboard.setRange(sizeSpecs[sizeIdx].low, sizeSpecs[sizeIdx].count);
@@ -2770,6 +3007,11 @@ void KeysEditor::timerCallback()
     // a slider), so it is kept current here like every other live number on a bar.
     const int oct = (int) apvts.getRawParameterValue("octave")->load();
     octaveReadout.setText((oct > 0 ? "+" : "") + juce::String(oct), juce::dontSendNotification);
+}
+
+void KeysEditor::pullHostTempo()
+{
+    const auto& apvts = processor.apvts;
 
     // Tempo Sync (2026-08-02, Owen: "we need a BPM sync toggle to sync with DAW"). Sync on and
     // a host tempo actually live this block: the field shows the host's number and the drag
@@ -2777,17 +3019,34 @@ void KeysEditor::timerCallback()
     // host is the one setting the tempo. Otherwise the field edits "bpm" exactly as it always
     // has. Polled here like every other live bar readout: hostTempoLive() is written on the
     // audio thread every block and can flip on its own as a host starts or stops rolling.
-    {
-        const bool hostLive = apvts.getRawParameterValue("bpmSync")->load() > 0.5f
-                             && processor.hostTempoLive();
-        bpmField.showingHost = hostLive;
-        bpmField.hostBpm = processor.currentTempo();
-        bpmField.setEnabled(! hostLive);
-        bpmPrevButton.setEnabled(! hostLive);
-        bpmNextButton.setEnabled(! hostLive);
-        if (hostLive)
-            bpmField.repaint(); // the only thing that can move this number is the host itself
-    }
+    const bool hostLive = apvts.getRawParameterValue("bpmSync")->load() > 0.5f
+                         && processor.hostTempoLive();
+    bpmField.showingHost = hostLive;
+    bpmField.hostBpm = processor.currentTempo();
+    bpmField.setEnabled(! hostLive);
+    bpmPrevButton.setEnabled(! hostLive);
+    bpmNextButton.setEnabled(! hostLive);
+    // The one write here that no JUCE setter compares for us. `setEnabled` repaints on a
+    // change and does nothing on a tick where nothing moved, but the *number* is a member
+    // paint() reads, so only this pull knows when it has gone stale - and it asked for a
+    // repaint on every one of thirty ticks a second for as long as a host was rolling.
+    // Compared against what was last drawn instead: `showingHost` and `hostBpm` are all
+    // paint() reads that can move here (the field is disabled while a host owns the tempo,
+    // so it takes no mouse and its hover cannot change either), and an unchanged pair draws
+    // an identical frame.
+    if (hostLive && (! lastShowingHost || bpmField.hostBpm != lastHostBpmDrawn))
+        bpmField.repaint();
+    lastShowingHost = hostLive;
+    lastHostBpmDrawn = bpmField.hostBpm;
+}
+
+// Scale Lock, Sustain, Latch and the voice cap, pushed into the playing surface, plus the
+// pedal's own falling edge. Every NoteSurface setter below compares before it writes, so
+// this pull adds no cache of its own; `lastSustain` is the one thing here that is an edge
+// rather than a state, and it has always kept its own.
+void KeysEditor::pullKeybedModes()
+{
+    const auto& apvts = processor.apvts;
 
     // Push shared performance config into the playing surface.
     const bool sus = apvts.getRawParameterValue("sustain")->load() > 0.5f;
@@ -2804,7 +3063,10 @@ void KeysEditor::timerCallback()
     if (! sus && lastSustain)
         processor.stopAllChordPads();
     lastSustain = sus;
+}
 
+void KeysEditor::pullArpHoldOff()
+{
     // Switching the arp off releases a chord held into it. That check used to live here, and
     // it had two holes an editor could not close: it was gated on the chord having come from
     // a *pad*, so a chord handed over from the live card was never released, and with no
@@ -2830,13 +3092,14 @@ void KeysEditor::timerCallback()
     // greying itself out in front of it.
     // Across every line, because the button releases every line. One line holding is enough
     // for there to be something to let go of.
-    {
-        bool anyHold = processor.anyArpHold();
-        for (int n = 0; n < KeysProcessor::uiArpLines && ! anyHold; ++n)
-            anyHold = processor.arpLaunchedSlot(n) >= 0;
-        arpHoldOffButton.setEnabled(anyHold);
-    }
+    bool anyHold = processor.anyArpHold();
+    for (int n = 0; n < KeysProcessor::uiArpLines && ! anyHold; ++n)
+        anyHold = processor.arpLaunchedSlot(n) >= 0;
+    arpHoldOffButton.setEnabled(anyHold);
+}
 
+void KeysEditor::pullGeneratorChips()
+{
     // Mode and Scale Compliance used to be greyed here whenever the source read neither (the
     // Markov brain walks a table of transitions instead of a scale). Both left this bar on
     // 2026-08-02 and only the generator's window draws them now, which does its own greying;
@@ -2850,6 +3113,11 @@ void KeysEditor::timerCallback()
     // session load) and none of them owe the editor a callback.
     fillButton.setEnabled(chordGen.pageHasEmptyPads());
     regenButton.setEnabled(chordGen.pageHasRegeneratablePads());
+}
+
+void KeysEditor::pullMidiChannel()
+{
+    const auto& apvts = processor.apvts;
 
     // Changing MIDI channel while notes sound would strand them on the old channel
     // (note-off goes to the new one), so panic on any channel change.
@@ -2863,6 +3131,11 @@ void KeysEditor::timerCallback()
         }
         lastChannel = ch;
     }
+}
+
+void KeysEditor::pullPadStripKnobs()
+{
+    const auto& apvts = processor.apvts;
 
     // Keep the two-handle velocity range synced to its params and show the numbers. With
     // Humanize off the two ends are one value as far as playing goes, so read out the
@@ -2918,12 +3191,18 @@ void KeysEditor::timerCallback()
     // the window.
     strumKnob.refresh();
     humanKnob.refresh();
+}
 
+void KeysEditor::pullPadPages()
+{
     // Pad page: label and the ends of the range.
     const int page = processor.padPage();
     for (int p = 0; p < KeysProcessor::numPadPages; ++p)
         pageButtons[(size_t) p].setToggleState(p == page, juce::dontSendNotification);
+}
 
+void KeysEditor::pullPadEditLink()
+{
     // Keyboard-edit link: the edited pad follows the keyboard's sounding set. An
     // all-notes-removed state is not written (Clear is the explicit wipe), and
     // flipping to another page ends the edit.
@@ -2950,7 +3229,10 @@ void KeysEditor::timerCallback()
             }
         }
     }
+}
 
+void KeysEditor::animatePitchReturn()
+{
     // Pitch wheel gliding home after release: exponential ease, ~160 ms to centre
     // (Octavium animates this; hardware springs, it doesn't snap).
     if (pitchReturning)
@@ -2967,7 +3249,10 @@ void KeysEditor::timerCallback()
             pitchWheel.setValue(next, juce::sendNotificationSync);
         }
     }
+}
 
+void KeysEditor::animatePanicFlash()
+{
     // Panic flash: decay the blue behind All Off (Octavium fires this on click only, never
     // on the internal clears, so it always means "you just did that").
     if (panicFlash > 0.0f)
@@ -2976,11 +3261,10 @@ void KeysEditor::timerCallback()
         panicButton.setColour(juce::TextButton::buttonColourId,
                               skin::control.interpolatedWith(skin::accentOf(*this).base, panicFlash));
     }
+}
 
-    // Keep the CC assignment labels current (they are parameters; automation or another
-    // editor instance can move them).
-    knobBank.refreshAssignments();
-
+void KeysEditor::pullCurrentChord()
+{
     // Feed the pads the chord sounding on the keyboard (drives the live card and capture).
     // Notes arriving on the MIDI input count: play a chord on a physical keyboard and the
     // live card names it and can be captured to a pad, which is the whole point of watching
@@ -3026,6 +3310,14 @@ void KeysEditor::timerCallback()
     const auto& chord = preferHeldChord ? (held.empty() ? played : held)
                                         : (played.empty() ? held : played);
     chordPads.setCurrentChord(chord);
+    // **The one write on this clock that is deliberately unconditional, and it is not an
+    // oversight.** setCurrentChord compares and repaints only on a change; this repaint is the
+    // strip's whole frame clock. ChordPads stopped being a juce::Timer on 2026-08-22, and what
+    // it draws moves from places that owe the editor nothing - a pad set from MCP or a drop, a
+    // ring lit because a line took that card's chord, the letter a line wears, a pad going
+    // quiet under Exclusive. Take this away and the strip goes stale until something else
+    // happens to ask for a paint. If it ever has to go, the strip needs a change signal of its
+    // own first; a cache here would only ever be caching the wrong question.
     chordPads.repaint();
 }
 
@@ -3058,7 +3350,7 @@ void KeysEditor::paint(juce::Graphics& g)
 
 void KeysEditor::resized()
 {
-    auto area = getLocalBounds().reduced(10);
+    auto area = getLocalBounds().reduced(editorMargin);
 
     // Top to bottom: every section is a bar, and - unless it is folded or off in a window of
     // its own - a band of content under it. The keybed is last and takes whatever is left, so
@@ -3067,55 +3359,25 @@ void KeysEditor::resized()
     // --- Controls -------------------------------------------------------------------
     controlsBar.setBounds(area.removeFromTop(SectionBar::height));
     {
+        using namespace controlsbar; // the cell widths, named at the head of this file
         auto bar = layoutDetachRow(secControls, controlsBar.contentArea(), true);
         bar.removeFromRight(6);
-        themeButton.setBounds(bar.removeFromRight(112).reduced(2, 0));
+        themeButton.setBounds(bar.removeFromRight(themeW).reduced(2, 0));
         bar.removeFromRight(6);
         // The gear, immediately left of the swatch. 34 px square - CLAUDE.md's own mouse-only
         // floor, exactly - rather than the 26 px pill height every other control on this bar
         // gets from contentArea()'s own 4 px top/bottom inset: an icon-only target this small
         // needs every pixel the floor asks for, so it is bounded off controlsBar's own full
         // height instead of off `bar`, flush with the bar's top and bottom edges.
-        gearButton.setBounds(bar.removeFromRight(34).withY(controlsBar.getY()).withHeight(SectionBar::height));
+        gearButton.setBounds(bar.removeFromRight(gearW).withY(controlsBar.getY()).withHeight(SectionBar::height));
         bar.removeFromRight(6);
         if (updateButton.isVisible())
-            updateButton.setBounds(bar.removeFromRight(170).reduced(0, 1));
+            updateButton.setBounds(bar.removeFromRight(updateW).reduced(0, 1));
 
-        // Root, Scale, Lock, Voices and MIDI Ch's two sizes, decided by measuring rather than
-        // assuming (2026-08-02, Owen's ask - and "I think we can resize the elements down"
-        // when they would not fit at his window width). Computed *before* laying anything out
-        // on the left: the Instrument chip below needs to know how much room this group and
-        // the tempo group are about to claim before it can work out what is left for it.
-        //
-        // Root keeps a caption in the roomy set alone now - "C" says nothing on its own, but
-        // it is the one caption Owen did not ask for (2026-08-02: "BPM and Off and [Voices]
-        // ... needs labels"), so it is the one that drops first under width pressure. Voices
-        // and CH are captioned in *both* sets: Keys Host runs in tight, and a caption that
-        // only ever showed in the roomy set nobody reaches was not a caption Owen could see.
-        // Scale and Lock never get one: "Major" and "Lock" are their own labels.
-        constexpr int gap = 8, lblGap = 4;
-        struct Cell { int label, box; };
-        // Voices is the widest of the small boxes because "Off" plus a chevron is wider
-        // than the digits either side of it in the list - measured, not guessed: at 52 it
-        // drew "..." while every other value fitted, which is the failure a combo makes
-        // instead of complaining.
-        //
-        // Root and CH were 48 and 48 here (44 and 44 tight) and both drew "..." in every
-        // state, which is the same failure again and had been there since they moved to the
-        // bar: a chevron plus JUCE's own padding costs a combo about 38 px before a single
-        // glyph is drawn, so 48 cannot hold even "C". Root has to fit "A#" and CH has to fit
-        // "16", so they are sized for their *widest* value, not the one selected when you
-        // happen to look. The 44/26 label widths are proven at this same font from the
-        // roomy set they were built for - reused rather than re-guessed for tight's copies.
-        constexpr Cell roomy[] = { { 34, 58 }, { 0, 96 }, { 0, 62 }, { 44, 68 }, { 26, 56 } };
-        constexpr Cell tight[] = { {  0, 54 }, { 0, 76 }, { 0, 56 }, { 44, 62 }, { 26, 52 } };
-        const auto widthOf = [](const Cell (&cells)[5])
-        {
-            int w = gap * 4;
-            for (const auto& c : cells)
-                w += c.box + (c.label > 0 ? c.label + lblGap : 0);
-            return w;
-        };
+        // The keyboard-settings group is measured *before* anything is laid out on the left:
+        // the Instrument chip below needs to know how much room this group and the tempo group
+        // are about to claim before it can work out what is left for it. Which of the two cell
+        // sets it gets, and why there are two, is written down beside them in `controlsbar`.
 
         // The Instrument chip (2026-08-02, Owen: "the load instrument section with all that
         // should go in the controls submenu"), in the cell Knobs vacated. It is the only
@@ -3131,27 +3393,16 @@ void KeysEditor::resized()
         // chip it never shows would drop Voices and CH to the caption-less tight set on the
         // bar Owen ships, to buy nothing.
         //
-        // BPM's caption and the Sync chip (2026-08-02, this bullet) grew this group from 114
-        // to 222: label "BPM" (34, reusing Root's own roomy width - both are three-to-four
-        // letters at the same font, and Root's is already proven not to ellipsise) + 4 px
-        // gap, then the same prev/field/next as always, then an 8 px gap and Sync at 62 (Fill
-        // and Regen's own proven width for a four-letter bar chip, not a checkbox-style
-        // ToggleButton - there is no width here for one).
-        constexpr int bpmGroupW = 34 + 4          // "BPM" + gap
-                                 + 26 + 3 + 56 + 3 + 26  // prev, gap, field, gap, next
-                                 + 8 + 62;          // gap, Sync
-        // chipMin stays 60 (unchanged since the update-button corner it was built for) - see
-        // minWidthForView() for why the floor, not this clamp, absorbs the growth above.
-        // Everywhere but that one corner the clamp still lands on chipMax.
+        // What the tempo group costs, and why, is `controlsbar::bpmGroupW`.
+
         // Undo / Redo first, and reserved out of the bar before anything measures what is
         // left - the reserve-fixed-size-first rule, which this bar has starved a control by
         // ignoring before now.
-        undoButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        undoButton.setBounds(bar.removeFromLeft(undoW).withSizeKeepingCentre(60, 24));
         bar.removeFromLeft(4);
-        redoButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
-        bar.removeFromLeft(14);
+        redoButton.setBounds(bar.removeFromLeft(redoW).withSizeKeepingCentre(60, 24));
+        bar.removeFromLeft(bigGap);
 
-        constexpr int chipMin = 60, chipMax = 150, bigGap = 14;
         const int chipCell = onBuildInstrumentMenu != nullptr ? chipMax + bigGap : 0;
         const int spareForChipAndCombos = bar.getWidth() - bpmGroupW - bigGap;
         const bool roomForLabels = (spareForChipAndCombos - chipCell) >= widthOf(roomy);
@@ -3176,15 +3427,15 @@ void KeysEditor::resized()
         // way Root's does against its combo (place(), below); Sync follows the field it
         // labels rather than leading it, since it is a modifier on the number beside it and
         // not a fifth thing to read before the number itself.
-        bpmBarLabel.setBounds(bar.removeFromLeft(34).withSizeKeepingCentre(34, 24));
+        bpmBarLabel.setBounds(bar.removeFromLeft(bpmLabelW).withSizeKeepingCentre(bpmLabelW, 24));
         bar.removeFromLeft(lblGap);
-        bpmPrevButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        bpmPrevButton.setBounds(bar.removeFromLeft(bpmStepW).withSizeKeepingCentre(bpmStepW, 24));
         bar.removeFromLeft(3);
-        bpmField.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
+        bpmField.setBounds(bar.removeFromLeft(bpmFieldW).withSizeKeepingCentre(bpmFieldW, 24));
         bar.removeFromLeft(3);
-        bpmNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        bpmNextButton.setBounds(bar.removeFromLeft(bpmStepW).withSizeKeepingCentre(bpmStepW, 24));
         bar.removeFromLeft(gap);
-        bpmSyncButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+        bpmSyncButton.setBounds(bar.removeFromLeft(bpmSyncW).withSizeKeepingCentre(60, 24));
         bar.removeFromLeft(bigGap);
 
         {
@@ -3232,19 +3483,20 @@ void KeysEditor::resized()
         // (Sustain, Fill, Regen): contentArea() is the 34 px strip less 4 at each end, so 26
         // is the ceiling here and the mouse-only floor is bought in width instead - 86 px of
         // Hold off is a bigger target than a 34 px square.
+        using namespace arpbar; // the cell widths, named at the head of this file
         auto bar = layoutDetachRow(secArp, arpBar.contentArea(), true);
         bar.removeFromRight(6);
-        arpHoldOffButton.setBounds(bar.removeFromRight(88).withSizeKeepingCentre(86, 24));
+        arpHoldOffButton.setBounds(bar.removeFromRight(holdOffW).withSizeKeepingCentre(86, 24));
         bar.removeFromRight(4);
-        arpAllOffButton.setBounds(bar.removeFromRight(84).withSizeKeepingCentre(82, 24));
+        arpAllOffButton.setBounds(bar.removeFromRight(allOffW).withSizeKeepingCentre(82, 24));
         bar.removeFromRight(10);
         // Light keys last, so the two stop buttons sit together at the right end where the
         // hand goes for them. A toggle needs its box plus the words, hence the wider cell.
-        arpLightsButton.setBounds(bar.removeFromRight(120).withSizeKeepingCentre(118, 24));
+        arpLightsButton.setBounds(bar.removeFromRight(lightsW).withSizeKeepingCentre(118, 24));
         bar.removeFromRight(6);
         // Beside the two stop buttons, because that is where the hand goes when something is
         // making a noise you did not ask for, and this is the switch that answers for it.
-        arpTrackMidiButton.setBounds(bar.removeFromRight(122).withSizeKeepingCentre(120, 24));
+        arpTrackMidiButton.setBounds(bar.removeFromRight(trackMidiW).withSizeKeepingCentre(120, 24));
 
         // A and B, from the left (2026-08-02, second pass): the arp's own On switches now, so
         // - unlike All beside them - they are laid out whether or not the section is open,
@@ -3254,13 +3506,13 @@ void KeysEditor::resized()
         {
             if (t == nullptr)
                 continue;
-            t->setBounds(bar.removeFromLeft(40).withSizeKeepingCentre(38, 24));
+            t->setBounds(bar.removeFromLeft(lineTabW).withSizeKeepingCentre(38, 24));
             bar.removeFromLeft(4);
         }
         // All still only navigates the panel, so its cell still collapses with the fold
         // rather than leaving Quantize orbiting a hole where it was (the pageButtons lesson).
         if (processor.layout.arp && arpBarAllTab != nullptr)
-            arpBarAllTab->setBounds(bar.removeFromLeft(44).withSizeKeepingCentre(42, 24));
+            arpBarAllTab->setBounds(bar.removeFromLeft(allTabW).withSizeKeepingCentre(42, 24));
         // The three page tabs, in the same collapsing cell as All and for the same reason:
         // they navigate a panel, so with the section folded there is nothing behind them.
         // A small gap first, so All reads as the head of this group rather than as one more
@@ -3272,7 +3524,7 @@ void KeysEditor::resized()
             {
                 if (t == nullptr)
                     continue;
-                t->setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(60, 24));
+                t->setBounds(bar.removeFromLeft(pageTabW).withSizeKeepingCentre(60, 24));
                 bar.removeFromLeft(3);
             }
         }
@@ -3281,11 +3533,11 @@ void KeysEditor::resized()
         if (processor.layout.arp && processor.layout.arpMacro)
         {
             bar.removeFromLeft(6);
-            arpFoldBottomButton.setBounds(bar.removeFromLeft(96).withSizeKeepingCentre(94, 24));
+            arpFoldBottomButton.setBounds(bar.removeFromLeft(foldBottomW).withSizeKeepingCentre(94, 24));
         }
         bar.removeFromLeft(14);
-        quantizeBarLabel.setBounds(bar.removeFromLeft(56).withSizeKeepingCentre(56, 24));
-        quantizeBarBox.setBounds(bar.removeFromLeft(92).withSizeKeepingCentre(90, 24));
+        quantizeBarLabel.setBounds(bar.removeFromLeft(quantizeLabelW).withSizeKeepingCentre(56, 24));
+        quantizeBarBox.setBounds(bar.removeFromLeft(quantizeBoxW).withSizeKeepingCentre(90, 24));
         bar.removeFromLeft(8);
         section(secArp).caption = bar;
     }
@@ -3299,6 +3551,7 @@ void KeysEditor::resized()
     area.removeFromTop(6);
     padsBar.setBounds(area.removeFromTop(SectionBar::height));
     {
+        using namespace padbar; // the cell widths, named at the head of this file
         auto bar = layoutDetachRow(secPads, padsBar.contentArea(), true);
         // The generator - three chips, three combos and two items on a card menu (2026-07-30)
         // - comes off the *right*, which is where every control that outlives its section's
@@ -3307,20 +3560,20 @@ void KeysEditor::resized()
         // strip folds, so anything placed after them would keep a couple of hundred px of hole
         // where they were. 24 px like the other bar controls that act rather than fold.
         bar.removeFromRight(6);
-        regenButton.setBounds(bar.removeFromRight(70).withSizeKeepingCentre(68, 24));
+        regenButton.setBounds(bar.removeFromRight(regenW).withSizeKeepingCentre(68, 24));
         bar.removeFromRight(4);
-        fillButton.setBounds(bar.removeFromRight(62).withSizeKeepingCentre(60, 24));
+        fillButton.setBounds(bar.removeFromRight(fillW).withSizeKeepingCentre(60, 24));
         // The generator's window, left of the two actions that do not need it. Same end of the
         // bar, same 24 px, same unconditional placement: it never hides either, and for the
         // sharper version of the same reason - with the pads folded and this gone, the only
         // things left that could reach the generator would be Fill and Regen, and every setting
         // behind them would be off the screen.
         bar.removeFromRight(6);
-        chordGenButton.setBounds(bar.removeFromRight(90).withSizeKeepingCentre(88, 24));
+        chordGenButton.setBounds(bar.removeFromRight(genW).withSizeKeepingCentre(88, 24));
         // The library's window, immediately left of the generator's. The two are a pair and read
         // as one: "make me one" and "show me what there is".
         bar.removeFromRight(6);
-        chordLibButton.setBounds(bar.removeFromRight(80).withSizeKeepingCentre(78, 24));
+        chordLibButton.setBounds(bar.removeFromRight(libW).withSizeKeepingCentre(78, 24));
         // The generator's Key, alone now. Mode, Scale Compliance and the arp target letter
         // left this bar on 2026-08-02 (Owen: "remove the scale and percentage and letter b
         // from pads header"): both combos are still in the Generator window, which holds
@@ -3335,28 +3588,28 @@ void KeysEditor::resized()
         // generator window's own top row does. Mode is the wide one: "Mixolydian" and
         // "Phrygian Dominant" are what has to fit, and a ComboBox ellipsises rather than
         // complaining (the Voices lesson, 2026-08-02).
-        genModeBox.setBounds(bar.removeFromRight(124).withSizeKeepingCentre(122, 24));
+        genModeBox.setBounds(bar.removeFromRight(modeW).withSizeKeepingCentre(122, 24));
         bar.removeFromRight(4);
-        genRootBox.setBounds(bar.removeFromRight(58).withSizeKeepingCentre(56, 24));
+        genRootBox.setBounds(bar.removeFromRight(keyW).withSizeKeepingCentre(56, 24));
         // The page buttons ride on the Pads bar, where they used to sit in a row of their
         // own under the strip. One click still reaches any page, and the section keeps its
         // height for pads instead of spending 34 px on a transport.
         for (auto& b : pageButtons)
         {
-            b.setBounds(bar.removeFromLeft(46).reduced(1, 2));
+            b.setBounds(bar.removeFromLeft(pageW).reduced(1, 2));
             bar.removeFromLeft(4);
         }
         bar.removeFromLeft(10);
         // The strip's Play switch, after the pages: it acts on the same cards they page, and
         // like them it is pointless with the strip folded away (see syncSectionControls). A
         // toggle needs its box plus the word, the Light keys sizing.
-        padsPlayButton.setBounds(bar.removeFromLeft(64).withSizeKeepingCentre(62, 24));
+        padsPlayButton.setBounds(bar.removeFromLeft(playW).withSizeKeepingCentre(62, 24));
         bar.removeFromLeft(6);
         // Keep arp running, on the same fixed-width reserve as Play and for the same reason it
         // sits next to it: it qualifies what a press on these cards does. 92 px for the box
         // plus "Keep arp" - measured against the bar's own slack rather than guessed, and it
         // does not move the editor's floor; see minWidthForView().
-        padsKeepArpButton.setBounds(bar.removeFromLeft(94).withSizeKeepingCentre(92, 24));
+        padsKeepArpButton.setBounds(bar.removeFromLeft(keepArpW).withSizeKeepingCentre(92, 24));
         bar.removeFromLeft(14);
         // Humanize and its velocity range rode this bar from 2026-08-02 to 2026-08-03, when
         // they became a range knob *in the strip* with Strum beside them. They are pad
@@ -3379,18 +3632,19 @@ void KeysEditor::resized()
         // (detached, they are not our children at all - the holder places them in that
         // window). Exclusive, Sustain and All Off are what you reach for *while playing*,
         // so they stay put whatever the keybed is doing.
+        using namespace keyboardbar; // the cell widths, named at the head of this file
         auto bar = layoutDetachRow(secKeyboard, keyboardBar.contentArea(), true);
         bar.removeFromRight(14);
         // 24 px tall like Sustain and Exclusive beside it, not the old reduced(0, 3) which
         // left it 20. The skin's button font scales with height, so those 4 px were also
         // shrinking the label: All Off was the odd one out on the bar for no reason.
-        panicButton.setBounds(bar.removeFromRight(84).withSizeKeepingCentre(84, 24));
+        panicButton.setBounds(bar.removeFromRight(panicW).withSizeKeepingCentre(84, 24));
         bar.removeFromRight(6);
-        latchButton.setBounds(bar.removeFromRight(78).withSizeKeepingCentre(76, 24));
+        latchButton.setBounds(bar.removeFromRight(latchW).withSizeKeepingCentre(76, 24));
         bar.removeFromRight(6);
-        sustainButton.setBounds(bar.removeFromRight(96).withSizeKeepingCentre(94, 24));
+        sustainButton.setBounds(bar.removeFromRight(sustainW).withSizeKeepingCentre(94, 24));
         bar.removeFromRight(6);
-        chordExclusiveButton.setBounds(bar.removeFromRight(104).withSizeKeepingCentre(102, 24));
+        chordExclusiveButton.setBounds(bar.removeFromRight(exclusiveW).withSizeKeepingCentre(102, 24));
 
         // Size and Octave, from the left (2026-08-02, Owen: "the size can go down to the
         // header of the keyboard button"). Both stay put with the section folded, the same
@@ -3399,25 +3653,27 @@ void KeysEditor::resized()
         // C3..C5 by construction), and folding the band away is exactly when you still want
         // it. Not a slider - a bar control is 24 px tall, and IncDecButtons' arrows would
         // stack to 12 px each - so it is the BPM field's own shape: caption, `<`, read-out, `>`.
-        sizeBox.setBounds(bar.removeFromLeft(104).withSizeKeepingCentre(104, 24));
+        sizeBox.setBounds(bar.removeFromLeft(sizeW).withSizeKeepingCentre(104, 24));
         bar.removeFromLeft(6);
-        octaveBarLabel.setBounds(bar.removeFromLeft(30).withSizeKeepingCentre(30, 24));
-        octPrevButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        octaveBarLabel.setBounds(bar.removeFromLeft(octLabelW).withSizeKeepingCentre(30, 24));
+        octPrevButton.setBounds(bar.removeFromLeft(octStepW).withSizeKeepingCentre(26, 24));
         bar.removeFromLeft(3);
-        octaveReadout.setBounds(bar.removeFromLeft(42).withSizeKeepingCentre(42, 24));
+        octaveReadout.setBounds(bar.removeFromLeft(octReadoutW).withSizeKeepingCentre(42, 24));
         bar.removeFromLeft(3);
-        octNextButton.setBounds(bar.removeFromLeft(26).withSizeKeepingCentre(26, 24));
+        octNextButton.setBounds(bar.removeFromLeft(octStepW).withSizeKeepingCentre(26, 24));
 
         // REC and the take chip, off the left after Octave. Fixed widths taken before the
-        // caption gets what is left, the standing reserve-first rule - though this bar has
-        // room to spare at the floor (the four right-hand toggles and the Size/Octave group
-        // spend ~634 px of the ~1048 the bar hands out at 1280), so unlike the Controls bar
-        // this pair costs no floor. They stay put when the section folds for the same reason
-        // Sustain and All Off do: a stop button that folds away mid-take is not a stop button.
+        // caption gets what is left, the standing reserve-first rule - though this bar has room
+        // to spare at the floor: `keyboardbar::contentWidth()` is what the whole strip spends,
+        // and minWidthForView() shows it clearing the shipped floor with a caption's worth of
+        // slack, so unlike the Controls bar this pair costs no floor. (That was stated as "~634
+        // of ~1048 at 1280" here, two floors ago; the sum is derived now rather than recited.)
+        // They stay put when the section folds for the same reason Sustain and All Off do: a
+        // stop button that folds away mid-take is not a stop button.
         bar.removeFromLeft(14);
-        recButton.setBounds(bar.removeFromLeft(62).withSizeKeepingCentre(62, 24));
+        recButton.setBounds(bar.removeFromLeft(recW).withSizeKeepingCentre(62, 24));
         bar.removeFromLeft(6);
-        takeChip.setBounds(bar.removeFromLeft(116).withSizeKeepingCentre(116, 24));
+        takeChip.setBounds(bar.removeFromLeft(takeW).withSizeKeepingCentre(116, 24));
 
         section(secKeyboard).caption = bar;
     }

@@ -29,6 +29,10 @@ src/
 │                             # A *library* pad asks chordlib::numeralAt instead - `degree` is an
 │                             # index into the mode a chord was generated in, and a library row is
 │                             # generated against its own
+├── ChordVoicing.h            # the three voicing passes (applyMajorMinorBias, fitVoicing,
+│                             # applyVoicingPipeline) as free functions, so the ordering
+│                             # trap is pinned by a test rather than reproduced in one
+├── EuclidGen.h               # Bjorklund, for the Euclid strip's fill of the Chance lane
 ├── ArpEngine.h               # pure arpeggiator core, unit-tested; the one playhead
 │                             # reader in Keys, and only while its rate is in Sync.
 │                             # The processor holds *three* of these since 2026-08-01,
@@ -65,7 +69,18 @@ src/
 │   │                         # pass - the letters on the editor's arp bar are each line's
 │   │                         # own On switch now, not a way to pick one; the macro view
 │   │                         # (all four lines in a 2x2 grid, four lines from 2026-08-19)
-│   │                         # is the extra choice on the bar
+│   │                         # is the extra choice on the bar. The card and the grid are
+│   │                         # files of their own since 2026-09-02, below - do not look
+│   │                         # for MacroRow or LaneGrid in here
+│   ├── MacroRow.{h,cpp}      # the macro card and its layout constants (arpMacroModsW and
+│   │                         # the rest), lifted out of ArpPanel.cpp
+│   ├── LaneGrid.{h,cpp}      # the lane grid, the loop bar and the MUTE strip, lifted out
+│   │                         # of ArpPanel.cpp
+│   ├── ArpRateMode.h         # the rate dial's Sync/Hz attachment swap, written once for
+│   │                         # the two surfaces that turn one (the band and every card)
+│   ├── TakePanel.{h,cpp}     # the take before it leaves: a view of KeysProcessor::takeNotes(),
+│   │                         # built from the same sequence the written file holds. Never
+│   │                         # an editor - editing a take belongs in Lattice
 │   ├── SectionBar.h          # the fold/unfold header above a section of the editor
 │   ├── RangeSlider.h         # two-value slider whose band drags as one (velocity, strum)
 │   ├── StepComboBox.h        # a combo that reports every pick, including one already
@@ -143,6 +158,17 @@ a queue per line rather than a per-pitch ownership mask, because a mask lets the
 clear a pitch's owner before the matching note-off is drained and strands that note in an
 engine's held set forever. No allocation, no locks: every buffer is sized in `prepareToPlay`
 and every parameter is read through a pointer cached at construction.
+
+**The track's own MIDI needs an invitation** (`arpTrackMidi`, global, default off).
+`processBlock` holds it aside before the collector drains - by the time `runArpLines` runs the
+collector has merged, and a clip's C4 and a clicked C4 are the same `MidiMessage` - and puts it
+back afterwards, untouched and in sample order, so the chip decides what the *arpeggiator* hears
+and never what the track plays. `trackHeldByLine`, a per-line pitch mask set only where a note
+was actually handed to a line, is what lets the chip's falling edge release the right things: it
+has to synthesise note-offs for whatever a line took in while the door was open, and firing one
+for every pitch the *track* is holding would let `ArpEngine::Held::ons` (a refcount matched on
+pitch alone) decrement whichever owner is there, stranding a keybed note under your hand if it
+shared a pitch with a clip note the line never received.
 
 ## Playing surface: one product, one piano
 
@@ -387,9 +413,18 @@ samples it. That one idea carries both sliders that are still the pool's own:
 Note count and inversions **used to be pool properties too, and are not any more**
 (2026-08-01, Owen: "all of their options should have the option for how many notes and
 what inversion"). Both are facts about the *voicing* a chord arrives in rather than about
-which chord it is, so `ChordGenMenu::fitVoicing` now applies them as a post-pass over
-whatever any of the eight sources produced. `fitPads` is the same pass for the Markov
-path, which arrives as pads rather than `chordgen::Chord`s.
+which chord it is, so `fitVoicing` now applies them as a post-pass over whatever any of
+the eight sources produced. `fitPads` is the same pass for the Markov path, which arrives
+as pads rather than `chordgen::Chord`s.
+
+**The three passes live in `src/ChordVoicing.h`** (`keys::chordvoicing`), not on the
+generator: `applyMajorMinorBias`, `fitVoicing` and `applyVoicingPipeline` are free
+functions taking their settings as arguments, so a test reaches them without a live
+`KeysProcessor`. `ChordGenMenu::fitVoicing` and `applyMajorMinorBias` are still there and
+are still what the generator calls, but they now do one job only: resolve the settings off
+the APVTS and hand them to the pure pass. Any doc saying the ordering can only be pinned
+by reproducing its shape in a test, because `fitVoicing` is private to a class needing a
+live processor, is describing the arrangement before that move.
 
 Growing a chord stacks further thirds **through the mode**, so an eleven-note chord is
 still in key; shrinking one drops from the top, which keeps the root and the third (the
@@ -600,9 +635,11 @@ still pointing at a panel that a fold takes off screen. It replaces the band and
 editor with a **2x2 grid of boxed cards** (A and B on top, C and D below, since 2026-08-19 -
 two columns rather than four across is load-bearing, since a card's knob strip needs roughly
 430 px and a fourth line in one row would have squeezed every card, where a grid only ever adds
-rows), each with a detented rate knob, its shape, eight knobs (Oct, Gate, **Mutate**, **Lock**,
-Swing, Offset, Vel, H.Time - Chance became Mutate and Lock 2026-08-18, H.Vel folded into Vel's
-own ring 2026-08-17, `docs/ARP_DESIGN.md` has the mechanism), two **Harmony** interval
+rows), each with a detented rate knob, its shape, **eleven** knobs (Oct, Gate, **Density**,
+**Duck**, Mutate, Stray, Lock, Swing, Offset, Vel, H.Time - Chance became Mutate and Lock
+2026-08-18, Stray split out of Mutate 2026-08-21, H.Vel folded into Vel's own ring 2026-08-17,
+Density gave Chance a face on the card and Duck joined it 2026-09-01, `docs/ARP_DESIGN.md` has
+the mechanism), two **Harmony** interval
 dropdowns each with its own **Chance** knob beneath it (appended 2026-08-19, from BigSky's
 shimmer list) and, since the seventh 2026-08-02 pass, a **Details** button beside Anchor - the
 card's own On toggle is gone the same way the bar's separate chip is, and an off line scrims
@@ -616,6 +653,51 @@ than adding to it, so the panel does not grow. Each row's attachments bind to it
 the row's life, unlike the band's, which rebind whenever the edited line changes (a Details
 click, where a tab click used to do it): four lines on screen at once cannot each be "the
 current line".
+
+**Keybed** (`MacroRow::keybedButton`, bound to `arpKeys`) sits on the card's top row after the
+dice, reserved out of the row before Shape takes its cut so it costs no width at either floor and
+no height. It is the same parameter the line's own On used to be read as answering for; both
+surfaces say **Keybed** now rather than "Play" (which read as the line's own On switch) or "Keys"
+(which collided with the bar's Light keys) - whether the keys you play on the keybed reach this
+line at all.
+
+**The four lines can hear each other** (2026-09-01; `docs/LINE_INTERACTION.md` is the design,
+and only the bus itself, DUCK, RESET and NEIGHBOUR are built so far). Each `ArpEngine` keeps a
+`LineRecord` (`record`) that it writes as it runs - the steps it fired, its running total, the
+walk pass, the Chain lane's own bit, the note it landed on - and a later line reads it through
+`Params::follow`, a plain pointer. `runArpLines` walks the lines in letter order on the audio
+thread and only ever hands a line's `arpFollow` choice (Off / From A / From B / From C) a pointer
+to a line whose index is lower than its own, whatever a host lane or a script writes into the
+parameter - the rule that keeps the bus one-way, A to D, with nothing to loop through. The card's
+own row greys the letters a line may not follow; the processor enforces the rule regardless.
+**DUCK** (`arpDuck`, 0-100) reads that record in `fireStep`, before the chance draw: a step is
+skipped when the source has fired a step since this line's own previous one and a per-cell roll
+says so, salted apart from Mutate and Lock so the two never draw the same number on one cell. The
+first step after Follow changes, or after DUCK starts, never ducks - there is no "since my last
+step" yet to compare against. **RESET** (`arpResetFollow`) is the Follow entry of the card's
+Retrigger list rather than a chip of its own (`ArpPanel::applyRetrigChoice`): picking it clears
+the clock-window parameters the same way a clock window clears the note retrigger. A source
+publishes `record.pass` at the top of `fireStep`, before any condition can return, so a muted or
+ducked boundary step still turns a follower's page. **NEIGHBOUR** widened the Chain lane's range
+to 0-4: values 3 and 4 read `follow->lastStepFired` (and its negation) inside `chainAllows`, so a
+lane can be made to fire with, or against, another line's most recent step; with no source both
+allow, so a lane drawn for a switched-off source still plays.
+
+**Legato** (`arpLegato`, per line, default off) holds a note through the steps that would
+otherwise leave a gap - Density, the Chance lane, a mute, a rest, a failed Chain condition -
+instead of ending it at its gate: the note before a skip stays open and closes one sample after
+the next fired step's note-on (`emitHit`'s `closeHeld`), the opposite order from the tie branch
+on purpose, since a tie is the same pitch and must go off first while this is a different pitch
+that must not gap. It works by looking one step ahead: `fireStep` asks `prerollNext` the same
+four questions (chain, mute, rest, chance) one step early and keeps the chance draw, so
+`chanceFails` hands the identical answer back when that step actually arrives. `Active::legato`
+marks a held entry - no due time, skipped by the ordinary due path - and `releaseLegato` closes
+every such entry when the flag goes off or nothing is left to hold it open (the chord released,
+the line switched off).
+
+**Density** is `arpChance` given a face on the macro card (`kDensity` in `ArpPanel`'s `Knob`
+enum) rather than a new parameter; the Play page's own Chance slider reads the identical value,
+the card simply puts it where you reach for it while playing.
 
 The **chord pads are a section of their own** too, below the arp. They used to live inside
 the centre view, which meant the arpeggiator (the one panel whose whole job is to chew on a
@@ -1036,20 +1118,28 @@ coming back:
   back onto it. That wiring left with Compliance; `StepComboBox.h` is unused now, kept for
   whichever future control needs the same trick (see **Files** above). All four remaining
   controls stay live with the Pads section folded, so folding the strip cannot take the card
-  menu and the bar together, which would be the whole generator. The Pads bar's own arithmetic
-  in `minWidthForView()` still wants 1070, the floor set the day the Generator chip joined Fill
-  and Regen (2026-07-30) - but the function itself returns 1280 now, since the Controls bar
-  overtook it as the binding constraint on 2026-08-02, the day the Tempo Sync chip and three
-  more captions joined that bar. Keys Host asks for that number rather than copying it.
-- **Clear page is removed** (2026-08-01). It had already moved once, from a chip on the Pads
-  bar to a button in the generator's window (2026-07-30), because it wiped every unlocked pad
-  on the page with no `juce::UndoManager` anywhere in Keys to catch a slip. The tray gave the
-  window a destructive action that costs nothing - **Clear**, on the tray's own header - and
-  once that existed, a button that could still erase all sixteen live pads at once had no
-  reason left to be a click away inside the same window. Nothing in Keys now empties a whole
-  page in one gesture: per-pad clearing is still **Clear pad** on that pad's menu or dragging
-  its card off the strip, and the page can still be replaced wholesale, one pad at a time as
-  it decides each, by **Regen** on the Pads bar.
+  menu and the bar together, which would be the whole generator. **The Pads bar answers for its
+  own width now, and so does every other one**: `minWidthForView()` is no longer a hand sum
+  ending in a literal (1070, then 1280) but the max over each bar's own `contentWidth()` - the
+  `controlsbar` / `arpbar` / `padbar` / `keyboardbar` namespaces at the head of
+  `PluginEditor.cpp`, off the same constants `resized()` spends, with Controls measured at its
+  *tight* cell set because that is the layout it has to be able to reach - together with
+  `ArpPanel::minPanelWidth()` plus the editor's two margins, and a 1320 shipped-floor term.
+  The floor stays a term rather than the answer so that the day a bar genuinely outgrows it,
+  the bar wins instead of a literal. Two costs sit deliberately outside the Controls figure,
+  the update button's 170 px and the Instrument chip, since most instances show neither.
+  Keys Host asks for that number rather than copying it.
+- **Clear page lives on a pad's card menu**, alone in a group at the foot of the right-click
+  list. `KeysProcessor::clearChordPadPage()` empties every unlocked pad on the current page in
+  one undo entry - see **Undo** below - which is what makes the gesture affordable: a click
+  that could erase up to twelve live pads at once is one click back rather than gone for good.
+  It is the only row on that menu that acts on anything but the card it was opened from, which
+  is why it sits apart rather than beside **Clear pad**, whose name it would otherwise read as
+  the plural of. It is deliberately not a method on `ChordGenMenu`: a page wipe is data work on
+  the pad table and has no business living on the thing that generates chords. Per-pad clearing
+  is still **Clear pad** on that pad's own menu or dragging its card off the strip, and the page
+  can still be replaced wholesale, one pad at a time as it decides each, by **Regen** on the
+  Pads bar.
 - **Fill never overwrites** (2026-07-30, Owen: "new generations shouldn't overwrite
   existing"). `fillPage()` writes the *empty* pads and only those, locked or not - a blank
   needs no protection. `regeneratePage()` is the destructive one and the only one: it rerolls
@@ -1108,6 +1198,39 @@ holding, and restoring the arp can rewrite the lanes under a running line.
 `undoGeneration()` is a counter the editor polls, the `soundingGeneration()` pattern - undo
 entries are created all over the UI, and one reader is far less to get wrong than every writer
 remembering to call back.
+
+## Take
+
+Ableton cannot record a plugin's own MIDI onto that plugin's own track: Live records what
+arrives at a track's *input*, and Keys' notes are made downstream of that, inside the plugin
+itself, so arming the track and pressing record captures an empty clip. Keys keeps its own take
+instead (`KeysProcessor::setRecording`, 2026-08-17).
+
+`captureBlock` runs at the very end of `processBlock`, into a lock-free ring only the audio
+thread advances, and captures the stream **leaving** the plugin - after the arp, after strum, on
+whichever channel each line sent a note out on - so a take holds what you heard rather than what
+you clicked. `recording` gates it, set from the message thread with a release store paired with
+an acquire load so the audio thread never starts writing on a cursor a previous take left behind.
+Arming freezes the tempo: `takeBpm` is read from `currentTempo()` once, in `setRecording(true)`,
+and not touched again - the file is written once, at stop, and a host tempo drifting afterwards
+would otherwise make every later preview disagree with the bytes already on disk.
+
+Stopping writes the file immediately (`writeTake()`, into `KeysProcessor::takeFolder()`, kept as
+a separate call from `setRecording` so the capture logic is testable without touching the user's
+Documents folder), trimmed to the first captured **note** rather than the first event - Keys' own
+wheels emit CC and pitch bend onto the same stream, so a nudge before the first note would
+otherwise become the take's zero. `buildTakeMidiFile` supplies a note-off for anything still
+ringing at stop and writes a type-0 file at the frozen tempo; `takeNotes()` (`TakeNote`) is built
+from that same written sequence rather than from the raw capture, so `TakePanel`'s preview cannot
+disagree with what actually sits on disk.
+
+REC and the **Last take** chip sit on the Keyboard bar, after Octave, and stay live through a
+fold - a stop button that folded away mid-take would not be one. The chip opens `TakePanel` in
+its own **Keys Take** window (`KeysEditor::setTakeWindowOpen`), offering Save as, Show in
+Explorer and a direct drag onto a track - the last of those because Live's own clipboard will not
+accept a paste from the Windows one, so a dropped `.mid` file is the only route a take has into a
+clip. `tests/TakeTests.cpp` covers the trim to the first note, the frozen tempo, and the note-offs
+supplied for anything still ringing when recording stops.
 
 ## Parameters and state
 

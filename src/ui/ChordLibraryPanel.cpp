@@ -228,7 +228,7 @@ ChordLibraryPanel::~ChordLibraryPanel()
 void ChordLibraryPanel::buildControls()
 {
     title.setText("Chord Library", juce::dontSendNotification);
-    title.setFont(juce::Font(juce::FontOptions(16.0f, juce::Font::bold)));
+    title.setFont(skin::uiSemi(16.0f).withExtraKerningFactor(0.04f));
     title.setColour(juce::Label::textColourId, skin::text);
     addAndMakeVisible(title);
 
@@ -706,7 +706,7 @@ void ChordLibraryPanel::paint(juce::Graphics& g)
         }
         else
         {
-            skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+            skin::raisedFill(g, b, kRadius, skin::cardFace, skin::cardFaceBot);
             if (i == hovered)
             {
                 g.setColour(accent.base.withAlpha(0.10f));

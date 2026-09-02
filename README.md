@@ -174,9 +174,10 @@ The settings in the window: **Key** and **Mode** (12 modes),
 (Algorithmic only: how far outside the key it may go - 100% stays in, lower borrows from
 related modes, then reaches for secondary dominants, then anything), **Lock Influence**
 (Algorithmic only: how much new chords copy the character of the ones you locked), **Smooth
-Voicing** (all seven sources, renamed from "Voice Leading" 2026-08-01: chooses which octave
+Voicing** (all eight sources, renamed from "Voice Leading" 2026-08-01: chooses which octave
 each note sits in so consecutive chords stay close, never which chords you get), **Notes**
-(a 2-11 range, replacing the old 3/4/5 tick boxes - below 3 you get dyads, above 5 the stack
+(a 1-11 range, replacing the old 3/4/5 tick boxes - below 3 you get dyads and single notes,
+above 5 the stack
 keeps climbing in thirds through the mode) and **Inversions** (root position plus 1st/2nd/3rd,
 which **replaces** the rotation a chord arrived in rather than compounding with it), two new
 sliders **Brightness** (a view onto Mode, sweeping the seven diatonic modes Lydian to Locrian)

@@ -234,6 +234,10 @@ private:
     // about which chord it is, so seven brains honouring them separately would be seven places to
     // get it wrong (Owen, 2026-08-01: "all of their options should have the option for how many
     // notes and what inversion"). Both read ranges, and both swap the ends if they cross.
+    //
+    // fitVoicing's own mutation is `chordvoicing::fitVoicing` (../ChordVoicing.h) now: this member
+    // is the settings read that pass needs (the two ranges, the two tick-box flags, the inversion
+    // set), kept here rather than folded away because fitPads() calls it directly too.
     std::pair<int, int> noteCountRange() const; // 1..11 (the floor was 2 until 2026-08-21)
     std::pair<int, int> octaveRange() const;
     void fitVoicing(std::vector<chordgen::Chord>& chords);
@@ -241,7 +245,9 @@ private:
 
     // Lean every chord's third major or minor, whatever produced it. A third pass over the
     // output rather than a seventh brain, for the reason the other two are: it is a question
-    // about the chords you got, not about how to get them.
+    // about the chords you got, not about how to get them. The mutation is
+    // `chordvoicing::applyMajorMinorBias` (../ChordVoicing.h); this member is the one settings
+    // read (genMajMin) that pass needs.
     void applyMajorMinorBias(std::vector<chordgen::Chord>& chords);
 
     // The tick boxes. `constrains(id)` is the one reader, so a box that is not wired anywhere

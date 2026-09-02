@@ -195,7 +195,8 @@ directional: downloads, not unique installs.
 - **Windows SDK** for `signtool.exe`; `build.ps1` finds the newest one itself
 - **SafeNet drivers + the EV token**, the same certificate Octavium and
   alpha-osk use (thumbprint `FC22B5221318F3F3F6B3EB2D969D7F99091557BF`, pinned
-  in `build.ps1`, and pinned again by every client's updater)
+  in `installer/signing-thumbprint.txt` - the one copy `build.ps1` and
+  `release.py` both read - and pinned again by every client's updater)
 - **`gh`**, authenticated against an account with write access to
   `okstudio1/keys-releases`
 

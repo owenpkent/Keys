@@ -2,6 +2,7 @@
 // statics only -- tests/KeysTests.cpp owns the runner's main(), same as MarkovTests.cpp.
 #include "ChordGen.h"
 #include "ChordSources.h"
+#include "ChordVoicing.h"
 #include "ScaleModes.h"
 #include <juce_core/juce_core.h>
 #include <algorithm>
@@ -473,6 +474,39 @@ struct RootPositionCollapseTests : juce::UnitTest
             }
         }
 
+        beginTest("chordvoicing::fitVoicing matches the un-collapsed grow loop, under every mode");
+        {
+            // The trap above was pinned by reproducing fitVoicing's grow loop locally
+            // (growByThirds, above), because fitVoicing itself used to be private to
+            // ChordGenMenu and unreachable from a console test - "fitVoicing itself is private
+            // to a class that needs a live KeysProcessor" per this struct's own header comment.
+            // The mutation moved to keys::chordvoicing (ChordVoicing.h) so it can be called
+            // directly now: this compares the real function's output against growByThirds' own
+            // reference simulation, which never re-collapses what it grows, so agreement
+            // between the two - exact agreement, not just a matching count - is the direct
+            // confirmation that fitVoicing does not reintroduce the bug the two blocks above can
+            // only demonstrate the shape of. (Comparing counts against a hard-coded eleven would
+            // be a weaker, and for a mode whose spacing runs off the top of the MIDI range before
+            // eleven notes, a wrong, assumption.)
+            for (int m = 0; m < keys::modes::count(); ++m)
+            {
+                const auto seed = keys::chordgen::chordNotes(0, keys::chordgen::typeIndex("Major"), 2);
+                const auto expected = growByThirds(seed, 11, 0, m);
+
+                std::vector<keys::chordgen::Chord> chords(1);
+                chords[0].rootPc = 0;
+                chords[0].type = keys::chordgen::typeIndex("Major");
+                chords[0].notes = seed;
+                juce::Random rng(9000 + m);
+                keys::chordvoicing::fitVoicing(chords, /*rootPc*/ 0, m, /*noteCountRange*/ { 11, 11 },
+                                               /*octaveRange*/ { 2, 2 }, /*freeNoteCount*/ false,
+                                               /*freeOctave*/ false, /*inversions*/ {}, rng);
+
+                expect(chords[0].notes == expected,
+                       "mode " + juce::String(m) + " should be the un-collapsed grown stack");
+            }
+        }
+
         beginTest("every voicing pass is a no-op on a single note");
         {
             // The floor of `genNotesMin` / `genNotesMax` moved to 1 on 2026-08-21, and the
@@ -518,4 +552,183 @@ struct RootPositionCollapseTests : juce::UnitTest
     }
 };
 static RootPositionCollapseTests rootPositionCollapseTests;
+
+// keys::chordvoicing::applyMajorMinorBias, lifted out of ChordGenMenu::applyMajorMinorBias so it
+// unit-tests directly. See ChordVoicing.h for why the mutation is pure and the settings read
+// (genMajMin) stays behind in ChordGenMenu.
+struct MajorMinorBiasTests : juce::UnitTest
+{
+    MajorMinorBiasTests() : juce::UnitTest("keys::chordvoicing::applyMajorMinorBias") {}
+
+    void runTest() override
+    {
+        using namespace keys;
+
+        beginTest("amount=0 is the identity");
+        {
+            std::vector<chordgen::Chord> chords(1);
+            chords[0].rootPc = 0;
+            chords[0].type = chordgen::typeIndex("Minor");
+            chords[0].notes = chordgen::chordNotes(0, chords[0].type, 5); // C Eb G
+            const auto before = chords[0].notes;
+            juce::Random rng(7);
+            chordvoicing::applyMajorMinorBias(chords, 0, rng);
+            expect(chords[0].notes == before, "amount=0 must not touch the notes");
+            expectEquals(chords[0].type, chordgen::typeIndex("Minor"), "...or the type");
+        }
+
+        beginTest("a large positive amount pushes the minor third to major");
+        {
+            std::vector<chordgen::Chord> chords(1);
+            chords[0].rootPc = 0;
+            chords[0].type = chordgen::typeIndex("Minor");
+            chords[0].notes = chordgen::chordNotes(0, chords[0].type, 5); // {60, 63, 67}
+            juce::Random rng(7);
+            chordvoicing::applyMajorMinorBias(chords, 100, rng); // chance = 1.0, always fires
+            expect(chords[0].notes == std::vector<int> { 60, 64, 67 },
+                   "the minor third (63) should read major (64); root and fifth stay put");
+            expectEquals(chords[0].type, chordgen::typeIndex("Major"),
+                         "the label follows the notes when the root reading survives");
+        }
+
+        beginTest("a large negative amount pushes the major third to minor");
+        {
+            std::vector<chordgen::Chord> chords(1);
+            chords[0].rootPc = 0;
+            chords[0].type = chordgen::typeIndex("Major");
+            chords[0].notes = chordgen::chordNotes(0, chords[0].type, 5); // {60, 64, 67}
+            juce::Random rng(7);
+            chordvoicing::applyMajorMinorBias(chords, -100, rng);
+            expect(chords[0].notes == std::vector<int> { 60, 63, 67 },
+                   "the major third (64) should read minor (63)");
+            expectEquals(chords[0].type, chordgen::typeIndex("Minor"));
+        }
+
+        beginTest("a chord with no third at all is left alone in either direction");
+        {
+            // Sus4: root, fourth, fifth - no note sits at interval 3 or 4 from the root, so
+            // neither branch has anything to move.
+            std::vector<chordgen::Chord> chords(1);
+            chords[0].rootPc = 0;
+            chords[0].type = chordgen::typeIndex("Sus4");
+            chords[0].notes = chordgen::chordNotes(0, chords[0].type, 5); // {60, 65, 67}
+            const auto before = chords[0].notes;
+            juce::Random rng(7);
+            chordvoicing::applyMajorMinorBias(chords, 100, rng);
+            expect(chords[0].notes == before, "no third means nothing to lean");
+        }
+    }
+};
+static MajorMinorBiasTests majorMinorBiasTests;
+
+// The pipeline's load-bearing order (Lean, then fitVoicing, then smoothing), pinned by running
+// the passes in the wrong order by hand and showing the result differs from the real
+// chordvoicing::applyVoicingPipeline. Every input below is chosen so the passes under test are
+// fully deterministic - fixed note-count and octave ranges (so fitVoicing never has to roll a
+// `want` or a register), no inversions (so it never rolls one of those either), and a lean
+// chance of exactly 1.0 (so the "does it fire" draw can never go the other way) - which is what
+// makes a hand-derived expectation trustworthy rather than a restatement of whatever the code
+// happens to compute.
+struct VoicingPipelineOrderTests : juce::UnitTest
+{
+    VoicingPipelineOrderTests() : juce::UnitTest("keys::chordvoicing pipeline order") {}
+
+    void runTest() override
+    {
+        using namespace keys;
+
+        beginTest("Lean must run before fitVoicing, not after");
+        {
+            // Locrian (mode index 6, intervals 0,1,3,5,6,8,10): growing a third-degree note
+            // (the minor third, interval 3) finds the scale tone at top+3 (interval 6 lands
+            // immediately); growing a fourth-degree note (the major third, interval 4) does not
+            // find one until top+4 (interval 7 is not in Locrian, interval 8 is). So leaning the
+            // third before it grows and leaning it after grow has already picked a note from the
+            // *un-leaned* chord land on genuinely different pitches - not merely a different
+            // path to the same answer.
+            const int mode = modes::indexOf("Locrian");
+
+            // Correct order: lean (push major, chance 1.0) the root+minor-third dyad, then grow
+            // it to a triad.
+            std::vector<chordgen::Chord> correct(1);
+            correct[0].rootPc = 0;
+            correct[0].notes = { 60, 63 }; // C, Eb: root and minor third
+            juce::Random rngCorrect(11);
+            chordvoicing::applyMajorMinorBias(correct, 100, rngCorrect);
+            expect(correct[0].notes == std::vector<int> { 60, 64 },
+                   "the minor third should already read major before fitVoicing runs");
+            chordvoicing::fitVoicing(correct, 0, mode, { 3, 3 }, { 5, 5 }, false, false, {}, rngCorrect);
+            expect(correct[0].notes == std::vector<int> { 60, 64, 68 },
+                   "growing from the leaned major third finds the scale tone at top+4");
+
+            // Wrong order: grow the dyad first (from the un-leaned minor third), then lean.
+            std::vector<chordgen::Chord> wrong(1);
+            wrong[0].rootPc = 0;
+            wrong[0].notes = { 60, 63 };
+            juce::Random rngWrong(11);
+            chordvoicing::fitVoicing(wrong, 0, mode, { 3, 3 }, { 5, 5 }, false, false, {}, rngWrong);
+            expect(wrong[0].notes == std::vector<int> { 60, 63, 66 },
+                   "growing from the still-minor third finds a different scale tone, at top+3");
+            chordvoicing::applyMajorMinorBias(wrong, 100, rngWrong);
+            expect(wrong[0].notes == std::vector<int> { 60, 64, 66 },
+                   "lean can only re-colour the third it finds; it cannot undo the note fit already grew");
+
+            expect(wrong[0].notes != correct[0].notes,
+                   "fit-then-lean lands on a different chord than lean-then-fit");
+        }
+
+        beginTest("fitVoicing must run before smoothing, not after");
+        {
+            // A held C major chord and an F major chord starting three octaves above it.
+            // fitVoicing's register step always parks a chord at whatever octaveRange says,
+            // regardless of what ran before - so if it runs after smoothing, it throws the
+            // smoothing away; running it first leaves smoothing's placement standing.
+            const auto held = std::vector<int> { 60, 64, 67 };     // C major, held fixed by octaveRange
+            const auto farAway = std::vector<int> { 113, 117, 120 }; // F major, three octaves up
+
+            std::vector<chordgen::Chord> correct(2);
+            correct[0] = { 0, chordgen::typeIndex("Major"), held, -1 };
+            correct[1] = { 5, chordgen::typeIndex("Major"), farAway, -1 };
+            juce::Random rngA(13);
+            chordvoicing::fitVoicing(correct, 0, 0, { 3, 3 }, { 5, 5 }, false, false, {}, rngA);
+            expect(correct[1].notes == std::vector<int> { 65, 69, 72 },
+                   "fitVoicing alone parks the F chord an octave above the held C, same as always");
+            sources::applyVoiceLeading(correct, 1.0f);
+            expect(correct[1].notes == std::vector<int> { 60, 65, 69 },
+                   "smoothing, run last, pulls the F chord's C down onto the held chord's own C");
+
+            std::vector<chordgen::Chord> wrong(2);
+            wrong[0] = { 0, chordgen::typeIndex("Major"), held, -1 };
+            wrong[1] = { 5, chordgen::typeIndex("Major"), farAway, -1 };
+            sources::applyVoiceLeading(wrong, 1.0f);
+            expect(wrong[1].notes == std::vector<int> { 60, 65, 69 },
+                   "smoothing alone reaches the same place fitVoicing-then-smoothing did");
+            juce::Random rngB(13);
+            chordvoicing::fitVoicing(wrong, 0, 0, { 3, 3 }, { 5, 5 }, false, false, {}, rngB);
+            expect(wrong[1].notes == std::vector<int> { 65, 69, 72 },
+                   "fitVoicing's register step, run after smoothing, throws smoothing's work away");
+
+            expect(wrong[1].notes != correct[1].notes,
+                   "smooth-then-fit lands on a different chord than fit-then-smooth");
+        }
+
+        beginTest("applyVoicingPipeline itself runs lean, fit, smooth in that order");
+        {
+            // The pipeline's own contract, exercised end to end on the fit/smooth case above
+            // (lean amount 0, so this pins the fit-then-smooth half of the order; the lean half
+            // is pinned directly against applyMajorMinorBias + fitVoicing above, since the
+            // pipeline's lean step is that same function, called first, either way).
+            std::vector<chordgen::Chord> chords(2);
+            chords[0] = { 0, chordgen::typeIndex("Major"), { 60, 64, 67 }, -1 };
+            chords[1] = { 5, chordgen::typeIndex("Major"), { 113, 117, 120 }, -1 };
+            juce::Random rng(13);
+            chordvoicing::applyVoicingPipeline(chords, 0, 0, 0, { 3, 3 }, { 5, 5 }, false, false, {},
+                                               1.0f, rng);
+
+            expect(chords[1].notes == std::vector<int> { 60, 65, 69 },
+                   "the pipeline fits before it smooths, matching the fit-then-smooth order above");
+        }
+    }
+};
+static VoicingPipelineOrderTests voicingPipelineOrderTests;
 } // namespace

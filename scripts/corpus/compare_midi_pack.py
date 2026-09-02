@@ -20,7 +20,8 @@ import re
 import sys
 from collections import Counter
 
-ROOT = r"E:\Ableton\free-midi-progressions-20231004"
+# Overridable so this runs on a machine where the pack lives somewhere other than Owen's E: drive.
+ROOT = os.environ.get("KEYS_MIDI_PACK_ROOT", r"E:\Ableton\free-midi-progressions-20231004")
 LIB = "src/ChordLibrary.h"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 

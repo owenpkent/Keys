@@ -3,11 +3,22 @@ param(
     [switch]$Standalone,
     [switch]$Installer,
     [switch]$Sign,
-    [switch]$NoSign
+    [switch]$NoSign,
+    [switch]$PrintVersion
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+# project(Keys VERSION ...) in CMakeLists.txt is the one place the version lives
+# (docs/RELEASE.md "Version source of truth"). Read once here, reused below for
+# the installer's /DVersion=, and exposed via -PrintVersion so release.py can
+# ask this script for it instead of keeping a second copy of the regex.
+$Version = (Select-String -Path "$PSScriptRoot\CMakeLists.txt" -Pattern 'project\(Keys VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+if ($PrintVersion) {
+    Write-Output $Version
+    exit 0
+}
 
 # Dev builds drop the VST3 where the DAW scans. Ableton is set to scan its custom
 # VST3 folder (Ableton\vst3), NOT %USERPROFILE%\VST3. build.ps1 owns the copy so a
@@ -16,8 +27,10 @@ $VstCopyDir = "$env:USERPROFILE\Ableton\vst3"
 if (-not (Test-Path $VstCopyDir)) { New-Item -ItemType Directory -Path $VstCopyDir -Force | Out-Null }
 
 # The auto-updater pins this exact thumbprint (OK Studio Inc. EV cert on the eToken),
-# so a release signed with anything else is rejected by every client.
-$SignThumbprint = "FC22B5221318F3F3F6B3EB2D969D7F99091557BF"
+# so a release signed with anything else is rejected by every client. One file,
+# installer/signing-thumbprint.txt, so release.py reads the same value rather than
+# keeping its own copy.
+$SignThumbprint = (Get-Content "$PSScriptRoot\installer\signing-thumbprint.txt" -Raw).Trim()
 $TimestampUrl   = "http://timestamp.sectigo.com"
 $doSign = ($Sign -or $Installer) -and -not $NoSign
 
@@ -86,22 +99,21 @@ $copied = Copy-Vst3ToDaw -Artefacts "Keys_artefacts" -Bundle "Keys.vst3"
 $copied = (Copy-Vst3ToDaw -Artefacts "KeysHost_artefacts" -Bundle "Keys Host.vst3") -and $copied
 
 if ($Installer) {
-    $version = (Select-String -Path "$PSScriptRoot\CMakeLists.txt" -Pattern 'project\(Keys VERSION ([0-9.]+)').Matches[0].Groups[1].Value
     $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
         Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $iscc) {
         Write-Error "Inno Setup 6 not found. Install with: winget install JRSoftware.InnoSetup"
         exit 1
     }
-    & $iscc "/DVersion=$version" "installer\keys.iss"
+    & $iscc "/DVersion=$Version" "installer\keys.iss"
     if ($LASTEXITCODE -ne 0) { exit 1 }
 
-    $setupExe = "$PSScriptRoot\release\KeysSetup-$version.exe"
+    $setupExe = "$PSScriptRoot\release\KeysSetup-$Version.exe"
     if ($doSign) {
         Invoke-Sign -Files @($setupExe)
-        Write-Host "Installer signed: release\KeysSetup-$version.exe" -ForegroundColor Green
+        Write-Host "Installer signed: release\KeysSetup-$Version.exe" -ForegroundColor Green
     } else {
-        Write-Host "Installer: release\KeysSetup-$version.exe (UNSIGNED - clients will reject it!)" -ForegroundColor Yellow
+        Write-Host "Installer: release\KeysSetup-$Version.exe (UNSIGNED - clients will reject it!)" -ForegroundColor Yellow
     }
 }
 

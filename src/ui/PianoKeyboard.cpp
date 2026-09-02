@@ -138,8 +138,8 @@ void PianoKeyboard::paint(juce::Graphics& g)
     const auto ac = skin::accentOf(*this); // once per paint, not once per key
 
     // Instrument body above the keybed.
-    g.setGradientFill({ juce::Colour(0xff121317), 0.0f, 0.0f,
-                        juce::Colour(0xff0c0d10), 0.0f, full.getBottom(), false });
+    g.setGradientFill({ skin::keybedBodyTop, 0.0f, 0.0f,
+                        skin::keybedBodyBot, 0.0f, full.getBottom(), false });
     g.fillRect(full);
 
     const auto inScale = [this](int note)
@@ -210,11 +210,11 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const auto ka = lit ? accentFor(st.line) : ac;
         const auto kls = lit ? skin::keyLitFor(st.line) : skin::KeyLitSet {};
 
-        juce::ColourGradient grad = vGrad(juce::Colour(0xfff4f6f8), juce::Colour(0xffd2d6db), top, bot);
+        juce::ColourGradient grad = vGrad(skin::keyIvoryTop, skin::keyIvoryBot, top, bot);
         if (s == State::active)      grad = vGrad(kls.body.activeTop, kls.body.activeBot, top, bot);
         else if (s == State::held)   grad = vGrad(kls.body.heldTop, kls.body.heldBot, top, bot);
-        else if (dim)                grad = vGrad(juce::Colour(0xffc9cdd4), juce::Colour(0xff9ea4ad), top, bot);
-        else                         grad.addColour(0.55, juce::Colour(0xffe9ecef));
+        else if (dim)                grad = vGrad(skin::keyIvoryDimTop, skin::keyIvoryDimBot, top, bot);
+        else                         grad.addColour(0.55, skin::keyIvoryHighlight);
         g.setGradientFill(grad);
         g.fillPath(key);
 
@@ -227,10 +227,10 @@ void PianoKeyboard::paint(juce::Graphics& g)
         {
             juce::Graphics::ScopedSaveState clip(g);
             g.reduceClipRegion(key);
-            juce::Colour lipTop { 0xffdcdfe4 }, lipBot { 0xffc4c8cf };
+            juce::Colour lipTop = skin::keyLipTop, lipBot = skin::keyLipBot;
             if (s == State::active)      { lipTop = kls.lip.activeTop; lipBot = kls.lip.activeBot; }
             else if (s == State::held)   { lipTop = kls.lip.heldTop;   lipBot = kls.lip.heldBot; }
-            else if (dim)                { lipTop = juce::Colour(0xffb2b7bf); lipBot = juce::Colour(0xff9aa0a9); }
+            else if (dim)                { lipTop = skin::keyLipDimTop; lipBot = skin::keyLipDimBot; }
             g.setGradientFill(vGrad(lipTop, lipBot, bot - lipH, bot));
             g.fillRect(b.getX(), bot - lipH, b.getWidth(), lipH);
             g.setColour(juce::Colours::black.withAlpha(0.10f));
@@ -253,7 +253,7 @@ void PianoKeyboard::paint(juce::Graphics& g)
 
         if ((((k.note % 12) + 12) % 12) == 0) // subtle C marker for orientation
         {
-            g.setColour(lit ? juce::Colour(0xff07272c) : juce::Colour(0xff6a7078));
+            g.setColour(lit ? skin::keyMarkerInkLit : skin::keyMarkerInk);
             g.setFont(skin::micro(9.5f));
             g.drawText("C" + juce::String(k.note / 12 - 1),
                        b.withTrimmedBottom(lipH + 3.0f).removeFromBottom(12.0f),
@@ -281,11 +281,11 @@ void PianoKeyboard::paint(juce::Graphics& g)
         g.setColour(juce::Colours::black.withAlpha(0.18f));
         g.fillRoundedRectangle(b.translated(0.5f, 1.0f).expanded(0.5f, 0.0f), 3.0f);
 
-        juce::ColourGradient grad = vGrad(juce::Colour(0xff33373e), juce::Colour(0xff0b0d0f), top, bot);
+        juce::ColourGradient grad = vGrad(skin::keyBlackTop, skin::keyBlackBot, top, bot);
         if (s == State::active)      grad = vGrad(kls.black.activeTop, kls.black.activeBot, top, bot);
         else if (s == State::held)   grad = vGrad(kls.black.heldTop, kls.black.heldBot, top, bot);
-        else if (dim)                grad = vGrad(juce::Colour(0xff3c434c), juce::Colour(0xff151920), top, bot);
-        else                         grad.addColour(0.5, juce::Colour(0xff191c20));
+        else if (dim)                grad = vGrad(skin::keyBlackDimTop, skin::keyBlackDimBot, top, bot);
+        else                         grad.addColour(0.5, skin::keyBlackHighlight);
         g.setGradientFill(grad);
         g.fillRoundedRectangle(b, 3.0f);
 
@@ -294,10 +294,10 @@ void PianoKeyboard::paint(juce::Graphics& g)
         const float faceBot = top + b.getHeight() * 0.60f;
         const auto face = juce::Rectangle<float>(b.getX() + 1.6f, top + 1.0f,
                                                  b.getWidth() - 3.2f, faceBot - top - 1.0f);
-        juce::Colour faceTop { 0xff3f444c }, faceLow { 0xff23262b };
+        juce::Colour faceTop = skin::keyBlackFaceTop, faceLow = skin::keyBlackFaceBot;
         if (s == State::active)      { faceTop = kls.blackFace.activeTop; faceLow = kls.blackFace.activeBot; }
         else if (s == State::held)   { faceTop = kls.blackFace.heldTop;   faceLow = kls.blackFace.heldBot; }
-        else if (dim)                { faceTop = juce::Colour(0xff4a515b); faceLow = juce::Colour(0xff2a3037); }
+        else if (dim)                { faceTop = skin::keyBlackFaceDimTop; faceLow = skin::keyBlackFaceDimBot; }
         g.setGradientFill(vGrad(faceTop, faceLow, face.getY(), face.getBottom()));
         g.fillRoundedRectangle(face, 2.0f);
         g.setColour(lit ? ka.hot.withAlpha(0.55f) : juce::Colours::white.withAlpha(0.10f));
@@ -317,7 +317,7 @@ void PianoKeyboard::paint(juce::Graphics& g)
 
     // Fallboard rail, the cyan felt strip (the skin's signature detail), and the
     // ambient shadow the board casts down the keys.
-    g.setColour(juce::Colour(0xff0a0b0d));
+    g.setColour(skin::fallboardRail);
     g.fillRect(full.getX(), keysTop, full.getWidth(), 2.0f);
     g.setGradientFill({ ac.base, full.getX(), 0.0f, ac.deep, full.getRight(), 0.0f, false });
     g.fillRect(full.getX(), keysTop + 2.0f, full.getWidth(), 2.5f);

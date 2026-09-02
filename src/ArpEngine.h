@@ -71,6 +71,15 @@ public:
                 // about the step before. It self-corrects within a single step, which is the
                 // cheapest possible break of that rule and is why this form was chosen over
                 // Stochas' arbitrary cell-to-cell reference.
+                //
+                // Three more exceptions have joined it since (2026-09-01), all the same shape:
+                // DUCK and RESET each keep one step's memory of the line they follow
+                // (seenAtMyLastStep, seenSourcePass), Legato's lookahead keeps one step's preroll,
+                // and Random Once keeps a shuffled order between deals rather than the step it is
+                // on. The live rng (`rng`, below) is a different kind of exception again, feeding
+                // the feel draws - Humanize, Strum, ratchet velocity - that were never meant to be
+                // reconstructable from the step index at all. Everything else is still stateless
+                // from the playhead, a function of the step index alone.
                 laneChain,
                 // Cthulhu's **Position Reset** (its manual p25): *"the arpeggiator will reset on
                 // this step to play the first note of the arpeggiator pattern"*. There it is an
@@ -234,28 +243,18 @@ public:
     static constexpr double minRateHz = 0.03125;
     static constexpr double maxRateHz = 32.0;
 
-    // How a rate in Hz is written, wherever it is written: decimals by decade, so 0.031 Hz
-    // and 32.0 Hz both read as themselves. A fixed 2 prints the bottom octave of the range as
-    // "0.03", and a fixed 1 collapses the bottom *two* octaves onto "0.0" - which is how the
-    // slot cards came to label a running arp as a stopped one. One copy of the rule, spent by
-    // the arpRateHz parameter's text function and by ArpPanel's slot card; the unit suffix is
-    // the caller's, since the two do not space it the same way.
-    static juce::String rateHzText(double hz)
-    {
-        return juce::String(hz, hz < 1.0 ? 3 : (hz < 10.0 ? 2 : 1));
-    }
-
     // A tuplet is "N steps in the space of M", and M is the largest power of two at or below N:
     // 3 in the space of 2 - the plain triplet this generalised on 2026-08-03 - then 5 in 4, 7 in
     // 4, 9 in 8. That is the notation convention, and it is why a quintuplet is measured against
     // four and not six: five steps fill exactly the time four straight ones would. Which also
-    // makes the number alone enough to name one, and what lets rateSyncText below print the
-    // result as a plain fraction instead of the division plus a marker.
+    // makes the number alone enough to name one, and what lets ArpRateText.h's rateSyncText
+    // print the result as a plain fraction instead of the division plus a marker.
     // Anything under 2 is straight, which is how the choice list's "Off" arrives here.
     static int tupletSpace(int n) { return n >= 8 ? 8 : (n >= 4 ? 4 : 2); }
     static double tupletFactor(int n) { return n < 2 ? 1.0 : (double) tupletSpace(n) / (double) n; }
     // Written out rather than pulled from <numeric>: one loop, and the header stays as light
-    // as it is. Only rateSyncText uses it, to put a fraction in lowest terms.
+    // as it is. firedCountBefore below uses it for its subset lcms; so does ArpRateText.h's
+    // rateSyncText, to put a fraction in lowest terms.
     static int gcdOf(int a, int b)
     {
         while (b != 0)
@@ -314,50 +313,6 @@ public:
             total += (bits & 1) ? count : -count;
         }
         return total;
-    }
-
-    // How a tempo-synced rate is written under the dial: **the step length as an exact fraction
-    // of a bar**, one copy of the rule for the band and for every macro card.
-    //
-    // This is the one notation that survives tuplets (2026-08-03, Owen: "shouldn't it just be
-    // 1/5 not 1/4:5?", and he is right - `1/4:5` was invented here, which is the tell). The
-    // convention every DAW uses, `1/16T` and `1/16D`, has a letter for triplets and dotted and
-    // *no form at all* for a quintuplet; the fraction needs no letters, because a quarter-note
-    // quintuplet is five in the space of four quarters, which is four fifths of a beat, which
-    // is one fifth of a bar. So it is simply "1/5". FL Studio's grid ("1/3 beat", "1/6 beat")
-    // is the same system.
-    //
-    // 4/4 is assumed exactly as much as it already was: "1/4" has always meant a quarter of a
-    // bar here. Straight, this reproduces the division names byte for byte, which is why the
-    // dial reads the same as it ever did until a modifier is set.
-    //
-    // Dot stays a dot rather than folding in. It *could* - a dotted 1/8 is 3/16 of a bar - but
-    // "1/8." is universal and instantly read, where "3/16" has to be worked out. The tuplet is
-    // folded because it has no such symbol.
-    static juce::String rateSyncText(int rateIndex, bool dotted, int tuplet)
-    {
-        static constexpr int barsNum[11] = { 16, 8, 4, 2, 1, 1, 1, 1, 1, 1, 1 };
-        static constexpr int barsDen[11] = {  1, 1, 1, 1, 1, 2, 4, 8, 16, 32, 64 };
-        const int i = juce::jlimit(0, 10, rateIndex);
-        int num = barsNum[i], den = barsDen[i];
-        if (tuplet >= 2)
-        {
-            num *= tupletSpace(tuplet);
-            den *= tuplet;
-        }
-        // Reduce, or an 1/8 in threes prints as "2/24" instead of "1/12". Most combinations
-        // come back to a unit fraction; a few honestly do not (a 1/2 in fives is two fifths of
-        // a bar) and print as "2/5", which is exact and still reads as a length.
-        if (const int g = gcdOf(num, den); g > 1)
-        {
-            num /= g;
-            den /= g;
-        }
-        juce::String s = den == 1 ? juce::String(num) + (num == 1 ? " bar" : " bars")
-                                  : juce::String(num) + "/" + juce::String(den);
-        if (dotted)
-            s << ".";
-        return s;
     }
 
     // The chords the twelve slots hold, mirrored into atomics so a step can call one up on
@@ -1064,119 +1019,7 @@ public:
 
         if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
-            // Fire every step whose *fire time* lands inside [pos, pos + blockBeats). Not
-            // every boundary in that range: swing shifts the offbeats either way, so with a
-            // negative swing a step is pulled in front of its own boundary and can belong to
-            // the block before it. Walking from one step back and testing the fire time is
-            // what makes early swing possible at all - the old ceil-from-pos loop dropped
-            // any step it pulled behind the block start, which silenced every other note.
-            // Costs at most one extra iteration per block, since |swing| < 1 keeps fire
-            // times monotonic and each step therefore still fires in exactly one block.
-            // Three steps back, not one. One was enough while swing was the only thing that
-            // moved a step (|swing| < 1, so a step could only ever be pulled into the block
-            // before its own). The Late lane can push a step up to 0.9 of a step *past* its
-            // boundary, and on an odd step that stacks with a positive swing, so a step can
-            // now fire as much as 1.65 steps after the one it is named for. Costs two extra
-            // iterations that skip on a negative offset and fire nothing.
-            double nextIndexF = std::floor(pos / stepBeats + 1.0e-9) - 3.0;
-            for (;;)
-            {
-                const double boundaryBeats = nextIndexF * stepBeats;
-                const long long globalStep = (long long) llround(nextIndexF);
-
-                // With any divider enabled, a boundary fires only if it is a multiple of at
-                // least one of them (dividerFires); a suppressed boundary fires no note, no
-                // ratchet, and does not advance anything - skip it before it touches a single
-                // lane read or the direction walk. All zero (the default) never enters this
-                // branch, so behaviour is unchanged bit for bit.
-                if (dividersOn && ! dividerFires(globalStep, divs))
-                {
-                    nextIndexF += 1.0;
-                    continue;
-                }
-                // The index a firing boundary reads its lanes by and restarts its walk from.
-                // Raw with no dividers (today's behaviour, untouched); with dividers, the count
-                // of firing boundaries before this one (firedCountBefore), computed from
-                // globalStep alone - stateless the same way the rest of this clock is - so the
-                // pattern advances one lane step per *fired* boundary instead of leaving gaps
-                // where a divider skipped a raw step. Only the lane index compresses: the wall-
-                // clock position below still comes from the real step grid.
-                const long long stepIndex = dividersOn ? firedCountBefore(globalStep, divs) : globalStep;
-
-                double fireBeats = boundaryBeats;
-                if ((globalStep & 1) != 0)
-                    fireBeats += stepBeats * p.swing; // swing shifts the offbeats
-                // Late: this step's own shift, always forwards. Cthulhu calls the lane Late
-                // and so does this - it can only delay, which is what keeps fire times in
-                // step order however the lane is drawn (step n at n+0.9 still precedes step
-                // n+1 at n+1.0). An early half would need the whole close-what-you-land-on
-                // rule in emitHit rewritten, for a shift Swing already offers.
-                fireBeats += stepBeats * juce::jlimit(0, 90, driftedLane(p, laneLate, stepIndex)) / 100.0;
-                const double offsetBeats = fireBeats - pos;
-                const int offset = (int) std::floor(offsetBeats / beatsPerSample);
-                if (offset >= numSamples)
-                    break;
-                if (offset >= 0)
-                {
-                    // Restarts, both kinds, decided here rather than where they are asked for:
-                    // "step 1" only means anything at a step boundary, and the note that asks
-                    // for a retrigger arrives in the middle of a block. Whichever fires first
-                    // after the request becomes step 1, for the lanes (stepBase) and for the
-                    // direction walk (dirCursor) alike. Before this the lanes never restarted
-                    // at all - they were read straight off the absolute step index, so the
-                    // Retrigger toggle only ever reset the walk.
-                    if (p.retrigBeats > 0.0)
-                    {
-                        const long long win = (long long) std::floor(boundaryBeats / p.retrigBeats + 1.0e-9);
-                        if (win != lastRetrigWindow)
-                        {
-                            lastRetrigWindow = win;
-                            pendingRetrig = true;
-                        }
-                    }
-                    // **RESET from the line we follow** (2026-09-01, phase two of the line bus):
-                    // when the source's walk pass changes, this step becomes step 1, through
-                    // the restart Retrigger already owns. The first look at the source records
-                    // its pass without restarting, or switching Reset on would reset at once.
-                    // A step late at worst when both lines land in one block with this line's
-                    // offset before the source's; equal-rate anchored lines share offsets, and
-                    // the source ran first.
-                    if (p.resetFollow && p.follow != nullptr)
-                    {
-                        if (! seenPassValid)
-                        {
-                            seenSourcePass = p.follow->pass;
-                            seenPassValid = true;
-                        }
-                        else if (p.follow->pass != seenSourcePass)
-                        {
-                            seenSourcePass = p.follow->pass;
-                            pendingRetrig = true;
-                        }
-                    }
-                    else
-                        seenPassValid = false;
-
-                    if (pendingRetrig)
-                    {
-                        pendingRetrig = false;
-                        stepBase = stepIndex;
-                        dirCursor = 0;
-                    }
-
-                    // Any ratchet sub-hit carried in from an earlier block that is due before
-                    // this step goes first, so hits reach emitHit in time order.
-                    firePendingBefore(offset, numSamples, out);
-                    // The playhead the grids draw, published here rather than from the clock:
-                    // a suppressed divider boundary and a step the chord could not fill both
-                    // pass through the loop above without reading a lane, and a playhead that
-                    // moved on those would point at cells the engine never looked at.
-                    uiRelStep.store(stepIndex - stepBase, std::memory_order_relaxed);
-                    uiOffset.store(p.offset, std::memory_order_relaxed);
-                    fireStep(p, stepIndex, offset, stepBeats / beatsPerSample, numSamples, out);
-                }
-                nextIndexF += 1.0;
-            }
+            scanStepsInBlock(p, pos, stepBeats, beatsPerSample, numSamples, divs, dividersOn, out);
 
             firePendingBefore(numSamples, numSamples, out); // the rest of this block's sub-hits
         }
@@ -1708,20 +1551,144 @@ private:
         permDirty = false;
     }
 
-    void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
-                  int numSamples, juce::MidiBuffer& out)
+    // The step scan for one block: which boundaries fire, at what sample offset, and the two
+    // restarts that can land on one - Retrigger's own window and RESET's watch on the pass of
+    // the line we follow. It reads the block's timebase and never writes it; everything it
+    // sounds goes through fireStep, so the order of lane reads and draws is where it was.
+    void scanStepsInBlock(const Params& p, double pos, double stepBeats, double beatsPerSample,
+                          int numSamples, const std::array<int, 4>& divs, bool dividersOn,
+                          juce::MidiBuffer& out)
     {
-        // On the bus first, before any condition can return: a follower's RESET watches this
-        // number, and a source whose boundary step is muted or ducked must still turn the page.
-        record.pass = walkPass(p, globalStep);
+        // Fire every step whose *fire time* lands inside [pos, pos + blockBeats). Not
+        // every boundary in that range: swing shifts the offbeats either way, so with a
+        // negative swing a step is pulled in front of its own boundary and can belong to
+        // the block before it. Walking from one step back and testing the fire time is
+        // what makes early swing possible at all - the old ceil-from-pos loop dropped
+        // any step it pulled behind the block start, which silenced every other note.
+        // Costs at most one extra iteration per block, since |swing| < 1 keeps fire
+        // times monotonic and each step therefore still fires in exactly one block.
+        // Three steps back, not one. One was enough while swing was the only thing that
+        // moved a step (|swing| < 1, so a step could only ever be pulled into the block
+        // before its own). The Late lane can push a step up to 0.9 of a step *past* its
+        // boundary, and on an odd step that stacks with a positive swing, so a step can
+        // now fire as much as 1.65 steps after the one it is named for. Costs two extra
+        // iterations that skip on a negative offset and fire nothing.
+        double nextIndexF = std::floor(pos / stepBeats + 1.0e-9) - 3.0;
+        for (;;)
+        {
+            const double boundaryBeats = nextIndexF * stepBeats;
+            const long long globalStep = (long long) llround(nextIndexF);
 
+            // With any divider enabled, a boundary fires only if it is a multiple of at
+            // least one of them (dividerFires); a suppressed boundary fires no note, no
+            // ratchet, and does not advance anything - skip it before it touches a single
+            // lane read or the direction walk. All zero (the default) never enters this
+            // branch, so behaviour is unchanged bit for bit.
+            if (dividersOn && ! dividerFires(globalStep, divs))
+            {
+                nextIndexF += 1.0;
+                continue;
+            }
+            // The index a firing boundary reads its lanes by and restarts its walk from.
+            // Raw with no dividers (today's behaviour, untouched); with dividers, the count
+            // of firing boundaries before this one (firedCountBefore), computed from
+            // globalStep alone - stateless the same way the rest of this clock is - so the
+            // pattern advances one lane step per *fired* boundary instead of leaving gaps
+            // where a divider skipped a raw step. Only the lane index compresses: the wall-
+            // clock position below still comes from the real step grid.
+            const long long stepIndex = dividersOn ? firedCountBefore(globalStep, divs) : globalStep;
+
+            double fireBeats = boundaryBeats;
+            if ((globalStep & 1) != 0)
+                fireBeats += stepBeats * p.swing; // swing shifts the offbeats
+            // Late: this step's own shift, always forwards. Cthulhu calls the lane Late
+            // and so does this - it can only delay, which is what keeps fire times in
+            // step order however the lane is drawn (step n at n+0.9 still precedes step
+            // n+1 at n+1.0). An early half would need the whole close-what-you-land-on
+            // rule in emitHit rewritten, for a shift Swing already offers.
+            fireBeats += stepBeats * juce::jlimit(0, 90, driftedLane(p, laneLate, stepIndex)) / 100.0;
+            const double offsetBeats = fireBeats - pos;
+            const int offset = (int) std::floor(offsetBeats / beatsPerSample);
+            if (offset >= numSamples)
+                break;
+            if (offset >= 0)
+            {
+                // Restarts, both kinds, decided here rather than where they are asked for:
+                // "step 1" only means anything at a step boundary, and the note that asks
+                // for a retrigger arrives in the middle of a block. Whichever fires first
+                // after the request becomes step 1, for the lanes (stepBase) and for the
+                // direction walk (dirCursor) alike. Before this the lanes never restarted
+                // at all - they were read straight off the absolute step index, so the
+                // Retrigger toggle only ever reset the walk.
+                if (p.retrigBeats > 0.0)
+                {
+                    const long long win = (long long) std::floor(boundaryBeats / p.retrigBeats + 1.0e-9);
+                    if (win != lastRetrigWindow)
+                    {
+                        lastRetrigWindow = win;
+                        pendingRetrig = true;
+                    }
+                }
+                // **RESET from the line we follow** (2026-09-01, phase two of the line bus):
+                // when the source's walk pass changes, this step becomes step 1, through
+                // the restart Retrigger already owns. The first look at the source records
+                // its pass without restarting, or switching Reset on would reset at once.
+                // A step late at worst when both lines land in one block with this line's
+                // offset before the source's; equal-rate anchored lines share offsets, and
+                // the source ran first.
+                if (p.resetFollow && p.follow != nullptr)
+                {
+                    if (! seenPassValid)
+                    {
+                        seenSourcePass = p.follow->pass;
+                        seenPassValid = true;
+                    }
+                    else if (p.follow->pass != seenSourcePass)
+                    {
+                        seenSourcePass = p.follow->pass;
+                        pendingRetrig = true;
+                    }
+                }
+                else
+                    seenPassValid = false;
+
+                if (pendingRetrig)
+                {
+                    pendingRetrig = false;
+                    stepBase = stepIndex;
+                    dirCursor = 0;
+                }
+
+                // Any ratchet sub-hit carried in from an earlier block that is due before
+                // this step goes first, so hits reach emitHit in time order.
+                firePendingBefore(offset, numSamples, out);
+                // The playhead the grids draw, published here rather than from the clock:
+                // a suppressed divider boundary and a step the chord could not fill both
+                // pass through the loop above without reading a lane, and a playhead that
+                // moved on those would point at cells the engine never looked at.
+                uiRelStep.store(stepIndex - stepBase, std::memory_order_relaxed);
+                uiOffset.store(p.offset, std::memory_order_relaxed);
+                fireStep(p, stepIndex, offset, stepBeats / beatsPerSample, numSamples, out);
+            }
+            nextIndexF += 1.0;
+        }
+    }
+
+    // Everything a step has to survive before it may sound: the Chain condition, Mute, a drawn
+    // rest, DUCK's window and the Chance draw, in that order, with Rand's own draw on the Note
+    // lane's value on the way past. Every draw here is spent in the order the streams were
+    // written for - do not reorder them. It writes `lastStepFired` and DUCK's window and hands
+    // the Note lane's value back in `noteVal`; it must not touch the walk, the sequence or
+    // `record`, all of which belong to a step that got past it.
+    bool stepSurvivesGates(const Params& p, long long globalStep, int offset, int& noteVal)
+    {
         // The chain condition, first of all: a step whose condition fails did not happen, and
         // must not spend a chance draw or advance anything. `lastStepFired` is the one bit of
         // playhead-dependent state in this engine - see laneChain for why that is affordable.
         if (! chainAllows(p, laneValue(p, laneChain, globalStep)))
         {
             lastStepFired = false;
-            return;
+            return false;
         }
 
         // The mute lane first, and before anything else is resolved: a muted step costs
@@ -1731,14 +1698,14 @@ private:
         if (laneValue(p, laneMute, globalStep) > 0)
         {
             lastStepFired = false;
-            return;
+            return false;
         }
 
-        int noteVal = laneValue(p, laneNote, globalStep);
+        noteVal = laneValue(p, laneNote, globalStep);
         if (noteVal <= noteRest)
         {
             lastStepFired = false;
-            return; // a drawn rest
+            return false; // a drawn rest
         }
 
         // Rand: how far this step's selection may stray from what is drawn, and which way
@@ -1774,7 +1741,7 @@ private:
             if (sourceFired && rollsCell(p, globalStep, p.duck, duckSalt))
             {
                 lastStepFired = false;
-                return;
+                return false;
             }
         }
         else
@@ -1783,40 +1750,21 @@ private:
         if (chanceFails(p, globalStep))
         {
             lastStepFired = false;
-            return; // 100 always fires, 0 never does
+            return false; // 100 always fires, 0 never does
         }
-        lastStepFired = true; // everything below this point sounds
+        lastStepFired = true; // everything past this gate sounds
+        return true;
+    }
 
-        // **Legato looks one step ahead** (2026-09-01). Whether this step's notes are held open
-        // or end at their gate depends on what the *next* step does, and by the time the next
-        // step is decided a gated note has already ended - so the decision has to be made now.
-        // The deterministic parts (chain, mute, rest) are simply read early; the chance draw is
-        // made early and kept, and chanceFails() hands the same answer back when that step
-        // arrives, so the note is held for exactly the skip that was foreseen. Only with Legato
-        // on: off, no draw is made ahead and the step is decided where it always was.
-        nextSkips = p.legato && prerollNext(p, globalStep);
-
-        // Position Reset, after the step has survived mute, rest, chain and chance, and before
-        // anything asks the walk where it is: a step that did not sound did not reach its reset
-        // either, which is what keeps a reset on a low-Chance step from firing on the passes the
-        // step itself skipped.
-        if (laneValue(p, laneReset, globalStep) > 0)
-            dirCursor = 0;
-
-        buildSequence(p);
-        if (seqCount == 0)
-            return;
-
-        // On the bus: this step fired. After the empty-sequence return above, since a step that
-        // sounds nothing is not something a follower should duck to.
-        if (record.firedCount < maxStepsPerBlock)
-            record.firedAt[(size_t) record.firedCount++] = offset;
-
-        // Which sequence entries this step plays. One, normally. All of them on the Chord
-        // shape, which is what makes it a comping engine rather than a walk order - a fixed
-        // Note-lane index still means that one note, so an edited pattern keeps its meaning
-        // over a chord shape instead of silently turning into block chords.
-        int playIdx[maxHeld * 4];
+    // Which sequence entries this step plays. One, normally. All of them on the Chord
+    // shape, which is what makes it a comping engine rather than a walk order - a fixed
+    // Note-lane index still means that one note, so an edited pattern keeps its meaning
+    // over a chord shape instead of silently turning into block chords.
+    // It advances the direction walk, `lastPlayedIdx` and Mutate's own choice; it must not
+    // touch the lanes that decide *how* the step plays, which are read after it.
+    int chooseSequenceIndices(const Params& p, long long globalStep, int noteVal,
+                              int (&playIdx)[maxHeld * 4])
+    {
         int playCount = 0;
         if (p.direction == Direction::chord && noteVal == 0)
         {
@@ -1872,129 +1820,94 @@ private:
             playIdx[playCount++] = chosen;
             lastPlayedIdx = chosen; // what a later Prev repeats
         }
+        return playCount;
+    }
 
-        // The Octave lane's per-step shift plus the line's own, both in octaves. Summed rather
-        // than one overriding the other: the knob says where the run sits, the lane says how a
-        // particular step departs from that, and they are different questions.
-        const int octaveShift = 12 * (juce::jlimit(-3, 3, driftedLane(p, laneOctave, globalStep))
-                                      + juce::jlimit(-3, 3, p.octShift));
-        const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
-        const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
-        const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
-        // What scales the line's level: the Velocity lane, the ramp, and the retired Volume
-        // parameter (pinned at its default by migrateVelTrim, so it is a multiply by one).
-        // These are the *programmed* dynamics, and the audibility floor below protects them.
-        const float velScale = (float) driftedLane(p, laneVelocity, globalStep) / 100.0f * rampScale
-                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
-        const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
-        const double gate = juce::jlimit(5, 200, driftedLane(p, laneGate, globalStep))
-                          * juce::jlimit(5, 200, p.gate) / 10000.0;
+    // A step's resolved pitch, one entry of the table the ratchet loop repeats.
+    // `src` is the index of the hit this one harmonises, or its own index if it is not a
+    // harmony voice - which is what lets a voice take the same velocity draw as the note it
+    // is thickening (2026-08-23, Owen: "harmony same velocity"). `vel` is **decided in the
+    // ratchet loop and not where the hit is made**: it used to carry the incoming note's
+    // velocity, which has been dead weight since `velLevel` replaced it (2026-08-18) - written
+    // at every call site, copied by the harmony voices, and then ignored by the one place that
+    // emits a note. That dead copy is exactly why the voice loop already looked as though it
+    // shared its source's loudness. Now the field means something and it does.
+    struct Hit { int note; int chan; int src; float vel; };
+    // Five times the base capacity: the line has two harmony voices and a voice may name
+    // **two** intervals (2026-08-19; the second interval 2026-08-21), so between them they
+    // can add four copies of every base hit. The comment said three while a voice could
+    // only add one copy each, and the number moved with it rather than being left to be
+    // rediscovered. In practice addHit dedups on (note, channel), so a step can hold at
+    // most 128 entries per channel and the ceiling is never the binding constraint - but
+    // the array is sized from what the writers can *attempt*, because the dedup is a
+    // property of the notes that happen to be held and the capacity must not be. addHit
+    // drops on overflow rather than writing past the end, as ever.
+    static constexpr int maxHits = (maxHeld * 8 + ChordTable::maxNotes) * 5;
 
-        const double subLen = stepSamplesF / ratchets;
-        // Humanize never reorders anything: it only ever pushes a hit late, and never by more
-        // than 40% of the gap to the next sub-hit. Unbounded, a 25 ms nudge at a fast ratchet
-        // could carry one sub-hit past the next, and two hits of one pitch arriving out of
-        // order is exactly the shape emitHit's close-what-you-land-on rule cannot survive.
-        // **The knob is the centre of the wander since 2026-08-19** (Owen, on the halo:
-        // "should be equal from center"): the draw is humanize +/- the ring, equal both
-        // sides, and the reach stops where a rail is nearer - h itself, so the floor never
-        // goes early (below zero late), and 100-h, so the band stays equal rather than
-        // lopsided against the ceiling. A ring at its default 100 therefore reads [0, 2h]:
-        // the knob is the typical lateness, which is what a centre means. The 40% guard is
-        // unchanged and still owns note ordering.
-        const int hTime = juce::jlimit(0, 100, p.humanize);
-        const int hReach = juce::jmin(juce::jlimit(0, 100, p.humanizeSpan),
-                                      juce::jmin(hTime, 100 - hTime));
-        const int maxLate = hTime > 0
-                          ? (int) juce::jmin(0.025 * sr * ((hTime + hReach) / 100.0),
-                                             subLen * 0.4)
-                          : 0;
-        const int minLate = juce::jlimit(0, maxLate,
-                                         (int) (0.025 * sr * ((hTime - hReach) / 100.0)));
-
-        // Resolve the step into pitches once, before the ratchet loop repeats them. Three
-        // lanes fold in here, and all three want the note *after* the sequence walk has
-        // chosen one, not instead of it.
-        // `src` is the index of the hit this one harmonises, or its own index if it is not a
-        // harmony voice - which is what lets a voice take the same velocity draw as the note it
-        // is thickening (2026-08-23, Owen: "harmony same velocity"). `vel` is **decided in the
-        // ratchet loop below and not here**: it used to carry the incoming note's velocity,
-        // which has been dead weight since `velLevel` replaced it (2026-08-18) - written at
-        // every call site, copied by the harmony voices, and then ignored by the one place that
-        // emits a note. That dead copy is exactly why the voice loop already looked as though it
-        // shared its source's loudness. Now the field means something and it does.
-        struct Hit { int note; int chan; int src; float vel; };
-        // Five times the base capacity: the line has two harmony voices and a voice may name
-        // **two** intervals (2026-08-19; the second interval 2026-08-21), so between them they
-        // can add four copies of every base hit. The comment said three while a voice could
-        // only add one copy each, and the number moved with it rather than being left to be
-        // rediscovered. In practice addHit dedups on (note, channel), so a step can hold at
-        // most 128 entries per channel and the ceiling is never the binding constraint - but
-        // the array is sized from what the writers can *attempt*, because the dedup is a
-        // property of the notes that happen to be held and the capacity must not be. addHit
-        // drops on overflow rather than writing past the end, as ever.
-        // Value-initialised. Only the first `hitCount` entries are ever read, and addHit is the
-        // only writer, so the tail is dead either way - but the dedup scan below reads
-        // hits[i].note for i < hitCount, and cppcheck cannot prove those were written, so the
-        // CI gate treats it as an uninitialised read. Zeroing about 11 KB once per *fired step*
-        // is immaterial next to what the rest of fireStep does, and it costs no allocation and
-        // no lock, so the audio-thread rule is untouched. Well-defined beats provably-unread.
-        // (680 entries at **16** bytes - about 10.6 KB - up from 408 entries when the capacity
-        // was *3, and from 12 bytes before Hit carried `src` on 2026-08-23. That field grew the
-        // per-step memset by a third and this line did not move with it for a day, which is the
-        // standing lesson wearing different clothes: **a size asserted in a comment goes stale
-        // silently.** It is still the number to weigh if a third harmony voice is proposed.)
-        Hit hits[(maxHeld * 8 + ChordTable::maxNotes) * 5] {};
-        int hitCount = 0;
-        const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
-        // **One hit per pitch per channel per step, and that is a hard rule, not tidiness.**
-        // Two identical hits in one step are not a doubled note - they are a hung one. Both
-        // land at the same sample offset, so the second goes down emitHit's tie branch: it
-        // writes a note-off at `on - 1`, *before* the first one's note-on at `on`, and drops
-        // the first from active[]. MidiBuffer sorts by sample position, so ArpMerge then sees
-        // off, on, on and only one parked off - the refcount climbs to 2, the real note-off
-        // takes it to 1 rather than 0 and is suppressed, and the pitch is never released. It
-        // stays pinned above zero for the rest of the session, so every later hit on that
-        // pitch hangs too.
-        //
-        // Reachable without trying: set both harmony voices to the same interval, or give a
-        // chord-lane triad a + Perfect 5th voice, and C's fifth is the G already in the step.
-        // The harmony loop's own guard only ever caught a copy that clamped onto *its own*
-        // source. Deduping here covers every route into hits[] at once, which is where a rule
-        // about the whole step belongs.
-        // `src` defaults to "this hit is its own source"; only the harmony voices pass one.
-        // Returns the index of the hit this pitch now occupies - the existing one when the
-        // dedup above claims it, the new one otherwise, and -1 only on overflow. A harmony
-        // voice needs that index to name its source, and on the dedup path it must name the
-        // hit that is *actually sounding* rather than the one that was refused: thickening a
-        // hit that was dropped would leave the voice reading a velocity nobody drew.
-        // **Scale Lock lands here and nowhere else.** Every pitch the line emits is written
-        // through this lambda, so snapping on the way in covers the direction walk, Octave and
-        // Transpose, a chord called up by the Chord lane, Stray's chromatic zone and both
-        // harmony voices at once - and it snaps *before* the dedup, which is the half that
-        // matters: two notes that round onto one pitch have to collapse to one hit, and a
-        // harmony voice that lands on its own source has to be dropped, exactly as an interval
-        // that clamped there already is. Snapping is idempotent, so a keybed note that arrived
-        // pre-snapped passes through untouched.
-        //
-        // Locking Keys' output to the scale is what the toggle says, so it wins over Stray's
-        // upper zone rather than the other way about: with Lock on, Stray's chromatic strays
-        // round back into the key and its two zones read as one. That is the switch doing its
-        // job, not a collision - untick Lock to hear the wrong notes it exists to prevent.
-        const auto addHit = [&](int note, int chan, int src = -1)
+    // **One hit per pitch per channel per step, and that is a hard rule, not tidiness.**
+    // Two identical hits in one step are not a doubled note - they are a hung one. Both
+    // land at the same sample offset, so the second goes down emitHit's tie branch: it
+    // writes a note-off at `on - 1`, *before* the first one's note-on at `on`, and drops
+    // the first from active[]. MidiBuffer sorts by sample position, so ArpMerge then sees
+    // off, on, on and only one parked off - the refcount climbs to 2, the real note-off
+    // takes it to 1 rather than 0 and is suppressed, and the pitch is never released. It
+    // stays pinned above zero for the rest of the session, so every later hit on that
+    // pitch hangs too.
+    //
+    // Reachable without trying: set both harmony voices to the same interval, or give a
+    // chord-lane triad a + Perfect 5th voice, and C's fifth is the G already in the step.
+    // The harmony loop's own guard only ever caught a copy that clamped onto *its own*
+    // source. Deduping here covers every route into hits[] at once, which is where a rule
+    // about the whole step belongs.
+    // `src` defaults to "this hit is its own source"; only the harmony voices pass one.
+    // Returns the index of the hit this pitch now occupies - the existing one when the
+    // dedup above claims it, the new one otherwise, and -1 only on overflow. A harmony
+    // voice needs that index to name its source, and on the dedup path it must name the
+    // hit that is *actually sounding* rather than the one that was refused: thickening a
+    // hit that was dropped would leave the voice reading a velocity nobody drew.
+    // **Scale Lock lands here and nowhere else.** Every pitch the line emits is written
+    // through this one function, so snapping on the way in covers the direction walk, Octave and
+    // Transpose, a chord called up by the Chord lane, Stray's chromatic zone and both
+    // harmony voices at once - and it snaps *before* the dedup, which is the half that
+    // matters: two notes that round onto one pitch have to collapse to one hit, and a
+    // harmony voice that lands on its own source has to be dropped, exactly as an interval
+    // that clamped there already is. Snapping is idempotent, so a keybed note that arrived
+    // pre-snapped passes through untouched.
+    //
+    // Locking Keys' output to the scale is what the toggle says, so it wins over Stray's
+    // upper zone rather than the other way about: with Lock on, Stray's chromatic strays
+    // round back into the key and its two zones read as one. That is the switch doing its
+    // job, not a collision - untick Lock to hear the wrong notes it exists to prevent.
+    int addStepHit(const Params& p, Hit (&hits)[maxHits], int& hitCount,
+                   int note, int chan, int src) const noexcept
+    {
+        const int n = juce::jlimit(
+            0, 127, p.scaleLock ? snapToMask(note, p.scaleMask, p.rootPc) : note);
+        for (int i = 0; i < hitCount; ++i)
+            if (hits[i].note == n && hits[i].chan == chan)
+                return i;
+        if (hitCount < maxHits)
         {
-            const int n = juce::jlimit(
-                0, 127, p.scaleLock ? snapToMask(note, p.scaleMask, p.rootPc) : note);
-            for (int i = 0; i < hitCount; ++i)
-                if (hits[i].note == n && hits[i].chan == chan)
-                    return i;
-            if (hitCount < (int) (sizeof(hits) / sizeof(hits[0])))
-            {
-                hits[hitCount] = { n, chan, src >= 0 ? src : hitCount, 0.0f };
-                return hitCount++;
-            }
-            return -1;
-        };
+            hits[hitCount] = { n, chan, src >= 0 ? src : hitCount, 0.0f };
+            return hitCount++;
+        }
+        return -1;
+    }
+
+    // Resolve the step into pitches once, before the ratchet loop repeats them. Three
+    // lanes fold in here, and all three want the note *after* the sequence walk has
+    // chosen one, not instead of it.
+    // Writes into `hits` / `hitCount` and nowhere else: the walk has already chosen its
+    // entries and no velocity is drawn here, both of which happen either side of it.
+    void resolveStepHits(const Params& p, long long globalStep, int octaveShift, int transpose,
+                         int harmony, int chordSel, const int (&playIdx)[maxHeld * 4],
+                         int playCount, Hit (&hits)[maxHits], int& hitCount)
+    {
+        const auto& lead = held[0]; // whose velocity and channel a summoned chord borrows
+        // addStepHit with this step's table bound to it, so every call below reads as it always
+        // has. No allocation and no indirection: a capturing lambda called through its own type.
+        const auto addHit = [&](int note, int chan, int src = -1)
+        { return addStepHit(p, hits, hitCount, note, chan, src); };
         const auto place = [&](int note)
         {
             // Octave lane, then Transpose - which counts *scale degrees*, not semitones.
@@ -2005,9 +1918,12 @@ private:
             return transpose != 0 ? shiftByDegrees(shifted, transpose, p.scaleMask, p.rootPc) : shifted;
         };
 
+        // Acquire: syncArpChordTable stores the notes relaxed and then this count with
+        // memory_order_release, so an acquire load here is what makes the notes below visible
+        // rather than a half-written chord from a store still in flight on the message thread.
         const int chordCount = (chordSel > 0 && p.chords != nullptr)
                              ? juce::jlimit(0, ChordTable::maxNotes,
-                                            p.chords->count[(size_t) (chordSel - 1)].load(std::memory_order_relaxed))
+                                            p.chords->count[(size_t) (chordSel - 1)].load(std::memory_order_acquire))
                              : 0;
         if (chordCount > 0)
         {
@@ -2084,94 +2000,132 @@ private:
                 }
             }
         }
+    }
 
-        // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): each adds
-        // its interval to every hit the step resolved - chord-lane steps included, and
-        // Mutate's stray included, since the voice reads the hits rather than re-deriving
-        // them. The chance is rolled per step per voice, a hash of the step so a transport
-        // jump lands on the same answer (stateless, the mutatedIndex rule); salted by the
-        // voice index and by mutateSeed, so a voice's two slots - and two lines at the same
-        // setting - never gate in lockstep. A hit that clamps onto its own source is dropped,
-        // not doubled: a collapsed interval is a silence, the subharmonic rule above.
+    // The line's two fixed harmony voices (2026-08-19, BigSky's shimmer list): each adds
+    // its interval to every hit the step resolved - chord-lane steps included, and
+    // Mutate's stray included, since the voice reads the hits rather than re-deriving
+    // them. The chance is rolled per step per voice, a hash of the step so a transport
+    // jump lands on the same answer (stateless, the mutatedIndex rule); salted by the
+    // voice index, by mutateSeed and, since 2026-09-02, by harmSalt, so a voice's two slots,
+    // two lines at the same setting, and a harmony voice against Mutate's own draw on the
+    // same step never gate in lockstep. A hit that clamps onto its own source is dropped,
+    // not doubled: a collapsed interval is a silence, the subharmonic rule above.
+    // Adding harmSalt moves which steps a harmony voice fires on for any chance below 100 -
+    // a different draw, not a different feature; a session with Harm Chance at 100 is
+    // untouched, since nothing there is ever rolled.
+    // Reads the hits the step resolved and appends to them; it must not re-derive a note or
+    // spend anything but its own chance roll, which is salted so it can never be Mutate's.
+    void addHarmonyVoices(const Params& p, long long globalStep, Hit (&hits)[maxHits], int& hitCount)
+    {
+        const auto addHit = [&](int note, int chan, int src = -1)
+        { return addStepHit(p, hits, hitCount, note, chan, src); };
+        const int baseHits = hitCount;
+        for (int s = 0; s < 2; ++s)
         {
-            const int baseHits = hitCount;
-            for (int s = 0; s < 2; ++s)
+            const int semis = juce::jlimit(-48, 48, p.harmSemis[s]);
+            const int semisB = juce::jlimit(-48, 48, p.harmSemisB[s]);
+            const int chancePct = juce::jlimit(0, 100, p.harmChance[s]);
+            // **Both intervals, not just the first.** A slot is silent only when it names
+            // no interval at all; testing `semis` alone would skip a slot whose first
+            // interval is 0 and whose second is not, and such an entry would register in
+            // all three parallel tables, pass every jassert, show up in the dropdown and
+            // play nothing - with no symptom anywhere to say why.
+            if ((semis == 0 && semisB == 0) || chancePct <= 0)
+                continue;
+            if (chancePct < 100)
             {
-                const int semis = juce::jlimit(-48, 48, p.harmSemis[s]);
-                const int semisB = juce::jlimit(-48, 48, p.harmSemisB[s]);
-                const int chancePct = juce::jlimit(0, 100, p.harmChance[s]);
-                // **Both intervals, not just the first.** A slot is silent only when it names
-                // no interval at all; testing `semis` alone would skip a slot whose first
-                // interval is 0 and whose second is not, and such an entry would register in
-                // all three parallel tables, pass every jassert, show up in the dropdown and
-                // play nothing - with no symptom anywhere to say why.
-                if ((semis == 0 && semisB == 0) || chancePct <= 0)
+                const unsigned int h = hash32((unsigned int) (long long) globalStep * 2654435761u
+                                              ^ (unsigned int) (s + 1) * 40503u
+                                              ^ (unsigned int) (p.mutateSeed * 2246822519u)
+                                              ^ harmSalt);
+                if ((int) (h % 100u) >= chancePct)
                     continue;
-                if (chancePct < 100)
+            }
+            // Both of the slot's intervals, inside the one chance roll above: a voice that
+            // names two pitches is one voice, so it must not half-fire.
+            for (const int iv : { semis, semisB })
+            {
+                if (iv == 0)
+                    continue;
+                for (int k = 0; k < baseHits; ++k)
                 {
-                    const unsigned int h = hash32((unsigned int) (long long) globalStep * 2654435761u
-                                                  ^ (unsigned int) (s + 1) * 40503u
-                                                  ^ (unsigned int) (p.mutateSeed * 2246822519u));
-                    if ((int) (h % 100u) >= chancePct)
-                        continue;
-                }
-                // Both of the slot's intervals, inside the one chance roll above: a voice that
-                // names two pitches is one voice, so it must not half-fire.
-                for (const int iv : { semis, semisB })
-                {
-                    if (iv == 0)
-                        continue;
-                    for (int k = 0; k < baseHits; ++k)
-                    {
-                        const int target = juce::jlimit(0, 127, hits[k].note + iv);
-                        if (target != hits[k].note)
-                            addHit(target, hits[k].chan, k);
-                    }
+                    const int target = juce::jlimit(0, 127, hits[k].note + iv);
+                    if (target != hits[k].note)
+                        addHit(target, hits[k].chan, k);
                 }
             }
         }
+    }
 
-        // Volume 0 is a mute, and a mute emits nothing. The 0.05 floor below exists so a
-        // Velocity lane at 0, or a hard Humanize draw, stays audible rather than turning a
-        // note-on into a note-off - but it must not also make the line's own level
-        // un-silenceable, and it did: VOL at the bottom of its travel played the line quietly
-        // instead of stopping it, which is the one thing a control called VOL has to do.
-        //
-        // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
-        // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
-        // the run up where it would have been rather than restarting it.
-        if (p.volume <= 0 || p.velLevel <= 0)
-            hitCount = 0;
+    // Humanize's timing window for this step: how late the earliest and latest a hit may be
+    // pushed. Arithmetic over the two knobs and the sub-hit length alone - it draws nothing,
+    // so the draw that spends this window stays in the ratchet loop where it always was.
+    struct HumanizeWindow { int minLate; int maxLate; };
+    HumanizeWindow humanizeWindow(const Params& p, double subLen) const noexcept
+    {
+        // Humanize never reorders anything: it only ever pushes a hit late, and never by more
+        // than 40% of the gap to the next sub-hit. Unbounded, a 25 ms nudge at a fast ratchet
+        // could carry one sub-hit past the next, and two hits of one pitch arriving out of
+        // order is exactly the shape emitHit's close-what-you-land-on rule cannot survive.
+        // **The knob is the centre of the wander since 2026-08-19** (Owen, on the halo:
+        // "should be equal from center"): the draw is humanize +/- the ring, equal both
+        // sides, and the reach stops where a rail is nearer - h itself, so the floor never
+        // goes early (below zero late), and 100-h, so the band stays equal rather than
+        // lopsided against the ceiling. A ring at its default 100 therefore reads [0, 2h]:
+        // the knob is the typical lateness, which is what a centre means. The 40% guard is
+        // unchanged and still owns note ordering.
+        const int hTime = juce::jlimit(0, 100, p.humanize);
+        const int hReach = juce::jmin(juce::jlimit(0, 100, p.humanizeSpan),
+                                      juce::jmin(hTime, 100 - hTime));
+        const int maxLate = hTime > 0
+                          ? (int) juce::jmin(0.025 * sr * ((hTime + hReach) / 100.0),
+                                             subLen * 0.4)
+                          : 0;
+        const int minLate = juce::jlimit(0, maxLate,
+                                         (int) (0.025 * sr * ((hTime - hReach) / 100.0)));
+        return { minLate, maxLate };
+    }
 
-        // The line's level plus this draw's share of the Humanize Velocity band. Lifted out of
-        // the hit loop so a hit and its harmony voices can be handed **one** answer rather than
-        // each rolling its own - see where it is called, and Hit::src.
-        const auto humanisedVelocity = [&]
+    // The line's level plus this draw's share of the Humanize Velocity band. Lifted out of
+    // the hit loop so a hit and its harmony voices can be handed **one** answer rather than
+    // each rolling its own - see where it is called, and Hit::src.
+    // It draws from `rng` and nothing else: one call is one draw, so it must be called once
+    // per source hit per ratchet and never for a voice, which reads its source's answer.
+    float humanisedVelocity(const Params& p, float velScale)
+    {
+        // **The line's own level is the velocity, not the one that arrived** (2026-08-18).
+        // The Velocity lane, the ramp and Drift all still shape it through velScale exactly
+        // as they did; only the *base* moved from the incoming chord to the knob. See
+        // Params::velLevel.
+        float v = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
+        if (p.humanVel > 0)
         {
-            // **The line's own level is the velocity, not the one that arrived** (2026-08-18).
-            // The Velocity lane, the ramp and Drift all still shape it through velScale exactly
-            // as they did; only the *base* moved from the incoming chord to the knob. See
-            // Params::velLevel.
-            float v = (float) juce::jlimit(0, 127, p.velLevel) / 127.0f * velScale;
-            if (p.humanVel > 0)
-            {
-                // In **MIDI velocity units** since 2026-08-18, and **either side of the level**
-                // since 2026-08-19 (Owen, on the halo: "should be equal from center"): the knob
-                // is the band's centre, the ring is how far a hit may land above or below it,
-                // uniform across the band. The reach stops where a rail is nearer - the level
-                // itself, or 127 less it - so the band stays equal on both sides rather than
-                // piling up against an end. humanVelSpan, the ring's own former sub-span, is
-                // pinned at its default by the UI and no longer read: a centred band has no
-                // ceiling for a sub-span to hang from.
-                const int level = juce::jlimit(0, 127, p.velLevel);
-                const int reach = juce::jmin(juce::jlimit(0, 127, p.humanVel),
-                                             juce::jmin(level, 127 - level));
-                const double u = (double) (rng() % 1000u) / 1000.0;
-                v += (float) ((2.0 * u - 1.0) * (double) reach / 127.0) * velScale;
-            }
-            return v;
-        };
+            // In **MIDI velocity units** since 2026-08-18, and **either side of the level**
+            // since 2026-08-19 (Owen, on the halo: "should be equal from center"): the knob
+            // is the band's centre, the ring is how far a hit may land above or below it,
+            // uniform across the band. The reach stops where a rail is nearer - the level
+            // itself, or 127 less it - so the band stays equal on both sides rather than
+            // piling up against an end. humanVelSpan, the ring's own former sub-span, is
+            // pinned at its default by the UI and no longer read: a centred band has no
+            // ceiling for a sub-span to hang from.
+            const int level = juce::jlimit(0, 127, p.velLevel);
+            const int reach = juce::jmin(juce::jlimit(0, 127, p.humanVel),
+                                         juce::jmin(level, 127 - level));
+            const double u = (double) (rng() % 1000u) / 1000.0;
+            v += (float) ((2.0 * u - 1.0) * (double) reach / 127.0) * velScale;
+        }
+        return v;
+    }
 
+    // The ratchet loop: every hit the step resolved, repeated `ratchets` times, humanised and
+    // handed to emitHit - or parked for a later block when its sub-hit lands past the end of
+    // this one. The two draws it makes (timing, then velocity, per source hit per repeat) are
+    // in the order they have always been; it writes the bus's last note and nothing else.
+    void emitStepHits(const Params& p, Hit (&hits)[maxHits], int hitCount, int ratchets,
+                      double gate, float velScale, int offset, double subLen,
+                      const HumanizeWindow& late, int numSamples, juce::MidiBuffer& out)
+    {
         for (int r = 0; r < ratchets; ++r)
         {
             const int at = offset + (int) std::floor(subLen * r);
@@ -2193,8 +2147,8 @@ private:
                 // zero-late - where the velocity half genuinely is (2026-08-19). That half is
                 // drawn in humanisedVelocity above and explained there; this branch is the
                 // timing alone, and only runs when its own knob is up.
-                if (maxLate > 0)
-                    on += minLate + (int) (rng() % (unsigned) (maxLate - minLate + 1));
+                if (late.maxLate > 0)
+                    on += late.minLate + (int) (rng() % (unsigned) (late.maxLate - late.minLate + 1));
                 // **A hit and its harmony voices share one velocity draw** (2026-08-23, Owen:
                 // "harmony same velocity"). A hit that is its own source draws; a harmony voice
                 // reads the answer its source already stored. Voices are always appended after
@@ -2207,7 +2161,7 @@ private:
                 // which is a different feature and not the one that was asked for. What is
                 // shared is a hit and its harmony *within* one repeat.
                 if (hit.src == k)
-                    hit.vel = humanisedVelocity();
+                    hit.vel = humanisedVelocity(p, velScale);
                 // Every voice is appended after the hit it copies, so its source is always at a
                 // lower index and has already drawn on this ratchet. Asserted rather than left
                 // in prose: a voice derived from a voice would read a source that has not drawn
@@ -2262,6 +2216,103 @@ private:
                 // drained before the next step fires, so nothing that fits reaches it.
             }
         }
+    }
+
+    void fireStep(const Params& p, long long globalStep, int offset, double stepSamplesF,
+                  int numSamples, juce::MidiBuffer& out)
+    {
+        // On the bus first, before any condition can return: a follower's RESET watches this
+        // number, and a source whose boundary step is muted or ducked must still turn the page.
+        record.pass = walkPass(p, globalStep);
+
+        // Every question this step has to answer before it may sound, in one place and in the
+        // order the draws were written for; `noteVal` comes back with Rand already applied.
+        int noteVal = 0;
+        if (! stepSurvivesGates(p, globalStep, offset, noteVal))
+            return;
+
+        // **Legato looks one step ahead** (2026-09-01). Whether this step's notes are held open
+        // or end at their gate depends on what the *next* step does, and by the time the next
+        // step is decided a gated note has already ended - so the decision has to be made now.
+        // The deterministic parts (chain, mute, rest) are simply read early; the chance draw is
+        // made early and kept, and chanceFails() hands the same answer back when that step
+        // arrives, so the note is held for exactly the skip that was foreseen. Only with Legato
+        // on: off, no draw is made ahead and the step is decided where it always was.
+        nextSkips = p.legato && prerollNext(p, globalStep);
+
+        // Position Reset, after the step has survived mute, rest, chain and chance, and before
+        // anything asks the walk where it is: a step that did not sound did not reach its reset
+        // either, which is what keeps a reset on a low-Chance step from firing on the passes the
+        // step itself skipped.
+        if (laneValue(p, laneReset, globalStep) > 0)
+            dirCursor = 0;
+
+        buildSequence(p);
+        if (seqCount == 0)
+            return;
+
+        // On the bus: this step fired. After the empty-sequence return above, since a step that
+        // sounds nothing is not something a follower should duck to.
+        if (record.firedCount < maxStepsPerBlock)
+            record.firedAt[(size_t) record.firedCount++] = offset;
+
+        int playIdx[maxHeld * 4];
+        const int playCount = chooseSequenceIndices(p, globalStep, noteVal, playIdx);
+
+        // The Octave lane's per-step shift plus the line's own, both in octaves. Summed rather
+        // than one overriding the other: the knob says where the run sits, the lane says how a
+        // particular step departs from that, and they are different questions.
+        const int octaveShift = 12 * (juce::jlimit(-3, 3, driftedLane(p, laneOctave, globalStep))
+                                      + juce::jlimit(-3, 3, p.octShift));
+        const int transpose = juce::jlimit(-7, 7, laneValue(p, laneTranspose, globalStep));
+        const int harmony = juce::jlimit(0, 7, laneValue(p, laneHarmony, globalStep));
+        const int chordSel = juce::jlimit(0, ChordTable::numSlots, laneValue(p, laneChord, globalStep));
+        // What scales the line's level: the Velocity lane, the ramp, and the retired Volume
+        // parameter (pinned at its default by migrateVelTrim, so it is a multiply by one).
+        // These are the *programmed* dynamics, and the audibility floor below protects them.
+        const float velScale = (float) driftedLane(p, laneVelocity, globalStep) / 100.0f * rampScale
+                             * ((float) juce::jlimit(0, 100, p.volume) / 100.0f);
+        const int ratchets = juce::jlimit(1, 4, laneValue(p, laneRatchet, globalStep));
+        const double gate = juce::jlimit(5, 200, driftedLane(p, laneGate, globalStep))
+                          * juce::jlimit(5, 200, p.gate) / 10000.0;
+
+        const double subLen = stepSamplesF / ratchets;
+        const HumanizeWindow late = humanizeWindow(p, subLen);
+
+        // The step's hits, resolved once and then repeated by the ratchet loop: the walk's own
+        // notes, or a chord the Chord lane called up, with the Harmony lane's voice on each and
+        // the line's two fixed voices over whatever that left.
+        // Value-initialised. Only the first `hitCount` entries are ever read, and addHit is the
+        // only writer, so the tail is dead either way - but addStepHit's dedup scan reads
+        // hits[i].note for i < hitCount, and cppcheck cannot prove those were written, so the
+        // CI gate treats it as an uninitialised read. Zeroing about 11 KB once per *fired step*
+        // is immaterial next to what the rest of fireStep does, and it costs no allocation and
+        // no lock, so the audio-thread rule is untouched. Well-defined beats provably-unread.
+        // (680 entries at **16** bytes - about 10.6 KB - up from 408 entries when the capacity
+        // was *3, and from 12 bytes before Hit carried `src` on 2026-08-23. That field grew the
+        // per-step memset by a third and this line did not move with it for a day, which is the
+        // standing lesson wearing different clothes: **a size asserted in a comment goes stale
+        // silently.** It is still the number to weigh if a third harmony voice is proposed.)
+        Hit hits[maxHits] {};
+        int hitCount = 0;
+        resolveStepHits(p, globalStep, octaveShift, transpose, harmony, chordSel,
+                        playIdx, playCount, hits, hitCount);
+        addHarmonyVoices(p, globalStep, hits, hitCount);
+
+        // Volume 0 is a mute, and a mute emits nothing. The 0.05 floor below exists so a
+        // Velocity lane at 0, or a hard Humanize draw, stays audible rather than turning a
+        // note-on into a note-off - but it must not also make the line's own level
+        // un-silenceable, and it did: VOL at the bottom of its travel played the line quietly
+        // instead of stopping it, which is the one thing a control called VOL has to do.
+        //
+        // Dropped here rather than by returning early, so the step is still *resolved*: the RNG
+        // draw, the sequence walk and stepCounter have all happened above, and unmuting picks
+        // the run up where it would have been rather than restarting it.
+        if (p.volume <= 0 || p.velLevel <= 0)
+            hitCount = 0;
+
+        emitStepHits(p, hits, hitCount, ratchets, gate, velScale, offset, subLen, late,
+                     numSamples, out);
         ++stepCounter;
     }
 
@@ -2484,6 +2535,12 @@ private:
         }
     }
     static constexpr unsigned int duckSalt = 0x9E3779B9u; // so DUCK and Mutate never roll the same number on one cell
+    // 2026-09-02: the harmony voices' own chance roll below shares Mutate's three multiplier
+    // constants without going through rollsCell (it hashes globalStep and the voice index
+    // directly, not the (step, era) cell Mutate and DUCK share), but nothing stopped those
+    // inputs lining up with Mutate's on some step. Salted the same way, so a harmony voice's
+    // draw can never be Mutate's draw wearing a different name.
+    static constexpr unsigned int harmSalt = 0x7F4A7C15u;
 
     // Which pass of the Note lane's walk window `globalStep` is in. **Counted in lane cells,
     // not raw steps.** This used to live inside mutateCell and came off `rel` directly, which
