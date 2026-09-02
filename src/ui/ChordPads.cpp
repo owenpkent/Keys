@@ -430,7 +430,7 @@ void ChordPads::paint(juce::Graphics& g)
             }
             else
             {
-                skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+                skin::raisedFill(g, b, kRadius, skin::cardFace, skin::cardFaceBot);
             }
 
             // The card says what the chord *is* as well as what it is called: the name, and

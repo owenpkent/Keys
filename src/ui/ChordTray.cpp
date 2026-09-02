@@ -258,7 +258,7 @@ void ChordTray::paint(juce::Graphics& g)
             juce::Graphics::ScopedSaveState ss(g);
             if (airborne)
                 g.setOpacity(0.4f);
-            skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+            skin::raisedFill(g, b, kRadius, skin::cardFace, skin::cardFaceBot);
 
             // Sounding from this press and not yet dragged: light it the way a sounding pad is
             // lit. The press *is* the note, and the fill is the only thing that says so.
@@ -757,7 +757,7 @@ void ChordRefCard::paint(juce::Graphics& g)
         return;
     }
 
-    skin::raisedFill(g, b, kRadius, juce::Colour(0xff272b32), juce::Colour(0xff1e2126));
+    skin::raisedFill(g, b, kRadius, skin::cardFace, skin::cardFaceBot);
     if (pressed)
     {
         g.setGradientFill({ skin::accentOf(*this).hot, 0.0f, b.getY(),

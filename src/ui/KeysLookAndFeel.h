@@ -27,6 +27,11 @@ namespace skin
     const juce::Colour control    { 0xff262a31 };  // raised control top
     const juce::Colour controlBot { 0xff1f2227 };
 
+    // The chord card's raised face: an unfilled/unpressed pad, tray card or library row, all
+    // drawn with skin::raisedFill(). Was the same literal pair typed out at four call sites.
+    const juce::Colour cardFace    { 0xff272b32 };
+    const juce::Colour cardFaceBot { 0xff1e2126 };
+
     // Armed REC. The one red in Keys, and deliberately *not* part of the Accent family below:
     // the accent is per instance and this must not be, because "recording" has to read the same
     // on the pad track and the bass track. A token rather than a literal in PluginEditor.cpp,
@@ -187,6 +192,42 @@ namespace skin
         const auto a = lineAccent(line);
         return a.base == cyanAccent.base ? cyanKeyLit() : deriveKeyLit(a.base, a.deep);
     }
+
+    // Keybed. Everything PianoKeyboard::paint draws that is not a lit gradient (those are
+    // KeyLitSet above) or the theme accent: the instrument body behind the keys, the ivory and
+    // ebony key colours at rest and dimmed (out of Scale Lock), the front lip bevel, the C
+    // marker ink, and the fallboard rail. These were twenty-odd hex literals typed straight
+    // into that file; moved here byte for byte rather than re-derived, so the paint is
+    // unchanged.
+    const juce::Colour keybedBodyTop { 0xff121317 };
+    const juce::Colour keybedBodyBot { 0xff0c0d10 };
+
+    const juce::Colour keyIvoryTop       { 0xfff4f6f8 };
+    const juce::Colour keyIvoryBot       { 0xffd2d6db };
+    const juce::Colour keyIvoryHighlight { 0xffe9ecef };  // mid-gradient stop, resting key
+    const juce::Colour keyIvoryDimTop    { 0xffc9cdd4 };
+    const juce::Colour keyIvoryDimBot    { 0xff9ea4ad };
+
+    const juce::Colour keyLipTop    { 0xffdcdfe4 };
+    const juce::Colour keyLipBot    { 0xffc4c8cf };
+    const juce::Colour keyLipDimTop { 0xffb2b7bf };
+    const juce::Colour keyLipDimBot { 0xff9aa0a9 };
+
+    const juce::Colour keyMarkerInkLit { 0xff07272c };  // C marker text on a lit key
+    const juce::Colour keyMarkerInk    { 0xff6a7078 };  // C marker text on a resting key
+
+    const juce::Colour keyBlackTop       { 0xff33373e };
+    const juce::Colour keyBlackBot       { 0xff0b0d0f };
+    const juce::Colour keyBlackHighlight { 0xff191c20 };  // mid-gradient stop, resting key
+    const juce::Colour keyBlackDimTop    { 0xff3c434c };
+    const juce::Colour keyBlackDimBot    { 0xff151920 };
+
+    const juce::Colour keyBlackFaceTop    { 0xff3f444c };
+    const juce::Colour keyBlackFaceBot    { 0xff23262b };
+    const juce::Colour keyBlackFaceDimTop { 0xff4a515b };
+    const juce::Colour keyBlackFaceDimBot { 0xff2a3037 };
+
+    const juce::Colour fallboardRail { 0xff0a0b0d };
 
     // Brightened on 2026-08-01 (Owen: "hard to read some text. too dark"). `textDim` was
     // 0xff8a919c and `textFaint` 0xff5a6068, which are fine as *shades* and were chosen looking
