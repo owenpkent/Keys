@@ -860,7 +860,12 @@ bool KeysProcessor::arpLineOn(int line) const
     // so the guard is only the range check; it stays because uiArpLines can move again.
     if (line < 0 || line >= uiArpLines)
         return false;
-    return apvts.getRawParameterValue(arpParamId(line, "On"))->load() > 0.5f;
+    // runArpLines calls this per line, per block, on the audio thread, so it must read the
+    // cached atomic pointer rather than build arpParamId's juce::String and hash it through
+    // apvts::getRawParameterValue - the allocation and the string-keyed lookup are both things
+    // the audio thread may not do. arpParam(line, apOn) is that same cached pointer arpParamId
+    // would have resolved, read the way every other per-block arp read already is.
+    return arpParam(line, apOn) > 0.5f;
 }
 
 bool KeysProcessor::cardsFeedArp() const

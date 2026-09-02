@@ -71,6 +71,15 @@ public:
                 // about the step before. It self-corrects within a single step, which is the
                 // cheapest possible break of that rule and is why this form was chosen over
                 // Stochas' arbitrary cell-to-cell reference.
+                //
+                // Three more exceptions have joined it since (2026-09-01), all the same shape:
+                // DUCK and RESET each keep one step's memory of the line they follow
+                // (seenAtMyLastStep, seenSourcePass), Legato's lookahead keeps one step's preroll,
+                // and Random Once keeps a shuffled order between deals rather than the step it is
+                // on. The live rng (`rng`, below) is a different kind of exception again, feeding
+                // the feel draws - Humanize, Strum, ratchet velocity - that were never meant to be
+                // reconstructable from the step index at all. Everything else is still stateless
+                // from the playhead, a function of the step index alone.
                 laneChain,
                 // Cthulhu's **Position Reset** (its manual p25): *"the arpeggiator will reset on
                 // this step to play the first note of the arpeggiator pattern"*. There it is an
@@ -2005,9 +2014,12 @@ private:
             return transpose != 0 ? shiftByDegrees(shifted, transpose, p.scaleMask, p.rootPc) : shifted;
         };
 
+        // Acquire: syncArpChordTable stores the notes relaxed and then this count with
+        // memory_order_release, so an acquire load here is what makes the notes below visible
+        // rather than a half-written chord from a store still in flight on the message thread.
         const int chordCount = (chordSel > 0 && p.chords != nullptr)
                              ? juce::jlimit(0, ChordTable::maxNotes,
-                                            p.chords->count[(size_t) (chordSel - 1)].load(std::memory_order_relaxed))
+                                            p.chords->count[(size_t) (chordSel - 1)].load(std::memory_order_acquire))
                              : 0;
         if (chordCount > 0)
         {
@@ -2090,9 +2102,13 @@ private:
         // Mutate's stray included, since the voice reads the hits rather than re-deriving
         // them. The chance is rolled per step per voice, a hash of the step so a transport
         // jump lands on the same answer (stateless, the mutatedIndex rule); salted by the
-        // voice index and by mutateSeed, so a voice's two slots - and two lines at the same
-        // setting - never gate in lockstep. A hit that clamps onto its own source is dropped,
+        // voice index, by mutateSeed and, since 2026-09-02, by harmSalt, so a voice's two slots,
+        // two lines at the same setting, and a harmony voice against Mutate's own draw on the
+        // same step never gate in lockstep. A hit that clamps onto its own source is dropped,
         // not doubled: a collapsed interval is a silence, the subharmonic rule above.
+        // Adding harmSalt moves which steps a harmony voice fires on for any chance below 100 -
+        // a different draw, not a different feature; a session with Harm Chance at 100 is
+        // untouched, since nothing there is ever rolled.
         {
             const int baseHits = hitCount;
             for (int s = 0; s < 2; ++s)
@@ -2111,7 +2127,8 @@ private:
                 {
                     const unsigned int h = hash32((unsigned int) (long long) globalStep * 2654435761u
                                                   ^ (unsigned int) (s + 1) * 40503u
-                                                  ^ (unsigned int) (p.mutateSeed * 2246822519u));
+                                                  ^ (unsigned int) (p.mutateSeed * 2246822519u)
+                                                  ^ harmSalt);
                     if ((int) (h % 100u) >= chancePct)
                         continue;
                 }
@@ -2484,6 +2501,12 @@ private:
         }
     }
     static constexpr unsigned int duckSalt = 0x9E3779B9u; // so DUCK and Mutate never roll the same number on one cell
+    // 2026-09-02: the harmony voices' own chance roll below shares Mutate's three multiplier
+    // constants without going through rollsCell (it hashes globalStep and the voice index
+    // directly, not the (step, era) cell Mutate and DUCK share), but nothing stopped those
+    // inputs lining up with Mutate's on some step. Salted the same way, so a harmony voice's
+    // draw can never be Mutate's draw wearing a different name.
+    static constexpr unsigned int harmSalt = 0x7F4A7C15u;
 
     // Which pass of the Note lane's walk window `globalStep` is in. **Counted in lane cells,
     // not raw steps.** This used to live inside mutateCell and came off `rel` directly, which
