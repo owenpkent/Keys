@@ -41,7 +41,9 @@ set(KEYS_SOURCES
     src/ui/ChordLibraryPanel.cpp
     src/ui/SourceViz.cpp
     src/ui/TakePanel.cpp
-    src/ui/ArpPanel.cpp)
+    src/ui/ArpPanel.cpp
+    src/ui/MacroRow.cpp
+    src/ui/LaneGrid.cpp)
 
 # Sources, compile defs and links are identical for the instrument and the MIDI-effect
 # variant; only the plugin classification (set by okstudio_add_plugin) and the
