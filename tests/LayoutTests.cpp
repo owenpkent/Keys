@@ -564,6 +564,60 @@ public:
             }
         }
 
+        beginTest("the keybed chip sits after the dice at either floor, clear of the shape group");
+        {
+            // The switch that decides whether the keyboard feeds a line was on the Play page
+            // alone until 2026-09-01, and Owen found it off with nothing on screen to say so.
+            // It takes the slack Shape's cap leaves on the card's top row; this is what keeps
+            // that slack real at both floors rather than asserted in a comment.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+            for (const int w : { panelW, detachedPanelW })
+            {
+                panel.setSize(w, panel.preferredHeight());
+                juce::Array<juce::Component*> targets;
+                collectTargets(panel, targets);
+                juce::Component* chip = nullptr;
+                juce::Component* shape = nullptr;
+                juce::Component* dice = nullptr;
+                for (auto* t : targets)
+                {
+                    if (t->getTitle() == "Macro keybed A") chip = t;
+                    if (t->getTitle() == "Macro shape A") shape = t;
+                    if (t->getTitle() == "Macro reroll A") dice = t;
+                }
+                expect(chip != nullptr && shape != nullptr && dice != nullptr,
+                       "the chip, the shape combo and the dice are all on card A");
+                if (chip == nullptr || shape == nullptr || dice == nullptr)
+                    continue;
+                const auto b = chip->getBounds();
+                // The top row centres every single-height control at the same 26 px - the Sync
+                // chip, the steppers, the dice - so the chip takes the row's height, not the
+                // 34 px floor the strip below uses; a taller chip beside a shorter dice would
+                // be the odd one out. Measured against the dice rather than a literal.
+                expect(b.getHeight() == dice->getBounds().getHeight() && b.getWidth() >= 34,
+                       "the keybed chip is the row's own height, like the dice beside it, at panel "
+                           + juce::String(w));
+                if (auto* button = dynamic_cast<juce::Button*>(chip))
+                {
+                    juce::GlyphArrangement ga;
+                    ga.addLineOfText(juce::Font { juce::FontOptions((float) juce::jmin(15, b.getHeight() * 3 / 4)) },
+                                     button->getButtonText(), 0.0f, 0.0f);
+                    const float needed = ga.getBoundingBox(0, -1, true).getRight() + (float) b.getHeight();
+                    expect((float) b.getWidth() >= needed,
+                           "the keybed chip is " + juce::String(b.getWidth()) + " px wide at panel "
+                               + juce::String(w) + ", too narrow for its word which needs "
+                               + juce::String(juce::roundToInt(needed)));
+                }
+                expect(! b.intersects(dice->getBounds()) && ! b.intersects(shape->getBounds()),
+                       "the keybed chip overlaps the dice or the shape combo at panel " + juce::String(w));
+                expect(b.getX() > dice->getRight(), "the chip sits after the dice");
+                expect(chip->getParentComponent()->getLocalBounds().contains(b),
+                       "the chip is inside its card at panel " + juce::String(w));
+            }
+        }
+
         beginTest("the macro knob strip is never clamped, at either window's floor");
         {
             // The starvation sweep above cannot catch this on its own and it is worth saying

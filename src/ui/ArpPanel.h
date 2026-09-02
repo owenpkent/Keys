@@ -337,6 +337,15 @@ public:
         // to item, so the list must hold every entry the parameter can - and on line A that is
         // all three, so the combo opens to Off and three reasons why.
         juce::ComboBox followsBox;
+        // **Keybed** (2026-09-01, Owen, with line A's switch off and no way to see it: "I
+        // thought it was on"): the per-line arpKeys switch, on the card. Whether what you play
+        // on the keybed feeds this line was decided on the Play page alone, two clicks inside a
+        // view nothing on the card or the bar reports on - the 2026-08-27 round's "it's so
+        // unclear where that's hiding", one axis over. It sits on the top row after the dice,
+        // in the slack Shape's cap leaves at every floor, so it costs no width and no height.
+        // On-screen word Keybed, on both surfaces: "Play" read as the line's own On, and
+        // "Keys" collided with the bar's Light keys (the 2026-08-02 record).
+        juce::ToggleButton keybedButton { "Keybed" };
         // Tuplet is a combo, not a tick: it picks one of five, and a check box that cycled its
         // own text was a control lying about its own shape (2026-08-03, Owen: "it's a check box
         // but it changes"). A combo is what Keys already means by "pick from a list" - Shape,
@@ -408,7 +417,7 @@ public:
         juce::Label chordLabel;
 
         std::unique_ptr<ButtonAtt> rateModeAtt;
-        std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, legatoAtt;
+        std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, legatoAtt, keybedAtt;
         std::unique_ptr<ComboAtt> tupletAtt, followsAtt;
         std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
         void setDropTarget(bool);
@@ -736,7 +745,7 @@ private:
     // PLAY's home on the band since the macro rows slimmed down (2026-08-02): whether this
     // line arpeggiates what you play on the keybed. Same parameter the macro rows carried
     // (arpKeys); the word is Play because "Keys" collided with the bar's Light keys.
-    juce::ToggleButton keysBandButton { "Play" };
+    juce::ToggleButton keysBandButton { "Keybed" };
     // The second band row (2026-07-30). SPREAD is Repeats + Distance + Offset - how far the
     // chord is stacked and where the run starts; FEEL is the three that decide whether it
     // sounds played. Horizontal sliders rather than the band's rotaries: a knob column spans
