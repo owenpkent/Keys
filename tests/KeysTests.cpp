@@ -1,6 +1,7 @@
 // Unit tests for Keys' pure logic. JUCE UnitTest framework, no extra dependency.
 // Run: cmake --build build --target Keys_tests && ctest --test-dir build
 #include "ChordGen.h"
+#include "ChordNumerals.h"
 #include "ChordSuggest.h"
 #include "Chords.h"
 #include "NoteMath.h"
@@ -330,6 +331,56 @@ struct SuggestTests : juce::UnitTest
 };
 
 static SuggestTests suggestTests;
+
+struct ChordNumeralTests : juce::UnitTest
+{
+    ChordNumeralTests() : juce::UnitTest("keys::numerals") {}
+
+    void runTest() override
+    {
+        using namespace keys;
+        const int major = modes::indexOf("Major (Ionian)");
+        const int naturalMinor = modes::indexOf("Natural Minor (Aeolian)");
+
+        beginTest("a degree resolves to its cased roman numeral, in the mode's own casing");
+        // C major's qualities are major, minor, minor, major, major, minor, diminished for
+        // degrees 0..6 - I ii iii IV V vi vii.
+        expectEquals(numerals::forChord({}, 0, -1, 0, major), juce::String("I"));
+        expectEquals(numerals::forChord({}, 1, -1, 0, major), juce::String("ii"));
+        expectEquals(numerals::forChord({}, 5, -1, 0, major), juce::String("vi"));
+
+        beginTest("a diminished degree carries the small degree sign");
+        // Built from the code point rather than typed, matching forDegree's own reasoning: the
+        // literal stays plain ASCII regardless of source encoding.
+        const juce::String degreeSign = juce::String::charToString((juce::juce_wchar) 0x00B0);
+        expectEquals(numerals::forChord({}, 6, -1, 0, major), juce::String("vii") + degreeSign);
+
+        beginTest("a numeral already on the chord wins outright, degree and root ignored");
+        // This is how a Markov chord or a ChordLibrary row's step carries a seventh or a
+        // borrowed degree the plain I..VII table can't spell on its own: forChord never invents
+        // an accidental or a "7", it only ever passes one through. The degree passed alongside
+        // "bVII" (3, which would otherwise resolve to "IV") is deliberately wrong, to pin that
+        // the numeral wins outright rather than merely being consulted first.
+        expectEquals(numerals::forChord("V7", -1, 7, 0, major), juce::String("V7"));
+        expectEquals(numerals::forChord("bVII", 3, 0, 0, major), juce::String("bVII"));
+
+        beginTest("no degree: resolved from the root against the current key");
+        // The third route - a hand-captured or hand-edited pad, which carries a root but no
+        // degree at all.
+        expectEquals(numerals::forChord({}, -1, 7, 0, major), juce::String("V"));        // G in C major
+        expectEquals(numerals::forChord({}, -1, 9, 9, naturalMinor), juce::String("i")); // A in A minor
+
+        beginTest("a root outside the key resolves nothing");
+        // C# in C major is not a member of the scale, so the lookup never finds a degree to
+        // fall back on. Empty, not a "?", is the deliberate answer - see the header comment.
+        expectEquals(numerals::forChord({}, -1, 1, 0, major), juce::String());
+
+        beginTest("no numeral, no degree, no root: nothing resolves either");
+        expectEquals(numerals::forChord({}, -1, -1, 0, major), juce::String());
+    }
+};
+
+static ChordNumeralTests chordNumeralTests;
 } // namespace
 
 int main()
