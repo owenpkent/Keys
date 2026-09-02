@@ -412,6 +412,84 @@ public:
             expectEquals(onsD, 8, "duck at zero: following changes nothing by itself");
         }
 
+        // **Phase two of the line bus** (2026-09-01): RESET and NEIGHBOUR.
+        beginTest("reset from the line it follows bounds a polymeter");
+        {
+            // A walks sixteen steps, B seven. B's Note lane plays 60 on its own step 1 and 64
+            // everywhere else, so where 60 lands is where B's walk begins. Free-running, that is
+            // every seven steps; reset from A, B also starts over every time A does.
+            const auto runB = [&](bool reset, bool sourceOn) -> std::vector<int>
+            {
+                ArpEngine a, b;
+                a.prepare(sr);
+                b.prepare(sr);
+                a.lanes.length[ArpEngine::laneNote].store(16);
+                b.lanes.length[ArpEngine::laneNote].store(7);
+                b.lanes.value[ArpEngine::laneNote][0].store(1);
+                for (int s = 1; s < 7; ++s)
+                    b.lanes.value[ArpEngine::laneNote][s].store(2);
+                auto ap = lp;
+                ap.enabled = sourceOn;
+                auto bp = lp;
+                bp.follow = &a.record;
+                bp.resetFollow = reset;
+                std::vector<int> sixtyAt;
+                for (int step = 0; step < 40; ++step)
+                {
+                    juce::MidiBuffer outA, outB;
+                    clock.ppq = 0.25 * step;
+                    a.process(ap, clock, block, step == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer(), outA);
+                    b.process(bp, clock, block, step == 0 ? chordOn({ 60, 64 }) : juce::MidiBuffer(), outB);
+                    for (auto& x : collect(outB))
+                        if (x.on && x.note == 60)
+                            sixtyAt.push_back(step);
+                }
+                return sixtyAt;
+            };
+            const std::vector<int> freeRun { 0, 7, 14, 21, 28, 35 };
+            const std::vector<int> bounded { 0, 7, 14, 16, 23, 30, 32, 39 };
+            expect(runB(false, true) == freeRun, "without Reset, B's walk comes round every seven steps");
+            expect(runB(true, true) == bounded, "with Reset, B also starts over wherever A does");
+            expect(runB(true, false) == freeRun, "a silent source never resets anybody");
+        }
+
+        beginTest("neighbour: chain 3 plays with the line it follows, 4 against it");
+        {
+            // A fires on even steps only. B's Chain lane at 3 everywhere fires exactly where A
+            // did - for two lines on one rate the source's last step is the same step, since A
+            // ran first - and at 4 exactly where A did not.
+            const auto runB = [&](int chain, bool follow) -> std::vector<int>
+            {
+                ArpEngine a, b;
+                a.prepare(sr);
+                b.prepare(sr);
+                for (int s : { 1, 3, 5, 7 })
+                    a.lanes.value[ArpEngine::laneProbability][s].store(0);
+                for (int s = 0; s < 8; ++s)
+                    b.lanes.value[ArpEngine::laneChain][s].store(chain);
+                auto bp = lp;
+                bp.follow = follow ? &a.record : nullptr;
+                std::vector<int> firedAt;
+                for (int step = 0; step < 8; ++step)
+                {
+                    juce::MidiBuffer outA, outB;
+                    clock.ppq = 0.25 * step;
+                    a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                    b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                    for (auto& x : collect(outB))
+                        if (x.on)
+                            firedAt.push_back(step);
+                }
+                return firedAt;
+            };
+            expect(runB(3, true) == std::vector<int> { 0, 2, 4, 6 }, "3: only where A sounded");
+            expect(runB(4, true) == std::vector<int> { 1, 3, 5, 7 }, "4: only where A did not");
+            expect(runB(3, false) == std::vector<int> { 0, 1, 2, 3, 4, 5, 6, 7 },
+                   "with nobody to follow, 3 reads as always");
+            expect(runB(4, false) == std::vector<int> { 0, 1, 2, 3, 4, 5, 6, 7 },
+                   "and so does 4");
+        }
+
         beginTest("lanes are ignored unless usePattern is on");
         {
             ArpEngine e;

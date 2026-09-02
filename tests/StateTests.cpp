@@ -205,11 +205,19 @@ public:
             // Appended, never inserted: a per-line parameter's index is what arpParamId names
             // it by and what a saved session stores it under - the genSource rule.
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
-                         juce::String("Duck"), "Duck is the last per-line parameter, after Follow, after Legato");
+                         juce::String("ResetFollow"), "ResetFollow is the last per-line parameter");
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
-                         juce::String("Follow"));
+                         juce::String("Duck"));
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 3)),
+                         juce::String("Follow"));
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 4)),
                          juce::String("Legato"));
+            {
+                Host h;
+                expectWithinAbsoluteError(
+                    paramOf(h.processor, KeysProcessor::arpParamId(2, KeysProcessor::apResetFollow)),
+                    0.0f, 0.01f, "Reset from the followed line is off by default");
+            }
             expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apFollow), juce::String("arp2Follow"));
             expectEquals(KeysProcessor::arpParamId(3, KeysProcessor::apDuck), juce::String("arp4Duck"));
             expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apLegato), juce::String("arpLegato"));

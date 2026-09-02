@@ -411,7 +411,11 @@ public:
                     // it does with what it hears: skip a step when the source just played one.
                     // Both default off, so a saved session opens with four lines as deaf to each
                     // other as they were.
-                    apFollow, apDuck, numArpParams };
+                    apFollow, apDuck,
+                    // Appended 2026-09-01, phase two: the source coming round restarts this
+                    // line. On the Play page it is the **Follow** entry of the Retrigger list,
+                    // since "when does the pattern start over" already had a control there.
+                    apResetFollow, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).

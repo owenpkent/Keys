@@ -121,6 +121,23 @@ departed from the plan.
   letter at or below the line, because that is what the processor does with it. `StateTests`
   pins the downward rule at the processor level with two lines on one chord: B following A at
   DUCK 100 plays only its warm-up step; A "following" C plays every step B does.
+- **Phase two, the same day: RESET and NEIGHBOUR.** `arpResetFollow`, appended after `apDuck`,
+  default off, **PARAMETER LAYOUT CHANGE**; the Chain lane's range 0-2 -> 0-4, lane data and
+  no migration. **RESET is the Follow entry of the Play page's Retrigger list**, not a seventh
+  chip: the card's strip is full at the docked floor once From took the sixth cell, and "when
+  does the pattern start over" already had a control - so `applyRetrigChoice` writes three
+  parameters behind one combo, Follow clearing the clock window as a clock window clears the
+  note retrigger. It rides `pendingRetrig`, so a reset *is* a Retrigger restart. **The source
+  publishes `record.pass` at the top of `fireStep`, before any condition can return** - the
+  first cut published it where a step fired, and a source whose boundary step is muted or
+  ducked would have turned the page a step late. The first look records the pass without
+  restarting, or switching Follow on mid-run jolts the line. **NEIGHBOUR is `chainAllows`**,
+  one function for the step and for Legato's lookahead: 3 and 4 read `follow->lastStepFired`,
+  which the source writes as its block *ends*, so for two lines on one rate it is the same
+  step (the source ran first) and on different rates the source's most recent; with no source
+  they allow, so a lane drawn for a switched-off source plays rather than falls silent.
+  `ArpTests` pins seven against sixteen snapping home on A's every sixteenth step, a silent
+  source resetting nobody, and 3 / 4 firing exactly with / against the source.
 
 **A line can be thinned from its card, and a thinned line can hold through the gaps
 (2026-09-01).** Owen: *"a density knob where it controls, like, how much notes there are, and also
@@ -2620,7 +2637,8 @@ and the source of `docs/ACID_DESIGN.md` (added 2026-08-16, proposed and unbuilt)
 `docs/REFERENCES.md` ranks the three unbuilt ideas worth having.
 
 **`docs/LINE_INTERACTION.md` is the design for the four lines listening to each other; its bus,
-From and DUCK are built, everything from RESET on is proposed and unbuilt** (2026-09-01, Owen: *"can we get the arpeggiators to interact with each other, like
+From, DUCK, RESET and NEIGHBOUR are built, CLOCK and everything after it is proposed and
+unbuilt** (2026-09-01, Owen: *"can we get the arpeggiators to interact with each other, like
 the step sequencers, so we can get interesting variations"*). One piece of plumbing - a per-line
 record written in letter order on the audio thread and readable by the lines that run after it,
 the same ordering `arpNoteLines` already leans on - and eight mechanisms over it: DUCK (the
