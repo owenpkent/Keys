@@ -1678,6 +1678,18 @@ what is no longer true lives here in one place:
   four force `anchored = false`: the anchored branch reads `clock.ppq` straight off the playhead
   for step position and never touches bpm at all, so testing `followHost` through it would prove
   nothing about which bpm actually fed the step period.
+- **Keys records itself, and a take you can look at before it leaves** (2026-08-17, Owen:
+  "host in ableton does not record midi"). Ableton cannot record a plugin's own MIDI onto its
+  own track, so `KeysProcessor::captureBlock` copies the stream leaving `processBlock` (after
+  the arp, strum and chords, on whichever channel a line sent it) into a ring on the audio
+  thread while REC (`Record take`) is down. **Stopping writes the file at once**
+  (`writeTake()`, into `KeysProcessor::takeFolder()`, Documents\OK Studio\Keys Takes). **The
+  tempo is frozen at arm, not at stop**: `takeBpm` is set once in `setRecording(true)` from
+  `currentTempo()`, so a drifting host tempo cannot desync the file from its own preview. The
+  **Last take** chip (`Last take`) opens `TakePanel` in a **Keys Take** window, built from
+  `buildTakeMidiFile`'s own sequence rather than the raw capture. Both sit on the Keyboard bar
+  after Octave and stay live through a fold. `tests/TakeTests.cpp` pins the trim, the frozen
+  tempo, and the note-offs supplied for anything still ringing at stop.
 - **A settings gear on the Controls bar, plugin-level like the swatch** (2026-08-17, Owen: "we
   need a settings icon and menu. populate menu"). Sits immediately left of the theme swatch,
   drawn as vector paint rather than an asset or an emoji (the same self-drawn-chrome rule
