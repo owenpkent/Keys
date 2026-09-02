@@ -112,6 +112,34 @@ namespace
         return juce::var(a);
     }
 
+    // `count` copies of `value`, for the set_arp_pattern oversized-array test: the interesting
+    // property is the length, not what any one step holds.
+    juce::var filledIntArray(int count, int value)
+    {
+        juce::Array<juce::var> a;
+        for (int i = 0; i < count; ++i)
+            a.add(value);
+        return juce::var(a);
+    }
+
+    // One play_sequence step: {note, startMs, durationMs}.
+    juce::var seqStep(int note, double startMs, double durationMs)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty("note", note);
+        o->setProperty("startMs", startMs);
+        o->setProperty("durationMs", durationMs);
+        return juce::var(o);
+    }
+
+    juce::var varArray(std::initializer_list<juce::var> items)
+    {
+        juce::Array<juce::var> a;
+        for (auto& v : items)
+            a.add(v);
+        return juce::var(a);
+    }
+
     int lowestHeld(const std::vector<int>& v)
     {
         return v.empty() ? -1 : *std::min_element(v.begin(), v.end());
@@ -614,6 +642,175 @@ public:
                           args({ { "notes", noteArray({ 45, 48, 52, 55 }) } }));
             expect(! (bool) r["waitingForQuantize"], "an immediate hold claimed to be waiting");
             expectEquals((int) h.processor.arpHeldNotes(0).size(), 4);
+        }
+
+        // set_arp_pattern is a thin argument-and-clamp layer over the live lanes or a stored
+        // slot; get_arp_pattern is its own separate read path. Round-tripping through both is
+        // the only way to pin that a write actually lands rather than merely returning success.
+        beginTest("set_arp_pattern clamps a lane's values to its documented range and "
+                  "get_arp_pattern reads them back");
+        {
+            Host h;
+            juce::String err;
+            auto r = call(h.processor, "set_arp_pattern",
+                          args({ { "velocity", noteArray({ 10, 50, 300, -5 }) } }), err);
+            expect(err.isEmpty(), "unexpected error: " + err);
+            expectEquals((int) r["lanesSet"], 1);
+
+            auto pat = call(h.processor, "get_arp_pattern", args({}));
+            auto* velocity = pat["velocity"].getArray();
+            if (velocity == nullptr || velocity->size() != 4)
+            {
+                expect(false, "velocity lane did not come back at length 4");
+                return;
+            }
+            // ArpEngine::laneRanges clamps Velocity to 10..200; 300 and -5 are outside it.
+            const int expected[4] = { 10, 50, 200, 10 };
+            for (int i = 0; i < 4; ++i)
+                expectEquals((int) (*velocity)[i], expected[i],
+                             "velocity step " + juce::String(i) + " was not clamped as documented");
+            expectEquals((int) pat["lengths"]["velocity"], 4);
+        }
+
+        // A slot write must not disturb the live lanes it did not touch, and what it wrote
+        // must come back exactly through get_arp_pattern's own slot branch.
+        beginTest("set_arp_pattern writes a stored slot without touching the live lanes");
+        {
+            Host h;
+            call(h.processor, "set_arp_pattern", args({ { "note", noteArray({ 1, 2, 3 }) } }));
+
+            juce::String err;
+            auto r = call(h.processor, "set_arp_pattern",
+                          args({ { "slot", 3 }, { "note", noteArray({ 4, 5, 6, 7 }) } }), err);
+            expect(err.isEmpty(), "unexpected error: " + err);
+            expectEquals((int) r["slot"], 3);
+
+            auto stored = call(h.processor, "get_arp_pattern", args({ { "slot", 3 } }));
+            auto* storedNote = stored["note"].getArray();
+            if (storedNote == nullptr || storedNote->size() != 4)
+            {
+                expect(false, "the stored slot's note lane did not come back at length 4");
+                return;
+            }
+            for (int i = 0; i < 4; ++i)
+                expectEquals((int) (*storedNote)[i], i + 4, "stored note step " + juce::String(i));
+
+            // Slot 3 is not line A's active pattern (default 0), so this write must not reach
+            // the live lanes captured above.
+            auto live = call(h.processor, "get_arp_pattern", args({}));
+            auto* liveNote = live["note"].getArray();
+            if (liveNote == nullptr || liveNote->size() != 3)
+            {
+                expect(false, "a slot write changed the live note lane's length");
+                return;
+            }
+            for (int i = 0; i < 3; ++i)
+                expectEquals((int) (*liveNote)[i], i + 1, "live note step " + juce::String(i));
+        }
+
+        beginTest("set_arp_pattern rejects an oversized lane array and an out-of-range slot");
+        {
+            Host h;
+            juce::String err;
+            call(h.processor, "set_arp_pattern",
+                 args({ { "note", filledIntArray(ArpEngine::maxSteps + 1, 1) } }), err);
+            expect(err.isNotEmpty(), "a " + juce::String(ArpEngine::maxSteps + 1)
+                                          + "-element lane array was accepted");
+            expect(err.contains("note"), "the oversized-array error did not name the lane: " + err);
+
+            call(h.processor, "set_arp_pattern",
+                 args({ { "note", noteArray({ 1, 2 }) }, { "slot", KeysProcessor::numArpPatterns } }),
+                 err);
+            expect(err.isNotEmpty(), "a slot past the last pattern was accepted");
+            expect(err.contains("slot"), "the out-of-range slot error did not say 'slot': " + err);
+        }
+
+        // Bjorklund's algorithm for E(3, 8) is the tresillo: hits at steps 0, 3 and 6. Read
+        // straight off euclidHit's own formula in EuclidGen.h rather than guessed, since
+        // apply_euclid's whole job is writing exactly what that formula says.
+        beginTest("apply_euclid writes the exact Bjorklund pattern into the probability lane");
+        {
+            Host h;
+            juce::String err;
+            auto r = call(h.processor, "apply_euclid",
+                          args({ { "hits", 3 }, { "steps", 8 }, { "rotation", 0 } }), err);
+            expect(err.isEmpty(), "unexpected error: " + err);
+            expectEquals((int) r["hits"], 3);
+            expectEquals((int) r["steps"], 8);
+            expectEquals((int) r["rotation"], 0);
+
+            auto pat = call(h.processor, "get_arp_pattern", args({}));
+            auto* probability = pat["probability"].getArray();
+            if (probability == nullptr || probability->size() != 8)
+            {
+                expect(false, "the probability lane did not come back at length 8");
+                return;
+            }
+            const int expected[8] = { 100, 0, 0, 100, 0, 0, 100, 0 };
+            for (int i = 0; i < 8; ++i)
+                expectEquals((int) (*probability)[i], expected[i],
+                             "step " + juce::String(i) + " did not match E(3, 8)");
+            expectEquals((int) pat["lengths"]["probability"], 8);
+        }
+
+        beginTest("apply_euclid rejects steps outside 1..maxSteps");
+        {
+            Host h;
+            juce::String err;
+            call(h.processor, "apply_euclid",
+                 args({ { "hits", 3 }, { "steps", ArpEngine::maxSteps + 1 } }), err);
+            expect(err.isNotEmpty(), "steps past maxSteps was accepted");
+            call(h.processor, "apply_euclid", args({ { "hits", 3 }, { "steps", 0 } }), err);
+            expect(err.isNotEmpty(), "steps of 0 was accepted");
+        }
+
+        // play_sequence's only observable effect on note-on/off runs through KeysMcp's own
+        // 5ms poll Timer, which nothing in this suite advances (no test here pumps the JUCE
+        // message loop, and a real-time wait would make this test flaky under CI). So this
+        // pins the tool's argument validation and its immediate reply instead, not whether a
+        // note actually sounds later - see toolPlaySequence in KeysMcp.cpp for the full
+        // contract that leaves untested.
+        beginTest("play_sequence validates its steps and reports what it scheduled");
+        {
+            Host h;
+            juce::String err;
+
+            call(h.processor, "play_sequence", args({ { "steps", varArray({}) } }), err);
+            expect(err.isNotEmpty(), "an empty steps array was accepted");
+
+            juce::Array<juce::var> tooMany;
+            for (int i = 0; i < 257; ++i)
+                tooMany.add(seqStep(60, 0.0, 10.0));
+            call(h.processor, "play_sequence", args({ { "steps", juce::var(tooMany) } }), err);
+            expect(err.isNotEmpty(), "257 steps was accepted (max 256)");
+
+            call(h.processor, "play_sequence", args({ { "steps", varArray({ 60 }) } }), err);
+            expect(err.isNotEmpty(), "a step that is not an object was accepted");
+
+            call(h.processor, "play_sequence",
+                 args({ { "steps", varArray({ seqStep(200, 0.0, 10.0) }) } }), err);
+            expect(err.isNotEmpty(), "note 200 was accepted");
+
+            call(h.processor, "play_sequence",
+                 args({ { "steps", varArray({ seqStep(60, -1.0, 10.0) }) } }), err);
+            expect(err.isNotEmpty(), "a negative startMs was accepted");
+
+            call(h.processor, "play_sequence",
+                 args({ { "steps", varArray({ seqStep(60, 0.0, 0.0) }) } }), err);
+            expect(err.isNotEmpty(), "a zero durationMs was accepted");
+
+            call(h.processor, "play_sequence",
+                 args({ { "steps", varArray({ seqStep(60, 119999.0, 2000.0) }) } }), err);
+            expect(err.isNotEmpty(), "a sequence horizon past 120000ms was accepted");
+
+            auto r = call(h.processor, "play_sequence",
+                          args({ { "steps", varArray({ seqStep(60, 0.0, 500.0),
+                                                        seqStep(64, 250.0, 500.0) }) } }),
+                          err);
+            expect(err.isEmpty(), "unexpected error: " + err);
+            expectEquals((int) r["scheduled"], 2);
+            expectWithinAbsoluteError((double) r["horizonMs"], 750.0, 1.0e-6,
+                                      "horizonMs did not report max(start + duration) across the steps");
         }
     }
 };

@@ -2,6 +2,7 @@
 #include "../PluginProcessor.h"
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <utility>
 
 namespace keys
@@ -63,6 +64,35 @@ namespace
         return true;
     }
 
+    // Reads a chord-pad slot argument, rejecting one out of KeysProcessor::numChordPads
+    // range. Four call sites read this under the key "slot"; hold_arp_chord's own pad
+    // argument is named "padSlot" instead, so `key` is passed through into the message
+    // rather than the word "slot" being hard-coded twice under two different names.
+    bool readPadSlot(const juce::var& args, const char* key, int& slot, juce::String& error)
+    {
+        slot = (int) args.getProperty(key, -1);
+        if (slot < 0 || slot >= KeysProcessor::numChordPads)
+        {
+            error = juce::String(key) + " out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+            return false;
+        }
+        return true;
+    }
+
+    // Reads a stored arp-pattern slot argument (always under "slot"), rejecting one out of
+    // KeysProcessor::numArpPatterns range. Three call sites had "slot out of range 0..11"
+    // typed out by hand.
+    bool readPatternSlot(const juce::var& args, int& slot, juce::String& error)
+    {
+        slot = (int) args.getProperty("slot", -1);
+        if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
+        {
+            error = "slot out of range 0.." + juce::String(KeysProcessor::numArpPatterns - 1);
+            return false;
+        }
+        return true;
+    }
+
     juce::var intVectorToVar(const std::vector<int>& values)
     {
         juce::Array<juce::var> arr;
@@ -85,6 +115,30 @@ namespace
             if (! (e.isInt() || e.isInt64() || e.isDouble()))
                 return false;
             out.push_back((int) e);
+        }
+        return true;
+    }
+
+    // Parses a MIDI-note array under `v` into ints, enforcing a count of minCount..maxCount
+    // and each value 0..127. Three call sites did this by hand: readIntArray, a size check,
+    // then an identical per-note range loop reporting "note out of range 0..127: <n>" - only
+    // that second half is shared here, since the three sites disagree on how many notes are
+    // legal and so must keep their own wording for `sizeError`.
+    bool readNotes(const juce::var& v, int minCount, int maxCount, const juce::String& sizeError,
+                   std::vector<int>& out, juce::String& error)
+    {
+        if (! readIntArray(v, out) || (int) out.size() < minCount || (int) out.size() > maxCount)
+        {
+            error = sizeError;
+            return false;
+        }
+        for (int n : out)
+        {
+            if (n < 0 || n > 127)
+            {
+                error = "note out of range 0..127: " + juce::String(n);
+                return false;
+            }
         }
         return true;
     }
@@ -501,19 +555,9 @@ okstudio::mcp::Tool KeysMcp::toolPlayNotes()
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
         std::vector<int> notes;
-        if (! readIntArray(args.getProperty("notes", juce::var()), notes) || notes.empty())
-        {
-            error = "notes must be a non-empty array of integers 0..127";
+        if (! readNotes(args.getProperty("notes", juce::var()), 1, std::numeric_limits<int>::max(),
+                        "notes must be a non-empty array of integers 0..127", notes, error))
             return {};
-        }
-        for (int n : notes)
-        {
-            if (n < 0 || n > 127)
-            {
-                error = "note out of range 0..127: " + juce::String(n);
-                return {};
-            }
-        }
 
         const int defaultVel = juce::jlimit(1, 127, juce::roundToInt(processor.baseVelocity01() * 126.0f) + 1);
         const int velocity = juce::jlimit(1, 127, (int) args.getProperty("velocity", defaultVel));
@@ -682,26 +726,13 @@ okstudio::mcp::Tool KeysMcp::toolSetChordPad()
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int slot = (int) args.getProperty("slot", -1);
-        if (slot < 0 || slot >= KeysProcessor::numChordPads)
-        {
-            error = "slot out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+        int slot;
+        if (! readPadSlot(args, "slot", slot, error))
             return {};
-        }
         std::vector<int> notes;
-        if (! readIntArray(args.getProperty("notes", juce::var()), notes) || notes.empty() || notes.size() > 10)
-        {
-            error = "notes must be an array of 1..10 integers";
+        if (! readNotes(args.getProperty("notes", juce::var()), 1, 10,
+                        "notes must be an array of 1..10 integers", notes, error))
             return {};
-        }
-        for (int n : notes)
-        {
-            if (n < 0 || n > 127)
-            {
-                error = "note out of range 0..127: " + juce::String(n);
-                return {};
-            }
-        }
 
         const juce::String name = args.getProperty("name", juce::String()).toString();
         processor.setChordPad(slot, notes, name);
@@ -725,12 +756,9 @@ okstudio::mcp::Tool KeysMcp::toolClearChordPad()
     t.params = { { "slot", "integer", "Pad slot " + padSlotRange() + " to clear.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int slot = (int) args.getProperty("slot", -1);
-        if (slot < 0 || slot >= KeysProcessor::numChordPads)
-        {
-            error = "slot out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+        int slot;
+        if (! readPadSlot(args, "slot", slot, error))
             return {};
-        }
         cancelPendingRelease(slot);
         processor.clearChordPad(slot);
         return juce::var(true);
@@ -751,12 +779,9 @@ okstudio::mcp::Tool KeysMcp::toolPressChordPad()
     };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int slot = (int) args.getProperty("slot", -1);
-        if (slot < 0 || slot >= KeysProcessor::numChordPads)
-        {
-            error = "slot out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+        int slot;
+        if (! readPadSlot(args, "slot", slot, error))
             return {};
-        }
         cancelPendingRelease(slot); // re-pressing resets any earlier scheduled release
         processor.pressChordPad(slot);
 
@@ -790,12 +815,9 @@ okstudio::mcp::Tool KeysMcp::toolReleaseChordPad()
     t.params = { { "slot", "integer", "Pad slot " + padSlotRange() + " to release.", true } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int slot = (int) args.getProperty("slot", -1);
-        if (slot < 0 || slot >= KeysProcessor::numChordPads)
-        {
-            error = "slot out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+        int slot;
+        if (! readPadSlot(args, "slot", slot, error))
             return {};
-        }
         cancelPendingRelease(slot);
         processor.releaseChordPad(slot);
         return juce::var(true);
@@ -841,12 +863,9 @@ okstudio::mcp::Tool KeysMcp::toolHoldArpChord()
 
         if (hasPad)
         {
-            const int slot = (int) args.getProperty("padSlot", -1);
-            if (slot < 0 || slot >= KeysProcessor::numChordPads)
-            {
-                error = "padSlot out of range 0.." + juce::String(KeysProcessor::numChordPads - 1);
+            int slot;
+            if (! readPadSlot(args, "padSlot", slot, error))
                 return {};
-            }
             if (processor.chordPad(slot).notes.empty())
             {
                 error = "pad slot " + juce::String(slot) + " is empty";
@@ -857,19 +876,9 @@ okstudio::mcp::Tool KeysMcp::toolHoldArpChord()
         else
         {
             std::vector<int> notes;
-            if (! readIntArray(args.getProperty("notes", juce::var()), notes) || notes.empty() || notes.size() > 10)
-            {
-                error = "notes must be an array of 1..10 integers";
+            if (! readNotes(args.getProperty("notes", juce::var()), 1, 10,
+                            "notes must be an array of 1..10 integers", notes, error))
                 return {};
-            }
-            for (int n : notes)
-            {
-                if (n < 0 || n > 127)
-                {
-                    error = "note out of range 0..127: " + juce::String(n);
-                    return {};
-                }
-            }
             processor.holdArpChord(notes, args.getProperty("name", juce::String()).toString(), line);
         }
 
@@ -962,12 +971,9 @@ okstudio::mcp::Tool KeysMcp::toolGetArpPattern()
         auto* obj = new juce::DynamicObject();
         if (args.hasProperty("slot"))
         {
-            const int slot = (int) args.getProperty("slot", -1);
-            if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
-            {
-                error = "slot out of range 0..11";
+            int slot;
+            if (! readPatternSlot(args, slot, error))
                 return {};
-            }
             const auto& pat = processor.arpPatternSlot(slot, line);
             writeArpPatternInto(*obj, pat.value, pat.length, pat.clockDiv,
                                 pat.on, pat.loopFrom, pat.loopTo, pat.dir);
@@ -1143,12 +1149,9 @@ okstudio::mcp::Tool KeysMcp::toolSetArpPattern()
         int line = 0;
         if (! readLine(args, line, error))
             return {};
-        const int slot = hasSlot ? (int) args.getProperty("slot", -1) : processor.arpActivePattern(line);
-        if (hasSlot && (slot < 0 || slot >= KeysProcessor::numArpPatterns))
-        {
-            error = "slot out of range 0..11";
+        int slot = processor.arpActivePattern(line);
+        if (hasSlot && ! readPatternSlot(args, slot, error))
             return {};
-        }
 
         if (hasSlot)
         {
@@ -1223,12 +1226,9 @@ okstudio::mcp::Tool KeysMcp::toolRecallArpPattern()
                  { "line", "integer", arpLineRange(), false } };
     t.run = [this](const juce::var& args, juce::String& error) -> juce::var
     {
-        const int slot = (int) args.getProperty("slot", -1);
-        if (slot < 0 || slot >= KeysProcessor::numArpPatterns)
-        {
-            error = "slot out of range 0..11";
+        int slot;
+        if (! readPatternSlot(args, slot, error))
             return {};
-        }
         int line = 0;
         if (! readLine(args, line, error))
             return {};
