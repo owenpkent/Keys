@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ArpEngine.h"
+#include "LayoutState.h"
+#include "TakeRecorder.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <array>
@@ -550,32 +552,24 @@ public:
     double currentTempo() const { return arpBeatsBpm.load(std::memory_order_relaxed); }
 
     // --- Take: Keys records itself ------------------------------------------------------
-    // **Ableton cannot record a plugin's own MIDI onto that plugin's own track**, and this is
-    // the whole reason this exists (2026-08-17, Owen: "host in ableton does not record midi").
-    // Live records what arrives at a track's *input*; Keys' notes are made inside the plugin,
-    // downstream of that input, so arming the Keys track and pressing record captures an empty
-    // clip. It is not a Keys bug and there is no plugin-side setting that changes it - the
-    // listener-track routing in docs/ABLETON_LIVE.md is the DAW-correct answer and always
-    // worked. It is also a second track, a re-patch and an arm, for something that should be
-    // one click, and on a one-track Keys Host set it is the whole reason the set had one track.
+    // The capture itself is `TakeRecorder` (src/TakeRecorder.h), which is where the reason it
+    // exists at all is written down: Ableton cannot record a plugin's own MIDI onto that
+    // plugin's own track, so Keys keeps its own take of the stream leaving processBlock.
     //
-    // So Keys keeps its own take. What is captured is the stream leaving processBlock - after
-    // the arp, after strum, on the channels the lines sent it on - which is what you heard, not
-    // what you clicked. The take lands on disk the moment recording stops, so it is never a
-    // thing you can lose by clicking the wrong chip; see takeFolder().
+    // Everything below is a forwarder onto the `take` member, so the editor, the MCP bridge and
+    // tests/TakeTests.cpp go on calling exactly what they always called, and every comment
+    // explaining one of them sits with its body in TakeRecorder.h. Only `setRecording` adds
+    // anything: the recorder freezes a tempo when it arms and the processor is the one that
+    // knows what this instance's tempo is, so it hands `currentTempo()` over there.
     void setRecording(bool shouldRecord);
-    bool isRecording() const { return recording.load(std::memory_order_relaxed); }
+    bool isRecording() const { return take.isRecording(); }
 
     // The take as it stands, message thread. `capturedSeconds` is first **note** to last event, so
     // an armed-but-silent minute before you played does not count and is not written.
-    int capturedEventCount() const { return (int) capturedTake.size(); }
+    int capturedEventCount() const { return take.capturedEventCount(); }
     double capturedSeconds() const;
-
-    // Whether the take holds a note yet, which is a different question from whether it holds an
-    // *event*. Keys' own wheels emit CC and pitch bend on the same stream captureBlock reads, so
-    // nudging the mod wheel and then thinking for ten seconds used to start the clock and, worse,
-    // set the trim point - putting every note ten seconds off the top of the clip, which is
-    // exactly what the frozen tempo exists to prevent. A take is made of notes.
+    // Whether the take holds a *note* yet, which is a different question from whether it holds
+    // an event: Keys' own wheels land on the same stream, and a take is made of notes.
     bool capturedHasNotes() const;
 
     // The take as a type-0 MIDI file at the tempo it was played to, note-offs supplied for
@@ -583,29 +577,22 @@ public:
     // zero. False when there is nothing to write, which means no note was played.
     bool buildTakeMidiFile(juce::MidiFile& out) const;
 
-    // The take's notes, for drawing it. **Built from buildTakeMidiFile's own sequence**, not
-    // from the raw capture, so what the preview draws is provably what the file holds - the
-    // trim, the pairing and the supplied note-offs are all applied once, in one place, and a
-    // preview that disagreed with the file would be worse than no preview at all.
-    struct TakeNote
-    {
-        double startSec = 0.0, lengthSec = 0.0;
-        int note = 0, channel = 1;
-        float velocity = 0.0f;
-    };
+    // The take's notes, for drawing it, built from that same file. `KeysProcessor::TakeNote` is
+    // the name TakePanel already spells, so it stays a name on this class.
+    using TakeNote = TakeRecorder::TakeNote;
     std::vector<TakeNote> takeNotes() const;
 
     // The tempo the take was played to, frozen when recording armed. Not `currentTempo()`: the
     // file is written once, at stop, and a host tempo that moved afterwards would make every
     // later preview disagree with the bytes already on disk.
-    double takeTempo() const { return takeBpm; }
+    double takeTempo() const { return take.takeTempo(); }
 
     // Where a stopped take is written, created on demand. One fixed folder rather than a save
     // dialog per take: add it to Live's Places once and every take afterwards is a short drag
     // inside Live's own browser, which is a far kinder gesture than dragging out of a plugin
     // window and across the screen.
     static juce::File takeFolder();
-    juce::File lastTakeFile() const { return lastTake; }
+    juce::File lastTakeFile() const { return take.lastTakeFile(); }
 
     // Writes the current take and remembers it as lastTakeFile(). Separate from setRecording so
     // that stopping is a pure state change with nothing on disk in it - which is what lets the
@@ -615,10 +602,8 @@ public:
     juce::File writeTake();
 
     // Whether the **last** writeTake could not put the take on disk (no folder, no stream, a
-    // failed write). Cleared at the top of every writeTake. It exists because the honest answer
-    // to a failed write is to keep the take you already had, and a UI that quietly went on
-    // offering that older file would be reporting the wrong take as the right one.
-    bool lastTakeWriteFailed() const { return takeWriteFailed; }
+    // failed write). See TakeRecorder for why a failed write keeps the take you already had.
+    bool lastTakeWriteFailed() const { return take.lastTakeWriteFailed(); }
 
     // What "let go of the held chord" means to a *user*, and the only thing the UI should
     // call. releaseArpChord() alone is not it: with the chain running it drops the chord and
@@ -744,217 +729,11 @@ public:
     const ArpPattern& arpPatternSlot(int index, int line = 0) const;
     void setArpPatternSlot(int index, const ArpPattern& pattern, int line = 0); // refreshes live lanes too if index == active
 
-    // How the editor is folded up. Deliberately not parameters: none of it changes a
-    // note, and exposing five booleans to host automation would only add ways to break
-    // a session. It lives here rather than in the editor because the editor is created
-    // and destroyed every time the window opens, and Owen should get the same layout
-    // back. Message thread only; the audio thread never reads it.
-    struct LayoutState
-    {
-        bool controls = true;   // the header rows and the knob bank under them
-        // Vestigial since 2026-08-02: the Knobs chip that folded the CC knob bank off the
-        // bottom of the Controls band is gone, and the bank is unconditional whenever the
-        // section itself is open. Kept, always true, so layoutToTree()/layoutFromTree() keep
-        // round-tripping a session's tree without a special case for one dropped field.
-        bool knobs = true;
-        bool pads = true;       // the chord-pad strip
-        bool arp = false;       // the arpeggiator section (off by default: it is tall)
-        bool wheels = true;     // mod + pitch, left of the keybed
-        bool keyboard = true;   // the keybed itself
+    // How the editor is folded up: LayoutState and its two tree functions live in
+    // src/LayoutState.h now (message-thread UI state, and the audio thread never reads a
+    // field of it). `layout` below is still the one live copy and every reader of it is
+    // unchanged; layoutToTree()/layoutFromTree() are forwarders onto keys::layoutstate.
 
-        // Every section can also be popped out into a window of its own (2026-07-27; the
-        // keybed and the arp could already, and Owen asked for the rest to follow). One
-        // flag and one remembered frame each, in the editor's top-to-bottom order.
-        // `detached` keeps its bare name: it is the keybed's, and renaming it would drop
-        // the setting out of every session saved before this.
-        bool controlsDetached = false;
-        bool arpDetached = false;
-        bool padsDetached = false;
-        bool detached = false;  // keybed lives in its own resizable window
-
-        // The chord generator's window (2026-07-30, Owen's call). Not a section: it is never
-        // docked, has no bar and no fold, and opens from a button on the Pads bar. It is in
-        // here all the same because it is the same question - where did Owen leave a window,
-        // and was it open - and the answer has to survive the editor closing.
-        bool chordGen = false;
-        // And the same for the Library window (2026-08-18), which is the second surface onto
-        // ChordLibrary.h and is opened by its own chip on the same bar.
-        bool chordLib = false;
-
-        // Which arp line the panel is editing and a chord card feeds. See arpCurrentLine().
-        int  arpLine = 0;
-        // ...and whether it is showing the macro view instead of that line's own controls.
-        // Same kind of state and the same reason it lives here: the panel is destroyed every
-        // time the section folds, and Owen should get back the view he left.
-        //
-        // **Default true from 2026-08-02**, which is what "view two arpeggiators" means in
-        // practice: a fresh instance opens with both lines on screen as rows, over the chord
-        // strip you drag from. The A / B tabs are still there for the step lanes and the twelve
-        // slots, which are per-line and have nowhere to live in a row.
-        bool arpMacro = true;
-        // Whether the All view's **bottom row of macro cards is collapsed to a strip**
-        // (2026-08-19, Owen: "maybe you should be able to minimize bottom arps"). Four lines in
-        // a 2x2 grid is two card rows where it was one, and a card is 323 px, so the All view
-        // alone sets a 1349 px minimum window - against a 1392 px work area on Owen's own
-        // screen, and more than a 1080p one has at all. Collapsed, the bottom row is a 34 px
-        // strip and the minimum falls to 1060.
-        //
-        // **The lines keep playing.** This is the macro card's scrim rule read one level up:
-        // collapsing is about what is on screen, never about what is running, so C and D keep
-        // their chords, their patterns and their output. It is also why the strip carries no On
-        // switches of its own - those are on the arp bar, and a second writer for one parameter
-        // is exactly the mistake that deleted MacroRow's own On toggle on 2026-08-02.
-        //
-        // Here rather than in the panel for the reason arpMacro and arpPage are: the panel is
-        // destroyed every time the section folds, and the view you left is the one to get back.
-        bool arpMacroBottomFolded = false;
-        // Which page of a line's deep view is showing (2026-08-14, Owen: "can we simplify the
-        // detail view or organize into pages"). Values are ArpPanel::Page: 0 = Draw (the step
-        // lanes), 1 = Cards (the twelve slots), 2 = Play (rate, shape, feel).
-        //
-        // **Defaults to 2, Play**, and that is not arbitrary: Draw does nothing until you have
-        // drawn on it *and* set Shape to Pattern, so opening there is opening on a blank page
-        // with no way to tell why. Owen landed on exactly that - one step long, Shape on
-        // Pattern - and said "I don't understand this layout. how to get the sound I want".
-        // Play is where rate and shape are, which is the answer to that question.
-        //
-        // The deep view used to be all four blocks at once - band, lanes, slots, actions - at
-        // 612 px against the macro view's 240, so clicking Details grew the *window* by 372 px
-        // and clicking All shrank it back. Paged, every page fits inside one fixed panel
-        // height, and the window stops moving between views entirely. Same reason this lives
-        // here rather than in the panel as arpMacro does: the panel is destroyed every time
-        // the section folds, and Owen should get back the page he left.
-        int  arpPage = 2;
-        // Whether the keybed lights up for the notes the arp is *playing*, as opposed to the
-        // chord it was handed (which lights it either way, through noteRefs). Layout state and
-        // not a parameter: it changes what is drawn and nothing that is heard, so there is
-        // nothing here for a host to automate. On by default - it is the thing Owen asked to
-        // be able to see - and one click on the arp bar turns it off when the flicker of a
-        // 1/16 run is not what you want to be looking at.
-        bool arpLights = true;
-
-        // The settings menu (2026-08-17, Owen: "we need a settings icon and menu. populate
-        // menu."), reached from the gear on the Controls bar. Three fields, none of them a
-        // parameter for the same reason arpLights is not: nothing here changes a note.
-        //
-        // UI scale, Octavium's Zoom submenu ported over (same eight presets). Persisted so a
-        // choice survives a reopen; the editor does not yet resize or transform itself to
-        // match it - see KeysEditor::showSettingsMenu for why that half is deliberately not
-        // built alongside the menu, rather than guessed at against this window's own
-        // extensively-documented, pixel-exact resize floor.
-        int  uiScalePercent = 100;
-
-        // Hold Visuals During Sustain: on by default, because on **is** today's behaviour and
-        // has been since before this flag existed - a key the pedal is holding paints in the
-        // held colour, same as latched. Off is Octavium's own menu item, wired for the first
-        // time (it read `self.keyboard.visual_hold_on_sustain` there but nothing ever wrote
-        // it): a sustained-only key rests visually while it keeps sounding, so the eye can
-        // separate "the pedal is holding this" from "this is down right now" even though both
-        // are true. A note that is also pressed or latched is unaffected - see
-        // PianoKeyboard::paint's stateOf.
-        bool holdVisualsOnSustain = true;
-
-        // Whether a glide made with the pedal down leaves every key it crossed ringing.
-        // **Default true, which is exactly what Keys has always done** - see the trail branch
-        // in NoteSurface::mouseDrag.
-        //
-        // This started life as Octavium's "Drag While Sustain" and the name did not survive
-        // contact. Octavium describes that option as letting a click-drag glide across the keys
-        // at all, and Keys' drag has *always* glided, unconditionally, on every build - so a
-        // switch by that name would either do nothing or take gliding away, and neither is what
-        // the label promises. The one thing genuinely left to decide is whether the run piles up
-        // behind you or stays monophonic, so the setting is named for that instead. Default true
-        // and the gate reads `sustain && this`, so no session that opens after the update plays
-        // differently than it did before it.
-        bool dragWhileSustain = true;
-
-        // Whether a key held **only** by the pedal counts as part of the chord the keybed is
-        // offering - what the live card names, and what an "Edit on keyboard" pad is written
-        // from. **Default false** (2026-08-16, Owen: "sustain shouldn't propose chords ...
-        // should be a menu option"). It still sounds either way; this is only about proposing.
-        //
-        // The default is the interesting half. Keys is played with one mouse, so a chord has to
-        // be built one click at a time, and there are two ways to make a click stick: Latch and
-        // Sustain. Reading them the same way meant the pedal's passing notes kept rewriting the
-        // card and any pad being edited. Splitting them gives each a job - **Latch builds a
-        // chord, Sustain plays one** - and the menu item is there for anyone who wants the old
-        // reading back. See NoteSurface::proposedChordNotes.
-        bool sustainProposesChords = false;
-
-        // The library rows you starred, by name (2026-08-18). Scaler's browser has this and Keys'
-        // had no answer for it at all: 355 rows, and no way to keep the six you actually use.
-        // Names rather than indices, the same call `ChordPad::progression` makes and for the same
-        // reason - `chordlib::table()` is free to be inserted into, and an index would take that
-        // freedom away. A name that no longer matches any row is simply ignored on load, which is
-        // what a row being renamed or dropped should cost.
-        //
-        // **Per session, like every other preference in Keys**, which is the honest weakness here:
-        // Scaler's favourites are global, and a star you set in one project is gone in the next.
-        // Keys has no global store for anything - the settings gear's three switches are all in
-        // this struct too - so a global one would be new machinery for one feature. Worth
-        // revisiting the day a second preference wants to outlive a project.
-        juce::StringArray libraryFavourites;
-        // The Pads bar's **Play** toggle (2026-08-19, Owen: "I want a toggle above the
-        // keyboard to play notes. Because some sometimes when I'm trying to drag a cord into
-        // the arpeggiator, it plays instead, and it stops everything"). Off, a click on a
-        // card makes no sound at all - the strip is drag-only - so a press that was meant to
-        // become a drag toward the arpeggiator cannot fire a chord and, with Exclusive on,
-        // choke every running line on the way past. The drag, the drop targets and the card
-        // menu are untouched; the one left-click arp behaviour that survives is the stop on a
-        // cleared card still feeding a line, which plays nothing either way.
-        //
-        // **On, it is hold-to-play** (2026-08-22, Owen: "when the play mode is checked on the
-        // pads, I want it to trigger as soon as you click on it and stay held until you let
-        // go"). The press fires the chord and the release ends it, so a stab is short and a
-        // lean is long - which is most of what a pad is for. It used to be release-and-fixed,
-        // an 800 ms blip owned by a timer, with holding available only as a separate tick on
-        // the settings gear (`padHoldToPlay`, 2026-08-18). **That tick is gone and this is what
-        // it did**: two switches for one question is one switch too many, and Owen's reading is
-        // the plain one - a control called Play plays for as long as you are playing it.
-        //
-        // What the retired default was protecting against is real and is now this toggle's own
-        // job: firing on the press means a press that turns out to be a *drag* has already
-        // choked the other chord sources, and with Exclusive on that reaches each arp line's
-        // held chord. That is precisely the report Play itself came out of - so the answer is
-        // to turn Play **off** while you are dragging cards into the arpeggiator, which is the
-        // one gesture it was built for, rather than to keep a second switch that made the
-        // sounding half half-hearted. Turning Exclusive off alongside it costs the drag nothing.
-        bool padsPlayOnClick = true;
-
-        // **Keep arp running** (2026-08-26, Owen: "I wanna be able to hold the chord down to
-        // build it with my mouse, but then also to drag a new chord onto the arpeggiator").
-        // Ticked, pressing a card on the strip - a pad or the live card - never releases an arp
-        // line's held chord, however Exclusive is set. Unticked is what Keys did before: with
-        // Exclusive on, leaning on a card stopped every running line.
-        //
-        // This is the half of the Play toggle's story that Play could not fix. Play decides
-        // whether the strip makes a *sound*; what actually cut the lines off was the **choke**,
-        // and the only way to avoid it was to give up the sound as well - so hold-to-build and
-        // drag-into-the-arp were two settings you had to keep swapping between. They are one
-        // now: Play stays ticked, and a press that turns out to be a drag has taken nothing
-        // away by the time it is recognised.
-        //
-        // A *drop* on a line still replaces that line's chord, and Exclusive still chokes the
-        // pads and the live card from it. This narrows one gesture, not the rule: pressing a
-        // card is playing a chord, and a line's held chord is not something you are playing -
-        // it is what the machine is chewing. Same distinction `takeChordOnLine` draws when it
-        // routes a chord without navigating to the line.
-        //
-        // Default **on**, so it is the behaviour you get without knowing the switch is there -
-        // and an older session, whose tree has no such property, takes it too. Nothing about a
-        // saved session changes visibly unless Exclusive is on, which is off by default.
-        bool padsKeepArpRunning = true;
-
-        int  accent = 0;        // index into skin::accentChoices(); 0 is the OK Studio cyan
-
-        // Where each window was left. Empty = never detached yet, so centre it.
-        juce::Rectangle<int> controlsDetachedBounds {};
-        juce::Rectangle<int> arpDetachedBounds {};
-        juce::Rectangle<int> padsDetachedBounds {};
-        juce::Rectangle<int> detachedBounds {};     // the keybed's, named for the flag above
-        juce::Rectangle<int> chordGenBounds {};     // the generator's window
-        juce::Rectangle<int> chordLibBounds {};     // the library's window
-    };
     enum class UndoScope { pads, arp };
 
     // --- Undo (2026-08-14, Owen: "we should have undo") ---------------------------------
@@ -1028,6 +807,10 @@ protected:
     // Everything both products restore from a saved session. Keys Host adds its instrument
     // on top of this rather than repeating the list; see the definition.
     void restoreSharedState(const juce::ValueTree& root);
+    // The eight session migrations. Each is a forwarder onto keys::keysparams (src/KeysParams.h,
+    // where the shape they all share is written down and where every definition below lives).
+    // They stay on the processor because restoreSharedState above is the list a session
+    // restores, and that list reads better as calls than as a namespace repeated eight times.
     // Repairs a session saved before Strum became a range; see the definition for the tell.
     void migrateStrumRange(const juce::ValueTree& root);
     // Same shape: puts the arp rate back in Sync when a session predates the Hz mode, since an
@@ -1228,53 +1011,12 @@ private:
 
     std::atomic<juce::uint32> soundingGen { 0 };
 
-    // --- Take capture (see setRecording) ------------------------------------------------
-    // A single-producer/single-consumer ring: the audio thread appends the block's outgoing
-    // events and publishes one index; heartbeatTick drains it into `capturedTake` on the
-    // message thread, where the vector is free to allocate. Nothing on the audio thread
-    // allocates, takes a lock, or touches `capturedTake`.
-    //
-    // 32768 events against a 50 Hz drain is about six hundred events a *block* before the
-    // writer could lap the reader, which no keyboard produces; the lap is handled anyway
-    // (drainCapture drops the oldest) rather than left to read torn events.
-    struct CapturedEvent
-    {
-        double atSec;            // from the start of recording, not from the host's timeline
-        juce::uint8 bytes[3] {};
-        juce::uint8 size = 0;
-    };
-    static constexpr int captureCapacity = 1 << 15;
-    // How far past the oldest surviving slot drainCapture restarts after a lap. Recovering to the
-    // oldest slot exactly means recovering to the slot the writer is inside, so this is the gap
-    // that keeps the reader off it - a generous block's worth of events rather than the one slot
-    // that would strictly do.
-    static constexpr juce::uint32 captureLapMargin = 512;
-
-    std::vector<CapturedEvent> captureRing { (size_t) captureCapacity };
-    std::atomic<juce::uint32> captureWrite { 0 }; // audio thread publishes, message thread reads
-    juce::uint32 captureRead = 0;                 // message thread only
-    std::atomic<bool> recording { false };
-
-    // Samples since arming, which is what stamps each event's `atSec`. Atomic, and **`recording`
-    // is stored with release ordering after it is zeroed**, so the audio thread cannot see the
-    // flag go up while this still holds the previous take's count. It was a plain int64 written
-    // from both threads behind a relaxed store for one build: a data race, and one whose visible
-    // form is a take whose first block is stamped a minute in, which makes `buildTakeMidiFile`
-    // trim from there and give every later event a negative tick.
-    std::atomic<juce::int64> captureSamples { 0 };
-
-    std::vector<CapturedEvent> capturedTake;      // message thread only
-    juce::File lastTake;
-    bool takeWriteFailed = false;
-
-    static constexpr short takeTicksPerQuarter = 960;
-    double takeBpm = 120.0;      // frozen at arm time; see takeTempo()
-    double takeTicksPerSecond() const;
-
-    void captureBlock(const juce::MidiBuffer&, int numSamples); // audio thread, end of the block
-    void drainCapture();                                        // message thread, off heartbeatTick
-    // The take's zero, and the one definition of "this take has something in it". See the .cpp.
-    const CapturedEvent* firstCapturedNote() const;
+    // --- Take capture ---------------------------------------------------------------------
+    // The ring, the drained take, the frozen tempo and the file are all TakeRecorder's now
+    // (src/TakeRecorder.h). The processor owns one and does exactly two things for it: hands
+    // captureBlock the outgoing buffer and this instance's sample rate at the end of every
+    // process call, and drains it on the heartbeat. Nothing here reaches into it.
+    TakeRecorder take;
 
     // Notes seen arriving on the MIDI input (see inputNotes). Written on the audio thread,
     // read on the message thread; a plain flag per pitch, never a count.

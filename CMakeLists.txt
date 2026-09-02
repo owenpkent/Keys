@@ -28,6 +28,8 @@ endif()
 
 set(KEYS_SOURCES
     src/PluginProcessor.cpp
+    src/KeysParams.cpp
+    src/TakeRecorder.cpp
     src/PluginEditor.cpp
     src/mcp/KeysMcp.cpp
     src/ui/NoteSurface.cpp
