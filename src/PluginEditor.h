@@ -101,7 +101,57 @@ private:
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
+    // --- Construction --------------------------------------------------------------
+    // The constructor builds every control, attachment and callback this editor owns, which is
+    // most of a thousand lines if it is written as one function. These are that function cut
+    // into the regions it builds, called from it in the order it always built them in.
+    //
+    // **Each one is a contiguous run of what was there before, never a regrouping of it.** A
+    // SectionBar is a full-width Button and the controls riding it are its siblings rather than
+    // its children, so the order things are added in is their z-order; two of these functions
+    // therefore build across a bar boundary rather than move a control to a tidier neighbour
+    // (buildControlsSection carries three Keyboard bar toggles, buildTempoAndQuantize spans the
+    // Controls bar and the arp bar). The name says what the run mostly builds; the definition
+    // says what else came with it.
+    void buildSections();
+    void buildControlsSection();
+    void buildPadStripControls();
+    void buildKeyboardSection();
+    void buildPadsBar();
+    void buildArpBar();
+    void buildTempoAndQuantize();
+    void buildPluginChrome();
+    void wireChordPadCallbacks();
+    void startUpdater();
+
+    // --- The 30 Hz poll --------------------------------------------------------------
+    // `timerCallback` is fifteen unrelated concerns sharing one clock; these are those
+    // concerns, one function each, called from it in the order they have always run in.
+    //
+    // Every one of them is a *pull*: it reads state that nothing pushed at the editor and
+    // writes what it finds onto a control. **A pull compares before it writes**, always - the
+    // shape `MacroRow::lastLineOn` and `RangeKnob::refresh()` already use - because a pull that
+    // writes on every tick is a repaint nobody profiles until it is a problem, and because two
+    // writers for one value is the shape that has cost this file four separate bugs (see
+    // syncPadRangeKnobs, and the note inside pullPadStripKnobs). Most of the comparing is done
+    // by JUCE itself: setEnabled, setToggleState, Label::setText and every NoteSurface setter
+    // early-out on an unchanged value, so a pull only needs a cache of its own where the thing
+    // it writes is a bare repaint.
     void timerCallback() override;
+    void pullLayoutToggles();
+    void pullKeyboardBar();
+    void pullHostTempo();
+    void pullKeybedModes();
+    void pullArpHoldOff();
+    void pullGeneratorChips();
+    void pullMidiChannel();
+    void pullPadStripKnobs();
+    void pullPadPages();
+    void pullPadEditLink();
+    void animatePitchReturn();
+    void animatePanicFlash();
+    void pullCurrentChord();
+
     void addCombo(juce::Component& parent, juce::ComboBox&, juce::Label&, const juce::String& text,
                   const juce::StringArray& items, const juce::String& paramID, std::unique_ptr<ComboAtt>&);
     void showUpdate(const okstudio::updater::UpdateInfo&);
@@ -618,6 +668,13 @@ private:
         double hostBpm = 0.0;
     };
     BpmField bpmField;
+    // What the field was last told to draw, so pullHostTempo() asks for a repaint only when the
+    // host's number actually moves. Overriding paint() means the field has no other way to know
+    // it went stale, and the pull ran a repaint on every one of thirty ticks a second for as
+    // long as a host was rolling - which is the cost, not the correctness, and is exactly the
+    // sort of thing nobody notices until somebody profiles a paint.
+    bool lastShowingHost = false;
+    double lastHostBpmDrawn = 0.0;
     // "BPM", unconditional like the field it labels (2026-08-02, Owen: "BPM ... needs
     // labels"). Styled like quantizeBarLabel beside it on the arp bar: the same shape, a
     // caption immediately left of the control group it names.

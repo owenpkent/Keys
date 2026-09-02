@@ -296,6 +296,106 @@ public:
                 }
         }
 
+        beginTest("the Controls bar lays out inside itself at the editor's minimum width");
+        {
+            // **The measurement that keeps `minWidthForView()` honest.** That function used to
+            // be ninety lines of hand arithmetic in a comment ending in a literal, and the
+            // comment had drifted three times over: it itemised controls that had left the Pads
+            // bar, missed one that came back, and never counted Undo and Redo at all. It
+            // derives the four bars from the same constants `resized()` spends now, and 1320
+            // stays in it as the floor Keys ships; this is what says the two agree.
+            //
+            // The Controls bar because it is the binding one. It has carried the tempo group,
+            // Sync, four keyboard-settings combos, Undo, Redo, the gear and the theme swatch
+            // since 2026-08-17, and it is the bar that has twice made the floor move.
+            //
+            // **Overlap and containment, not widths.** Every control here is placed with
+            // `withSizeKeepingCentre`, which forces the size whatever cell it was handed, and
+            // `removeFromLeft` / `removeFromRight` clamp to what is left rather than going
+            // negative - so a starved bar produces controls of exactly the right size sitting
+            // on top of each other, and a width assertion compares two constants. That is the
+            // arp bar sweep's own lesson, one bar over.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+
+            // The bar itself, found by the name SectionBar gives every one of them. It is a
+            // Button, so it is in `targets` too and has to be taken back out below.
+            SectionBar* bar = nullptr;
+            for (auto* t : targets)
+                if (t->getTitle() == "Controls section")
+                    bar = dynamic_cast<SectionBar*>(t);
+            expect(bar != nullptr, "the Controls bar is on screen at all");
+
+            if (bar != nullptr)
+            {
+                // Everything riding that bar: a direct child of the editor, visible, and sitting
+                // in the bar's own band. The controls are the bar's *siblings* rather than its
+                // children - a SectionBar stays full width so it can paint its caption across
+                // the whole strip - which is what makes "a direct child of the editor, in this
+                // band" the way to find them.
+                const auto band = bar->getBounds();
+                const auto content = bar->contentArea();
+                juce::Array<juce::Rectangle<int>> cells;
+                juce::StringArray names;
+                for (auto* t : targets)
+                {
+                    if (t == bar || t->getParentComponent() != &ed)
+                        continue;
+                    const auto b = t->getBounds();
+                    if (b.isEmpty() || ! band.contains(b.getCentre()))
+                        continue;
+                    cells.add(b);
+                    // The accessible name where there is one; the two tempo steppers are
+                    // "<" and ">" and deliberately have none, since four bars carry a pair
+                    // apiece and UI Automation takes the first match.
+                    auto name = t->getTitle();
+                    if (name.isEmpty())
+                    {
+                        if (auto* button = dynamic_cast<juce::Button*>(t))
+                            name = "\"" + button->getButtonText() + "\"";
+                    }
+                    names.add(name.isEmpty() ? juce::String("an unnamed control") : name);
+                }
+
+                // Counted, so a rename or a reparent that stops matching fails here instead of
+                // passing by finding nothing - the trap the macro-knob sweep already paid for.
+                // Fourteen in plain Keys: Detach, the theme swatch, the gear, Undo, Redo, the
+                // two tempo steppers, the tempo field, Sync, Root, Scale, Lock, Voices and CH.
+                // A floor rather than an equality, because what is on this bar legitimately
+                // varies - the Instrument chip and the update button are both hidden here, and
+                // a hidden control is allowed any bounds since nothing can reach it.
+                expect(cells.size() >= 12,
+                       "only " + juce::String(cells.size()) + " controls were found on the "
+                       "Controls bar, which reads as this sweep having stopped finding them "
+                       "rather than as the bar having emptied");
+
+                for (int i = 0; i < cells.size(); ++i)
+                {
+                    // Horizontal containment only. The gear is deliberately bounded off the
+                    // bar's *full* height rather than off contentArea(), which is inset 4 px
+                    // top and bottom, so a vertical assertion would fail a control that is
+                    // right.
+                    expect(cells[i].getX() >= content.getX(),
+                           names[i] + " starts left of the Controls bar's content area, so it "
+                           "has been pushed back over the fold zone");
+                    expect(cells[i].getRight() <= content.getRight(),
+                           names[i] + " runs past the right-hand end of the Controls bar");
+
+                    for (int j = i + 1; j < cells.size(); ++j)
+                        expect(! cells[i].intersects(cells[j]),
+                               names[i] + " overlaps " + names[j] + " - the Controls bar has run "
+                               "out of width at the editor's minimum, and CLAUDE.md's rule is to "
+                               "raise the floor rather than let a control pay for it");
+                }
+            }
+        }
+
         beginTest("every arp drop target takes a chord from any surface, not only a pad");
         {
             // The 2026-08-26 fix, pinned. All four arp targets - the panel, a macro card, a slot
