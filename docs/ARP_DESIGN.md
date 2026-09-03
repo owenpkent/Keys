@@ -1750,11 +1750,13 @@ What carries it:
   readout under the dial ("1/8" against "4.00 Hz") says it a second time in its own units.
 - **The readout says what is played, not what the parameter holds** (2026-08-03, Owen: *"when
   triplet mode is enabled the division text should reflect"*). In Sync it is
-  `ArpEngine::rateSyncText`, **the step length as an exact fraction of a bar**: `1/8` straight,
-  `1/12` in threes, `1/10` in fives, `1/5` for a quarter in fives, `1/8.` dotted, `1/10.` for
-  both. Straight, it reproduces the division names byte for byte, so it is not a second copy of
-  the rate list that can drift from it. The attachment's own text function is the bare division
-  (it comes from the choice parameter, which knows nothing about the two modifiers), and
+  `keys::arptext::rateSyncText` (`src/ArpRateText.h`, split out of `ArpEngine.h` on 2026-09-02
+  so the engine header holds no `juce::String`), **the step length as an exact fraction of a
+  bar**: `1/8` straight, `1/12` in threes, `1/10` in fives, `1/5` for a quarter in fives, `1/8.`
+  dotted, `1/10.` for both. Straight, it reproduces the division names byte for byte, so it is
+  not a second copy of the rate list that can drift from it. The attachment's own text function
+  is the bare division (it comes from the choice parameter, which knows nothing about the two
+  modifiers), and
   `SliderParameterAttachment` writes `textFromValueFunction` in its constructor - so
   `installRateText()` has to run *after* every attachment swap, not once at construction. In Hz
   nothing is added: the engine ignores both modifiers there, so "4.00 Hz" is already the whole
@@ -1989,3 +1991,37 @@ Phase one of `docs/LINE_INTERACTION.md`, built 2026-09-01. The rest of that file
   first); on different rates, the source's most recent. With no source, 3 and 4 allow - a lane
   drawn for a source that was switched off plays rather than falls silent. `laneRanges` says
   0-4 now and the grid reads that table, so the Draw page needed no change of its own.
+- **CLOCK** (`Params::clockFollow`, phase three, 2026-09-02) replaces the step loop outright
+  rather than adding a condition to it. `process()` calls `clockedStepsInBlock` instead of
+  `scanStepsInBlock` whenever `arpLineIsClocked` is true - ClockFollow on and From naming a line
+  strictly above this one (`src < line`), the same in-effect test `follows` and DUCK's window
+  already read. There is no boundary to find and nothing to swing, because the source already
+  did that: the loop walks `p.follow->firedAt`, one entry per source *step* (a ratchet is still
+  one fire), and fires this line once per entry at the source's own sample offset. **The step
+  index is the source's own running count, `firedBefore + i`** - the shape `firedCountBefore`
+  already gave the rhythm dividers - so the lanes advance one cell per source step across a
+  block boundary exactly as within one, and this line's Retrigger window and RESET watch the
+  source's own `pass` rather than a count of their own.
+- **Gate reads against the source's `stepSamples`**, passed into `fireStep` in place of this
+  line's own: 50% still means half the space to the next note, because that space now belongs
+  to the source. `LineRecord::stepSamples` publishes that borrowed number back out again for a
+  clocked line's own followers - "clocked, this line's step *is* the source's step" - so a line
+  clocked to a clocked line inherits the length from the top of the chain rather than measuring
+  nothing of its own, and every line in a chain gates against the one pulse that started it.
+- **Everything that decided *when* this line's own steps fell is simply never read**: Rate in
+  either unit, its two steppers, Sync/Hz, Swing, Dot, Tuplet, Anchor and the Cards page's four
+  rhythm dividers all grey on the card and the Play page. One flag, composed into the existing
+  `refreshRateMode` rather than a second function beside it, so a control greyed by Hz and a
+  control greyed by Clock can never disagree about whose turn it is to un-grey; both dials wait
+  for the mouse button up before greying, the same drag guard `arprate::applyMode` already
+  needed. The dividers grey for the reason Dot and Tuplet already do in Hz: `scanStepsInBlock`
+  is the only place that reads them, and a clocked line never runs it - a divider divides a
+  clock this line no longer has. Gate, the lanes, DUCK and Legato are untouched; they are still
+  this line's own.
+- **No clock is the one place the bus's rule runs backwards.** Every other mechanism defines a
+  source that is off or silent as "the follower plays as today"; CLOCK cannot, since it has
+  already taken the follower's own clock away rather than laid a condition over it - a clocked
+  line with nothing to clock to (`p.follow == nullptr`, or a From at Off or at/below this line)
+  plays nothing at all. DUCK still runs underneath a clocked line, reading its usual window; a
+  clocked step lands exactly on a source fire by construction, so at Duck 100 that window reads
+  true every time past the warm-up step and the line falls silent after its first note.
