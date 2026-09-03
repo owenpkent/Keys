@@ -7,6 +7,49 @@ so the top of the file is the most recent round and the bottom is the oldest thi
 standing. A superseded claim is kept where it sits and marked there rather than deleted, because
 knowing why a rule existed is what stops it being reinvented.
 
+**CLOCK: a line steps to another line's rhythm (2026-09-02).** Phase three of
+`docs/LINE_INTERACTION.md`, and it landed the day after phase one and two rather than after "the
+bus has been lived with", which is what section 5 of that file and Phase 3's own line both
+recommend. Owen: *"c"* - offered the choice, he picked starting the next thing over landing the
+stack.
+
+- **`arpClockFollow`, appended per line after `arpResetFollow`, default off. PARAMETER LAYOUT
+  CHANGE.** On, with From naming a source in effect, this line's own Rate, Swing, Dot, Tuplet and
+  Anchor stop being read at all: `clockedStepsInBlock` replaces the step loop outright, firing
+  one step of this line for every entry in the source's `firedAt`, and Gate reads against the
+  source's own `stepSamples` rather than this line's rate - a 50% gate still means half the
+  space to the next note you hear, because that space is now the source's step.
+- **The chip stayed on the top row rather than joining Reset on the Play page or taking a new
+  cell on the bottom strip, because the bottom strip is already the card's binding row.**
+  `arpMacroModsW` is 598 px against a 598 px card at `minMacroWidth()`, so a seventh chip there
+  would have raised the panel's floor and the window's behind it; the top row had 38 px of slack
+  past Shape's cap instead. Clock's 76 px cell and its 6 px gap - the same gap Keybed's own cell
+  keeps, since the two are a pair, what plays into this line and what clocks it - come out of
+  Shape, which still clears its longest entry, "Fingered Bottom", at both floors. No floor moved.
+- **The greying is composed into `refreshRateMode` rather than a `refreshClock` beside it**, on
+  both the card and the Play page. Two functions each setting `enabled` from its own half of the
+  question would hand the flag back to whichever ran last, so a control greyed by Hz or by Clock
+  stays greyed whichever set it. Both dials wait for the mouse button to come up before greying,
+  since `Slider::mouseUp` is a no-op on a disabled slider and a gesture greyed mid-drag would
+  leave its attachment's automation bracket open with nothing to close it. The Cards page's four
+  rhythm dividers grey the same way, alongside the Play page's controls rather than instead of
+  them: a divider divides a clock this line no longer has either.
+- **"Clocked" is one test, shared.** `arpLineIsClocked` in `MacroRow.h` is ClockFollow on *and*
+  From naming a line strictly above this one - the same in-effect rule `follows` itself already
+  applies - and it is the one copy read by the card, the Play page and `get_state`'s `clocked`
+  field, so the three can never disagree about whether a line is actually clocked.
+- **No clock is silence, and that is the one place the bus's rule runs backwards.** Every other
+  mechanism defines a source that is off or silent as "the follower plays as today"; CLOCK
+  cannot, because it takes the follower's clock away rather than adding a condition to it, so a
+  clocked line with nothing to clock to plays nothing. DUCK still runs on a clocked line
+  underneath this, and at 100 it silences every step after the warm-up one: a clocked step sits
+  exactly on a source fire, so DUCK's "the source fired since my last step" test reads true every
+  time past the first.
+- **The line's own clock is left running underneath, not torn down.** Switching CLOCK off
+  mid-run hands the line back to its own free-run or ppq phase exactly where it would have got
+  to, with no catch-up burst of the steps it did not take. A line clocked to a clocked line
+  inherits the original step length, so a chain of them all gate against the one pulse at the top.
+
 **The keybed switch is on the card, and it says Keybed (2026-09-01, last thing that evening).**
 Owen, with line A's `arpKeys` off and nothing on screen to say so: *"The notes I'm playing on the
 keyboard aren't being sent to the arpeggiator"*, then *"I thought it was on."* Found by asking the

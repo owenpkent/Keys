@@ -5,6 +5,68 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: CLOCK - a line steps to another line's rhythm instead of its own
+
+**PARAMETER LAYOUT CHANGE.** `arpClockFollow` is appended per line, default **off**, right
+after `arpResetFollow` - a saved session opens exactly as it was, since a line with no source
+named has nothing to clock off in the first place.
+
+`get_state` reports `clocked` beside `follows`: true only when a line's own ClockFollow is on
+*and* its From names a source that is actually in effect - the same downward rule `follows`
+itself already applies, so an illegal From (naming a letter at or below the line) reads
+`clocked` false whatever ClockFollow says.
+
+Phase three of `docs/LINE_INTERACTION.md`, and the one that turns two sequencers into one
+instrument with two voices.
+
+With **From** set and **Clock** on, a line stops reading its own clock altogether and takes one
+step for every step the line it follows plays. The source's rhythm becomes this line's rhythm -
+swung, late, thinned by Density, cut by a Chance lane or by DUCK - and the follower lands on
+exactly those moments; everything else about the line stays its own, so the two walk different
+patterns of different lengths through one shared pulse. A source ratcheting three sub-hits on a
+step is still one step: the follower advances a single lane cell for it, because what the lines
+publish to each other is steps rather than notes.
+
+**Gate is measured against the source's step**, not against the rate this line is no longer
+using, so 50% still means half the space to the next note you hear. Rate and its `< >` steppers,
+the Sync/Hz switch, Dot, Tuplet and Anchor grey out on the card and on the Play page, because
+there is no clock of this line's own left for them to set - the same greying Hz already does to
+Dot, Tuplet and Anchor - and the Cards page's four rhythm dividers grey with them, since a
+divider divides a clock this line no longer runs.
+
+**No clock is silence, and that is the point.** A clocked line whose source is off, silent or
+holding nothing plays nothing, which is what a sequencer with no clock is - the one place the
+bus's usual rule (a source that is off leaves its follower playing as today) reads the other
+way, because CLOCK takes the clock away rather than adding a condition to it. DUCK still runs on
+a clocked line underneath this, and at 100 it silences every step after the warm-up one: a
+clocked step sits exactly on a source fire, so DUCK's "the source fired since my last step" test
+reads true every time past the first. With **no source in effect** - From at Off, or naming a
+letter at or below this line - the switch does nothing at all, byte for byte: the From chip is
+what says whether anything is happening.
+
+Switching CLOCK off mid-run puts the line back on its own clock where that clock had got to,
+with no catch-up burst of the steps it did not take; a line clocked to a clocked line inherits
+the original step length, so a whole chain of lines gates against the one pulse at the top of it.
+
+**Clock** is a chip on every macro card's top row, immediately after **Keybed**, bound to
+`arpClockFollow`; accessible name `Macro clock A` (per line, A to D). It is live on every card,
+line A's included - nothing on a card is ever disabled, and From is what says whether a switch
+is doing anything, the rule DUCK already follows. The greying is one writer, `refreshRateMode`
+on both the card and the Play page, so a control greyed by Hz or by Clock stays grey whichever
+set it; the two dials wait for the mouse button to come up before greying, so a host lane or an
+MCP write can never leave a drag gesture open. It fits the top row at no cost: the bottom strip
+is already the card's binding row at `minMacroWidth()`, where the top row had 38 px of slack
+past Shape's cap, so Clock's 76 px cell comes out of Shape instead - Shape still clears its
+longest entry, "Fingered Bottom", at both floors. `minMacroWidth()`, `minPanelWidth()` and the
+editor's 1320 px floor are all unchanged.
+
+`ArpTests` pins six cases: a follower advancing one lane cell per source step, a ratcheted
+source still counting as one, a silent source leaving the follower silent, Gate against the
+source's step rather than the follower's own rate, CLOCK with no source in effect reading
+byte-for-byte inert, and CLOCK switched off mid-run resuming without a burst. `StateTests` and
+`McpTests` pin the parameter and `clocked`'s downward rule; `LayoutTests` measures the Keybed
+and Clock chips at both floors.
+
 ### Under the hood: the structural half of the 2026-09-02 architecture review
 
 - `ArpEngine.h` no longer holds a `juce::String` anywhere in it. Its two rate-dial text

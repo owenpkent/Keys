@@ -1,8 +1,9 @@
 # Lines that listen to each other
 
-**Status (2026-09-01): Phases 0 to 2 are built - the bus, the From picker, DUCK, RESET and
-NEIGHBOUR.** CLOCK and everything after it is proposed and unbuilt. Section 4 below records where the two built
-controls actually went, which is not where this file first put them. Owen:
+**Status (2026-09-02): Phases 0 to 3 are built - the bus, the From picker, DUCK, RESET,
+NEIGHBOUR and CLOCK.** SHADOW and everything after it is proposed and unbuilt. Section 4 below
+records where the built controls actually went, which is not where this file first put them, and
+notes where CLOCK landed ahead of this file's own recommended order (section 5). Owen:
 
 > *"can we get the arpeggiators to interact with each other, like the step sequencers, so we
 > can get interesting variations."*
@@ -217,8 +218,19 @@ rose to 1288 px for the chip; nothing else moved. The `< A` caption mark is not 
 says it. **RESET (phase two) is the Follow entry of the Play page's Retrigger list**, not a
 chip beside Legato: with From on the strip there was no seventh cell at the docked floor, and
 "when does the pattern start over" already had its control, so the list grew one answer.
-**NEIGHBOUR** landed exactly as designed. The paragraphs below are the design as first written
-and stand for the mechanisms not yet built.
+**NEIGHBOUR** landed exactly as designed.
+
+**CLOCK (phase three) is a chip too, but it stayed on the card's top row rather than joining
+RESET on the Play page or taking the bottom strip's open seventh cell.** By the time it was
+built the bottom strip was the card's binding row, not the top: `arpMacroModsW` (598 px) matched
+`minMacroWidth()`'s 598 px card exactly, so a seventh chip there would have raised the panel's
+floor and the window's behind it, where the top row still had 38 px of slack past Shape's cap.
+Clock sits right after Keybed, the two switches read as a pair - what reaches this line from
+outside it, and what clocks it - and Shape gives up the width instead, staying clear of its
+longest entry, "Fingered Bottom", at both floors. No floor moved for it at all, docked or
+detached; see `docs/DECISIONS.md`'s CLOCK entry for the arithmetic.
+
+The paragraphs below are the design as first written and stand for the mechanisms not yet built.
 
 - **The source picker** (`arpFollow`) is a combo on the line's Play page, PLAYBACK group, next
   to Retrigger - a thing you set once. It reads "Follows: Off / A / B / C" and lists only the
@@ -243,9 +255,10 @@ and stand for the mechanisms not yet built.
 **The bus, then A (DUCK) and C (RESET), then B (NEIGHBOUR) because it is nearly free.** That is
 three or four days and it is where the "interesting variations" live: interlocking parts and
 bounded drift are what two independent lines cannot do at all today. D (CLOCK) is the deep one
-and should follow once the bus has been lived with. E and H change pitch and loudness, which
-other knobs already own, and want a listen before a cell. F is a global tick and can land any
-afternoon. G waits on a state design.
+and was recommended to follow once the bus had been lived with; it landed 2026-09-02, a day
+after A and C rather than after that pause - see `docs/DECISIONS.md`'s CLOCK entry for the call.
+E and H change pitch and loudness, which other knobs already own, and want a listen before a
+cell. F is a global tick and can land any afternoon. G waits on a state design.
 
 What every mechanism keeps: **a line off or silent leaves its followers playing as today**, and
 **signal flows downward, A to D**. Break either and the four lines stop being four instruments
@@ -421,6 +434,12 @@ release.
 - Tests: B advances one lane cell per A fire; A's ratchets do not double-step B; A silent, B
   silent; B's gate at 50 % is half of A's step, not B's own rate.
 - **PR 3 = Phase 3.** Two to three days. Build after PR 1 has been played with.
+- **Built 2026-09-02, one day after PR 1 and PR 2 rather than after that pause.** Two departures
+  from the plan above, both in the chip's placement, not the mechanism: it stayed a chip, but on
+  the card's **top row** beside Keybed rather than the bottom strip (the bottom strip had become
+  the card's binding row by then; no floor moved either way), and the Cards page's four rhythm
+  dividers grey along with Rate, Swing, Dot, Tuplet and Anchor, since a divider divides a clock
+  this line no longer has. See `docs/DECISIONS.md`'s CLOCK entry and `docs/ARCHITECTURE.md`.
 
 ### Later, in this order
 
