@@ -417,7 +417,12 @@ public:
                     // Appended 2026-09-01, phase two: the source coming round restarts this
                     // line. On the Play page it is the **Follow** entry of the Retrigger list,
                     // since "when does the pattern start over" already had a control there.
-                    apResetFollow, numArpParams };
+                    apResetFollow,
+                    // Appended 2026-09-02, phase three: the source's own hits become this
+                    // line's steps - its Rate, Swing, Dot, Tuplet and Anchor stop mattering,
+                    // because it no longer has a clock of its own. See
+                    // ArpEngine::Params::clockFollow and docs/LINE_INTERACTION.md.
+                    apClockFollow, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).

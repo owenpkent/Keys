@@ -187,6 +187,10 @@ notes coming from" - a question this API could not answer at all until 2026-08-2
   also when the parameter names a letter at or below the line, since the processor hands the
   engine nothing for those and the answer here is what is in effect. See
   `docs/LINE_INTERACTION.md`.
+- **`clocked`** (2026-09-02, phase three) is true only when this line's ClockFollow is on
+  *and* `follows` is non-empty - the same in-effect rule, since an illegal From hands the
+  engine no record whatever ClockFollow says. True means this line has no clock of its own
+  left: it steps once per hit of the line it follows instead of reading its own grid.
 - **`soundingNoteCount` and `sequence` are what the line is actually sounding**,
   whatever the source. `soundingNoteCount` counts the notes the engine holds;
   `sequence` is the pitches it walks, in the order the Shape and octave stack put

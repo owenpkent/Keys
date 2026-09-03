@@ -204,14 +204,16 @@ public:
         beginTest("Legato is appended after Stray and off by default; Density is the Chance parameter");
         {
             // Appended, never inserted: a per-line parameter's index is what arpParamId names
-            // it by and what a saved session stores it under - the genSource rule.
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
-                         juce::String("ResetFollow"), "ResetFollow is the last per-line parameter");
+            // it by and what a saved session stores it under - the genSource rule. ClockFollow
+            // landed after ResetFollow on 2026-09-02 (see the dedicated test below), which is
+            // why this no longer claims ResetFollow is the last one.
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
-                         juce::String("Duck"));
+                         juce::String("ResetFollow"));
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 3)),
-                         juce::String("Follow"));
+                         juce::String("Duck"));
             expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 4)),
+                         juce::String("Follow"));
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 5)),
                          juce::String("Legato"));
             {
                 Host h;
@@ -235,6 +237,25 @@ public:
             expect(chance != nullptr, "the Chance parameter still registers under its old id");
             if (chance != nullptr)
                 expect(chance->getName(64).endsWith("Density"), "the host-facing name follows the UI");
+        }
+
+        beginTest("ClockFollow is appended after ResetFollow and off by default");
+        {
+            // Phase three of the line bus (docs/LINE_INTERACTION.md): the source's hits become
+            // this line's steps. Appended, never inserted, same rule as the test above.
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
+                         juce::String("ClockFollow"), "ClockFollow is the last per-line parameter");
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
+                         juce::String("ResetFollow"));
+            expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apClockFollow), juce::String("arpClockFollow"));
+            expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apClockFollow), juce::String("arp2ClockFollow"));
+            expectEquals(KeysProcessor::arpParamId(2, KeysProcessor::apClockFollow), juce::String("arp3ClockFollow"));
+            expectEquals(KeysProcessor::arpParamId(3, KeysProcessor::apClockFollow), juce::String("arp4ClockFollow"));
+            Host h;
+            for (int line = 0; line < KeysProcessor::numArpLines; ++line)
+                expectWithinAbsoluteError(
+                    paramOf(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apClockFollow)),
+                    0.0f, 0.01f, "Clock Follow is off by default, which is four lines free-running as today");
         }
 
         beginTest("a line cannot follow a letter below it: the rule holds in the processor, not only the UI");
@@ -1248,7 +1269,7 @@ public:
                 "Humanize", "Keys", "Channel", "OctShift", "Volume", "HumanVel", "VelTrim",
                 "Tuplet", "HumanizeSpan", "HumanVelSpan", "Drift", "Mutate", "MutateLock",
                 "VelLevel", "Harm1", "Harm1Chance", "Harm2", "Harm2Chance", "Stray",
-                "Legato", "Follow", "Duck", "ResetFollow",
+                "Legato", "Follow", "Duck", "ResetFollow", "ClockFollow",
             };
             static const char* const globalsAfterLines[] = {
                 "arpQuantize", "bpm", "bpmSync", "arpTrackMidi",

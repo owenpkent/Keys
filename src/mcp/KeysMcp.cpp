@@ -417,9 +417,19 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
                     const auto* raw = processor.apvts.getRawParameterValue(
                         KeysProcessor::arpParamId(n, KeysProcessor::apFollow));
                     const int src = raw != nullptr ? (int) raw->load() - 1 : -1;
-                    l->setProperty("follows", (src >= 0 && src < n)
+                    const bool followInEffect = src >= 0 && src < n;
+                    l->setProperty("follows", followInEffect
                                                   ? juce::String::charToString((juce::juce_wchar) ('A' + src))
                                                   : juce::String());
+                    // CLOCK, phase three (2026-09-02): true only when this line's own
+                    // ClockFollow is on *and* From names a source that is actually in effect -
+                    // reusing followInEffect rather than re-deriving it, since runArpLines
+                    // hands the engine no record for an illegal From either, whatever
+                    // ClockFollow says.
+                    const auto* clockRaw = processor.apvts.getRawParameterValue(
+                        KeysProcessor::arpParamId(n, KeysProcessor::apClockFollow));
+                    l->setProperty("clocked",
+                                   followInEffect && clockRaw != nullptr && clockRaw->load() > 0.5f);
                 }
                 std::array<int, ArpEngine::maxHeld * 4> pitches {};
                 const int seqCount = eng.uiSequence(pitches);

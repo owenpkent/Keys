@@ -347,7 +347,7 @@ public:
         bool lastStepFired = false;  // the Chain lane's own bit, as this block left it
         int lastNote = -1;           // the pitch the last fired step landed on
         int lastVelocity = 0;        // 1..127
-        double stepSamples = 0.0;    // this line's step length, for a clocked follower later
+        double stepSamples = 0.0;    // this line's step length, what a clocked follower gates against
         bool sounding = false;       // enabled and holding a chord
     };
     LineRecord record {};
@@ -678,6 +678,14 @@ public:
         // Quantize, Offset and every lane see the restart they already understand. What it
         // bounds is polymeter: seven against sixteen drifts for a bar and snaps home.
         bool resetFollow = false;
+        // **CLOCK** (phase three): this line stops reading its own clock and steps once per
+        // step the source fires. The source's rhythm - swung, late, ducked, thinned - becomes
+        // this line's clock, so two sequencers read as one instrument with two voices. While
+        // it is on, this line's Rate, Swing, Dot, Tuplet and Anchor are never consulted at all
+        // (the card greys them); Gate, the lanes and everything else still belong to this line.
+        // With no source in effect the line runs exactly as it does today: the From chip is
+        // what says whether anything is happening, the rule DUCK already follows.
+        bool clockFollow = false;
     };
 
     struct HostClock
@@ -944,6 +952,29 @@ public:
             lastRetrigWindow = std::numeric_limits<long long>::min();
         }
 
+        // **CLOCK** (2026-09-02, phase three of the line bus): with a source in effect, this
+        // line's steps are the source's, and it does not read its own clock at all. Decided
+        // once here because three things below ask it: what to publish as this line's step
+        // length, which step loop runs, and whether the timebase just changed.
+        const bool clocked = p.clockFollow && p.follow != nullptr;
+
+        // Switching CLOCK on or off is the same change of *timebase* the Hz/Sync edge above
+        // is, one axis over: the step index counts the source's fires on one side and this
+        // line's own grid on the other, and two numberings that far apart make the lane phase
+        // carried across meaningless. So the next step to fire becomes step 1, through the
+        // restart Retrigger already owns. Deliberately **not** the Hz/Sync treatment in full:
+        // nothing owed is flushed (a note-off's offset is samples in this block either way, so
+        // it is still valid), and the free-run phase and the ppq tracking are left running
+        // below whether or not this line is using them - which is what lets CLOCK go off
+        // mid-run and the own clock pick up exactly where it would have been, rather than
+        // catching up on every step it did not take.
+        if (clocked != lastClocked)
+        {
+            lastClocked = clocked;
+            pendingRetrig = true;
+            lastRetrigWindow = std::numeric_limits<long long>::min();
+        }
+
         // One scheduler, two clocks, and the mode picks which drives it. Hz mode pins the
         // tempo to 60 so that one "beat" of everything below is one second; the step is then
         // 1/hz of that unit, and every quantity measured as a *fraction of a step* (swing,
@@ -965,6 +996,13 @@ public:
         const double stepBeats = stepLengthBeats(p);
         const double blockBeats = beatsPerSample * numSamples;
         record.stepSamples = stepBeats / beatsPerSample;
+        // Clocked, this line's step *is* the source's step, so that is the length to publish:
+        // a line clocked to a clocked line inherits the original step length rather than a
+        // number off a rate dial nothing here is reading. Everything downstream of the bus -
+        // a follower's Gate, its own clocked steps - then measures against the one clock in
+        // the chain, which is what "the source's rhythm becomes mine" has to mean two deep.
+        if (clocked)
+            record.stepSamples = p.follow->stepSamples;
 
         // Position in beats at the start of this block. Hz mode never takes the anchored
         // branch: following the bar grid is the one thing a free-running rate cannot do.
@@ -1019,7 +1057,10 @@ public:
 
         if (p.enabled && heldCount > 0 && stepBeats > 0.0)
         {
-            scanStepsInBlock(p, pos, stepBeats, beatsPerSample, numSamples, divs, dividersOn, out);
+            if (clocked)
+                clockedStepsInBlock(p, pos, beatsPerSample, numSamples, out);
+            else
+                scanStepsInBlock(p, pos, stepBeats, beatsPerSample, numSamples, divs, dividersOn, out);
 
             firePendingBefore(numSamples, numSamples, out); // the rest of this block's sub-hits
         }
@@ -1549,6 +1590,89 @@ private:
         for (int i = permCount - 1; i > 0; --i) // Fisher-Yates
             std::swap(perm[(size_t) i], perm[(size_t) (rng() % (unsigned) (i + 1))]);
         permDirty = false;
+    }
+
+    // **CLOCK**: the step loop for a line whose clock is another line's output (2026-09-02,
+    // docs/LINE_INTERACTION.md section D). Not a variant of scanStepsInBlock but its
+    // replacement: there is no grid to walk, no boundary to find and nothing to swing, because
+    // the source has already done all of that and its record says where each of its steps
+    // landed. Swing, the Late lane and Anchor are therefore the source's, since the offsets
+    // are; Gate, the lanes, DUCK, Legato and everything else are still this line's. This line's
+    // own Rate, Swing, Dot, Tuplet, Anchor and the rhythm dividers are simply never consulted -
+    // they describe a clock that is not running, which is what the card greys them for.
+    //
+    // Two things make it as short as it is. `firedAt` is one entry per *step*, not per hit (the
+    // record's own contract), so a source ratcheting three sub-hits on a step advances this
+    // line by one cell rather than three. And the step index is the source's running fire
+    // count, `firedBefore + i` - the same firedCountBefore shape the dividers use - so the
+    // lanes advance exactly one cell per source step, across blocks this line would have had no
+    // step of its own in as well as within one.
+    void clockedStepsInBlock(const Params& p, double pos, double beatsPerSample, int numSamples,
+                             juce::MidiBuffer& out)
+    {
+        if (numSamples <= 0)
+            return;
+        const LineRecord& src = *p.follow;
+        // Clamped rather than trusted, for the reason the dividers are: it bounds a loop on the
+        // audio thread and it was written by something this engine cannot see.
+        const int fires = juce::jlimit(0, maxStepsPerBlock, src.firedCount);
+        for (int i = 0; i < fires; ++i)
+        {
+            const int offset = juce::jlimit(0, numSamples - 1, src.firedAt[(size_t) i]);
+            const long long stepIndex = src.firedBefore + (long long) i;
+
+            // Retrigger Every, as the scan loop decides it, measured against the beat this step
+            // actually lands on: it asks how often the pattern starts over in *time*, which is
+            // a question this line can still answer while somebody else owns its clock.
+            if (p.retrigBeats > 0.0)
+            {
+                const double atBeats = pos + (double) offset * beatsPerSample;
+                const long long win = (long long) std::floor(atBeats / p.retrigBeats + 1.0e-9);
+                if (win != lastRetrigWindow)
+                {
+                    lastRetrigWindow = win;
+                    pendingRetrig = true;
+                }
+            }
+
+            // RESET, unchanged from the scan loop, and the first look still only records where
+            // the source is. Clocked it usually lands on the same step it names, since the
+            // source turning the page did so on the very step being fired here.
+            if (p.resetFollow)
+            {
+                if (! seenPassValid)
+                {
+                    seenSourcePass = src.pass;
+                    seenPassValid = true;
+                }
+                else if (src.pass != seenSourcePass)
+                {
+                    seenSourcePass = src.pass;
+                    pendingRetrig = true;
+                }
+            }
+            else
+                seenPassValid = false;
+
+            if (pendingRetrig)
+            {
+                pendingRetrig = false;
+                stepBase = stepIndex;
+                dirCursor = 0;
+            }
+
+            // Sub-hits owed before this step go first, so hits reach emitHit in time order -
+            // the rule the close-what-you-land-on branch depends on, and the reason a second
+            // entry into fireStep has to keep this line rather than merely call it.
+            firePendingBefore(offset, numSamples, out);
+            uiRelStep.store(stepIndex - stepBase, std::memory_order_relaxed);
+            uiOffset.store(p.offset, std::memory_order_relaxed);
+            // The **source's** step length, not this line's rate: a 50 % gate is half the space
+            // to the source's next step, which is the only reading of Gate that still means
+            // anything when the clock belongs to somebody else. Ratchet spacing and the
+            // Humanize window divide the same number.
+            fireStep(p, stepIndex, offset, src.stepSamples, numSamples, out);
+        }
     }
 
     // The step scan for one block: which boundaries fire, at what sample offset, and the two
@@ -2657,6 +2781,11 @@ private:
     // memory of what was read, and zeroing it would report a mode change that never happened
     // (harmless - hardReset has already done the same work - but it would be a lie).
     bool lastRateFree = false;
+    // Whether CLOCK was in effect last block, so process() can spot the step index changing
+    // what it counts. Not cleared by restart()/hardReset() for lastRateFree's own reason: it is
+    // a memory of what was read rather than playback state, and zeroing it would report an edge
+    // that never happened - harmless, since a restart has already done that work, but a lie.
+    bool lastClocked = false;
     std::mt19937 rng { 0xFAB1E5EDu }; // fixed seed: deterministic tests, free variation live
 };
 // Fold several arpeggiator lines' output into one stream under a single rule: **one note-on per

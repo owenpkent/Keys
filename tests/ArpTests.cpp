@@ -491,6 +491,227 @@ public:
                    "and so does 4");
         }
 
+        // **Phase three of the line bus** (2026-09-02): CLOCK. B stops reading its own clock
+        // and steps once per step A fires, so A's rhythm - swung, thinned, ratcheted - becomes
+        // B's, and B's own Rate, Swing, Dot, Tuplet and Anchor are never consulted at all.
+        beginTest("clock: the follower advances one lane cell per step of the line it follows");
+        {
+            // The rule: the step index is the source's running fire count, so a block the
+            // source skipped moves the follower nowhere. B's Velocity lane holds four distinct
+            // values, and its velocities walk them across A's *fires* rather than across the
+            // blocks - which nothing but the fire count can produce.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            for (int s : { 1, 3, 5, 7 })
+                a.lanes.value[ArpEngine::laneProbability][s].store(0); // A fires on even steps
+            const int lane[4] = { 40, 60, 80, 110 };
+            b.lanes.length[ArpEngine::laneVelocity].store(4);
+            for (int s = 0; s < 4; ++s)
+                b.lanes.value[ArpEngine::laneVelocity][s].store(lane[s]);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.clockFollow = true;
+            bp.rateIndex = 7; // 1/8, and never consulted: the velocities are what prove it
+            std::vector<int> vels;
+            for (int step = 0; step < 8; ++step)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                for (const auto meta : outB)
+                    if (meta.getMessage().isNoteOn())
+                        vels.push_back(meta.getMessage().getVelocity());
+            }
+            expectEquals((int) vels.size(), 4, "four source fires, four steps, and no more");
+            for (int i = 0; i < (int) vels.size() && i < 4; ++i)
+                expectWithinAbsoluteError(vels[(size_t) i], lane[i], 1,
+                                          "cell " + juce::String(i) + " on the source's fire " + juce::String(i));
+        }
+
+        beginTest("clock: a ratcheting source is one step, not three");
+        {
+            // The rule: `firedAt` is one entry per *step*, not per hit (the record's own
+            // contract), so a source ratcheting three sub-hits advances the follower by one
+            // cell and not by three.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            for (int s = 0; s < 8; ++s)
+                a.lanes.value[ArpEngine::laneRatchet][s].store(3);
+            const int lane[4] = { 40, 60, 80, 110 };
+            b.lanes.length[ArpEngine::laneVelocity].store(4);
+            for (int s = 0; s < 4; ++s)
+                b.lanes.value[ArpEngine::laneVelocity][s].store(lane[s]);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.clockFollow = true;
+            for (int step = 0; step < 4; ++step)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                int onsA = 0;
+                std::vector<int> velsB;
+                for (const auto meta : outA)
+                    if (meta.getMessage().isNoteOn())
+                        ++onsA;
+                for (const auto meta : outB)
+                    if (meta.getMessage().isNoteOn())
+                        velsB.push_back(meta.getMessage().getVelocity());
+                expectEquals(onsA, 3, "A really is ratcheting three sub-hits a step");
+                expectEquals((int) velsB.size(), 1, "B takes one step per source step, not per hit");
+                if (! velsB.empty())
+                    expectWithinAbsoluteError(velsB[0], lane[step], 1,
+                                              "and the lane moved on by exactly one cell");
+            }
+            expectEquals(a.record.firedCount, 1, "the record counts steps, which is why this works");
+        }
+
+        beginTest("clock: a silent source leaves the follower silent");
+        {
+            // The rule, and it is CLOCK's own rather than the bus's: no hits, no steps. Every
+            // other mechanism leaves a follower with no source playing as today; this one takes
+            // the clock away, and a sequencer with no clock is silent.
+            const auto onsFor = [&](bool sourceHasChord, bool sourceMuted)
+            {
+                ArpEngine a, b;
+                a.prepare(sr);
+                b.prepare(sr);
+                if (sourceMuted)
+                    for (int s = 0; s < 8; ++s)
+                        a.lanes.value[ArpEngine::laneMute][s].store(1);
+                auto bp = lp;
+                bp.follow = &a.record;
+                bp.clockFollow = true;
+                int ons = 0;
+                for (int step = 0; step < 8; ++step)
+                {
+                    juce::MidiBuffer outA, outB;
+                    clock.ppq = 0.25 * step;
+                    a.process(lp, clock, block,
+                              step == 0 && sourceHasChord ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                    b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                    for (auto& x : collect(outB))
+                        if (x.on)
+                            ++ons;
+                }
+                return ons;
+            };
+            expectEquals(onsFor(false, false), 0, "a source holding nothing hands nobody a clock");
+            expectEquals(onsFor(true, true), 0, "and neither does one whose every step is muted");
+        }
+
+        beginTest("clock: gate is half of the source's step, not half of the follower's own rate");
+        {
+            // The rule: Gate is still this line's, but the space it is a fraction of belongs to
+            // whoever owns the clock. B's own rate is 1/8 against A's 1/16, so the two readings
+            // are 3000 samples apart and only one of them can be right.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.clockFollow = true;
+            bp.rateIndex = 7; // 1/8: 12000 samples, half of which would be 6000
+            bp.gate = 50;
+            std::vector<int> durs;
+            for (int step = 0; step < 4; ++step)
+            {
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72, 76 }) : juce::MidiBuffer(), outB);
+                int on = -1;
+                for (auto& x : collect(outB))
+                {
+                    if (x.on)
+                        on = x.sample;
+                    else if (on >= 0)
+                        durs.push_back(x.sample - on);
+                }
+            }
+            expectEquals((int) durs.size(), 4, "one gated note per step of the source");
+            for (const int d : durs)
+                expectWithinAbsoluteError(d, 3000, 2, "half of A's 6000-sample step, not half of B's 12000");
+        }
+
+        beginTest("clock with nobody to follow is byte for byte the line as it is today");
+        {
+            // The rule every phase repeats: with no source in effect the switch does nothing at
+            // all, and the From chip is what says whether anything is happening. Compared over
+            // eight blocks as whole events - offset, pitch, velocity - not merely as a count.
+            const auto run = [&](bool clockOn)
+            {
+                ArpEngine e;
+                e.prepare(sr);
+                e.lanes.value[ArpEngine::laneRatchet][2].store(2);
+                e.lanes.value[ArpEngine::laneProbability][5].store(0);
+                e.lanes.value[ArpEngine::laneVelocity][3].store(70);
+                auto sp = lp;
+                sp.clockFollow = clockOn; // and `follow` left null: nobody to clock to
+                sp.gate = 70;
+                std::vector<int> events;
+                for (int step = 0; step < 8; ++step)
+                {
+                    juce::MidiBuffer out;
+                    clock.ppq = 0.25 * step;
+                    e.process(sp, clock, block, step == 0 ? chordOn({ 60, 64, 67 }) : juce::MidiBuffer(), out);
+                    for (const auto meta : out)
+                    {
+                        const auto m = meta.getMessage();
+                        events.push_back(step);
+                        events.push_back(meta.samplePosition);
+                        events.push_back(m.isNoteOn() ? m.getNoteNumber() : -m.getNoteNumber());
+                        events.push_back(m.getVelocity());
+                    }
+                }
+                return events;
+            };
+            expect(! run(false).empty(), "there is something to compare");
+            expect(run(true) == run(false), "with no source in effect, CLOCK is not a switch at all");
+        }
+
+        beginTest("clock switched off mid-run resumes the follower's own clock without a burst");
+        {
+            // The rule: the own clock's phase keeps running underneath a clocked line, so
+            // switching CLOCK off picks the line up where its own rate would have had it rather
+            // than catching up on every step it did not take. B is at 1/4, so its own rate
+            // allows one step every four blocks and no block may ever fire two.
+            ArpEngine a, b;
+            a.prepare(sr);
+            b.prepare(sr);
+            auto bp = lp;
+            bp.follow = &a.record;
+            bp.clockFollow = true;
+            bp.rateIndex = 6; // 1/4: 24000 samples, one step every four 6000-sample blocks
+            int clockedOns = 0, freeOns = 0;
+            for (int step = 0; step < 16; ++step)
+            {
+                if (step == 8)
+                    bp.clockFollow = false;
+                juce::MidiBuffer outA, outB;
+                clock.ppq = 0.25 * step;
+                a.process(lp, clock, block, step == 0 ? chordOn({ 60 }) : juce::MidiBuffer(), outA);
+                b.process(bp, clock, block, step == 0 ? chordOn({ 72 }) : juce::MidiBuffer(), outB);
+                int ons = 0;
+                for (auto& x : collect(outB))
+                    if (x.on)
+                        ++ons;
+                if (step < 8)
+                    clockedOns += ons;
+                else
+                {
+                    freeOns += ons;
+                    expect(ons <= 1, "no block after the switch fires more than its own rate allows");
+                }
+            }
+            expectEquals(clockedOns, 8, "clocked, B took A's eight steps");
+            expectEquals(freeOns, 2, "free again, B takes its own two 1/4 steps and not eight");
+        }
+
         beginTest("lanes are ignored unless usePattern is on");
         {
             ArpEngine e;

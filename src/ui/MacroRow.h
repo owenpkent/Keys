@@ -28,6 +28,17 @@ namespace keys
 {
 class ArpPanel;
 
+// Is this line taking its steps from the line it follows (CLOCK, 2026-09-02)? True only when
+// the line's own ClockFollow is on **and** From names a letter strictly above it - the same
+// "in effect" test `runArpLines` applies before it hands the engine a record, and the same one
+// `get_state` reports as `clocked`. The processor is the authority; this is the UI asking the
+// question in the one place both surfaces can reach, because the card and the Play page grey
+// the same controls on the same answer and two copies of the rule would be two rules.
+//
+// It lives beside the card's layout constants for that reason and no other: MacroRow.h is the
+// header ArpPanel.h already includes, so one definition serves both without a header of its own.
+bool arpLineIsClocked(KeysProcessor&, int line);
+
 // One control line inside a macro card: 40 px of knob plus its 15 px readout, the same
 // spend the old single-line row made. ArpPanel.cpp builds arpMacroCard out of this and the
 // three strips below it, which is why they are in a header both files see rather than in
@@ -51,6 +62,12 @@ constexpr int arpMacroHeads = 11;
 // the same row, so at any width where the cap is not biting, Shape is 48 px narrower than
 // before. That is affordable only because `minMacroWidth()` guarantees the row enough
 // width to seat the knob strip, which is wider than this line needs.
+//
+// **Three chips come out of it now** - the dice, Keybed (2026-09-01) and Clock
+// (2026-09-02) - so the cap stops biting below about 1376 px of panel and Shape is the
+// row's elastic member all the way down: 142 px at the docked floor, 126 at
+// `minMacroWidth()`. Both clear the ~111 px "Fingered Bottom" needs, and LayoutTests is
+// what says so, since every one of those numbers is the kind that goes stale in a comment.
 //
 // **The "~166 px at the floor" figure that stood here was carried over from before the
 // dice and never re-derived** - it is nearer 151 at `minPanelWidth()`, and less again at
@@ -216,6 +233,12 @@ private:
     // attachment exists depends on Sync or Hz, and the swap has to wait out an open drag. The
     // swap and that guard are arprate::applyMode, shared with the band; what is left here is
     // the greying this card does and the band does differently.
+    //
+    // **It is the one writer of every enable on this card**, and that is why the clock greying
+    // is here rather than in a refreshClock() of its own: Hz and CLOCK grey overlapping sets of
+    // controls, so two functions each setting `enabled` from its own half of the question would
+    // be two writers for one flag, each undoing the other on whichever ran last. One function,
+    // one composed answer - a control greyed by either stays grey.
     void refreshRateMode();
 
     KeysProcessor& processor;
@@ -260,6 +283,17 @@ private:
     // On-screen word Keybed, on both surfaces: "Play" read as the line's own On, and
     // "Keys" collided with the bar's Light keys (the 2026-08-02 record).
     juce::ToggleButton keybedButton { "Keybed" };
+    // **Clock** (2026-09-02, docs/LINE_INTERACTION.md section D): this line stops reading its
+    // own grid and takes one step for every *step* the line From names plays - one per step,
+    // not per hit, so a ratcheted source step is one tick here - which puts this line's lanes
+    // on the source's swing, its offset and its gaps. Beside Keybed, and paired with it by
+    // a 6 px gap rather than the 14 px that separates groups on this row, because the two ask
+    // the same kind of question - what reaches this line from outside it. The other route in,
+    // From, is on the bottom strip, and the two are as far apart as the card allows: the strip
+    // is exactly full at the docked floor, where this row had the slack Shape's cap leaves.
+    // Live on every card, line A's included, the rule DUCK already follows - nothing on a card
+    // is ever disabled, and From is what says whether it is doing anything.
+    juce::ToggleButton clockButton { "Clock" };
     // Tuplet is a combo, not a tick: it picks one of five, and a check box that cycled its
     // own text was a control lying about its own shape (2026-08-03, Owen: "it's a check box
     // but it changes"). A combo is what Keys already means by "pick from a list" - Shape,
@@ -331,7 +365,7 @@ private:
     juce::Label chordLabel;
 
     std::unique_ptr<ButtonAtt> rateModeAtt;
-    std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, legatoAtt, keybedAtt;
+    std::unique_ptr<ButtonAtt> dotAtt, anchorAtt, legatoAtt, keybedAtt, clockAtt;
     std::unique_ptr<ComboAtt> tupletAtt, followsAtt;
     std::array<std::unique_ptr<SliderAtt>, numKnobs> knobAtts;
     void setDropTarget(bool);

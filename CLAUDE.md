@@ -173,8 +173,13 @@ after it. `ap.follow` is set to a source's record only when its index is strictl
 line's, whatever the parameter says, which is what forbids a loop; the UI greys the letters, the
 processor enforces it. `record.firedBefore` rolls over at the top of `process()`, not the end,
 or a follower counts this block's fires twice. DUCK, RESET and NEIGHBOUR all read that record.
-(DECISIONS.md: **The lines can hear each other, phase one: the bus, From, and DUCK**, and
-**Phase two, the same day: RESET and NEIGHBOUR.**)
+**CLOCK reads it differently: on, a line stops reading its own clock at all and takes one step
+for every entry in the source's `firedAt`, gating Gate and every lane against the source's own
+step length rather than its own rate.** A clocked line whose source is off or silent is silent
+too, the one place the bus's usual silence rule runs the other way, because CLOCK removes the
+clock instead of adding a condition to it. (DECISIONS.md: **The lines can hear each other, phase
+one: the bus, From, and DUCK**, **Phase two, the same day: RESET and NEIGHBOUR.**, and **CLOCK: a
+line steps to another line's rhythm (2026-09-02).**)
 
 **The engine is stateless from the playhead, with three named exceptions.** Everything is
 computed from the step index, so a transport jump lands right without walking there. The
@@ -512,15 +517,18 @@ and the source of `docs/ACID_DESIGN.md` (added 2026-08-16, proposed and unbuilt)
 `docs/REFERENCES.md` ranks the three unbuilt ideas worth having.
 
 **`docs/LINE_INTERACTION.md` is the design for the four lines listening to each other; its bus,
-From, DUCK, RESET and NEIGHBOUR are built, CLOCK and everything after it is proposed and
+From, DUCK, RESET, NEIGHBOUR and CLOCK are built. SHADOW and everything after it is proposed and
 unbuilt** (2026-09-01, Owen: *"can we get the arpeggiators to interact with each other, like
 the step sequencers, so we can get interesting variations"*). One piece of plumbing - a per-line
 record written in letter order on the audio thread and readable by the lines that run after it,
 the same ordering `arpNoteLines` already leans on - and eight mechanisms over it: DUCK (the
-hocket), NEIGHBOUR (the Chain lane reading another line), RESET, CLOCK, SHADOW, LOCK SYNC,
-HANDOVER (deferred: it needs a runtime state beside On) and VEL FOLLOW. Two rules every one of
-them keeps: **signal flows downward, A to D, so nothing can loop**, and **a source that is off
-or silent leaves its follower playing as today**. Do not describe any of it as shipping.
+hocket), NEIGHBOUR (the Chain lane reading another line), RESET, CLOCK (a line steps to its
+source's rhythm instead of its own, built 2026-09-02), SHADOW, LOCK SYNC, HANDOVER (deferred: it
+needs a runtime state beside On) and VEL FOLLOW. Two rules every one of them keeps: **signal
+flows downward, A to D, so nothing can loop**, and **a source that is off or silent leaves its
+follower playing as today** - CLOCK is the one place that second rule reads the other way, since
+it takes the clock away rather than adding a condition. Do not describe SHADOW and what follows
+it as shipping.
 
 **Eleven more arrived 2026-08-17** (Owen: "get the manuals. wide research") and they are surveyed
 in `docs/SEQUENCER_LANDSCAPE.md`, not here: REFERENCES.md is the record of what Keys **took** from
@@ -631,10 +639,14 @@ Four things will bite otherwise:
   the expected answer there rather than evidence it is missing),
   `Macro dot A` / `Macro tuplet A` / `Macro anchor A` / `Macro legato A` / `Macro follows A` (the
   last two from 2026-09-01 - the From chip is a combo, so it is also reachable by its current text,
-  "Off" or "From A"; `Macro trip A` until 2026-08-03, when
+  "Off" or "From A") / `Macro clock A` (2026-09-02, bound to `arpClockFollow` - on, with From
+  naming a source in effect, it greys the rate dial and its steppers, Sync/Hz, Dot, Tuplet, Anchor
+  and Swing on the card and the Play page, and the Cards page's rhythm dividers with them;
+  `arpLineIsClocked` in `MacroRow.h` is the one test the card, the panel and `get_state`'s
+  `clocked` field all share). `Macro trip A` was the name until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
-  first-match caveat), and `Macro OCT A` / `Macro GATE A` /
+  first-match caveat. `Macro OCT A` / `Macro GATE A` /
   `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **eleven from 2026-09-01**, when
   `Macro DENSITY A` joined the row between GATE and MUTATE (it is `arpChance`, the Play page's
   slider, under the name it reads as on a card) and, later that day, `Macro DUCK A` beside it;

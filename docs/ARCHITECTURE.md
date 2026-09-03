@@ -661,8 +661,13 @@ surfaces say **Keybed** now rather than "Play" (which read as the line's own On 
 (which collided with the bar's Light keys) - whether the keys you play on the keybed reach this
 line at all.
 
+**Clock** (`MacroRow::clockButton`, bound to `arpClockFollow`) sits right after Keybed, the two
+switches read together as a pair - what reaches this line from outside it, and what clocks it.
+Reserved the same way, before Shape takes its cut, so no floor moved for it either; see **CLOCK**
+below for what it does.
+
 **The four lines can hear each other** (2026-09-01; `docs/LINE_INTERACTION.md` is the design,
-and only the bus itself, DUCK, RESET and NEIGHBOUR are built so far). Each `ArpEngine` keeps a
+and the bus itself, DUCK, RESET, NEIGHBOUR and CLOCK are built so far). Each `ArpEngine` keeps a
 `LineRecord` (`record`) that it writes as it runs - the steps it fired, its running total, the
 walk pass, the Chain lane's own bit, the note it landed on - and a later line reads it through
 `Params::follow`, a plain pointer. `runArpLines` walks the lines in letter order on the audio
@@ -682,6 +687,25 @@ ducked boundary step still turns a follower's page. **NEIGHBOUR** widened the Ch
 to 0-4: values 3 and 4 read `follow->lastStepFired` (and its negation) inside `chainAllows`, so a
 lane can be made to fire with, or against, another line's most recent step; with no source both
 allow, so a lane drawn for a switched-off source still plays.
+
+**CLOCK** (`arpClockFollow`, phase three, 2026-09-02) replaces the step loop rather than reading
+the record like the other three: on, with From naming a source in effect, `process()` runs
+`clockedStepsInBlock` instead of `scanStepsInBlock`, firing one step of this line for every entry
+in `follow->firedAt` - one per *step*, not per hit, so a source ratcheting three sub-hits still
+advances this line by a single lane cell. Swing, the Late lane and Anchor are the source's, since
+the offsets already are; Gate is measured against `follow->stepSamples`, the source's own step
+length, rather than a rate this line no longer reads. This line's Rate, its steppers, Sync/Hz,
+Dot, Tuplet, Anchor and Swing grey on the card and the Play page, and the Cards page's four
+rhythm dividers grey with them, since a divider divides a clock that is not running;
+`arpLineIsClocked` in `MacroRow.h` is the one test the card, the panel and `get_state`'s
+`clocked` field all share, composed into `refreshRateMode` alongside the Hz greying rather than a
+second function, so a control greyed by either question stays greyed whichever set it. A clocked
+line whose source is off or silent plays nothing - the one mechanism where that reads the
+opposite of the bus's usual rule, because CLOCK removes the follower's clock rather than adding a
+condition to it. DUCK still runs underneath: a clocked step sits exactly on a source fire, so
+DUCK at 100 silences every step after the warm-up one. Switching CLOCK off mid-run hands the line
+back to its own clock exactly where it would have got to, with no catch-up burst, because the
+free-run phase and the ppq tracking are left running underneath the whole time CLOCK is on.
 
 **Legato** (`arpLegato`, per line, default off) holds a note through the steps that would
 otherwise leave a gap - Density, the Chance lane, a mute, a rest, a failed Chain condition -
