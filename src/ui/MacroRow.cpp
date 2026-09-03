@@ -60,7 +60,8 @@ namespace
           "first one it finds repeats for good. In between it holds an idea, then moves on." },
         { KeysProcessor::apSwing, "SWING",
           "Shifts this line's offbeats late (right) or early (left). The quickest way to stop "
-          "two lines landing on top of each other." },
+          "two lines landing on top of each other. Greyed while Clock is on and this line is "
+          "taking its steps from another: there is no grid of its own left to shift." },
         { KeysProcessor::apOffset, "OFFSET",
           "Starts this line's pattern from a different foot. Two lines on the same rate and "
           "different offsets are out of phase rather than in unison." },
@@ -168,6 +169,22 @@ void MacroRow::DiceButton::paintButton(juce::Graphics& g, bool highlighted, bool
         g.fillEllipse(juce::Rectangle<float>(pip * 2.0f, pip * 2.0f).withCentre(p));
 }
 
+// The "in effect" test, written once for both surfaces (see the declaration in MacroRow.h).
+// From's index is 0 for Off and 1..3 for A..C, so the source is index - 1, and a line may only
+// follow a letter strictly above it - which the processor enforces whatever the parameter says,
+// so a host lane writing "From C" into line B leaves that line unclocked here as well as there.
+bool arpLineIsClocked(KeysProcessor& processor, int line)
+{
+    const auto* follow = processor.apvts.getRawParameterValue(
+        KeysProcessor::arpParamId(line, KeysProcessor::apFollow));
+    const auto* clock = processor.apvts.getRawParameterValue(
+        KeysProcessor::arpParamId(line, KeysProcessor::apClockFollow));
+    if (follow == nullptr || clock == nullptr)
+        return false;
+    const int src = (int) follow->load() - 1;
+    return clock->load() > 0.5f && src >= 0 && src < line;
+}
+
 MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p), line(n)
 {
     okstudio::ui::makeMouseOnly(*this);
@@ -248,9 +265,10 @@ MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p
     followsBox.setTitle("Macro follows " + letter);
     followsBox.setTooltip("Which line this one listens to - only a letter above it, so nothing "
                           "can loop. What it does with what it hears: DUCK on the knob strip, "
-                          "Follow in the Play page's Retrigger list (restart when that line comes "
-                          "round), and 3 and 4 on the Draw page's Chain lane (play only with, or "
-                          "only against, that line's last step). "
+                          "Clock on the top row (step off that line instead of a clock of its "
+                          "own), Follow in the Play page's Retrigger list (restart when that "
+                          "line comes round), and 3 and 4 on the Draw page's Chain lane (play "
+                          "only with, or only against, that line's last step). "
                           "A line that is off or silent leaves this one playing as if it followed "
                           "nobody." + juce::String(line == 0 ? " Line A has nothing above it." : ""));
     addAndMakeVisible(followsBox);
@@ -333,6 +351,30 @@ MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p
                             "MIDI, on the arp bar.");
     addAndMakeVisible(keybedButton);
     keybedAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apKeys), keybedButton);
+
+    // Clock: this line's steps come from the line From names (2026-09-02). Beside Keybed, in
+    // the slack the Shape cap leaves, for the reason the header records - the bottom strip is
+    // exactly full at the docked floor and this row was not.
+    clockButton.setTitle("Macro clock " + letter);
+    clockButton.setTooltip("Take this line's steps from the line it follows: one step here for "
+                           "every step that line plays, so its rhythm - its swing, its offset, "
+                           "the steps it drops - becomes this line's, and these lanes advance a "
+                           "cell per step of it. This line's own RATE, SWING, Dot, Tuplet, "
+                           "Anchor and the Cards page's rhythm dividers go quiet while it does: "
+                           "there is no clock of its own left to divide or shift. Gate still means the same thing, measured against the source's "
+                           "step. Pick the line with From on the strip below; with From off - or "
+                           "on line A, which has nothing above it - this does nothing. A source "
+                           "that goes quiet takes this line with it, the way a sequencer with no "
+                           "clock is silent.");
+    addAndMakeVisible(clockButton);
+    clockAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apClockFollow), clockButton);
+    // The greying is a function of two parameters and each attachment knows about one, so both
+    // writers call the one function that composes them - the same shape dotButton's onClick
+    // beside its own attachment already uses for the rate readout. Without these the card would
+    // catch up on the panel's next 10 Hz tick, which is a tenth of a second of a rate dial that
+    // still looks live after you have taken its clock away.
+    clockButton.onClick = [this] { refreshRateMode(); };
+    followsBox.onChange = [this] { refreshRateMode(); };
     // Seed the combo *before* asking the dice about it. `addItemList` selects nothing and the
     // shape has no attachment to seed it either (applyShape writes two parameters by hand), so
     // the selection is -1 until something sets it - and refreshDice reading -1 opened the
@@ -586,15 +628,47 @@ void MacroRow::refreshRateMode()
                           KeysProcessor::arpParamId(line, KeysProcessor::apRateFree))->load() > 0.5f;
     rateModeButton.setButtonText(free ? "Hz" : "Sync");
 
+    // CLOCK (2026-09-02): with this line stepping off another line's hits, everything that
+    // decides *when* its own steps fall is inert - the rate in either unit, its two steppers,
+    // the Sync/Hz switch itself, the three beat modifiers and SWING, which shifts offbeats of
+    // a grid this line is no longer reading. So they grey, exactly as they do in Hz, rather
+    // than sitting lit over an engine that ignores them.
+    //
+    // **The two questions compose onto one flag**, which is why this is one function and not a
+    // refreshClock() beside it: a control greyed by either stays grey, and two writers would
+    // each hand the flag back on whichever ran last. Nothing here is ever *disabled for the
+    // mouse* in the drop-target sense - the card is still a DragAndDropTarget and the scrim
+    // rule stands; these are individual controls with nothing left to set.
+    //
+    // **A slider waits for the button to come up.** `Slider::mouseUp` does nothing at all on a
+    // disabled slider, so one greyed mid-drag never closes the gesture its attachment opened -
+    // a begin with no end, which a host reads as automation still being written. No hand can
+    // reach it (one mouse, and the switch is on another surface), but a host lane or an MCP
+    // write can, so the two dials wait: the rate knob's onDragEnd and the panel's next tick
+    // both call back here. It is the hazard `arprate::applyMode`'s own drag guard exists for,
+    // two controls along.
+    const bool clocked = arpLineIsClocked(processor, line);
+    const auto greyWhenIdle = [](juce::Slider& s, bool enabled)
+    {
+        if (! s.isMouseButtonDown())
+            s.setEnabled(enabled);
+    };
+    greyWhenIdle(rateKnob, ! clocked);
+    greyWhenIdle(knobFace(kSwing), ! clocked);
+    ratePrev.setEnabled(! clocked);
+    rateNext.setEnabled(! clocked);
+    rateModeButton.setEnabled(! clocked);
+    knobLabels[(size_t) kSwing].setEnabled(! clocked);
+
     // Dot, Tuplet and Anchor all subdivide or align against a *beat*, and in Hz there is no beat:
     // the engine ignores all three there, so they grey out rather than sitting lit and doing
     // nothing. Same rule and the same words as the band's - see ArpPanel::refreshRateMode.
     // Outside the early-out below, which only guards the attachment swap: these have to be
     // right on the first call too, when lastRateFree is still -1 and a Hz session has just
     // been restored.
-    dotButton.setEnabled(! free);
-    tupletBox.setEnabled(! free);
-    anchorButton.setEnabled(! free);
+    dotButton.setEnabled(! free && ! clocked);
+    tupletBox.setEnabled(! free && ! clocked);
+    anchorButton.setEnabled(! free && ! clocked);
     anchorButton.setTooltip(free ? "Nothing to anchor to in Hz: a free-running rate follows no "
                                    "bar grid. Switch the rate to Sync to lock the steps to one."
                                  : "Anchored: locked to the host bar grid. Free: never jumps, "
@@ -956,12 +1030,29 @@ void MacroRow::resized()
         // before Shape takes its cut, the same rule as the dice's own cell, so Shape shrinks
         // toward its cap rather than the chip being starved. At the docked floor the row has
         // over a hundred pixels past the dice; LayoutTests measures the chip at both floors.
+        //
+        // **Clock joins it (2026-09-02), and this row is where it fits at no cost.** The bottom
+        // strip is the card's binding row - `arpMacroModsW` is 598 against a 598 px card at
+        // `minMacroWidth()`, so a seventh chip there would have raised every floor in the
+        // product, the panel's and then the editor's. This row spent 390 px of fixed cells plus
+        // Shape, capped at 170, so it was 38 px short of full at that same floor and Shape is
+        // the elastic member: with Clock's 76 px and its 6 px gap reserved here, Shape lands on
+        // 126 px at the narrowest, and "Fingered Bottom" needs 111 (about 78 px of Segoe UI 14
+        // plus the combo's 32 px of label inset and chevron). Nothing else moved.
+        //
+        // The gap is 6, not the dice's 14: 14 separates groups on this row, and Keybed and
+        // Clock are a pair - the two switches that say what reaches this line from outside it.
+        // **The row's own slack is now 15 px, so it is the next thing to bind**: another
+        // control here raises `minMacroWidth()`, and the Shape test in LayoutTests is what will
+        // say so rather than a label quietly ellipsising.
         const int diceW = 34;
         const int keybedW = 88;
+        const int clockW = 76;
         shapePrev.setBounds(centred(r.removeFromLeft(26)));
         r.removeFromLeft(6);
         const int shapeW = juce::jmin(arpMacroShapeMaxW,
-                                      juce::jmax(0, r.getWidth() - 26 - 6 - 14 - diceW - 14 - keybedW));
+                                      juce::jmax(0, r.getWidth() - 26 - 6 - 14 - diceW - 14
+                                                        - keybedW - 6 - clockW));
         shapeBox.setBounds(centred(r.removeFromLeft(shapeW)));
         r.removeFromLeft(6);
         shapeNext.setBounds(centred(r.removeFromLeft(26)));
@@ -969,6 +1060,8 @@ void MacroRow::resized()
         diceButton.setBounds(centred(r.removeFromLeft(diceW)));
         r.removeFromLeft(14);
         keybedButton.setBounds(centred(r.removeFromLeft(keybedW)));
+        r.removeFromLeft(6);
+        clockButton.setBounds(centred(r.removeFromLeft(clockW)));
     }
     // The RATE / SHAPE names span their whole group, steppers included, so the arrows can
     // only be read as belonging to the word above them. Placed from the controls, as ever.

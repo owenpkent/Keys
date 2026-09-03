@@ -707,6 +707,14 @@ void addArpLineParams(juce::AudioProcessorValueTreeState::ParameterLayout& layou
     // Default off.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("ResetFollow"), 1 },
                                                     nm + " Reset Follow", false));
+    // **CLOCK, phase three** (2026-09-02, docs/LINE_INTERACTION.md section 6): the source's
+    // hits become this line's steps instead of its own grid, so a swung, ducked, ratcheted
+    // source drives this line's lanes through its own timing. On, this line's Rate, Swing,
+    // Dot, Tuplet and Anchor stop applying - it has no clock of its own left to set. Default
+    // off, the same reasoning as Follow and Duck above it: a saved session opens with four
+    // lines exactly as deaf to each other as they were.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("ClockFollow"), 1 },
+                                                    nm + " Clock Follow", false));
 }
 
 // The names the harmony combos show, built from the one table in KeysParams.h that also holds

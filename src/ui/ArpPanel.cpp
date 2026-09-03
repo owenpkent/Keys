@@ -877,11 +877,68 @@ void ArpPanel::refreshRateMode()
 {
     const bool free = processor.apvts.getRawParameterValue(paramId(KeysProcessor::apRateFree))->load() > 0.5f;
 
+    // CLOCK (2026-09-02): the line is stepping off the line it follows, so nothing that decides
+    // when its own steps fall is doing anything - the dial in either unit, its two steppers, the
+    // Sync/Hz switch, the three beat modifiers, Swing, which shifts offbeats of a grid this line
+    // has stopped reading, and the Cards page's four rhythm dividers, which divide that same
+    // grid. The card greys every one of those it carries; `arpLineIsClocked` is the one copy of
+    // the question, in MacroRow.h.
+    //
+    // **This block sits above the early-out, unlike the Hz greying below it, and the two are now
+    // one block for that reason.** The mode cache only guards the attachment swap, and it says
+    // nothing about whether From or Clock moved - so a clocked line whose rate mode had not
+    // changed would never have been greyed at all. It also composes: a control greyed by either
+    // question stays grey, which needs one writer per control, not one per question.
+    //
+    // The two dials wait for the button to come up, for the reason MacroRow::refreshRateMode
+    // spells out: `Slider::mouseUp` is a no-op on a disabled slider, so one greyed mid-drag
+    // leaves the gesture its attachment opened hanging open. Only a host lane or an MCP write
+    // can reach that here; the dial's onDragEnd and the next timer tick both call back.
+    const bool clocked = arpLineIsClocked(processor, editLine());
+    const auto greyWhenIdle = [](juce::Slider& s, bool enabled)
+    {
+        if (! s.isMouseButtonDown())
+            s.setEnabled(enabled);
+    };
+    greyWhenIdle(rateKnob, ! clocked);
+    greyWhenIdle(swingSlider, ! clocked);
+    ratePrev.setEnabled(! clocked);
+    rateNext.setEnabled(! clocked);
+    rateModeButton.setEnabled(! clocked);
+    rateLabel.setEnabled(! clocked);
+    swingLabel.setEnabled(! clocked);
+    // The four rhythm dividers go with them, Cards page rather than Play page. `divs` is read
+    // in exactly one place, `scanStepsInBlock`, and a clocked line never runs it -
+    // `clockedStepsInBlock` steps off the source's own fires instead - so a divider describes
+    // the clock this line no longer has. Unlike Dot, Tuplet and Anchor they are **not** an Hz
+    // question: a divider divides steps rather than beats and works in either unit, so
+    // `clocked` is the whole of what greys them. The strip's own toggle greys with its
+    // steppers rather than closing: a control that vanished under the mouse is the house rule
+    // this panel keeps breaking and then fixing.
+    clocksButton.setEnabled(! clocked);
+    for (int i = 0; i < 4; ++i)
+    {
+        clockDivLabels[(size_t) i].setEnabled(! clocked);
+        clockDivReadouts[(size_t) i].setEnabled(! clocked);
+        clockDivMinus[(size_t) i].setEnabled(! clocked);
+        clockDivPlus[(size_t) i].setEnabled(! clocked);
+    }
+    // Dot and Tuplet subdivide a *beat*, and in Hz there is no beat: the engine ignores them
+    // there (see ArpEngine::stepLengthBeats), so they grey out rather than sitting lit and
+    // doing nothing. Anchor goes with them, for exactly the same reason: ArpEngine::process()
+    // takes the bar-affixed branch on `clock.playing && clock.hasPpq && p.anchored &&
+    // ! p.rateFree`, so in Hz the toggle is inert - a free-running rate has no bar grid to lock
+    // to. It used to sit lit and enabled while it did nothing at all.
+    dotButton.setEnabled(! free && ! clocked);
+    tupletBox.setEnabled(! free && ! clocked);
+    tupletLabel.setEnabled(! free && ! clocked);
+    anchorButton.setEnabled(! free && ! clocked);
+
     // The swap, the drag guard and the reasoning behind both are arprate::applyMode - one copy
     // for this and for every macro card, where the rule used to be written out twice. False
     // means nothing moved (the mode is unchanged, or a drag is open), and everything below is
-    // work only a real change needs doing: the card's own refreshRateMode does its greying
-    // before this point instead, because it has no first-call cache to rely on.
+    // work only a real change needs doing - the tooltips and the readout, which are a function
+    // of the unit alone.
     if (! arprate::applyMode(processor.apvts, editLine(), rateKnob, { rateSyncAtt, rateHzAtt },
                              lastRateFree, rateDragging, free))
         return;
@@ -904,17 +961,6 @@ void ArpPanel::refreshRateMode()
     rateNext.setTooltip(free ? "Faster: up a quarter of an octave. Four clicks double the rate."
                              : "Faster: the next division down the list.");
 
-    // Dot and Tuplet subdivide a *beat*, and in Hz there is no beat: the engine ignores them
-    // there (see ArpEngine::stepLengthBeats), so they grey out rather than sitting lit and
-    // doing nothing.
-    dotButton.setEnabled(! free);
-    tupletBox.setEnabled(! free);
-    tupletLabel.setEnabled(! free);
-    // Anchor goes with them, for exactly the same reason. ArpEngine::process() takes the
-    // bar-affixed branch on `clock.playing && clock.hasPpq && p.anchored && ! p.rateFree`, so
-    // in Hz the toggle is inert - a free-running rate has no bar grid to lock to. It used to
-    // sit lit and enabled while it did nothing at all.
-    anchorButton.setEnabled(! free);
     anchorButton.setTooltip(free ? "Nothing to anchor to in Hz: a free-running rate follows no "
                                    "bar grid. Switch the rate to Sync to lock the steps to one."
                                  : "Anchored: locked to the host bar grid. Free: never jumps, "
@@ -1443,7 +1489,9 @@ void ArpPanel::buildControls()
     // left pulls them early (rushed, on top of the beat). Zero is straight.
     knob(swingSlider, swingLabel, "Swing", -0.75, 0.75, 0.01,
          "Shift the offbeat steps, as a fraction of a step. Right delays them for a shuffle, "
-         "left pulls them early to rush the beat, centre is straight.");
+         "left pulls them early to rush the beat, centre is straight. Greyed, with the rate and "
+         "its modifiers, while Clock on this line's macro card is stepping it off another line: "
+         "there is no grid of its own left to shift.");
 
     knob(gateSlider, gateLabel, "Gate", 5.0, 200.0, 1.0,
          "How much of each step the note sounds for. Over 100% ties into the next step. "
@@ -1727,7 +1775,10 @@ void ArpPanel::buildControls()
     clocksButton.setClickingTogglesState(true);
     clocksButton.setTitle("Rhythm dividers");
     clocksButton.setTooltip("Four independent clock dividers layered under the pattern - "
-                            "0 is off, higher numbers slow that voice down further.");
+                            "0 is off, higher numbers slow that voice down further. Greyed, with "
+                            "the rate and Swing, while Clock on this line's macro card is "
+                            "stepping it off another line: there is no clock of its own to "
+                            "divide.");
     clocksButton.onClick = [this] { openClocksStrip(clocksButton.getToggleState()); };
     addAndMakeVisible(clocksButton);
 

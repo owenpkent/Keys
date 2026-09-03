@@ -618,6 +618,53 @@ public:
                          "arpKeys was off and the line still picked up track MIDI");
         }
 
+        // CLOCK, phase three of the line bus (docs/LINE_INTERACTION.md): `clocked` reads true
+        // only when ClockFollow is on for a From that is actually in effect - the same
+        // downward rule `follows` already reports. B following A is legal (A ran first in the
+        // loop); A "following" C is not (C has not run yet), so ClockFollow on there must read
+        // exactly as if it were off.
+        beginTest("get_state reports clocked for a legal From with ClockFollow on");
+        {
+            Host h;
+            call(h.processor, "set_params", args({ { "values", args({
+                { "arp2Follow", "From A" }, { "arp2ClockFollow", true } }) } }));
+
+            auto st = call(h.processor, "get_state", args({}));
+            auto* lines = st["arpLines"].getArray();
+            if (lines == nullptr || lines->size() < 2)
+            {
+                expect(false, "arpLines missing or too short in get_state");
+                return;
+            }
+            const auto& lineB = (*lines)[1];
+            expect(lineB.hasProperty("clocked"), "get_state stopped reporting clocked");
+            expectEquals(lineB["follows"].toString(), juce::String("A"),
+                         "line B should read as following A");
+            expect((bool) lineB["clocked"], "ClockFollow on with a legal From should read clocked");
+        }
+
+        beginTest("get_state reports clocked false when From names a letter at or below the line");
+        {
+            Host h;
+            // A cannot follow C - nothing runs before A in the loop - so runArpLines hands A's
+            // engine no record whatever the parameter says, and clocked must agree with that
+            // even though ClockFollow itself is on.
+            call(h.processor, "set_params", args({ { "values", args({
+                { "arpFollow", "From C" }, { "arpClockFollow", true } }) } }));
+
+            auto st = call(h.processor, "get_state", args({}));
+            auto lineA = firstArpLine(st);
+            if (! lineA.isObject())
+            {
+                expect(false, "arpLines missing from get_state");
+                return;
+            }
+            expect(lineA["follows"].toString().isEmpty(),
+                   "A follows C should not take, since C runs after A");
+            expect(! (bool) lineA["clocked"],
+                   "an illegal From must not read clocked, even with ClockFollow on");
+        }
+
         beginTest("with Launch Quantize on, the hold waits and the reply says so");
         {
             Host h;

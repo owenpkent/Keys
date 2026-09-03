@@ -58,7 +58,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
         "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
-        "Stray", "Legato", "Follow", "Duck", "ResetFollow"
+        "Stray", "Legato", "Follow", "Duck", "ResetFollow", "ClockFollow"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1454,6 +1454,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             ap.follow = (src >= 0 && src < n) ? &lines[(size_t) src].engine.record : nullptr;
             ap.duck = (int) arpParam(n, apDuck);
             ap.resetFollow = arpParam(n, apResetFollow) > 0.5f;
+            ap.clockFollow = arpParam(n, apClockFollow) > 0.5f;
         }
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
