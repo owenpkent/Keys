@@ -11,7 +11,9 @@
 // says something that must be true at any size and in any view.
 
 #include "../src/PluginProcessor.h"
+#include "../src/ChordShift.h"
 #include "../src/ui/ArpPanel.h"
+#include "../src/ui/ChordShiftPanel.h"
 #include "../src/ui/KeysLookAndFeel.h"
 #include "../src/ui/RangeKnob.h"
 #include "../src/ui/ChordDrag.h"
@@ -1504,6 +1506,181 @@ public:
             rk.face().setValue(100.0, juce::dontSendNotification);
             expectEquals(rk.rangeLo(), 50.0, "away from the wall the whole span is back");
             expectEquals(rk.rangeHi(), 150.0, "on both sides");
+        }
+
+        beginTest("the Keyboard bar's chips, the Chord chip included, all fit at the editor's "
+                  "minimum width");
+        {
+            // The generic sweep the Controls bar test above already runs, one bar over: every
+            // visible control that is a direct child of the editor and sits in this bar's band
+            // must stay inside the bar's content area and clear of every other one - the only
+            // thing that can see a bar run out of width, since every control here is placed
+            // with withSizeKeepingCentre and removeFromRight/removeFromLeft clamp to what is
+            // left rather than going negative.
+            //
+            // Written for the Chord chip (2026-09-11), which joined the hold switches beside
+            // Exclusive: a chip added to a bar that already spends its floor is exactly the
+            // failure a width-only check cannot see, the same reason the arp bar sweep exists.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+
+            SectionBar* bar = nullptr;
+            for (auto* t : targets)
+                if (t->getTitle() == "Keyboard section")
+                    bar = dynamic_cast<SectionBar*>(t);
+            expect(bar != nullptr, "the Keyboard bar is on screen at all");
+
+            if (bar != nullptr)
+            {
+                const auto band = bar->getBounds();
+                const auto content = bar->contentArea();
+                juce::Array<juce::Rectangle<int>> cells;
+                juce::StringArray names;
+                bool sawChordChip = false;
+                for (auto* t : targets)
+                {
+                    if (t == bar || t->getParentComponent() != &ed)
+                        continue;
+                    const auto b = t->getBounds();
+                    if (b.isEmpty() || ! band.contains(b.getCentre()))
+                        continue;
+                    cells.add(b);
+                    if (t->getTitle() == "Keybed chord")
+                        sawChordChip = true;
+                    auto name = t->getTitle();
+                    if (name.isEmpty())
+                        if (auto* button = dynamic_cast<juce::Button*>(t))
+                            name = "\"" + button->getButtonText() + "\"";
+                    names.add(name.isEmpty() ? juce::String("an unnamed control") : name);
+                }
+
+                expect(sawChordChip, "'Keybed chord' is on the Keyboard bar at all");
+
+                // Fourteen or so in plain Keys: Detach, the wheels traveller, All Off, Latch,
+                // Sustain, Exclusive, the Chord chip, Size, the octave `<` readout `>` trio,
+                // REC and the take chip. A floor, not an equality, since Keys Host adds more.
+                expect(cells.size() >= 10,
+                       "only " + juce::String(cells.size()) + " controls were found on the "
+                       "Keyboard bar, which reads as this sweep having stopped finding them "
+                       "rather than as the bar having emptied");
+
+                for (int i = 0; i < cells.size(); ++i)
+                {
+                    expect(cells[i].getX() >= content.getX(),
+                           names[i] + " starts left of the Keyboard bar's content area, so it "
+                           "has been pushed back over the fold zone");
+                    expect(cells[i].getRight() <= content.getRight(),
+                           names[i] + " runs past the right-hand end of the Keyboard bar");
+
+                    for (int j = i + 1; j < cells.size(); ++j)
+                        expect(! cells[i].intersects(cells[j]),
+                               names[i] + " overlaps " + names[j] + " - the Keyboard bar has "
+                               "run out of width at the editor's minimum, and CLAUDE.md's rule "
+                               "is to raise the floor rather than let a control pay for it");
+                }
+            }
+        }
+
+        beginTest("the Chord chip is wide enough for every caption it can ever print");
+        {
+            // keys::chordshift::allChipTexts() is every caption keys::chordshift::chipText()
+            // can print - "Chord", the ten shape names, "N notes" - and the chip's own width
+            // (PluginEditor.cpp's keyboardbar::chordChipWidth()) is measured against the
+            // longest of them rather than written down (CLAUDE.md: "measure widths, do not
+            // assert them in a comment"). This is the check that keeps that derivation honest,
+            // the same rule the macro card's KEY chip sweep runs one file over.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+            juce::Component* found = nullptr;
+            for (auto* t : targets)
+                if (t->getTitle() == "Keybed chord")
+                    found = t;
+            expect(found != nullptr, "'Keybed chord' is on screen at all");
+
+            if (found != nullptr)
+            {
+                auto* button = dynamic_cast<juce::TextButton*>(found);
+                expect(button != nullptr, "'Keybed chord' is a TextButton");
+                if (button != nullptr)
+                {
+                    const auto b = button->getBounds();
+                    // The exact font the button renders with, not an approximation of one:
+                    // "the font it actually uses" is the point of this test, and the chip's own
+                    // width is derived from precisely this call in keyboardbar::chordChipWidth().
+                    const auto font = button->getLookAndFeel().getTextButtonFont(*button,
+                                                                                 b.getHeight());
+                    float longest = 0.0f;
+                    juce::GlyphArrangement ga;
+                    for (const auto& caption : keys::chordshift::allChipTexts())
+                    {
+                        ga.clear();
+                        ga.addLineOfText(font, caption, 0.0f, 0.0f);
+                        longest = juce::jmax(longest, ga.getBoundingBox(0, -1, true).getRight());
+                    }
+                    expect((float) b.getWidth() >= longest + 8.0f,
+                           "the Chord chip is " + juce::String(b.getWidth()) + " px wide, too "
+                           "narrow for its longest possible caption, which needs "
+                           + juce::String(juce::roundToInt(longest + 8.0f)));
+                }
+            }
+        }
+
+        beginTest("the Chord panel's targets all clear the mouse-only floor at its own minimum "
+                  "size");
+        {
+            // ChordShiftPanel is a window-only panel, never a Section, so it is built and sized
+            // directly here rather than through KeysEditor - contentSize() is exactly what the
+            // panel gets once a DetachedWindow's own title bar and border are taken out of
+            // minWindowSize(), so laying it out at that size is laying it out at its own floor.
+            const juce::ScopedJuceInitialiser_GUI juceInit;
+            KeysProcessor processor;
+            ChordShiftPanel panel { processor };
+            const auto size = ChordShiftPanel::contentSize();
+            panel.setSize(size.x, size.y);
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(panel, targets);
+
+            // On, the ten shapes and the twelve steppers (six rows x down/up): 24 in all. A
+            // floor rather than an equality only in spirit - every one of these is named, so a
+            // control quietly dropped from the tree fails the count instead of passing by
+            // finding fewer of them.
+            expect(targets.size() >= 1 + 1 + 10 + 2 * keys::chordshift::numShifts,
+                   "only " + juce::String(targets.size()) + " targets were found in the Chord "
+                   "panel, which reads as this sweep having stopped finding them rather than as "
+                   "the panel having emptied");
+
+            juce::Array<juce::Rectangle<int>> boxes;
+            juce::StringArray names;
+            for (auto* t : targets)
+            {
+                const auto b = t->getBounds();
+                const auto name = t->getTitle().isNotEmpty() ? t->getTitle()
+                                                              : juce::String("an unnamed control");
+                expect(b.getWidth() >= 34 && b.getHeight() >= 34,
+                       name + " clears the mouse-only floor at " + b.toString());
+                expect(panel.getLocalBounds().contains(b),
+                       name + " is not fully inside the Chord panel at " + b.toString());
+                boxes.add(b);
+                names.add(name);
+            }
+            for (int i = 0; i < boxes.size(); ++i)
+                for (int j = i + 1; j < boxes.size(); ++j)
+                    expect(! boxes[i].intersects(boxes[j]),
+                           names[i] + " overlaps " + names[j] + " in the Chord panel at its own "
+                           "minimum size");
         }
     }
 };

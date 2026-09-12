@@ -5,6 +5,45 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: the keybed plays chords - one click, up to seven notes
+
+**PARAMETER LAYOUT CHANGE.** `keyChord` and `keyChordShift1` .. `keyChordShift6` are appended as
+globals. Unlike most entries under that heading, this one costs a saved session nothing: the
+switch defaults **off** and all six shifts default to **0**, which is "the keybed plays exactly
+what you click". A session saved yesterday opens sounding precisely as it did, and there is no
+migration because there is nothing to backfill.
+
+Owen, pointing at Ableton's Chord device feeding its Scale device: *"doesn't need to stay in
+scale."*
+
+**A new Chord chip on the Keyboard bar** opens a window holding the whole feature: an On switch, a
+row of ten one-click shapes (Off, 5th, Oct, Maj, Min, Sus2, Sus4, Maj7, Min7, Dom7), and six
+manual shift rows with `-` / `+` steppers for the chord that is not on that list. Clicking a shape
+writes all six shifts at once - that is the "one click" the feature is named for, and the manual
+rows are the escape hatch rather than the way in. The chip's caption says what will play: `Chord`
+when it is off, `Min7` when the shifts spell a shape, `4 notes` when they do not.
+
+**The shifts are semitones, not scale degrees, and that is the ask rather than a shortcut.** Keys
+knows the key - which is the only reason Ableton needs two devices where this is one - and could
+have made every voice diatonic. It deliberately does not: a shift that is always +4 gives you the
+major third over a minor degree, which is the sound you reached for the device to get. Scale Lock
+still governs the key you *click*, through `NoteMath::resolveOutputNote`; the shifts stack on the
+note that comes out of it and are never re-snapped. Lock chooses the root, the shape chooses the
+chord.
+
+**A shift of zero is a voice that is off**, which is what keeps this to seven parameters rather
+than thirteen. The one chord it cannot play is a voice doubling the root at unison, and Ableton's
+device cannot play that either. Per-voice velocity is not built.
+
+The chord feeds everything a held chord already feeds: the track output, and any arp line with
+Keybed on, which sees the full stack rather than the one note you clicked. Nothing here touches a
+chord pad, the generator or the arp's own harmony voices.
+
+**Editing a stored chord is exempt, and the boundary is when the keybed falls silent.** Recalling
+a pad onto the keybed - "Edit on keyboard", or dragging a pad onto the live chord card - suppresses
+the fan-out until every recalled key has been let go, because a stored chord is one you built and
+thickening it on the way back into the pad would silently rewrite it.
+
 ### Added: every arpeggiator line has its own Root, Scale and Scale Lock
 
 **PARAMETER LAYOUT CHANGE.** `arpRoot`, `arpScale` and `arpScaleLock` are appended per line

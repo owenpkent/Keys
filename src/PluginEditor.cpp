@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "ChordShift.h"
 #include "Chords.h"
 #include "ScaleModes.h"
 #include "mcp/KeysMcp.h" // showAboutDialog names the port this instance answers on
@@ -197,13 +198,46 @@ namespace
         constexpr int panicW = 84, latchW = 78, sustainW = 96, exclusiveW = 104;
         constexpr int sizeW = 104, octLabelW = 30, octStepW = 26, octReadoutW = 42;
         constexpr int recW = 62, takeW = 116;
+        constexpr int chordGap = 6; // the gap before the Chord chip, matching its neighbours'
+
+        // The Chord chip's width, measured rather than written down (CLAUDE.md: "measure
+        // widths, do not assert them in a comment"). keys::chordshift::allChipTexts() is every
+        // caption the chip can ever print - "Chord", the ten shape names, "N notes" - and this
+        // asks how wide the longest of them actually draws at the font this bar's own
+        // TextButtons use (KeysLookAndFeel::getTextButtonFont's formula for a 24 px button),
+        // rather than guessing a number that goes stale the day a shape's name changes.
+        //
+        // Not constexpr: measuring a font is not a compile-time operation, and every caller
+        // (minWidthForView(), layoutKeybed()) was already a runtime call, so nothing here loses
+        // anything by that. Cached in a static local since the answer never changes within a
+        // run and a GlyphArrangement pass over eighteen-odd strings is not free to repeat every
+        // layout.
+        int chordChipWidth()
+        {
+            static const int w = []
+            {
+                float longest = 0.0f;
+                const juce::Font font = skin::uiSemi(juce::jmin(14.0f, 24.0f * 0.45f));
+                for (const auto& caption : keys::chordshift::allChipTexts())
+                {
+                    juce::GlyphArrangement ga;
+                    ga.addLineOfText(font, caption, 0.0f, 0.0f);
+                    longest = juce::jmax(longest, ga.getBoundingBox(0, -1, true).getRight());
+                }
+                return juce::roundToInt(longest) + 20; // the side padding every bar chip carries
+            }();
+            return w;
+        }
 
         // The traveller is on the bar while the section is docked, and layoutDetachRow puts a
         // 6 px gap before it - so a docked Keyboard bar is the wide case here too.
-        constexpr int contentWidth()
+        //
+        // Not constexpr any more: chordChipWidth() measures a font, which constexpr cannot do.
+        int contentWidth()
         {
             return detachWidth + 6 + wheelsW
                  + 14 + panicW + 6 + latchW + 6 + sustainW + 6 + exclusiveW
+                 + chordGap + chordChipWidth()
                  + sizeW + 6 + octLabelW + octStepW + 3 + octReadoutW + 3 + octStepW
                  + 14 + recW + 6 + takeW;
         }
@@ -790,6 +824,20 @@ void KeysEditor::buildKeyboardSection()
     };
     addAndMakeVisible(panicButton);
 
+    // The keybed's own chord (2026-09-11, Owen pointing at Ableton's Chord device: "doesn't
+    // need to stay in scale"). Beside the hold switches because it changes what a click sends,
+    // exactly the reach-for-it-while-playing case Exclusive is - but a click here only ever
+    // opens ChordShiftPanel, never toggles the feature itself: that switch lives on the panel,
+    // so this chip is one action rather than a toggle-and-open sharing one target.
+    chordChipButton.setTitle("Keybed chord");
+    chordChipButton.setTooltip("Play a chord from one key. Opens the keybed chord window: an "
+                               "On switch, ten one-click shapes, and six shifts for anything "
+                               "else.");
+    chordChipButton.setButtonText(
+        keys::chordshift::chipText(processor.keybedChordOn(), processor.keybedChordShifts()));
+    chordChipButton.onClick = [this] { setChordShiftWindowOpen(chordShiftWindow == nullptr); };
+    addAndMakeVisible(chordChipButton);
+
     keybedHolder.addAndMakeVisible(keyboard);
     // The knobs are a row of the Controls band, not a section: their old one held nothing
     // else once the arp and the generator moved out, and a bar plus a gap plus a caption is
@@ -1324,6 +1372,11 @@ KeysEditor::~KeysEditor()
     rememberChordLibBounds();
     chordLibWindow.reset();
     chordLibPanel.reset();
+    // And the keybed chord window, same order and same reason. Its bounds are session-only
+    // (see setChordShiftWindowOpen), so there is no remember call before it, unlike the
+    // generator and library pair above.
+    chordShiftWindow.reset();
+    chordShiftPanel.reset();
     // And the take window, same order and same reason.
     takeWindow.reset();
     takePanel.reset();
@@ -2592,6 +2645,47 @@ void KeysEditor::setChordLibWindowOpen(bool open)
     chordLibButton.setToggleState(open, juce::dontSendNotification);
 }
 
+// The keybed chord's window: the ChordGenPanel/TakePanel shape, built when it opens and torn
+// down when it closes. Unlike the generator and library windows its bounds are session-only
+// (`chordShiftWindowBounds`, a plain member) rather than kept in `KeysProcessor::LayoutState` -
+// that struct is the other half of this feature's to extend, not this half's, so this window
+// simply opens at its default size every run, the same trade `takeWindowBounds` already makes
+// for the same reason.
+void KeysEditor::setChordShiftWindowOpen(bool open)
+{
+    if (open == (chordShiftWindow != nullptr))
+        return; // already in the asked-for state
+
+    if (open)
+    {
+        chordShiftPanel = std::make_unique<ChordShiftPanel>(processor);
+        // Deferred a message-loop turn, the same reason the generator window defers: both ways
+        // out (the panel's Close button, the title bar's X) are *inside* what this destroys.
+        juce::Component::SafePointer<KeysEditor> safe(this);
+        const auto close = [safe]
+        {
+            juce::MessageManager::callAsync([safe]
+            {
+                if (auto* e = safe.getComponent())
+                    e->setChordShiftWindowOpen(false);
+            });
+        };
+        chordShiftPanel->onClose = close;
+        chordShiftWindow = std::make_unique<DetachedWindow>(
+            "Keys Chord", lnf, *chordShiftPanel, chordShiftWindowBounds,
+            ChordShiftPanel::minWindowSize(), ChordShiftPanel::defaultWindowSize(), close,
+            [this] { if (chordShiftWindow != nullptr) chordShiftWindowBounds = chordShiftWindow->getBounds(); });
+        chordShiftPanel->sendLookAndFeelChange(); // built before it was ever parented
+    }
+    else
+    {
+        if (chordShiftWindow != nullptr)
+            chordShiftWindowBounds = chordShiftWindow->getBounds();
+        chordShiftWindow.reset(); // clears its content first, so the panel is unparented
+        chordShiftPanel.reset();
+    }
+}
+
 juce::Rectangle<int> KeysEditor::layoutDetachRow(SectionId id, juce::Rectangle<int> row, bool onBar)
 {
     // The Detach button and its travellers are in exactly one of the two places at a time:
@@ -2960,6 +3054,7 @@ void KeysEditor::timerCallback()
     syncPadRangeKnobs();  // cheap: early-outs unless the stored pair changed under the knob
     pullLayoutToggles();
     pullKeyboardBar();
+    pullChordChip();
     pullHostTempo();
     pullKeybedModes();
     pullArpHoldOff();
@@ -3007,6 +3102,19 @@ void KeysEditor::pullKeyboardBar()
     // a slider), so it is kept current here like every other live number on a bar.
     const int oct = (int) apvts.getRawParameterValue("octave")->load();
     octaveReadout.setText((oct > 0 ? "+" : "") + juce::String(oct), juce::dontSendNotification);
+}
+
+// The Chord chip's caption: "Chord" off, a shape's name or a voice count on
+// (keys::chordshift::chipText). Nothing pushes this - the six shifts and the on/off switch
+// move from a session load, a host, or ChordShiftPanel itself - so it is pulled like every
+// other live bar readout, and compared before it writes: CLAUDE.md's own named trap for a
+// timer pull ("A timer pull has to compare before it writes, and two here did not").
+void KeysEditor::pullChordChip()
+{
+    const auto caption = keys::chordshift::chipText(processor.keybedChordOn(),
+                                                     processor.keybedChordShifts());
+    if (chordChipButton.getButtonText() != caption)
+        chordChipButton.setButtonText(caption);
 }
 
 void KeysEditor::pullHostTempo()
@@ -3645,6 +3753,9 @@ void KeysEditor::resized()
         sustainButton.setBounds(bar.removeFromRight(sustainW).withSizeKeepingCentre(94, 24));
         bar.removeFromRight(6);
         chordExclusiveButton.setBounds(bar.removeFromRight(exclusiveW).withSizeKeepingCentre(102, 24));
+        bar.removeFromRight(chordGap);
+        chordChipButton.setBounds(
+            bar.removeFromRight(chordChipWidth()).withSizeKeepingCentre(chordChipWidth(), 24));
 
         // Size and Octave, from the left (2026-08-02, Owen: "the size can go down to the
         // header of the keyboard button"). Both stay put with the section folded, the same

@@ -300,6 +300,25 @@ int KeysProcessor::polyphonyCap() const
     return (int) apvts.getRawParameterValue("polyphony")->load(); // 0 = unlimited
 }
 
+bool KeysProcessor::keybedChordOn() const
+{
+    return apvts.getRawParameterValue("keyChord")->load() > 0.5f;
+}
+
+std::array<int, keys::chordshift::numShifts> KeysProcessor::keybedChordShifts() const
+{
+    std::array<int, keys::chordshift::numShifts> out {};
+    // Read fresh every call rather than cached: this is a message-thread accessor called once
+    // per key press (NoteSurface::refresh()), not a per-block audio read, so there is nothing
+    // here worth the bookkeeping a cache would cost.
+    for (int i = 0; i < keys::chordshift::numShifts; ++i)
+    {
+        const auto id = "keyChordShift" + juce::String(i + 1);
+        out[(size_t) i] = (int) std::round(apvts.getRawParameterValue(id)->load());
+    }
+    return out;
+}
+
 int KeysProcessor::padPage() const
 {
     return juce::jlimit(0, numPadPages - 1, (int) apvts.getRawParameterValue("padPage")->load());

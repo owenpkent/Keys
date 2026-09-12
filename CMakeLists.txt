@@ -45,7 +45,8 @@ set(KEYS_SOURCES
     src/ui/TakePanel.cpp
     src/ui/ArpPanel.cpp
     src/ui/MacroRow.cpp
-    src/ui/LaneGrid.cpp)
+    src/ui/LaneGrid.cpp
+    src/ui/ChordShiftPanel.cpp)
 
 # Sources, compile defs and links are identical for the instrument and the MIDI-effect
 # variant; only the plugin classification (set by okstudio_add_plugin) and the
@@ -138,7 +139,7 @@ enable_testing()
 add_executable(Keys_tests tests/KeysTests.cpp tests/MarkovTests.cpp tests/ArpTests.cpp
                           tests/ChordSourceTests.cpp tests/StateTests.cpp tests/LayoutTests.cpp
                           tests/TakeTests.cpp tests/ChordLibraryTests.cpp
-                          tests/McpTests.cpp)
+                          tests/McpTests.cpp tests/ChordShiftTests.cpp)
 target_include_directories(Keys_tests PRIVATE src)
 # juce_audio_basics is for ArpEngine's MidiBuffer/MidiMessage; the kit does not
 # re-export it.
