@@ -255,6 +255,23 @@ MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), processor(p
     addAndMakeVisible(legatoButton);
     legatoAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apLegato), legatoButton);
 
+    // KEY: this line's Root, Scale and Lock, on the strip beside From (2026-09-11). No
+    // attachment - it writes three parameters and reads all three back, so the menu sets them
+    // and refreshKeyChip() pulls them, the same division the rate readout already lives by.
+    keyButton.setTitle("Macro key " + letter);
+    keyButton.setTooltip("The key this line plays in, and whether it is held to it. Root and "
+                         "Scale each follow the Controls bar until you pick one here, and Lock "
+                         "is the bar's Lock unless you force it on or off for this line alone - "
+                         "so one line can sit in harmonic minor under another in major. The key "
+                         "does more than the lock: this line's Transpose lane, a Distance counted "
+                         "in scale degrees and STRAY's in-key notes all count degrees in the key "
+                         "named here. The chip lights when this line is snapping, and reads the "
+                         "key it is snapping to. Chord pads are never snapped - a stored chord is "
+                         "one you built.");
+    keyButton.onClick = [this] { showKeyMenu(); };
+    addAndMakeVisible(keyButton);
+    refreshKeyChip(); // so a card built on a session with an override opens showing it
+
     // From: who this line listens to (2026-09-01, the line bus). Every entry the parameter can
     // hold is in the list - the attachment maps index to item - and the ones this line may not
     // pick are greyed in place: item 2 is A, item 3 is B, item 4 is C, and a line may only
@@ -832,6 +849,113 @@ void MacroRow::stepRate(int delta)
     }
 }
 
+// This line's key, resolved once for both the chip and its menu. The bar's three parameters
+// read live rather than cached: Root and Scale are combos on the Controls bar and Lock is a
+// toggle beside them, so all three can move without this card hearing anything.
+arpkey::Key MacroRow::lineKey() const
+{
+    auto& apvts = processor.apvts;
+    const auto lineParam = [&apvts, this](KeysProcessor::ArpParam w)
+    { return (int) apvts.getRawParameterValue(KeysProcessor::arpParamId(line, w))->load(); };
+    return arpkey::resolve((int) apvts.getRawParameterValue("root")->load(),
+                           (int) apvts.getRawParameterValue("scale")->load(),
+                           apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
+                           lineParam(KeysProcessor::apRoot),
+                           lineParam(KeysProcessor::apScale),
+                           lineParam(KeysProcessor::apScaleLock));
+}
+
+void MacroRow::refreshKeyChip()
+{
+    const auto key = lineKey();
+    const auto text = arpkey::chipText(key);
+    if (text != lastKeyText)
+    {
+        lastKeyText = text;
+        keyButton.setButtonText(text);
+    }
+    // Lit = this line is snapping, in the line's own colour rather than the instance accent, so
+    // four cards read as four lines here exactly as they do on the band. Unlit is textDim and not
+    // textFaint: this is 9-11 px caps, the size the 2026-08-01 round proved needs the contrast.
+    // setColour repaints, hence the cache - see the note on this method in the header.
+    if (key.lock != lastKeyLit)
+    {
+        lastKeyLit = key.lock;
+        keyButton.setColour(juce::TextButton::textColourOffId,
+                            key.lock ? skin::lineAccent(line).base : skin::textDim);
+        keyButton.repaint();
+    }
+}
+
+// Three lists and a way back, in one left click. Each submenu's Global row says what following
+// the bar currently means, because "Global" alone makes you look up at the bar to find out - and
+// the bar is a long way from a card in a detached Arp window.
+void MacroRow::showKeyMenu()
+{
+    auto& apvts = processor.apvts;
+    const auto set = [&apvts](const juce::String& paramId, int index)
+    {
+        if (auto* p = apvts.getParameter(paramId))
+            p->setValueNotifyingHost(p->convertTo0to1((float) index));
+    };
+    const auto pid = [this](KeysProcessor::ArpParam w) { return KeysProcessor::arpParamId(line, w); };
+    const int curRoot = (int) apvts.getRawParameterValue(pid(KeysProcessor::apRoot))->load();
+    const int curScale = (int) apvts.getRawParameterValue(pid(KeysProcessor::apScale))->load();
+    const int curLock = (int) apvts.getRawParameterValue(pid(KeysProcessor::apScaleLock))->load();
+    const int barRoot = (int) apvts.getRawParameterValue("root")->load();
+    const int barScale = (int) apvts.getRawParameterValue("scale")->load();
+    const bool barLock = apvts.getRawParameterValue("scaleLock")->load() > 0.5f;
+
+    const auto roots = okstudio::scales::noteNames();
+    const auto scaleNames = okstudio::scales::names();
+
+    juce::PopupMenu rootMenu;
+    rootMenu.addItem("Global (" + roots[juce::jlimit(0, roots.size() - 1, barRoot)] + ")", true,
+                     curRoot == arpkey::followGlobal,
+                     [set, pid] { set(pid(KeysProcessor::apRoot), arpkey::followGlobal); });
+    rootMenu.addSeparator();
+    for (int i = 0; i < roots.size(); ++i)
+        rootMenu.addItem(roots[i], true, curRoot == i + 1,
+                         [set, pid, i] { set(pid(KeysProcessor::apRoot), i + 1); });
+
+    juce::PopupMenu scaleMenu;
+    scaleMenu.addItem("Global (" + scaleNames[juce::jlimit(0, scaleNames.size() - 1, barScale)] + ")",
+                      true, curScale == arpkey::followGlobal,
+                      [set, pid] { set(pid(KeysProcessor::apScale), arpkey::followGlobal); });
+    scaleMenu.addSeparator();
+    for (int i = 0; i < scaleNames.size(); ++i)
+        scaleMenu.addItem(scaleNames[i], true, curScale == i + 1,
+                          [set, pid, i] { set(pid(KeysProcessor::apScale), i + 1); });
+
+    juce::PopupMenu lockMenu;
+    lockMenu.addItem(juce::String("Global (") + (barLock ? "on" : "off") + ")", true,
+                     curLock == arpkey::lockGlobal,
+                     [set, pid] { set(pid(KeysProcessor::apScaleLock), arpkey::lockGlobal); });
+    lockMenu.addSeparator();
+    lockMenu.addItem("On", true, curLock == arpkey::lockOn,
+                     [set, pid] { set(pid(KeysProcessor::apScaleLock), arpkey::lockOn); });
+    lockMenu.addItem("Off", true, curLock == arpkey::lockOff,
+                     [set, pid] { set(pid(KeysProcessor::apScaleLock), arpkey::lockOff); });
+
+    const auto key = lineKey();
+    juce::PopupMenu m;
+    m.addSectionHeader("Line " + juce::String::charToString((juce::juce_wchar) ('A' + line)) + " key");
+    m.addSubMenu("Root", rootMenu, true, nullptr, curRoot != arpkey::followGlobal, 0);
+    m.addSubMenu("Scale", scaleMenu, true, nullptr, curScale != arpkey::followGlobal, 0);
+    m.addSubMenu("Lock", lockMenu, true, nullptr, curLock != arpkey::lockGlobal, 0);
+    m.addSeparator();
+    // Greyed rather than absent while the line already follows: a row that comes and goes is a
+    // row you have to hunt for, and its being greyed is itself the answer to "is this line
+    // following the bar?" for anyone who opened the menu to check.
+    m.addItem("Follow the global key", ! key.follows, false, [set, pid]
+    {
+        set(pid(KeysProcessor::apRoot), arpkey::followGlobal);
+        set(pid(KeysProcessor::apScale), arpkey::followGlobal);
+        set(pid(KeysProcessor::apScaleLock), arpkey::lockGlobal);
+    });
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&keyButton));
+}
+
 void MacroRow::refresh()
 {
     refreshRateMode(); // a host can automate the unit out from under us
@@ -855,6 +979,7 @@ void MacroRow::refresh()
                             ->load());
     syncShapeBox();
     refreshDice();
+    refreshKeyChip(); // three parameters, no attachment, and a host lane can move any of them
 
     // What this line is holding, and whether something is on its way. A launch waiting on a
     // quantize boundary says so, because otherwise the click looks like it did nothing.
@@ -1164,6 +1289,7 @@ void MacroRow::resized()
     anchorButton.setBounds(takeMod(arpMacroModAnchor));
     legatoButton.setBounds(takeMod(arpMacroModLegato));
     followsBox.setBounds(takeMod(arpMacroModFollows));
+    keyButton.setBounds(takeMod(arpMacroModKey));
     detailsButton.setBounds(takeMod(arpMacroModDetails));
 }
 } // namespace keys

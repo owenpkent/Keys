@@ -422,7 +422,15 @@ public:
                     // line's steps - its Rate, Swing, Dot, Tuplet and Anchor stop mattering,
                     // because it no longer has a clock of its own. See
                     // ArpEngine::Params::clockFollow and docs/LINE_INTERACTION.md.
-                    apClockFollow, numArpParams };
+                    apClockFollow,
+                    // Appended 2026-09-11 (Owen: "it'd be cool to have scale lock per
+                    // arpeggiator"). The line's own key: Root and Scale each name a key or
+                    // follow the Controls bar, ScaleLock is the bar's lock, forced on or forced
+                    // off. All three default to Global, so a saved session that has never heard
+                    // of them plays in the bar's key exactly as it always did - which is the
+                    // rare parameter append with nothing for a migration to backfill. See
+                    // keys::arpkey::resolve, the one place the three are read together.
+                    apRoot, apScale, apScaleLock, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).

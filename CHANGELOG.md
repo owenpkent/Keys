@@ -5,6 +5,58 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: every arpeggiator line has its own Root, Scale and Scale Lock
+
+**PARAMETER LAYOUT CHANGE.** `arpRoot`, `arpScale` and `arpScaleLock` are appended per line
+(`arp2Root` ... `arp4ScaleLock` for B, C and D), all three defaulting to **Global**. This is the
+one kind of append that costs a saved session nothing: absence is the default is "wear the
+Controls bar's key", so a session saved yesterday opens in the bar's key, snapping exactly where
+it snapped before, with nothing for a migration to backfill.
+
+Owen: *"I was saying it'd be cool to have scale lock per arpeggiator."*
+
+Root, Scale and Lock were one setting on the Controls bar, and the comment in `runArpLines`
+argued the case: a lock that held on one line and not another would not be a lock. The bar still
+holds every line by default, so that reading survives. What is new is that a line may say
+otherwise, and it may say it about the **key** as well as the lock.
+
+**The new control is a KEY chip on each macro card's bottom strip**, between From and Details.
+One left click opens `Root` / `Scale` / `Lock`, each list headed by a Global row that says what
+following the bar currently means ("Global (C)", "Global (Major)", "Global (on)") and ticked at
+the current value, with **Follow the global key** at the foot to put all three back. The chip's
+caption says *whose* key this line is in, reading `KEY` while it follows the bar and the key
+itself once it does not ("C# HARM", "D DOR"); its lit colour says whether the line is *snapping*,
+in that line's own colour. So a glance down four cards answers both questions, and a line that
+has overridden only its lock still prints the bar's key, because that is the key it is locked to.
+
+**Lock is a three-way choice, not a switch**, because "off" and "not overridden" are different
+answers. With the bar's Lock on, only `Off` frees that one line; with the bar's Lock off, `On`
+locks that one line and leaves the keybed and its siblings alone, which is the direction that was
+unreachable before.
+
+**The key reaches further than the snap, and that is the feature rather than a side effect.** A
+line's root and scale already fed its Transpose lane, a Distance counted in scale degrees and
+STRAY's in-key notes; all three now count degrees in the key named on that line's card. So line
+D can sit in harmonic minor under line A in major, running the same pattern through a different
+set of degrees. Chord pads are still never snapped: a stored chord is one you built.
+
+The engine did not change. `ArpEngine::Params::rootPc`, `scaleMask` and `scaleLock` were already
+per-line fields handed in by the processor, so the whole feature is which three values go into
+them: `keys::arpkey::resolve` in the new `src/ArpLineKey.h` is the one place the bar and a line's
+overrides are read together, by `runArpLines` on the audio thread and by the card's chip on the
+message thread.
+
+`get_state` reports the answer rather than the parameters: `keyRoot`, `keyScale` and `keyLock` per
+line, resolved, plus `keyFollowsGlobal`, which is the one thing resolution throws away and is
+worth saying, since "C Major because the bar says so" and "C Major because this line insists"
+behave differently the moment the bar moves.
+
+**The window's minimum width moved, 1320 to about 1448.** The bottom strip was already the macro
+card's wider row, so a cell there is two in `ArpPanel::minMacroWidth()` and two more in the
+editor's floor. The alternatives were the Shape row, which has 15 px of slack rather than a cell,
+or a second strip, which buys width with height: the wrong trade on a 1440p screen whose unfolded
+layout already wants 1392 px of it.
+
 ### Added: CLOCK - a line steps to another line's rhythm instead of its own
 
 **PARAMETER LAYOUT CHANGE.** `arpClockFollow` is appended per line, default **off**, right

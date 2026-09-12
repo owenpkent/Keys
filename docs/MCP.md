@@ -191,6 +191,13 @@ notes coming from" - a question this API could not answer at all until 2026-08-2
   *and* `follows` is non-empty - the same in-effect rule, since an illegal From hands the
   engine no record whatever ClockFollow says. True means this line has no clock of its own
   left: it steps once per hit of the line it follows instead of reading its own grid.
+- **`keyRoot`, `keyScale`, `keyLock` and `keyFollowsGlobal`** (2026-09-11) are this line's own
+  key, resolved rather than raw. `keyRoot` and `keyScale` are note and scale names, the same
+  shape as the bar's own `root` and `scale`; `keyLock` is the plain bool Lock resolves to, not
+  the three-way Global/On/Off the parameter itself stores; `keyFollowsGlobal` is true only
+  while all three still read Global, the same in-effect reporting `follows` uses. A script
+  never has to redo the three-way read `keys::arpkey::resolve()` already did - a line with its
+  own key open reports that key here, not the Controls bar's.
 - **`soundingNoteCount` and `sequence` are what the line is actually sounding**,
   whatever the source. `soundingNoteCount` counts the notes the engine holds;
   `sequence` is the pitches it walks, in the order the Shape and octave stack put

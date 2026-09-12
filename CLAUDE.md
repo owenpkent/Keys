@@ -93,6 +93,9 @@ reasoning is one search away.
   the only playhead reader in Keys, and only while its rate is in Sync.
 - `ArpRateText.h` - the rate dial's two `juce::String` formatters (Sync's exact fraction of a
   bar, Hz's decimals by decade), split out of `ArpEngine.h` so that header stays UI-free.
+- `ArpLineKey.h` - a line's own key: the three-way read of Root, Scale and Lock between the
+  Controls bar and a per-line override, the scale mask it hands the engine, and the text the KEY
+  chip prints. Pure, and read from both threads, which is why it is one header and not two copies.
 - `NoteMath.h` - which MIDI note a drawn key sends: the scale-lock snap, then the octave.
 - `Chords.h` - naming a chord from its sounding notes. `ChordSuggest.h` - where one could go next.
 - `ScaleModes.h` - the modes generation reads. Not the kit's scale table: it answers a quality
@@ -197,12 +200,20 @@ took, through the per-line `trackHeldByLine` mask, never what the track holds. (
 **`arpTrackMidi`, appended, global, default false. PARAMETER LAYOUT CHANGE.**, and **The falling
 edge must release what the *line* took, never what the *track* holds**)
 
-**Scale Lock reaches the line's output.** `NoteMath::resolveOutputNote` snaps what you play into
-a line; `ArpEngine::snapToMask`, called in `addHit`, snaps what the line plays out, in the one
-place every emitted pitch passes through, and *before* the dedup, because two pitches rounding
-onto one must collapse to one hit. It is global, and chord pads are untouched: a stored chord is
-one you built. (DECISIONS.md: **Scale Lock reaches the line's output.**, and **The played note is
-resolved at press time**)
+**Scale Lock reaches the line's output, and every line has its own key.**
+`NoteMath::resolveOutputNote` snaps what you play into a line; `ArpEngine::snapToMask`, called in
+`addHit`, snaps what the line plays out, in the one place every emitted pitch passes through, and
+*before* the dedup, because two pitches rounding onto one must collapse to one hit. Chord pads are
+untouched: a stored chord is one you built.
+**The key is per line since 2026-09-11.** `arpRoot` / `arpScale` / `arpScaleLock` default to
+**Global**, which is the Controls bar's Root, Scale and Lock - so the bar is the default every
+line inherits and the keybed's own snap is always the bar's. `keys::arpkey::resolve` is the one
+place the bar and a line's overrides are read together, by `runArpLines` on the audio thread and
+by the card's KEY chip on the message thread; Lock is a three-way choice because a bool cannot
+say "whatever the bar says". A line's root and scale also drive its Transpose lane, a Distance
+counted in degrees and STRAY's in-key zone, so a line in its own key walks its own degrees.
+(DECISIONS.md: **A line has its own key, not just its own lock (2026-09-11).**, **Scale Lock
+reaches the line's output.**, and **The played note is resolved at press time**)
 
 **Eight chord sources, one voicing pipeline, in that order.** `ChordGenMenu::generateChords`
 dispatches all but Markov, which keeps its own paths. Whatever any of them produced then runs
@@ -253,8 +264,10 @@ window opens at its content's height, and its resize floor tracks it**)
 
 **The macro card is eleven knobs and two rows, and both rows are floors.** The `Knob` enum is UI
 indexing and nothing stores it, so inserting there is free: OctShift, Gate, Density, Duck,
-Mutate, Stray, Lock, Swing, Offset, Vel, H.Time. The bottom strip's six chips and the chord
-readout are the wider of the card's two rows, so `minMacroWidth()` takes the larger. Anything
+Mutate, Stray, Lock, Swing, Offset, Vel, H.Time. The bottom strip's seven chips and the chord
+readout are the wider of the card's two rows, so `minMacroWidth()` takes the larger - and KEY, the
+seventh (2026-09-11), is what took the editor's minimum width from 1320 to about 1448, since a
+cell on this row is two cards' worth. Anything
 fixed-size on the top row (the dice, the Keybed chip) is reserved *before* Shape takes its cut,
 and Shape is capped rather than merely elastic. Nothing on a card is ever disabled: an off line
 is scrimmed, so a chord dropped on it still lands. (DECISIONS.md: **DENSITY is `arpChance` given
@@ -643,7 +656,13 @@ Four things will bite otherwise:
   naming a source in effect, it greys the rate dial and its steppers, Sync/Hz, Dot, Tuplet, Anchor
   and Swing on the card and the Play page, and the Cards page's rhythm dividers with them;
   `arpLineIsClocked` in `MacroRow.h` is the one test the card, the panel and `get_state`'s
-  `clocked` field all share). `Macro trip A` was the name until 2026-08-03, when
+  `clocked` field all share) and, from 2026-09-11, `Macro key A` through `D`, the chip on the
+  bottom strip between `Macro follows` and `Macro details` that opens this line's Root / Scale /
+  Lock menu. It is a `TextButton`, so it offers an InvokePattern and a script can open the menu,
+  but its *caption* is data rather than a word - "KEY" while the line follows the Controls bar,
+  "C# HARM" once it does not - so never look for it by text, and do not expect the key it prints
+  to be the bar's. The three rows inside are submenus, which UIA reaches as menu items under the
+  popup rather than under the card. `Macro trip A` was the name until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
   first-match caveat. `Macro OCT A` / `Macro GATE A` /

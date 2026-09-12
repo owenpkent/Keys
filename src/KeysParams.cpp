@@ -1,4 +1,5 @@
 #include "KeysParams.h"
+#include "ArpLineKey.h" // arpkey::rootChoices/scaleChoices/lockChoices, the per-line key lists
 #include "ArpRateText.h" // arptext::rateHzText, for the arpRateHz parameter's own text function
 #include "ChordSources.h" // the Progression picker's item list is that table's own
 #include "PluginProcessor.h" // the ArpParam enum, arpParamId and numArpLines; see KeysParams.h
@@ -715,6 +716,28 @@ void addArpLineParams(juce::AudioProcessorValueTreeState::ParameterLayout& layou
     // lines exactly as deaf to each other as they were.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("ClockFollow"), 1 },
                                                     nm + " Clock Follow", false));
+
+    // **The line's own key** (2026-09-11, Owen: "I was saying it'd be cool to have scale lock
+    // per arpeggiator"). Root and Scale name the key this line walks in and Scale Lock says
+    // whether its output is snapped to it; each can instead say **Global**, which is the
+    // Controls bar's own Root, Scale and Lock and is every one of their defaults.
+    //
+    // Global as index 0 is what makes three parameters per line cost a saved session nothing:
+    // absence is the default is "follow the bar", so a session saved before today opens in the
+    // bar's key and sounds exactly as it did. It is also why Lock is a *choice* here where the
+    // bar's own `scaleLock` is a bool - a bool cannot say "whatever the bar says", and the
+    // difference between "off" and "not overridden" is the whole control.
+    //
+    // The two key parameters reach further than the snap does, and that is the point rather
+    // than a side effect: `rootPc` and `scaleMask` already fed the Transpose lane, a Distance
+    // counted in scale degrees and Stray's in-key zone, so a line put in its own key walks its
+    // own degrees as well. Keys' whole Root/Scale apparatus goes per line in one move.
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Root"), 1 }, nm + " Root",
+                                                      arpkey::rootChoices(), arpkey::followGlobal));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("Scale"), 1 }, nm + " Scale",
+                                                      arpkey::scaleChoices(), arpkey::followGlobal));
+    layout.add(std::make_unique<AudioParameterChoice>(ParameterID { id("ScaleLock"), 1 }, nm + " Scale Lock",
+                                                      arpkey::lockChoices(), arpkey::lockGlobal));
 }
 
 // The names the harmony combos show, built from the one table in KeysParams.h that also holds
