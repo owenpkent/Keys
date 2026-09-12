@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../ChordShift.h" // keys::chordshift::voicesFor, the keybed chord's own fan-out
 #include "../PluginProcessor.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
@@ -21,6 +22,13 @@ namespace keys
 // The output MIDI note is resolved once, at press time (outputNote), and remembered in
 // `sounding`, so a note-off always matches its note-on even if octave or scale change
 // while it rings.
+//
+// One drawn key can sound more than one MIDI note: with the keybed chord on (ChordShift.h),
+// pressing a key fans out into the played note plus up to six shifted voices, all computed
+// once at press time from whatever `KeysProcessor::keybedChordShifts()` says *then* - never
+// recomputed later - so `sounding` maps a drawn id to every voice that key opened, and release
+// walks that same list rather than asking the shifts again. A shift dragged while the key is
+// still held must not be able to strand a note the release no longer knows to ask for.
 //
 // Mouse: left click plays, left drag glides (monophonic; with the pedal down the trail
 // keeps ringing).
@@ -99,6 +107,15 @@ public:
     // Chord-pad recall: latch the drawn keys that produce these output notes, so a
     // stored chord comes back onto the surface for editing (Octavium's drag-to-edit).
     // Notes with no drawn key on the current surface are skipped.
+    //
+    // This is the *only* path a stored chord takes onto this surface (both the pad's
+    // right-click "Edit on keyboard" and the drag-to-edit recall route through it and nowhere
+    // else), so it is also where the keybed chord's fan-out gets out of the way: from this call
+    // until the surface next falls silent, refresh() reproduces exactly the notes it is asked
+    // for - these and any further key the user latches on top while editing - and never thickens
+    // any of them into a chord of their own. A stored chord is one the user built; fanning it out on the way
+    // back into `setChordPad` would silently rewrite what "Edit on keyboard" is meant to be
+    // naming. See `editingChord` and its one other use, in refresh().
     virtual void recallOutputNotes(const std::vector<int>& notes);
 
     // Supplied by the editor: current note velocity, 0..1.
@@ -141,11 +158,19 @@ protected:
     std::set<int> pressed;       // drawn ids under the active mouse gesture
     std::set<int> latched;       // drawn ids toggled on (Latch mode or right-click)
     std::set<int> sustained;     // drawn ids captured by the sustain pedal
-    std::map<int, int> sounding; // drawn id -> output note currently on
+    // drawn id -> every output note currently on for it, played note first (ChordShift.h's own
+    // order) - one entry without the keybed chord, up to seven with it. See the class comment.
+    std::map<int, std::vector<int>> sounding;
     std::vector<int> voiceOrder; // drawn ids in the order they started (FIFO, for stealing)
     int dragDrawn = -1;
     bool rightGesture = false;   // a right-click hold/release is in flight; ignore its drag/up
     bool releaseGesture = false; // this click released a sustained note; ignore its drag/up
+    // True from a recallOutputNotes() call until this surface next falls silent (and on
+    // panic(), which is one way of falling silent): a stored chord is being edited, so refresh()
+    // must not fan any key on this surface out into a chord of its own. Emptying the surface is
+    // the boundary rather than panic() alone because one of the two recall paths never panics -
+    // refresh() carries the whole argument at the point it clears this.
+    bool editingChord = false;
 
 private:
     void timerCallback() override; // polls the processor's sounding generation, repaints on change

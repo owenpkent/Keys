@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ArpEngine.h"
+#include "ChordShift.h" // keys::chordshift::numShifts, for keybedChordShifts()'s return type
 #include "LayoutState.h"
 #include "TakeRecorder.h"
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -176,6 +177,13 @@ public:
     int octaveShift() const;   // -5..+5, in octaves
     float baseVelocity01() const; // midpoint of the velocity range, 0..1 (Humanize re-rolls it per note)
     int polyphonyCap() const;  // 0 = unlimited, else max simultaneous notes
+
+    // The keybed's own chord (ChordShift.h): whether NoteSurface::refresh() should fan a
+    // pressed key out into a chord at all, and the six shifts to fan it out by when it should.
+    // Plain accessors over the two APVTS reads, the same shape baseVelocity01() takes just
+    // above, so the surface that actually fires the notes never touches apvts directly.
+    bool keybedChordOn() const;
+    std::array<int, keys::chordshift::numShifts> keybedChordShifts() const;
 
     // Chord pads: capture a chord's notes into a slot, click to play/stop it. The pad
     // definitions persist with the session; playback goes through the same note path.

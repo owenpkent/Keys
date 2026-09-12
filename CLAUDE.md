@@ -97,6 +97,9 @@ reasoning is one search away.
   Controls bar and a per-line override, the scale mask it hands the engine, and the text the KEY
   chip prints. Pure, and read from both threads, which is why it is one header and not two copies.
 - `NoteMath.h` - which MIDI note a drawn key sends: the scale-lock snap, then the octave.
+- `ChordShift.h` - the keybed's own chord: six fixed semitone shifts, the ten one-click shapes
+  that fill them, and the caption the Keyboard bar's chip prints. Semitones and not scale
+  degrees by Owen's call; Scale Lock governs the key you click and never the shifts.
 - `Chords.h` - naming a chord from its sounding notes. `ChordSuggest.h` - where one could go next.
 - `ScaleModes.h` - the modes generation reads. Not the kit's scale table: it answers a quality
   per degree as well as membership.
@@ -126,6 +129,8 @@ reasoning is one search away.
   its tray of candidates with the reference card, and its read-only diagram of the source.
 - `ChordLibraryPanel.{h,cpp}` - the library window: twelve rows a page, Hear, place, star, Follows.
 - `TakePanel.{h,cpp}` - the take's own window. A view of `takeNotes()`, never an editor.
+- `ChordShiftPanel.{h,cpp}` - the keybed chord's window: the On switch, the one-click shape
+  row, and six `-`/`+` shift rows. Opened by the Chord chip, which only opens it.
 - `KnobBank.{h,cpp}` with `CCMenu.h` - the eight assignable CC knobs and their one-click picker.
 - `RangeKnob.h` - a rotary whose own arc is a band, with the satellite that drags it.
   `RangeSlider.h` - the two-value slider under Strum and the pads' Humanize.
@@ -139,8 +144,8 @@ reasoning is one search away.
 `src/host/` is Keys Host: `KeysHostProcessor` runs one instrument VST3 in-process,
 `KeysHostEditor` owns the window and the instrument chip's menu. `src/mcp/KeysMcp.{h,cpp}`
 registers the tools on the kit's MCP server. `tests/` holds `ArpTests`, `StateTests`,
-`LayoutTests`, `TakeTests`, `ChordSourceTests`, `ChordLibraryTests`, `MarkovTests` and
-`McpTests`, all run from `KeysTests.cpp`.
+`LayoutTests`, `TakeTests`, `ChordSourceTests`, `ChordLibraryTests`, `MarkovTests`,
+`ChordShiftTests` and `McpTests`, all run from `KeysTests.cpp`.
 
 ### The rules
 
@@ -214,6 +219,20 @@ say "whatever the bar says". A line's root and scale also drive its Transpose la
 counted in degrees and STRAY's in-key zone, so a line in its own key walks its own degrees.
 (DECISIONS.md: **A line has its own key, not just its own lock (2026-09-11).**, **Scale Lock
 reaches the line's output.**, and **The played note is resolved at press time**)
+
+**One click can be seven notes, and the fan-out lives at the surface.** With the Keyboard bar's
+Chord chip on, `NoteSurface::refresh()` turns each newly pressed key into `chordshift::voicesFor`'s
+stack - the played note plus up to six fixed **semitone** shifts - and `sounding` maps that drawn
+key to **every** voice it opened. Release walks that stored list and never re-reads the shifts, or
+a shift moved mid-hold picks a different set to turn off than the set that went on. It is here and
+not in `KeysProcessor::noteOn` because this is the one place a click becomes a note; `noteOn` would
+have caught every other dest-0 caller and needed a recursion guard. The shifts are never re-snapped
+by Scale Lock - Lock chooses the root you clicked, the shape chooses the chord - and the stack
+feeds the track output and any line with Keybed on, exactly as a held chord does. **Recalling a
+stored chord onto the keybed suppresses the fan-out until the surface next falls silent**, checked
+at the end of `refresh()`: a stored chord is one you built, and one of the two recall paths never
+panics, so panic() is not a boundary that always arrives. (DECISIONS.md: **The keybed plays chords,
+and the shifts are semitones on purpose (2026-09-11).**)
 
 **Eight chord sources, one voicing pipeline, in that order.** `ChordGenMenu::generateChords`
 dispatches all but Markov, which keeps its own paths. Whatever any of them produced then runs
@@ -704,7 +723,14 @@ Four things will bite otherwise:
   throws can leave the combo's popup open as a top-level window, after which every subsequent
   lookup roots itself on that popup: the tell is a capture that comes out about 156x159, and
   the only way back is to restart the app. Budget for it, or drive the parameter another way.
-- **Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
+- **The keybed chord's own names (2026-09-11).** The Keyboard bar's chip is `Keybed chord` - not
+its caption, which changes with the shifts ("Chord", "Min7", "4 notes") and so cannot be asked for
+by text. It opens the **`Keys Chord`** window, which is a window and not a section, so pass
+`-WindowTitle "Keys Chord"` to capture it and enumerate that top-level element yourself to drive
+anything inside it - the trap at the top of this section, since the chip lives on the main window
+and opening a second window moves `MainWindowHandle`.
+
+**Close Keys Host politely, never `Stop-Process`.** A forced kill skips JUCE's settings
   write and loses the loaded synth. `-KeepOpen`, then `close_running` out of `run.py`.
 
 ## Conventions

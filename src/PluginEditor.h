@@ -6,6 +6,7 @@
 #include "ui/ChordGenPanel.h"
 #include "ui/ChordLibraryPanel.h"
 #include "ui/ChordPads.h"
+#include "ui/ChordShiftPanel.h"
 #include "ui/DetachedWindow.h"
 #include "ui/KeysLookAndFeel.h"
 #include "ui/KnobBank.h"
@@ -140,6 +141,7 @@ private:
     void timerCallback() override;
     void pullLayoutToggles();
     void pullKeyboardBar();
+    void pullChordChip(); // the keybed chord chip's caption: keys::chordshift::chipText
     void pullHostTempo();
     void pullKeybedModes();
     void pullArpHoldOff();
@@ -197,6 +199,13 @@ private:
     // and a pair here.
     void setChordLibWindowOpen(bool);
     void rememberChordLibBounds();
+
+    // The keybed's own chord window: the same not-a-section shape as the two above, opened from
+    // a chip on the Keyboard bar. Its bounds are session-only rather than kept in LayoutState -
+    // that struct belongs to the other half of this feature - the same shape
+    // `takeWindowBounds` already is, and for the same reason: nothing here is lost by forgetting
+    // where it was left between runs.
+    void setChordShiftWindowOpen(bool);
     // Places a section's Detach button, plus anything travelling with it, at the right-hand
     // end of `row`, and hands back what is left for that section's own controls. `onBar` says
     // which of the two rows this is - the section bar, or the strip a detached window carries
@@ -331,6 +340,13 @@ private:
     std::unique_ptr<DetachedWindow> chordGenWindow;
     std::unique_ptr<DetachedWindow> chordLibWindow;
 
+    // The keybed chord's window: same DetachedWindow shape, but its bounds live on this object
+    // rather than in LayoutState (see setChordShiftWindowOpen) - this run only, the reason
+    // takeWindowBounds beside it is not persisted either.
+    std::unique_ptr<ChordShiftPanel> chordShiftPanel;
+    std::unique_ptr<DetachedWindow> chordShiftWindow;
+    juce::Rectangle<int> chordShiftWindowBounds;
+
     juce::ComboBox sizeBox, rootBox, scaleBox, channelBox, chordStrumDirBox, polyphonyBox;
     juce::Label sizeLabel, rootLabel, scaleLabel, channelLabel, chordStrumDirLabel, polyphonyLabel;
     // No BPM slider in the band since 2026-08-02: the tempo is a number on the Controls
@@ -380,6 +396,13 @@ private:
     juce::ToggleButton humanizeButton { "Humanize" };
     juce::ToggleButton chordExclusiveButton { "Exclusive" };
     juce::TextButton panicButton { "All Off" };
+
+    // The keybed's own chord (2026-09-11): opens ChordShiftPanel below rather than toggling
+    // anything itself - the panel holds the On switch, so a click here is one action rather
+    // than a toggle-and-open sharing one target. Caption from keys::chordshift::chipText,
+    // refreshed by pullChordChip(); width from keyboardbar::chordChipWidth(), measured against
+    // keys::chordshift::allChipTexts() rather than written down.
+    juce::TextButton chordChipButton;
 
     // --- Take: REC and the chip that gets it out -----------------------------------------
     // Both ride the *Keyboard* bar, beside Exclusive / Sustain / Latch / All Off, and neither

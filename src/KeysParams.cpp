@@ -1,6 +1,7 @@
 #include "KeysParams.h"
 #include "ArpLineKey.h" // arpkey::rootChoices/scaleChoices/lockChoices, the per-line key lists
 #include "ArpRateText.h" // arptext::rateHzText, for the arpRateHz parameter's own text function
+#include "ChordShift.h" // chordshift::numShifts/minShift/maxShift, the keybed chord's own range
 #include "ChordSources.h" // the Progression picker's item list is that table's own
 #include "PluginProcessor.h" // the ArpParam enum, arpParamId and numArpLines; see KeysParams.h
 #include "ScaleModes.h"
@@ -337,6 +338,38 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     // windows. Appended last, the usual rule.
     layout.add(std::make_unique<AudioParameterBool>(ParameterID { "arpTrackMidi", 1 },
                                                     "Track MIDI to Arp", false));
+
+    // **The keybed's own chord** (2026-09-11, Owen pointing at Ableton's Chord device: "doesn't
+    // need to stay in scale"). One switch and six shifts, read by ChordShift.h's own logic - see
+    // that file for why the shifts are semitones rather than scale degrees, what a shift of zero
+    // means, and why six is the ceiling. Scope is the keybed only: nothing here touches a chord
+    // pad, the arp or the generator.
+    //
+    // **Seven appended globals, and every one of them defaulting to off or zero is the whole
+    // migration story - there isn't one.** A session saved before today has none of these ids,
+    // so APVTS hands each its default the moment it creates the parameter: `keyChord` false is
+    // "the keybed plays exactly what you click", which is what every existing session already
+    // sounds like, and the six shifts at 0 change nothing regardless, since `keyChord` off never
+    // reads them and a shift of 0 is `voicesFor`'s own definition of "off" besides. That is
+    // unlike `arpTrackMidi` just above, whose default flip is a real behaviour change for an old
+    // session - this is a brand-new feature arriving absent, and absent is silent.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { "keyChord", 1 }, "Keybed Chord", false));
+    for (int i = 1; i <= chordshift::numShifts; ++i)
+    {
+        // One text function for all six, printed as a signed semitone count ("+3 st", "0 st",
+        // "-12 st") rather than the bare float NormalisableRange would otherwise show - the same
+        // reason arpRateHz above carries one, and the one place any of the six is read back as a
+        // string (a host's generic editor, an MCP listing) rather than through ChordShift.h.
+        layout.add(std::make_unique<AudioParameterFloat>(
+            ParameterID { "keyChordShift" + String(i), 1 }, "Chord Shift " + String(i),
+            NormalisableRange<float>((float) chordshift::minShift, (float) chordshift::maxShift, 1.0f), 0.0f,
+            AudioParameterFloatAttributes()
+                .withStringFromValueFunction([](float v, int) {
+                    const int st = (int) std::round(v);
+                    return String(st > 0 ? "+" : "") + String(st) + " st";
+                })
+                .withValueFromStringFunction([](const String& s) { return s.getFloatValue(); })));
+    }
 
     return layout;
 }

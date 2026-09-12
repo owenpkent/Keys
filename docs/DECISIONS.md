@@ -7,6 +7,55 @@ so the top of the file is the most recent round and the bottom is the oldest thi
 standing. A superseded claim is kept where it sits and marked there rather than deleted, because
 knowing why a rule existed is what stops it being reinvented.
 
+**The keybed plays chords, and the shifts are semitones on purpose (2026-09-11).** Owen asked for
+it by showing a screenshot rather than describing it: Ableton's **Chord** device (Shift 1 at +3,
+Shift 2 at +7) feeding its **Scale** device (Base E, E Minor) into an Operator, with the words
+*"like this"* and, when offered a diatonic reading instead, *"doesn't need to stay in scale"*. The
+dictated ask that opened the round - *"scale, degree, shape, you can play the same thing with one
+click"* - names the three things that screenshot is made of: the scale, the degree you click, and
+the interval stack on top of it.
+
+`keyChord` plus six `keyChordShift*` globals, all defaulting to off, and `src/ChordShift.h` holding
+the resolution, the ten one-click shapes and the chip's caption - pure and header-only for the
+reason `ArpLineKey.h` and `ArpRateText.h` are, since the surface that fires the notes and the chip
+that names them must not each carry their own copy of the rule.
+
+**Keys collapses two devices into one, and then declines the thing that would have made it three.**
+Ableton needs Chord *and* Scale in that screenshot because Chord's shifts are fixed semitones and
+walk straight out of the key; Scale is there to clean up after it. Keys already knows the key, so a
+diatonic version was the obvious build - and was offered and refused. A shift that is always +4
+gives the major third over a minor degree, which is the sound you reach for the device to get.
+**Scale Lock governs the key you click and nothing else**: `NoteMath::resolveOutputNote` resolves
+the played note as it always has, and the shifts stack on what comes out and are never re-snapped.
+Lock chooses the root, the shape chooses the chord, and those were two questions with one answer
+until today.
+
+**A shift of zero is a voice that is off**, which is what holds this to seven parameters instead of
+thirteen and makes every default mean "absent". The cost is a voice that doubles the root at
+unison, which Ableton's device cannot play either.
+
+**The fan-out lives at the surface, not in `noteOn`.** `NoteSurface::refresh()` is the one place a
+click becomes a note, so it is where a click becomes seven; putting it in `KeysProcessor::noteOn`
+would have caught every other dest-0 caller - the generator's audition among them - and needed a
+recursion guard besides. Each drawn key now maps to **every** voice it opened, and release walks
+that stored list rather than asking the parameters again: a shift moved while the key is still held
+must not be able to pick a different set of notes to turn off than the set that went on.
+
+**An edit session ends when the surface falls silent, and finding that boundary was the round's
+real bug.** Recalling a stored chord onto the keybed suppresses the fan-out, because a stored chord
+is one you built and thickening it on the way back into the pad would silently rewrite it. The
+first cut cleared that suppression in `panic()` and asserted both exit paths panicked. They do not:
+dragging a pad onto the live chord card (`ChordPads::onRecall`) deliberately panics on neither
+side, because a panic there takes every other sounding chord in the plugin with it - the reason is
+written out beside the card's own octave and voicing rows. One such drag therefore left the flag
+stuck true and the keybed quietly unable to make a chord for the rest of the session. **This is
+CLAUDE.md's "a fix that names its call sites one at a time is only as complete as that list"
+arriving again**, and the list was wrong. Emptying the surface is the one thing both paths must do
+to finish, so it is the boundary - checked at the **end** of `refresh()`, after the press loop,
+because `recallOutputNotes` sets the flag and then calls `refresh()` itself, and nothing is
+sounding yet at the top of that call: asked any earlier, the check clears the flag a few lines
+before the notes it was set to protect are fanned out. Both placements are pinned by a test.
+
 **A line has its own key, not just its own lock (2026-09-11).** Owen: *"I was saying it'd be
 cool to have scale lock per arpeggiator."* Offered the plain reading (four independent locks over
 the bar's key), the conservative one (a three-state lock per line, the key still global) and the

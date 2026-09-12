@@ -121,7 +121,8 @@ std::map<int, int> NoteSurface::externallySounding() const
     // beside the one the user actually touched.
     std::set<int> own;
     for (const auto& kv : sounding)
-        own.insert(kv.second);
+        for (const int n : kv.second)
+            own.insert(n);
 
     std::map<int, int> out;
     for (int note = 0; note < 128; ++note)
@@ -209,7 +210,9 @@ std::vector<int> NoteSurface::proposedChordNotes(bool includeSustained) const
         // pressed or latched still counts, whether or not the pedal also caught it.
         if (sustained.count(drawn) > 0 && pressed.count(drawn) == 0 && latched.count(drawn) == 0)
             continue;
-        out.push_back(kv.second);
+        // Every voice this key opened, chord fan-out included: a proposed chord is what the
+        // keybed is actually sounding for the key, not just the note you clicked.
+        out.insert(out.end(), kv.second.begin(), kv.second.end());
     }
     std::sort(out.begin(), out.end());
     out.erase(std::unique(out.begin(), out.end()), out.end());
@@ -237,12 +240,18 @@ void NoteSurface::panic()
     dragDrawn = -1;
     rightGesture = false;
     releaseGesture = false; // both gesture flags, or a panic mid-gesture strands the other one
+    editingChord = false;   // ends any edit session recallOutputNotes started; see its comment
     refresh();
     processor.allNotesOff(); // belt-and-braces across all channels
 }
 
 void NoteSurface::recallOutputNotes(const std::vector<int>& notes)
 {
+    // See the declaration's comment: this is the only path a stored chord takes onto this
+    // surface, so from here until the next panic() the chord fan-out gets out of the way
+    // entirely, for these notes and for every further key latched on top of them.
+    editingChord = true;
+
     bool changed = false;
     for (const int note : notes)
     {
@@ -261,7 +270,7 @@ std::vector<int> NoteSurface::soundingOutputNotes() const
 {
     std::vector<int> out;
     for (const auto& kv : sounding)
-        out.push_back(kv.second);
+        out.insert(out.end(), kv.second.begin(), kv.second.end());
     std::sort(out.begin(), out.end());
     out.erase(std::unique(out.begin(), out.end()), out.end());
     return out;
@@ -299,7 +308,14 @@ void NoteSurface::refresh()
     {
         if (want.find(it->first) == want.end())
         {
-            processor.noteOff(it->second, noteChannel());
+            // Release every voice this key opened - the list refresh() itself stored at press
+            // time - and never the shifts as they read *now*. Recomputing here would let a
+            // shift moved while the key was still held pick a different set of notes to turn
+            // off than the set that actually went on, stranding whichever one it forgot: the
+            // owner of a sounding pitch has to release exactly what it took (CLAUDE.md's one
+            // note-on per sounding pitch, released by the last owner).
+            for (const int n : it->second)
+                processor.noteOff(n, noteChannel());
             it = sounding.erase(it);
         }
         else
@@ -314,10 +330,39 @@ void NoteSurface::refresh()
         if (sounding.find(drawn) == sounding.end())
         {
             const int out = outputNote(drawn);
-            processor.noteOn(out, vel, 0.0, noteChannel());
-            sounding[drawn] = out;
+            // Fanned out once, at the moment this key starts sounding, from whatever the shift
+            // parameters say *right now* - and never again for this key (see the release loop
+            // above). Suppressed while `editingChord`: recallOutputNotes() is the only path a
+            // stored chord takes onto this surface, and thickening it here would silently
+            // rewrite the chord an "Edit on keyboard" session is writing back into a pad. A
+            // stored chord is one the user built.
+            const auto voices = (processor.keybedChordOn() && ! editingChord)
+                                     ? chordshift::voicesFor(out, processor.keybedChordShifts())
+                                     : std::vector<int> { out };
+            for (const int n : voices)
+                processor.noteOn(n, vel, 0.0, noteChannel());
+            sounding[drawn] = voices;
         }
     }
+
+    // **An edit session ends when the surface falls silent, and that is the boundary that always
+    // arrives.** `panic()` alone was not enough: the *other* recall path - dragging a filled pad
+    // onto the live chord card (`ChordPads::onRecall` -> `PluginEditor.cpp`'s
+    // `keyboard.recallOutputNotes`) - deliberately does not panic on either side, because a panic
+    // there would take every other sounding chord in the plugin with it (the reason is written
+    // out at ChordPads.cpp's octave/voicing rows). Clearing only in panic() therefore left
+    // `editingChord` stuck true after one such drag, and a stuck flag here does not look like a
+    // bug: the keybed just quietly stops making chords for the rest of the session. Emptying the
+    // surface is the one thing both paths must do to finish, so it is the boundary.
+    //
+    // **At the end of refresh(), after the press loop, and that placement is load-bearing.**
+    // recallOutputNotes() sets the flag and then calls refresh() itself, and at the top of that
+    // call nothing is sounding yet - so a check before the press loop clears the flag a few lines
+    // before the notes it was set to protect get fanned out, which is precisely the bug this
+    // whole boundary exists to prevent, arriving by the other door. Asked at the end, the
+    // question is "did this pass leave the surface silent", which is the one that means finished.
+    if (sounding.empty())
+        editingChord = false;
 
     // Rebuild the FIFO voice order: keep still-sounding notes in their existing order,
     // then append any newly-sounding ones.

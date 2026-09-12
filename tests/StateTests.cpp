@@ -1409,6 +1409,11 @@ public:
             };
             static const char* const globalsAfterLines[] = {
                 "arpQuantize", "bpm", "bpmSync", "arpTrackMidi",
+                // Appended 2026-09-11: the keybed's own chord (ChordShift.h). `keyChord` off
+                // and all six shifts at 0 is "the keybed plays exactly what you click", so a
+                // session that predates them opens sounding exactly as it did.
+                "keyChord", "keyChordShift1", "keyChordShift2", "keyChordShift3",
+                "keyChordShift4", "keyChordShift5", "keyChordShift6",
             };
             expectEquals((int) (sizeof(perLineSuffixes) / sizeof(perLineSuffixes[0])),
                          (int) KeysProcessor::numArpParams,
