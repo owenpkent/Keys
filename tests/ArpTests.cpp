@@ -1,4 +1,5 @@
 #include "../src/ArpEngine.h"
+#include "../src/ArpLineKey.h"
 #include "../src/ArpRateText.h"
 #include "../src/EuclidGen.h"
 #include <juce_core/juce_core.h>
@@ -3469,6 +3470,113 @@ public:
                 expect(b >= 0 && b <= 1,
                        "note " + juce::String(note) + " left the run " + juce::String(b)
                            + " note-ons deep");
+        }
+
+        // --- A line's own key (2026-09-11) ------------------------------------------------
+        //
+        // Owen: "it'd be cool to have scale lock per arpeggiator". Root, Scale and Lock became
+        // three per-line parameters over the Controls bar's, and `arpkey::resolve` is the one
+        // place the three are read together - by runArpLines on the audio thread and by the macro
+        // card's KEY chip on the message thread. So it is resolution, not the snap, that these
+        // pin: the snap itself is the three tests above, unchanged, and what is new is *which
+        // mask and which root* a line hands them.
+
+        beginTest("a line's key follows the Controls bar until the line overrides it");
+        {
+            using namespace arpkey;
+            // The bar in D (rootPc 2) Dorian (kit index 4), locked.
+            const auto bar = [](int lineRoot, int lineScale, int lineLock)
+            { return resolve(2, 4, true, lineRoot, lineScale, lineLock); };
+
+            const auto following = bar(followGlobal, followGlobal, lockGlobal);
+            expectEquals(following.rootPc, 2, "Global root is the bar's root");
+            expectEquals(following.scaleIndex, 4, "Global scale is the bar's scale");
+            expect(following.lock, "Global lock is the bar's lock");
+            expect(following.follows, "nothing overridden is a line that follows");
+
+            // Each override is independent of the other two, which is the whole point of three
+            // parameters rather than one: a line can take the bar's key and refuse its lock, or
+            // take its lock and sit in another key.
+            const auto ownRoot = bar(8, followGlobal, lockGlobal); // index 8 = the 7th note name
+            expectEquals(ownRoot.rootPc, 7, "an overridden root is its list index less one");
+            expectEquals(ownRoot.scaleIndex, 4, "... and leaves the scale following");
+            expect(ownRoot.lock, "... and leaves the lock following");
+            expect(! ownRoot.follows, "one override is enough to stop following");
+
+            const auto ownScale = bar(followGlobal, 3, lockGlobal);
+            expectEquals(ownScale.scaleIndex, 2, "an overridden scale is its list index less one");
+            expectEquals(ownScale.rootPc, 2, "... and leaves the root following");
+
+            // Lock is a choice rather than a bool precisely so that "off" and "not overridden"
+            // are different answers. With the bar locked, only lockOff unlocks this line.
+            expect(bar(followGlobal, followGlobal, lockOn).lock, "forced on is on");
+            expect(! bar(followGlobal, followGlobal, lockOff).lock, "forced off beats the bar");
+            // And with the bar *un*locked, the same three choices read the other way round -
+            // which is the direction that was impossible before this parameter existed.
+            expect(resolve(0, 0, false, followGlobal, followGlobal, lockOn).lock,
+                   "forced on beats an unlocked bar: this is the per-line lock Owen asked for");
+            expect(! resolve(0, 0, false, followGlobal, followGlobal, lockGlobal).lock,
+                   "and following an unlocked bar is still unlocked");
+        }
+
+        beginTest("every per-line key list starts with Global, and every mask is a real scale");
+        {
+            using namespace arpkey;
+            // The choice lists are what make absence mean "follow the bar": index 0 has to be
+            // Global on all three, or a session that predates these parameters opens in C major
+            // locked instead of wearing the bar's key.
+            expectEquals(rootChoices()[0], juce::String("Global"), "root list starts at Global");
+            expectEquals(scaleChoices()[0], juce::String("Global"), "scale list starts at Global");
+            expectEquals(lockChoices()[0], juce::String("Global"), "lock list starts at Global");
+            expectEquals(rootChoices().size(), okstudio::scales::noteNames().size() + 1,
+                         "the root list is Global plus every note name");
+            expectEquals(scaleChoices().size(), okstudio::scales::names().size() + 1,
+                         "the scale list is Global plus every kit scale");
+            // A line handed a scale hands the engine a mask, and an empty mask would silence
+            // degree walking rather than free it - so the fallback is every pitch class. Swept
+            // over the whole kit table rather than spot-checked: a scale added to the kit arrives
+            // here without anything in Keys being touched.
+            for (int i = 0; i < okstudio::scales::names().size(); ++i)
+                for (int root = 0; root < 12; ++root)
+                {
+                    const auto mask = maskFor(root, i);
+                    expect(mask != 0, "a scale with no pitch classes would silence the line");
+                    expect((mask & 1u) != 0u, "the root is always in its own scale");
+                }
+        }
+
+        beginTest("the KEY chip's captions are unique, short and never empty");
+        {
+            using namespace arpkey;
+            // Two scales abbreviating to one word is the failure a chip cannot show: the card
+            // would read "C MIN" for two different keys and nothing on screen would say which.
+            // Swept over the kit's whole list for the reason REFERENCES' own lesson gives - the
+            // label can be right and the implementation reading it wrong, so check all of them
+            // rather than the one you doubt.
+            juce::StringArray seen;
+            for (const auto& name : okstudio::scales::names())
+            {
+                const auto shortForm = scaleAbbrev(name);
+                expect(shortForm.isNotEmpty(), name + " abbreviates to nothing");
+                expect(shortForm.length() <= 4, name + " abbreviates to \"" + shortForm
+                                                    + "\", which is wider than the chip is");
+                expect(! seen.contains(shortForm),
+                       name + " abbreviates to \"" + shortForm + "\", which is already taken");
+                seen.add(shortForm);
+            }
+            // The caption says whose key, and says "KEY" only while the line is wearing the
+            // bar's - a line with an override prints the key even if the override was the lock.
+            const auto bar = resolve(0, 0, false, followGlobal, followGlobal, lockGlobal);
+            expectEquals(chipText(bar), juce::String("KEY"), "a following line prints the word");
+            const auto lockOnly = resolve(0, 0, false, followGlobal, followGlobal, lockOn);
+            expectEquals(chipText(lockOnly), juce::String("C MAJ"),
+                         "a line that overrode only its lock still prints the key it is locked to");
+            const auto ownKey = resolve(0, 0, false, 2, 3, lockGlobal); // C# and Harmonic Minor
+            expectEquals(chipText(ownKey), juce::String("C# HARM"),
+                         "and an overridden key prints itself");
+            // Which is also the caption the card is measured against, so the two cannot drift.
+            expect(allChipTexts().contains("C# HARM"), "the measured list holds what the chip prints");
+            expect(allChipTexts().contains("KEY"), "including the word itself");
         }
 
         beginTest("Stray adds no note events, it only replaces them");

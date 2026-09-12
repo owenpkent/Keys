@@ -40,9 +40,19 @@ namespace
         }
     };
 
-    // Owen's window, near enough: the editor's minimum width is 1320 (it rose from 1280 when
-    // the settings gear joined the Controls bar on 2026-08-17) and the arp panel gets all of it.
-    constexpr int panelW = 1320;
+    // Owen's window, near enough: the editor's minimum width, less the 10 px margin it puts
+    // either side of the arp panel. 1300 is the 1320 floor the editor has carried since the
+    // settings gear joined the Controls bar (2026-08-17), read that way.
+    //
+    // **Derived rather than written down since 2026-09-11**, and this file's own standing lesson
+    // is why. It was the literal 1320, which stopped being a width the product can produce the
+    // moment KEY made the macro card wider: `minWidthForView()` carries
+    // `minPanelWidth() + 2 * editorMargin` as a term, so the editor grew to ~1448 and the panel
+    // with it, while this test went on laying the panel out at 1320 - and found four Details
+    // chips starved at a width no window would ever hand it. A false failure is cheap; the same
+    // staleness pointing the other way is a real one that passes, which is what this file exists
+    // to prevent. Take the larger and the test tracks the floor on its own.
+    const int panelW = juce::jmax(1300, ArpPanel::minPanelWidth());
 
     // **And the narrow end is not there.** The arp section detaches into a window of its own,
     // whose floor is `ArpPanel::minPanelWidth()` and whose content is that less the window's
@@ -557,7 +567,7 @@ public:
             }
         }
 
-        beginTest("the macro card's bottom strip fits its five chips and the chord, at either floor");
+        beginTest("the macro card's bottom strip fits its seven chips and the chord, at either floor");
         {
             // Legato joined Dot, Tuplet, Anchor and Details on 2026-09-01, and the arithmetic in
             // the layout's own comment was two floors out of date: it was measured against the
@@ -581,7 +591,8 @@ public:
                 juce::Component* row = nullptr;
                 int seen = 0;
                 for (const char* title : { "Macro dot A", "Macro tuplet A", "Macro anchor A",
-                                           "Macro legato A", "Macro follows A", "Macro details A" })
+                                           "Macro legato A", "Macro follows A", "Macro key A",
+                                           "Macro details A" })
                 {
                     juce::Component* found = nullptr;
                     for (auto* t : targets)
@@ -604,8 +615,22 @@ public:
                         juce::GlyphArrangement ga;
                         const juce::Font font { juce::FontOptions(
                             (float) juce::jmin(15, b.getHeight() * 3 / 4)) };
-                        ga.addLineOfText(font, button->getButtonText(), 0.0f, 0.0f);
-                        const float text = ga.getBoundingBox(0, -1, true).getRight();
+                        // KEY is the one chip here whose caption is data rather than a word:
+                        // it prints "KEY" while the line follows the Controls bar and the key
+                        // itself once it does not, and the caption a freshly built card happens
+                        // to be showing is the *shortest* of them. So measure every caption it
+                        // can ever print - which is also how a kit scale appended with a longer
+                        // abbreviation fails this test instead of ellipsising on the card.
+                        juce::StringArray captions { button->getButtonText() };
+                        if (juce::String(title) == "Macro key A")
+                            captions = arpkey::allChipTexts();
+                        float text = 0.0f;
+                        for (const auto& caption : captions)
+                        {
+                            ga.clear();
+                            ga.addLineOfText(font, caption, 0.0f, 0.0f);
+                            text = juce::jmax(text, ga.getBoundingBox(0, -1, true).getRight());
+                        }
                         const float needed = text
                             + (dynamic_cast<juce::ToggleButton*>(button) != nullptr
                                    ? (float) b.getHeight() : 8.0f);
@@ -634,7 +659,7 @@ public:
                                    + juce::String(juce::roundToInt(longest + 28.0f)));
                     }
                 }
-                expectEquals(seen, 6, "the strip lost a chip, or one was renamed");
+                expectEquals(seen, 7, "the strip lost a chip, or one was renamed");
 
                 for (int i = 0; i < chips.size(); ++i)
                     for (int j = i + 1; j < chips.size(); ++j)

@@ -16,6 +16,7 @@
 // number, which is exactly what went wrong when STRAY made the knob strip nine and only the
 // docked case was re-measured (2026-08-21).
 
+#include "../ArpLineKey.h"
 #include "../PluginProcessor.h"
 #include "ArpRateMode.h"
 #include "RangeKnob.h"
@@ -118,13 +119,27 @@ constexpr int arpMacroModTuplet = 92;
 constexpr int arpMacroModAnchor = 84;
 constexpr int arpMacroModLegato = 84; // "Legato" is "Anchor"'s length: the same cell
 constexpr int arpMacroModFollows = 82; // "From C" plus a chevron, measured in LayoutTests
+// KEY (2026-09-11): wide enough for the longest caption it can ever print, which is a root plus
+// the longest abbreviation in the kit's scale table - "C# HARM" today. Measured in LayoutTests
+// against every string `arpkey::allChipTexts()` can produce rather than asserted here, because a
+// width written down goes stale in silence and the kit's scale list is append-only: a new scale
+// with a longer short form fails that test instead of quietly ellipsising on four cards.
+//
+// **This is the cell that moved the window's floor**, and it is the one thing about KEY worth
+// knowing before touching this strip. The strip was already the card's wider row, so every pixel
+// here is two in `minMacroWidth()` and two more in the editor's minimum width: 1320 (the shipped
+// floor, which used to win outright) became ~1448. The alternative was the Shape row, whose cap
+// leaves 15 px of slack - not a cell - or a second strip, which buys width with height, and
+// height is the axis Owen's own 1440p layout has none of. Width, on a 2560 px screen, he has.
+constexpr int arpMacroModKey = 74;
 constexpr int arpMacroModDetails = 76;
 constexpr int arpMacroModGap = 8;
 constexpr int arpMacroChordW = 64;    // the held-chord readout; ellipsises gracefully
 constexpr int arpMacroChordGap = 6;
 constexpr int arpMacroModsW = arpMacroModDot + arpMacroModTuplet + arpMacroModAnchor
-                            + arpMacroModLegato + arpMacroModFollows + arpMacroModDetails
-                            + 6 * arpMacroModGap
+                            + arpMacroModLegato + arpMacroModFollows + arpMacroModKey
+                            + arpMacroModDetails
+                            + 7 * arpMacroModGap
                             + arpMacroChordGap + arpMacroChordW;
 // The harmony area's dropdown row (2026-08-19, second pass): a 34 px combo centred in it.
 // Its chance knob sits below it at arpMacroLine, one column per voice.
@@ -222,6 +237,15 @@ private:
     // since it runs off the 10 Hz timer.
     void refreshTuplet();
     void refreshDice();
+    // KEY's caption and lit state, pulled by the panel's timer like the chord readout, and
+    // compared before either is written: a timer pull that writes unconditionally re-runs for
+    // the rest of the session under a comment claiming it early-outs, which this file has paid
+    // for once already (2026-08-27). `lineKey()` is the single read both this and the menu use.
+    void refreshKeyChip();
+    void showKeyMenu();
+    arpkey::Key lineKey() const;
+    juce::String lastKeyText;
+    bool lastKeyLit = false;
     // Point the Shape combo at what this line's parameters actually say. One reader,
     // called from the constructor as well as from refresh(), because everything that
     // keys off the combo's selection - the dice's greying above all - reads -1 until
@@ -300,6 +324,21 @@ private:
     // Distance and Retrigger are all one - so it needs no explaining, and it takes an
     // ordinary ComboBoxAttachment where a button could not bind a choice at all.
     juce::ComboBox tupletBox;
+    // **KEY** (2026-09-11, Owen: "I was saying it'd be cool to have scale lock per
+    // arpeggiator"): this line's own Root, Scale and Lock, each wearing the Controls bar's
+    // until told otherwise. A chip rather than three controls because three would not fit on
+    // any row of this card, and a menu rather than a combo because it sets three parameters -
+    // the same shape as KnobBank's CC chip, which shows its assignment and opens `cc::showMenu`.
+    //
+    // It reads two ways at once, and deliberately: the caption says **whose key** this line is
+    // in ("KEY" while it follows the bar, "C# HARM" once it does not) and the lit colour says
+    // **whether it is snapping**, which is the bar's lock unless this line forced it. So a glance
+    // down a column of four cards answers both questions, and a line that has overridden only
+    // Lock still prints the bar's key - it is the key that line is locked to, whoever chose it.
+    //
+    // Never disabled, like everything else on a card: the rule is a scrim over an off line, not
+    // a dead control, because a chord dropped on an off line is load-bearing.
+    juce::TextButton keyButton { "KEY" };
     // Opens this line's detailed view (the band and, on Pattern, the step editor). Added
     // beside Anchor once the A/B chips stopped navigating anything: with the tabs gone,
     // this button is the only way back from the macro cards to the deep view.

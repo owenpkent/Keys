@@ -7,6 +7,71 @@ so the top of the file is the most recent round and the bottom is the oldest thi
 standing. A superseded claim is kept where it sits and marked there rather than deleted, because
 knowing why a rule existed is what stops it being reinvented.
 
+**A line has its own key, not just its own lock (2026-09-11).** Owen: *"I was saying it'd be
+cool to have scale lock per arpeggiator."* Offered the plain reading (four independent locks over
+the bar's key), the conservative one (a three-state lock per line, the key still global) and the
+wide one (Root and Scale per line as well), he took the wide one, and that is the entry: what went
+per line is **the key**, of which the lock is one third.
+
+`arpRoot`, `arpScale` and `arpScaleLock` are appended per line, all defaulting to **Global**. The
+engine needed no change at all, which is the tell that this was the right cut: `Params::rootPc`,
+`scaleMask` and `scaleLock` have always been per-line fields filled in by `runArpLines` from three
+global parameters, so the feature is entirely in *which* three values go in. `keys::arpkey::resolve`
+in the new `src/ArpLineKey.h` is the one place the bar and the overrides are read together, for the
+reason `arpLineIsClocked` exists: the audio thread builds the mask from it and the card's chip
+prints from it, and two copies of a rule with one copy on each thread is the drift worth a header.
+
+**Lock is a choice where the bar's is a bool, and that is load-bearing.** A bool cannot say
+"whatever the bar says", so the difference between *off* and *not overridden* would have been
+unsayable: with the bar locked, `Off` frees one line; with the bar unlocked, `On` locks one line
+and leaves the keybed alone. Index 0 of all three lists is Global, which is what makes twelve
+appended parameters cost a saved session nothing - absence is the default is "follow the bar", so
+there is nothing for a migration to backfill. It is the rare append with no session cost at all.
+
+**What this supersedes, and what it does not.** The 2026-08-26 entry below
+(**Scale Lock reaches the line's output**) argued that the lock had to be global: "a lock that
+held on one line and not another would not be a lock". That claim is now wrong as a *rule* and
+right as a *default* - the bar still holds every line until a line says otherwise - and the
+comment in `runArpLines` that carried it says so where it stood rather than being deleted. What
+is unchanged: the keybed's own snap at press time is still the bar's (`NoteMath::resolveOutputNote`
+knows nothing about lines), `snapToMask` in `addHit` is still the one place a line's output is
+snapped, and **chord pads are still never snapped**.
+
+**The key does more than the lock, which is why the wide reading was worth it.** `rootPc` and
+`scaleMask` already fed the Transpose lane, a Distance counted in scale degrees and STRAY's in-key
+zone. Those were global by accident rather than by argument: nobody ever chose that line D should
+walk *A's* degrees. So a line in its own key walks its own degrees too, and line D in harmonic
+minor under line A in major plays the same pattern through a different set of them. Four locks
+over one key would have been a mute switch; this is four keys.
+
+**One chip, not three controls, and the caption is two readings at once.** The KEY chip sits on the
+macro card's bottom strip between From and Details, and a left click opens `Root` / `Scale` / `Lock`
+as submenus with a **Follow the global key** row at the foot - the CC chip's own shape
+(`KnobBank` plus `cc::showMenu`), because three controls would not fit on any row of this card and
+a combo cannot set three parameters. Each list's Global row names what following currently means
+("Global (Major)"), since "Global" alone sends you hunting for a bar that may be in another window.
+The caption says **whose key** (the word `KEY` while it follows, "C# HARM" once it does not) and the
+lit colour says **whether it is snapping**, in the line's own colour: two questions, one cell, and
+a line that overrode only its lock still prints the bar's key, because that is the key it is locked
+to.
+
+**The floor moved, and the alternative was worse.** The bottom strip was already the card's wider
+row, so KEY's 74 px is two cards' worth in `ArpPanel::minMacroWidth()` and the editor's minimum
+width went 1320 to about 1448. The Shape row, where Clock and Keybed live, has 15 px of slack and
+not a cell; a second strip would have bought the width with height, and **height is the axis that
+has none left** - Owen's unfolded layout already wants 1392 px of a 1440p work area, while 1448 of
+2560 px across is a floor he will never meet. "Height is the cheap axis in this view" is true of
+the view and false of his screen, and this is the first round where the difference decided
+anything.
+
+**And a literal in `LayoutTests` went stale the moment it did** - `panelW = 1320`, "Owen's window,
+near enough", which stopped being a width the product can produce and reported four starved
+Details chips at a size no window would hand the panel. It is `jmax(1300, minPanelWidth())` now. A
+false failure is cheap and this one was caught in the same run; the same staleness pointing the
+other way is a real failure that passes, which is the whole reason that file measures rather than
+asserts. The lesson is the file's own, collected in CLAUDE.md: measure widths, do not write them
+down.
+
 **CLOCK: a line steps to another line's rhythm (2026-09-02).** Phase three of
 `docs/LINE_INTERACTION.md`, and it landed the day after phase one and two rather than after "the
 bus has been lived with", which is what section 5 of that file and Phase 3's own line both
@@ -342,6 +407,12 @@ Three asks, and each one supersedes a claim below it.
   fired straight to the output is the chord you put there.
   **Global, unlike everything else in that params loop**: a lock that held on one line and not
   another would not be a lock.
+  **Superseded as a rule on 2026-09-11, kept as the default** (see the entry at the top of this
+  file): Root, Scale and Lock are per-line parameters now, each wearing the bar's until a line
+  overrides it. The sentence above is still what happens unless you say otherwise on a card, and
+  it is the reason the defaults are what they are - but "would not be a lock" turned out to be an
+  argument for a default rather than for a rule, since a line in a key of its own wants a lock of
+  its own to hold it there.
 - **`Keys_tests` links with `/STACK:8388608`, and the reason is worth keeping.** Adding four
   `beginTest` blocks made the binary die with `0xC00000FD` having printed **nothing**, which reads
   as the suite silently not running rather than as a crash. `ArpEngineTests::runTest` is one

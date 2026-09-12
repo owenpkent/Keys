@@ -204,17 +204,31 @@ public:
         beginTest("Legato is appended after Stray and off by default; Density is the Chance parameter");
         {
             // Appended, never inserted: a per-line parameter's index is what arpParamId names
-            // it by and what a saved session stores it under - the genSource rule. ClockFollow
-            // landed after ResetFollow on 2026-09-02 (see the dedicated test below), which is
-            // why this no longer claims ResetFollow is the last one.
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
-                         juce::String("ResetFollow"));
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 3)),
-                         juce::String("Duck"));
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 4)),
-                         juce::String("Follow"));
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 5)),
-                         juce::String("Legato"));
+            // it by and what a saved session stores it under - the genSource rule.
+            //
+            // **Asked as an order rather than as offsets from the end** (2026-09-11). This test
+            // counted back from `numArpParams`, so it failed on the next append whatever that
+            // append did - once when ClockFollow landed, again when the line's key made it three
+            // at a stroke - and each time the repair was to renumber five lines that were never
+            // about the numbers. What it means to say is that these five arrived in this order
+            // and none of them moved, which is exactly what the claim below is. Only the last
+            // entry's *position* is a fact about the end of the list, and that is the test under
+            // this one's job.
+            const auto slot = [](const char* suffix)
+            {
+                for (int i = 0; i < KeysProcessor::numArpParams; ++i)
+                    if (juce::String(KeysProcessor::arpParamSuffix(i)) == suffix)
+                        return i;
+                return -1;
+            };
+            for (const char* suffix : { "Legato", "Follow", "Duck", "ResetFollow", "ClockFollow" })
+                expect(slot(suffix) >= 0, juce::String(suffix) + " is not a per-line parameter at all");
+            expect(slot("Legato") < slot("Follow"), "Legato came before Follow and still does");
+            expect(slot("Follow") < slot("Duck"), "Follow came before Duck and still does");
+            expect(slot("Duck") < slot("ResetFollow"), "Duck came before ResetFollow and still does");
+            expect(slot("ResetFollow") < slot("ClockFollow"),
+                   "ResetFollow came before ClockFollow and still does");
+            expect(slot("Stray") < slot("Legato"), "and Legato was appended after Stray");
             {
                 Host h;
                 expectWithinAbsoluteError(
@@ -242,11 +256,12 @@ public:
         beginTest("ClockFollow is appended after ResetFollow and off by default");
         {
             // Phase three of the line bus (docs/LINE_INTERACTION.md): the source's hits become
-            // this line's steps. Appended, never inserted, same rule as the test above.
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
-                         juce::String("ClockFollow"), "ClockFollow is the last per-line parameter");
-            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
-                         juce::String("ResetFollow"));
+            // this line's steps. Appended, never inserted, same rule as the test above - and it
+            // stopped being the *last* per-line parameter on 2026-09-11, when the line's own key
+            // appended three behind it. The order is what this pins; the end of the list is
+            // pinned by the key's own test below.
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 4)),
+                         juce::String("ClockFollow"), "ClockFollow is the last of the line bus's four");
             expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apClockFollow), juce::String("arpClockFollow"));
             expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apClockFollow), juce::String("arp2ClockFollow"));
             expectEquals(KeysProcessor::arpParamId(2, KeysProcessor::apClockFollow), juce::String("arp3ClockFollow"));
@@ -256,6 +271,46 @@ public:
                 expectWithinAbsoluteError(
                     paramOf(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apClockFollow)),
                     0.0f, 0.01f, "Clock Follow is off by default, which is four lines free-running as today");
+        }
+
+        beginTest("the line's key is three appended parameters and all three default to Global");
+        {
+            // 2026-09-11, Owen: "it'd be cool to have scale lock per arpeggiator". Root, Scale
+            // and Lock went per line, which is three choice parameters appended to every line -
+            // and **Global has to be index 0 on all three**, because that is what makes the
+            // append free: a session saved yesterday has none of them, so all three arrive at
+            // their default, and the default has to mean "wear the Controls bar's key" or every
+            // saved session opens in C major with its arps locked to it.
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 3)),
+                         juce::String("Root"));
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 2)),
+                         juce::String("Scale"));
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
+                         juce::String("ScaleLock"), "ScaleLock is the last per-line parameter");
+            expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apRoot), juce::String("arpRoot"));
+            expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apScale), juce::String("arp2Scale"));
+            expectEquals(KeysProcessor::arpParamId(3, KeysProcessor::apScaleLock),
+                         juce::String("arp4ScaleLock"));
+            Host h;
+            for (int line = 0; line < KeysProcessor::numArpLines; ++line)
+                for (const auto which : { KeysProcessor::apRoot, KeysProcessor::apScale,
+                                          KeysProcessor::apScaleLock })
+                    expectWithinAbsoluteError(
+                        paramOf(h.processor, KeysProcessor::arpParamId(line, which)), 0.0f, 0.01f,
+                        "every line starts out following the Controls bar's key");
+            // The parameter's own choice list is the other half of that claim: a default of 0
+            // only means "follow" while the list's first entry says so.
+            for (const auto which : { KeysProcessor::apRoot, KeysProcessor::apScale,
+                                      KeysProcessor::apScaleLock })
+            {
+                auto* p = dynamic_cast<juce::AudioParameterChoice*>(
+                    h.processor.apvts.getParameter(KeysProcessor::arpParamId(0, which)));
+                expect(p != nullptr, "the key parameters are choices, not bools or ints");
+                if (p != nullptr)
+                    expectEquals(p->choices[0], juce::String("Global"),
+                                 juce::String(KeysProcessor::arpParamSuffix(which))
+                                     + "'s first choice is what an absent parameter means");
+            }
         }
 
         beginTest("a line cannot follow a letter below it: the rule holds in the processor, not only the UI");
@@ -1270,6 +1325,9 @@ public:
                 "Tuplet", "HumanizeSpan", "HumanVelSpan", "Drift", "Mutate", "MutateLock",
                 "VelLevel", "Harm1", "Harm1Chance", "Harm2", "Harm2Chance", "Stray",
                 "Legato", "Follow", "Duck", "ResetFollow", "ClockFollow",
+                // Appended 2026-09-11: the line's own key. All three default to Global, so a
+                // session that predates them plays in the Controls bar's key exactly as it did.
+                "Root", "Scale", "ScaleLock",
             };
             static const char* const globalsAfterLines[] = {
                 "arpQuantize", "bpm", "bpmSync", "arpTrackMidi",

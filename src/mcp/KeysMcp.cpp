@@ -1,5 +1,7 @@
 #include "KeysMcp.h"
+#include "../ArpLineKey.h" // arpkey::resolve, so get_state reports the key a line is in
 #include "../PluginProcessor.h"
+#include <okstudio/Scales.h>
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -430,6 +432,34 @@ okstudio::mcp::Tool KeysMcp::toolGetState()
                         KeysProcessor::arpParamId(n, KeysProcessor::apClockFollow));
                     l->setProperty("clocked",
                                    followInEffect && clockRaw != nullptr && clockRaw->load() > 0.5f);
+                }
+                // The line's key (2026-09-11), **resolved** rather than raw: a client asking
+                // what line C is playing in wants the answer, not three parameters and the rule
+                // for combining them. `keyFollowsGlobal` is the one thing resolution throws
+                // away and is worth saying, since "C Major because the bar says so" and "C Major
+                // because this line insists" behave differently the moment the bar moves. Same
+                // reasoning as `clocked` above it: the processor is the authority and this is the
+                // bridge asking it, through the one resolution the card and runArpLines share.
+                {
+                    const auto lineParam = [this, n](KeysProcessor::ArpParam w)
+                    {
+                        const auto* raw = processor.apvts.getRawParameterValue(
+                            KeysProcessor::arpParamId(n, w));
+                        return raw != nullptr ? (int) raw->load() : 0;
+                    };
+                    const auto key = arpkey::resolve(
+                        (int) processor.apvts.getRawParameterValue("root")->load(),
+                        (int) processor.apvts.getRawParameterValue("scale")->load(),
+                        processor.apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
+                        lineParam(KeysProcessor::apRoot), lineParam(KeysProcessor::apScale),
+                        lineParam(KeysProcessor::apScaleLock));
+                    const auto roots = okstudio::scales::noteNames();
+                    const auto scaleNames = okstudio::scales::names();
+                    l->setProperty("keyRoot", roots[juce::jlimit(0, roots.size() - 1, key.rootPc)]);
+                    l->setProperty("keyScale",
+                                   scaleNames[juce::jlimit(0, scaleNames.size() - 1, key.scaleIndex)]);
+                    l->setProperty("keyLock", key.lock);
+                    l->setProperty("keyFollowsGlobal", key.follows);
                 }
                 std::array<int, ArpEngine::maxHeld * 4> pitches {};
                 const int seqCount = eng.uiSequence(pitches);

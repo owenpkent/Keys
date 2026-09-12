@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "ArpLineKey.h" // arpkey::resolve/maskFor, a line's key read over the Controls bar's
 #include "EuclidGen.h"
 #include "KeysParams.h"
 #include "PluginEditor.h"
@@ -58,7 +59,8 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
         "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
-        "Stray", "Legato", "Follow", "Duck", "ResetFollow", "ClockFollow"
+        "Stray", "Legato", "Follow", "Duck", "ResetFollow", "ClockFollow",
+        "Root", "Scale", "ScaleLock"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -1493,23 +1495,28 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
             ap.retrigBeats = bars[juce::jlimit(0, (int) std::size(bars) - 1,
                                                (int) arpParam(n, apRetrigBars))];
         }
-        // The scale, as a mask of pitch classes, for a Distance counted in scale degrees.
-        // Built here rather than in the engine so ArpEngine.h stays free of the scale tables
-        // and its tests can state a scale as a number.
-        ap.rootPc = (int) apvts.getRawParameterValue("root")->load();
-        {
-            const int scaleIdx = (int) apvts.getRawParameterValue("scale")->load();
-            unsigned int mask = 0;
-            for (int k = 0; k < 12; ++k)
-                if (okstudio::scales::isInScale(ap.rootPc + k, ap.rootPc, scaleIdx))
-                    mask |= 1u << k;
-            ap.scaleMask = mask != 0 ? mask : 0xFFFu; // an empty table would silence degree walking
-        }
-        // Scale Lock reaches the line's output as well as the keybed's (2026-08-26). Global,
-        // like Root and Scale beside it and unlike everything else in this loop: it is the
-        // keybed's own toggle on the Controls bar, and a lock that held on one line and not
-        // another would not be a lock. See ArpEngine::snapToMask.
-        ap.scaleLock = apvts.getRawParameterValue("scaleLock")->load() > 0.5f;
+        // **The line's key, the bar's unless this line overrode it** (2026-09-11, Owen: "it'd
+        // be cool to have scale lock per arpeggiator"). The scale arrives as a mask of pitch
+        // classes, built outside the engine so ArpEngine.h stays free of the scale tables and
+        // its tests can state a scale as a number; the three-way read above it is
+        // `keys::arpkey::resolve` rather than three comparisons written out here, because the
+        // macro card's KEY chip has to answer the same question on the message thread.
+        //
+        // All three of these were global until today, and the comment here argued the case: a
+        // lock that held on one line and not another would not be a lock. The bar still holds
+        // every line by default, so that reading survives - what is new is that a line may say
+        // otherwise, and it says it about the key as well as the lock. Root and Scale already
+        // reached the Transpose lane, a Distance counted in degrees and Stray's in-key zone, so
+        // a line in its own key walks its own degrees too. See ArpEngine::snapToMask for where
+        // the lock itself lands.
+        const auto key = arpkey::resolve(
+            (int) apvts.getRawParameterValue("root")->load(),
+            (int) apvts.getRawParameterValue("scale")->load(),
+            apvts.getRawParameterValue("scaleLock")->load() > 0.5f,
+            (int) arpParam(n, apRoot), (int) arpParam(n, apScale), (int) arpParam(n, apScaleLock));
+        ap.rootPc = key.rootPc;
+        ap.scaleMask = arpkey::maskFor(key.rootPc, key.scaleIndex);
+        ap.scaleLock = key.lock;
 
         ArpEngine::HostClock hc;
         if (auto* playHead = getPlayHead())
