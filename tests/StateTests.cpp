@@ -11,9 +11,11 @@
 // layout and `setStateInformation`. `Keys_tests` therefore links `Keys_SharedCode`, and each
 // test constructs a processor of its own so nothing leaks between them.
 
+#include "../src/ArpLineKey.h"
 #include "../src/ChordGen.h"
 #include "../src/PluginProcessor.h"
 #include <juce_events/juce_events.h>
+#include <set>
 
 namespace keys::tests
 {
@@ -291,6 +293,8 @@ public:
             expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apScale), juce::String("arp2Scale"));
             expectEquals(KeysProcessor::arpParamId(3, KeysProcessor::apScaleLock),
                          juce::String("arp4ScaleLock"));
+            const auto checkDefaults = [this]
+            {
             Host h;
             for (int line = 0; line < KeysProcessor::numArpLines; ++line)
                 for (const auto which : { KeysProcessor::apRoot, KeysProcessor::apScale,
@@ -311,6 +315,80 @@ public:
                                  juce::String(KeysProcessor::arpParamSuffix(which))
                                      + "'s first choice is what an absent parameter means");
             }
+            };
+            checkDefaults();
+        }
+
+        beginTest("a line's own key reaches its output, and only that line's");
+        {
+            // The seam the pure tests in ArpTests cannot see: `arpkey::resolve` is right, and this
+            // asks whether `runArpLines` is the thing reading it. Two lines lift the same C major
+            // triad off the track; B is put in F# harmonic minor and locked, A is left following
+            // the bar, which is C major and **unlocked**. C, E and G are all outside F# harmonic
+            // minor, so B cannot play a single note it was handed, while A must play all three
+            // untouched - which also pins the half that would be worst to get wrong, a per-line
+            // lock leaking onto the line beside it.
+            //
+            // **The body is a lambda for the reason `Keys_tests` links with `/STACK:8388608`.**
+            // `runTest` is one function, so a `Host` (a whole KeysProcessor, arp engines and
+            // lanes included) declared in a test block sits in that one frame for the whole
+            // suite - and adding this block with it inline overflowed the stack, which shows up
+            // as the binary printing *nothing* and exiting 0xC00000FD rather than as a failure.
+            // A lambda gets its own frame and gives it back. Do the same with the next one.
+            const auto runKeyPair = [this]
+            {
+            Host h;
+            h.processor.prepareToPlay(48000.0, 512);
+            setParam(h.processor, "arpTrackMidi", 1.0f);
+            setParam(h.processor, "scaleLock", 0.0f);
+            for (int line : { 0, 1 })
+            {
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apOn), 1.0f);
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apKeys), 1.0f);
+                // Chord shape: one step sounds every held note, so a run is over in a step and
+                // every pitch either line can produce turns up in the first few blocks.
+                setParam(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apDirection),
+                         (float) ArpEngine::Direction::chord);
+            }
+            // B in F# harmonic minor, locked. Root index 7 is F# (Global, then the twelve names);
+            // scale index 3 is Harmonic Minor (Global, then the kit's fourteen).
+            setParam(h.processor, KeysProcessor::arpParamId(1, KeysProcessor::apRoot), 7.0f);
+            setParam(h.processor, KeysProcessor::arpParamId(1, KeysProcessor::apScale), 3.0f);
+            setParam(h.processor, KeysProcessor::arpParamId(1, KeysProcessor::apScaleLock),
+                     (float) arpkey::lockOn);
+            // A octave-shifted up so the merged stream tells the two apart without reading channels.
+            setParam(h.processor, KeysProcessor::arpParamId(0, KeysProcessor::apOctShift), 1.0f);
+
+            juce::AudioBuffer<float> audio(2, 512);
+            juce::MidiBuffer first;
+            for (const int n : { 60, 64, 67 })
+                first.addEvent(juce::MidiMessage::noteOn(1, n, 0.8f), 0);
+            h.processor.processBlock(audio, first);
+            std::set<int> fromA, fromB;
+            for (int blk = 0; blk < 240; ++blk)
+            {
+                juce::MidiBuffer none;
+                h.processor.processBlock(audio, none);
+                for (const auto meta : none)
+                    if (meta.getMessage().isNoteOn())
+                    {
+                        const int note = meta.getMessage().getNoteNumber();
+                        (note >= 72 ? fromA : fromB).insert(note % 12);
+                    }
+            }
+            expect(! fromB.empty(), "B played nothing at all, so this test proved nothing");
+            // F# harmonic minor: F# G# A B C# D F.
+            const std::set<int> fSharpHarmMin { 6, 8, 9, 11, 1, 2, 5 };
+            for (const int pc : fromB)
+                expect(fSharpHarmMin.count(pc) == 1,
+                       "B is locked to F# harmonic minor and played pitch class "
+                           + juce::String(pc));
+            expect(fromB.count(0) == 0, "B played a C, which is the note it was handed and not in its key");
+            // And A, following an unlocked bar, played exactly what it was given.
+            expect(fromA == std::set<int> ({ 0, 4, 7 }),
+                   "A followed the bar's unlocked C major and should play C, E and G untouched");
+            };
+            runKeyPair();
         }
 
         beginTest("a line cannot follow a letter below it: the rule holds in the processor, not only the UI");
