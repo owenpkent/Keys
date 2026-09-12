@@ -38,6 +38,10 @@ src/
 │                             # The processor holds *three* of these since 2026-08-01,
 │                             # one per line; the file itself never knew how many of it
 │                             # there were and did not change (docs/ARP_DESIGN.md)
+├── ArpLineKey.h              # keys::arpkey: a line's own Root/Scale/Lock, read as
+│                             # bar-or-override (resolve(), used by runArpLines on the
+│                             # audio thread and the macro card's Key chip on the
+│                             # message thread alike, so the two can never disagree)
 ├── ui/
 │   ├── NoteSurface.{h,cpp}   # shared note bookkeeping every playable surface derives
 │   ├── PianoKeyboard.{h,cpp} # the piano surface (geometry + paint over NoteSurface);
@@ -1148,7 +1152,8 @@ coming back:
   `controlsbar` / `arpbar` / `padbar` / `keyboardbar` namespaces at the head of
   `PluginEditor.cpp`, off the same constants `resized()` spends, with Controls measured at its
   *tight* cell set because that is the layout it has to be able to reach - together with
-  `ArpPanel::minPanelWidth()` plus the editor's two margins, and a 1320 shipped-floor term.
+  `ArpPanel::minPanelWidth()` plus the editor's two margins, and a shipped-floor term - 1320,
+  about 1448 since the per-line **Key** chip grew the macro card's bottom strip (2026-09-11).
   The floor stays a term rather than the answer so that the day a bar genuinely outgrows it,
   the bar wins instead of a literal. Two costs sit deliberately outside the Controls figure,
   the update button's 170 px and the Instrument chip, since most instances show neither.
@@ -1259,7 +1264,8 @@ supplied for anything still ringing when recording stops.
 ## Parameters and state
 
 All settings are `AudioProcessorValueTreeState` parameters (`size`, `root`, `scale`,
-`scaleLock`, `octave`, `channel`, `polyphony`, `sustain`, `latch`,
+`scaleLock` (all three of those also overridable per arp line since 2026-09-11,
+see below), `octave`, `channel`, `polyphony`, `sustain`, `latch`,
 the Humanize set `humanize` / `humanizeVelMin` / `humanizeVelMax`, the
 chord-pad settings `chordExclusive` / `chordStrum` / `chordStrumMax` / `chordStrumDir` /
 `padPage`, the generator's `gen*` set, `genRoot`, `genMode`, `genOctave` / `genOctaveMax`
@@ -1330,6 +1336,21 @@ Keys did before there were lines. **Harm1, Harm1Chance, Harm2 and Harm2Chance ar
 suffixes** (2026-08-19), appended after every other line parameter for the same reason the
 rate's two units and the Vel/Humanize spans were: appending is the only direction that leaves
 an id's meaning untouched for a session saved before it existed.
+
+**Root, Scale and Lock, themselves, are appended per line too (2026-09-11)**: `arpRoot`,
+`arpScale` and `arpScaleLock` for line A, `arp2Root` through `arp4ScaleLock` for B through D,
+all `AudioParameterChoice`. Root lists **Global** plus the twelve note names, Scale lists
+**Global** plus the kit's fourteen scales, Lock lists **Global** / **On** / **Off**. Every
+default is index 0, Global, so a session saved before this existed plays every line in the
+Controls bar's key exactly as it always did - the rare appended parameter that costs a saved
+session nothing, because absence already means "follow the bar" rather than anything a
+migration has to backfill. `keys::arpkey::resolve()`, in the new `src/ArpLineKey.h`, is the one
+place the bar and a line's override are read together; `KeysProcessor::runArpLines` calls it
+where it used to read `root` / `scale` / `scaleLock` straight off the bar, and the macro card's
+**Key** chip calls the same function on the message thread, so the audio thread and the chip
+can never disagree about what key a line is actually in. `ArpEngine` itself did not change at
+all - `Params::rootPc`, `scaleMask` and `scaleLock` were already per-line fields; only *which*
+three values land in them did.
 
 The audio thread never builds one of those ids. Each line caches a
 `std::atomic<float>*` per parameter at construction (`ArpLine::param`, indexed by the

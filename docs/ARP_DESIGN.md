@@ -1420,6 +1420,21 @@ snaps *before* the dedup, so two pitches that round onto one collapse to a singl
 than becoming the hung note two hits on one pitch in one step always are. Chord pads are
 untouched: a stored chord is one you built.
 
+**Root and Scale themselves stayed one pair, shared by every line, until 2026-09-11.**
+`addHit` always snapped to the bar's own `(Root, Scale)` regardless of which line it was
+inside, so four lines meant one key wearing four locks rather than four keys. Each line now
+carries its own `arpRoot` / `arpScale` / `arpScaleLock`, three-way (**Global**, plus the real
+choices - Lock's real choices being **On** / **Off**), so a line that says nothing still follows
+the bar and a session saved before this existed costs nothing to load. `keys::arpkey::resolve()`,
+in the new `src/ArpLineKey.h`, is where that three-way read happens - on the audio thread inside
+`runArpLines`, and on the message thread inside the macro card's own **Key** chip - and its
+answer is what feeds `Params::rootPc` / `scaleMask` / `scaleLock` now instead of the bar's three
+parameters directly. `addHit`'s own snap did not move; only where the three values it snaps
+against come from did. A line resolved into its own key walks its own degrees everywhere
+Root and Scale already reached, not only the snap: the Transpose lane, a Distance counted in
+degrees, Stray's in-key zone. Line D can sit in harmonic minor under line A in major and walk
+harmonic minor's own degrees while it does. Chord pads remain untouched either way.
+
 ## Patterns, which became slots
 
 Originally 8 lettered patterns (A-H) per session. **Twelve launchable slots since

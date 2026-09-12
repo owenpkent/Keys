@@ -70,8 +70,8 @@ live nowhere else.
 | Control | What it does |
 |---------|--------------|
 | **Size** | 25 / 49 / 61 / 73 / 76 / 88 keys |
-| **Root** + **Scale** | The key and scale used by Scale Lock |
-| **Scale Lock** | Snap every note Keys plays to the nearest note in (Root, Scale) — you can't hit a wrong note. Out-of-scale keys are dimmed. Since 2026-08-26 it reaches the **arpeggiator's output** and its harmony voices too, not only the keys you press; chord pads still play the chord you stored. |
+| **Root** + **Scale** | The key and scale used by Scale Lock; any arp line can override both for itself with the **Key** chip on its macro card (2026-09-11) |
+| **Scale Lock** | Snap every note Keys plays to the nearest note in (Root, Scale) — you can't hit a wrong note. Out-of-scale keys are dimmed. Since 2026-08-26 it reaches the **arpeggiator's output** and its harmony voices too, not only the keys you press; chord pads still play the chord you stored. Since 2026-09-11 a line's own **Key** chip can lock that line to a different key than the bar's, so line D can sit in harmonic minor while line A stays in major. |
 | **Octave** | Transpose the whole keyboard by -5..+5 octaves |
 | **Velocity** | A **range knob** in the pads strip, captioned Humanize. The knob is the band's centre: the ring opens the range equally either side of it and never moves the knob itself. The lamp beside it switches it. Lit, each note takes a random value inside the band; unlit, every note plays the knob's own value and the readout shows that one number |
 | **MIDI Ch** | Output channel, 1–16 |
