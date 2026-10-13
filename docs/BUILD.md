@@ -95,9 +95,14 @@ instrument window only hides it, which would cost you a force-kill and the loade
 
 ## Smart App Control
 
-SAC is **enforced** on Owen's machine (`HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy` →
-`VerifiedAndReputablePolicyState = 1`) and dev builds are unsigned, so it gates the first
-launch of every freshly linked exe while it decides. It gates a *file hash*, not a path, so
+SAC was **enforced** on Owen's machine from at least July to September 2026
+(`HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy` → `VerifiedAndReputablePolicyState = 1`),
+and on 2026-10-13 it read **0, off**. When it went off is not recorded. The rest of this
+section stays because `run.py` still absorbs the wait, harmlessly, and because it is the
+account of what switching it back on would cost.
+
+While it is on, dev builds being unsigned, it gates the first launch of every freshly linked
+exe while it decides. It gates a *file hash*, not a path, so
 every relink is a fresh verdict and the same target can be instant one build and blocked the
 next.
 
@@ -137,6 +142,25 @@ reinstalling Windows", revised *after* the fix shipped. The free check is to ope
 Control settings** and see whether the toggle moves both ways before committing to it.
 
 Owen's machine, Owen's call — nothing in this repo changes that setting.
+
+## Defender's cloud scan
+
+With SAC off, Microsoft Defender still holds an unsigned exe it has seen too rarely to have a
+verdict on, for a cloud lookup, and says so with a **"Security scan required"** notification
+(Defender Operational event 2050, "uploaded a file for further analysis"). On 2026-10-13 the
+trigger was `keys-mcp.exe` and `lattice-mcp.exe`, held at every Claude Code session start
+although neither had been rebuilt for weeks. The same session's `keys` MCP server missed its
+30-second connect timeout, and the hold is the likely reason, so a flaky MCP connect and a
+recurring toast may be one problem.
+
+Owen's machine now excludes exactly two path patterns, `W:\dev\*\build\Release` and
+`W:\dev\*\build\*_artefacts`: the folders the compiler writes exes into, and not the source
+or `build/_deps`. Adding one needs an elevated shell. Before adding another, know two things.
+An exclusion written through the `C:\Users\owenp\dev` junction probably covers nothing,
+because Defender logs and matches the `W:` path. And on the same day every other exclusion on
+the machine was removed at Owen's call, after scanning measured at about 10% on a Gradle build
+and 5% on a pytest run, both inside run-to-run noise: fewer is the preference. Signing the MCP
+shims with the EV eToken is the fix that needs no exclusion at all, and is not done.
 
 ## Quick build (build.ps1)
 

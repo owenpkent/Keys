@@ -21,11 +21,12 @@ the running standalone, builds exactly one Standalone target, and relaunches it:
 5s for a touched .cpp, ~1s for a no-op. Keys Host standalone runs a real instrument VST3
 in-process, so a click makes sound with no DAW involved and no rescan. It remembers the
 loaded synth between launches, which is why the script asks the app to close politely (a
-forced kill skips JUCE's settings write and loses it). Those seconds are the build:
-Smart App Control is enforced here and dev builds are unsigned, so the *launch* of a
-freshly linked exe can be held while Windows vets it. `run.py` waits that out with a
-counter on screen (twenty minutes before it gives up, Ctrl+C to stop waiting);
-`docs/BUILD.md` has the ways out of the wait itself.
+forced kill skips JUCE's settings write and loses it). Those seconds are the build.
+Smart App Control used to hold the *launch* of every freshly linked unsigned exe while
+Windows vetted it; it was found **off** on 2026-10-13, and `run.py` still waits out a hold
+with a counter on screen (twenty minutes, Ctrl+C to stop) in case it comes back. What is
+left is Defender's cloud scan of a rarely seen unsigned exe, which this machine now skips
+for build output only; `docs/BUILD.md` has both, and the exclusion rule.
 
 **Owen runs it by double-clicking `run.py` in Explorer** — no arguments, no terminal, and
 the console holds open on failure so he can read the error. Never tell him to type a
