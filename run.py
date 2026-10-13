@@ -140,7 +140,7 @@ def _cmake_candidates():
 
     The one on PATH is *not* best. This machine installs cmake through pip, and pip's
     entry point is a small unsigned launcher at Scripts\\cmake.exe that re-execs the real
-    binary. Smart App Control (enforced here) blocks unsigned executables it does not
+    binary. Smart App Control, when it is on, blocks unsigned executables it does not
     recognise, so CreateProcess on the launcher fails outright — while the signed binary
     it wraps, in site-packages/cmake/data/bin, starts perfectly. Prefer anything signed
     and leave the launcher as the last resort.
@@ -629,8 +629,9 @@ def main() -> int:
         print(f"{YELLOW}{exe_name} not found at {exe} - run without --no-build first.{RESET}")
         return 1
 
-    # Smart App Control is enforced on this machine (VerifiedAndReputablePolicyState = 1)
-    # and dev builds are unsigned, so it gates the first launch of every freshly linked exe
+    # Smart App Control was enforced on this machine until at least 2026-09 and was found
+    # off on 2026-10-13 (VerifiedAndReputablePolicyState 1, then 0). Dev builds are unsigned,
+    # so while it is on it gates the first launch of every freshly linked exe
     # while its reputation check runs, then lets the same file through once that finishes
     # (CodeIntegrity event 3118). Signing every iteration would need the EV eToken and a
     # PIN, which defeats a 5-second loop, so absorb the wait here rather than weakening the
