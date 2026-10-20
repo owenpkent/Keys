@@ -3,9 +3,14 @@
 ## About the Owner
 
 Owen is a wheelchair user with muscular dystrophy who produces music with a single
-mouse. Typing is hard — be proactive, make decisions, offer A/B/C choices so he can
-answer with one letter. Mouse-only operability is not a preference here, it is the
-product.
+mouse. Typing costs him real effort and the pointer is cheap, so he works mouse-first.
+Be proactive: make the call yourself on small or reversible things instead of asking for
+confirmation. Ask only when the answer changes the outcome, and then end the turn with 2
+to 4 lettered options (A/B/C), marking the one you recommend, so he can answer with one
+character; never end on an open question that needs typed prose. Keep replies short. His
+prompts are often dictated, so names may be mistranscribed: check a plausible proper
+noun against the repo before treating it as something new. Mouse-only operability is not
+a preference here, it is the product.
 
 ## What This Is
 
