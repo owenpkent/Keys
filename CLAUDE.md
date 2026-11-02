@@ -110,7 +110,7 @@ reasoning is one search away.
 - `ChordGen.h` - the weighted pool, tiered by scale compliance. `ChordSources.h` - circle of
   fifths, Neo-Riemannian PLR, progression templates, negative harmony, planing, and
   `applyVoiceLeading`. `ChordMarkov.h` with `MarkovData.h` - the bigram chain and its 88
-  mood-tagged progressions. `ChordLibrary.h` - 355 named progressions stored as roman numerals.
+  mood-tagged progressions. `ChordLibrary.h` - 358 named progressions stored as roman numerals.
 - `ChordVoicing.h` - the three voicing passes (`applyMajorMinorBias`, `fitVoicing`,
   `applyVoicingPipeline`), pure, so a test reaches them without a live processor.
 - `ChordNumerals.h` - the roman numeral a card prints, in one place rather than one per surface.

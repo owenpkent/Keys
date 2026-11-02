@@ -4,7 +4,7 @@ Proposed 2026-08-18 (Owen: "collections or books of chords and progressions, thi
 together ... an outstanding library that makes it easy to compose, maybe organized by emotion or
 something. Scaler, the other VST has done a great job of this").
 
-**Built the same day, all of it.** `src/ChordLibrary.h` holds **355 tagged progressions**;
+**Built the same day, all of it.** `src/ChordLibrary.h` holds **358 tagged progressions**;
 **Library** is appended to the generator's Source list; `ChordLibraryPanel` is the browsable window
 off a Library chip on the Pads bar, with a star per row; a pad remembers which progression it is a
 step of and the strip brackets a run; and **Follows** answers §7's question - a progression that
