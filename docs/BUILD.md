@@ -214,8 +214,9 @@ nothing held once the chord is gone) and `state` (a session file with flipped by
 tail or attributes the UI could never produce must load, play a few blocks, save and load again).
 
 `.github/workflows/fuzz-nightly.yml` builds it with AddressSanitizer and runs it once a day on
-a fresh seed (the run id) with a large budget, so each night explores new space and a failure is
-allowed to be news. It is not a required check and never gates a merge. CI builds the binary on
+a fresh seed (the run id) with a 20000-case budget per target (about 90x the plain binary's cost
+under ASan, so some ten minutes), so each night explores new space and a failure is allowed to be
+news. A case that runs past a minute is reported as a hang with the same replay line. It is not a required check and never gates a merge. CI builds the binary on
 every push so it cannot rot, but does not run it. A failure prints the replay:
 
 ```

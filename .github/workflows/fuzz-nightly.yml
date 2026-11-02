@@ -1,7 +1,9 @@
 name: Fuzz nightly
 
-# Keys_fuzz (tests/FuzzTests.cpp) once a day on a fresh seed with a large budget, under
-# AddressSanitizer. The normal suite never runs it on a seed it did not choose, so a pull request
+# Keys_fuzz (tests/FuzzTests.cpp) once a day on a fresh seed under AddressSanitizer. The budget
+# is 20000 cases a target: ASan makes the allocation-heavy targets about 90x slower than a plain
+# build (chordsym: 200000 cases took 92 s here against about 1 s locally), so 200000 was a
+# forty-minute job before it reached the second target. The normal suite never runs it on a seed it did not choose, so a pull request
 # is judged on fixed inputs and never goes red for a reason it did not cause; this job is where
 # new inputs are allowed to surprise us. It is not a required check and never gates a merge.
 #
@@ -26,9 +28,9 @@ on:
   workflow_dispatch:
     inputs:
       iterations:
-        description: Cases per target before each target's cost scaling (default 200000)
+        description: Cases per target before each target's cost scaling (default 20000)
         type: number
-        default: 200000
+        default: 20000
 
 permissions:
   contents: read
@@ -37,7 +39,7 @@ jobs:
   fuzz:
     name: Randomised invariants (ASan, fresh seed)
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,7 +90,7 @@ jobs:
         shell: pwsh
         env:
           ASAN_OPTIONS: halt_on_error=1:abort_on_error=0
-          FUZZ_ITERATIONS: ${{ inputs.iterations || 200000 }}
+          FUZZ_ITERATIONS: ${{ inputs.iterations || 20000 }}
         run: |
           .\build\Release\Keys_fuzz.exe --seed ${{ github.run_id }} --iterations $env:FUZZ_ITERATIONS 2>&1 | Tee-Object -FilePath fuzz.log
           exit $LASTEXITCODE

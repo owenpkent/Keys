@@ -30,6 +30,10 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <thread>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -787,6 +791,31 @@ int main(int argc, char** argv)
     }
 
     std::cout << "Keys_fuzz seed=" << seed << " iterations=" << iterations << std::endl;
+
+    // A watchdog: a case that runs past a minute is a hang, and a hang has to come out as a
+    // reproducer too, not as the job's timeout. The main loop publishes the case it is on and
+    // when it started; this thread prints the replay line and exits the process.
+    std::atomic<int> watchTarget { -1 }, watchCase { -1 };
+    std::atomic<juce::int64> watchStarted { 0 };
+    std::thread([&]
+    {
+        for (;;)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            const auto started = watchStarted.load();
+            if (started == 0)
+                continue;
+            if (juce::Time::currentTimeMillis() - started > 60 * 1000)
+            {
+                const int t = watchTarget.load(), c = watchCase.load();
+                std::cout << "HANG  " << targets()[(size_t) t].name << " case " << c << ": still running after 60 s" << std::endl
+                          << "      reproduce: Keys_fuzz --target " << targets()[(size_t) t].name << " --seed " << seed
+                          << " --case " << c << std::endl;
+                std::_Exit(3);
+            }
+        }
+    }).detach();
+
     int failures = 0;
     juce::int64 totalCases = 0;
     for (size_t ti = 0; ti < targets().size(); ++ti)
@@ -801,6 +830,9 @@ int main(int argc, char** argv)
         {
             const int caseIndex = onlyCase >= 0 ? onlyCase : c;
             juce::Random rng(mix(seed, ti, (juce::uint64) caseIndex));
+            watchTarget.store((int) ti);
+            watchCase.store(caseIndex);
+            watchStarted.store(juce::Time::currentTimeMillis());
             try
             {
                 t.run(rng);
@@ -823,6 +855,7 @@ int main(int argc, char** argv)
             }
             ++totalCases;
         }
+        watchStarted.store(0);
         const auto ms = juce::Time::getMillisecondCounterHiRes() - started;
         std::cout << (failed ? "fail  " : "ok    ") << t.name << "  " << cases << " cases, "
                   << juce::String(ms / 1000.0, 1) << " s" << std::endl;
