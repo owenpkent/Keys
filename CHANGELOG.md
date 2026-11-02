@@ -5,6 +5,14 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: three dance minor loops in the chord library
+
+`i bVII bVI`, `i bVII iv bVI` and `i bVII bVI iv`, tagged Trance, EDM, House and Progressive
+House. They are the minor loops the dance songs in the Chordonomicon corpus use two to six times
+as often as its other songs, and the library had none of them as a loop (it had their four-chord
+relatives ending on V or bVII). 358 progressions now. The analysis is `docs/DANCE_HARMONY.md`
+section 9.
+
 ### Changed: the track's own MIDI no longer reaches the arpeggiator unless you say so
 
 **PARAMETER LAYOUT CHANGE.** `arpTrackMidi` is appended, default **false**, and a new parameter

@@ -626,6 +626,15 @@ namespace keys::chordlib
               { "Epic", "Uplifting", "Energetic" }, { "Trance", "EDM", "Progressive House" } },
             { "Trance breakdown (i-bVII-bVI-bVII)", "i bVII bVI bVII", Function::loop, kAeolian,
               { "Atmospheric", "Longing", "Dreamy" }, { "Trance", "Progressive House" } },
+            // The next three are the minor loops Chordonomicon's dance songs use two to six times as
+            // often as its other songs, and which no row here had as a cycle (docs/DANCE_HARMONY.md
+            // section 9). The loops are common property; nothing from the corpus is copied in.
+            { "Dance minor descent (i-bVII-bVI)", "i bVII bVI", Function::loop, kAeolian,
+              { "Longing", "Driving", "Epic" }, { "Trance", "EDM", "House" } },
+            { "Trance minor loop (i-bVII-iv-bVI)", "i bVII iv bVI", Function::loop, kAeolian,
+              { "Melancholic", "Driving", "Longing" }, { "Trance", "EDM", "House" } },
+            { "EDM minor loop (i-bVII-bVI-iv)", "i bVII bVI iv", Function::loop, kAeolian,
+              { "Dramatic", "Epic", "Longing" }, { "EDM", "Trance", "Progressive House" } },
             { "Techno cell (i-bII)", "i bII", Function::vamp, kPhrygian,
               { "Dark", "Driving", "Intense" }, { "Techno", "Minimal", "Electronica" } },
             { "Techno minor stab (i-bVI)", "i bVI", Function::vamp, kAeolian,
