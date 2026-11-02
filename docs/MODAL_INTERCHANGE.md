@@ -6,7 +6,7 @@ Status: **proposed, unbuilt.** Written 2026-11-02, from item 1 of the ranked gap
 
 ## What is being proposed
 
-A **ninth generator source, Borrowed**, appended to the `genSource` list. It writes a progression
+A **ninth generator source, Modal Interchange**, appended to the `genSource` list. It writes a progression
 in the session's key and mode, and swaps a chosen number of its chords for chords **borrowed from a
 parallel mode**: the iv, bVI and bVII a major song steals from minor, the Dorian IV and the harmonic
 V a minor song steals back. Every borrowed card says what it is (`bVI`) instead of printing nothing.
@@ -30,7 +30,7 @@ That is a blur, not a borrowing:
 - **It cannot be read.** A borrowed chord resolves to no degree, so `ChordNumerals::forChord`
   returns empty and the card's corner is blank, by design (a `?` on every out-of-key card was worse).
 
-The pool stays as it is. Borrowed is the deliberate version of the same idea.
+The pool stays as it is. Modal Interchange is the deliberate version of the same idea.
 
 ## The design
 
@@ -65,7 +65,7 @@ Numerals are in Keys' fixed major-scale convention (`datasets/README.md`, the tr
 always 8 semitones up, in any mode.
 
 `parallelModes()` today gives Ionian no Phrygian, so the pool can never offer a major song the
-Neapolitan `bII`, and gives Dorian no Harmonic Minor. The Borrowed source uses its **own** From list (below) rather than editing
+Neapolitan `bII`, and gives Dorian no Harmonic Minor. The Modal Interchange source uses its **own** From list (below) rather than editing
 `parallelModes()`, because that function also drives the pool's tier 2 and changing it would move
 every saved session generated in Weighted mode.
 
@@ -86,7 +86,7 @@ Then the voicing pipeline runs as it does for every source (Lean, `fitVoicing`,
 
 ### 3. Two settings, both click-only
 
-On the Borrowed band of the generator window, in the same place Planing's Diatonic tick sits:
+On the Modal Interchange band of the generator window, in the same place Planing's Diatonic tick sits:
 
 - **From**: Auto, Aeolian, Dorian, Mixolydian, Lydian, Phrygian, Harmonic Minor, Ionian. Auto
   draws from every mode that yields a candidate. A combo, so one click opens it and one click picks.
@@ -107,7 +107,7 @@ in the accent. Read-only, like every other source diagram.
 ## What it deliberately does not do
 
 - **It does not touch Scale Compliance.** Compliance is a Weighted-only setting
-  (`readsScaleSettings()` is `sourceIndex() == 0`), and Borrowed is out of key on purpose, the way
+  (`readsScaleSettings()` is `sourceIndex() == 0`), and Modal Interchange is out of key on purpose, the way
   `ChordSources.h`' own header says every source may be.
 - **It does not change Scale Lock.** One consequence is worth saying plainly: a borrowed chord
   dragged onto an arp line with Lock on has its outside notes snapped into the line's key by
@@ -120,7 +120,7 @@ in the accent. Read-only, like every other source diagram.
 
 From a code map taken the same day; line numbers will drift.
 
-- `src/KeysParams.cpp`: append "Borrowed" to `genSource`; append the two parameters after the
+- `src/KeysParams.cpp`: append "Modal Interchange" to `genSource`; append the two parameters after the
   generator block.
 - `tests/StateTests.cpp`: extend the `genSource` golden array and the parameter golden list.
 - `src/ChordSources.h`: `keys::sources::borrowed(rootPc, mode, octave, count, from, nBorrowed, rng)`,
@@ -148,5 +148,7 @@ From a code map taken the same day; line numbers will drift.
 
 1. **What it makes.** A progression with borrowed chords placed in it (this spec), or a palette:
    the tray filled only with the borrowed chords available in this key, for you to place yourself?
-2. **The name on the button.** "Borrowed" (short, plain) or "Modal Interchange" (the textbook term,
-   wider on a row that is already full)?
+
+Settled: the button says **Modal Interchange** (Owen, 2026-11-02), so measure the source row with
+that string before building; the setting that counts borrowed chords keeps the word Borrowed.
+Open: question 1. Owen, 2026-11-02: "I don't know yet."
