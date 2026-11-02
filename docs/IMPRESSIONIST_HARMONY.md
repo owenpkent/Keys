@@ -244,7 +244,7 @@ machinery has to change. The append-only rules apply to everything that touches 
    naming: `Chords.h` has to recognise the new shapes on a played chord, and a quartal stack has no
    unique root.
 2. **A planing source that takes the extended shapes, plus a "constant structure" mode.**
-   **Built 2026-11-02:** Major 9th, Minor 9th, Add9, Minor 11th, Quartal and Quintal are planing shapes (diatonic stacks scale steps, so it stays in key); the fifths-only option is the Quintal shape.
+   **Built 2026-11-02:** Major 9th, Minor 9th, Add9, Minor 11th, Quartal and Quintal are planing shapes (diatonic stacks scale steps, so it stays in any seven-note key, and trims a stack the scale has no chord for, so iii in C major plays Em7 rather than a false Em9); the fifths-only option is the Quintal shape.
    `planing()` picks from seven fixed shapes. Add the new types (the `docs/DANCE_HARMONY.md`
    section 7 gap, same fix: Minor 9, Major 9, Add9, and now Quartal and Quintal) and offer a
    Planing option that is **fifths only** (the "cathedrale" sound). The comment on

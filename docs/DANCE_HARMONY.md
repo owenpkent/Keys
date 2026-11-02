@@ -259,7 +259,7 @@ analysis of house harmony turned up; the sources above are practitioner writing.
 
 ### 7.2 Gaps, ranked (all proposed, unbuilt)
 
-1. **Extended shapes in planing (built 2026-11-02: Major 9th, Minor 9th, Add9, Minor 11th, plus Quartal and Quintal; diatonic planing stacks scale steps so every note stays in key).** Add Minor 9, Minor 11, Major 9 and add9
+1. **Extended shapes in planing (built 2026-11-02: Major 9th, Minor 9th, Add9, Minor 11th, plus Quartal and Quintal; diatonic planing stacks scale steps so every note stays in key, trimming to Em7 on iii where the ninth would be the avoid note).** Add Minor 9, Minor 11, Major 9 and add9
    to planing's shape list, so one-finger sliding makes Cm9, Dm9, Em9 and so on. Smallest
    change, largest dance payoff; a minor-9 planed diatonically is the "deep house chord"
    in one click. The existing comment warns that a wide chord planed chromatically "turns to mush", so
