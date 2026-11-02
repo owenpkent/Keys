@@ -74,7 +74,7 @@ All URLs were returned by search or are the canonical project page; licences as 
 
 | Corpus | What it holds | Licence | Source |
 | --- | --- | --- | --- |
-| Chordonomicon | 666,000+ user-generated progressions with genre, decade and structure tags | MIT on the dataset card (verified). The songs behind it are scraped user content, so the MIT tag does not settle the underlying copyright. | [HF](https://huggingface.co/datasets/ailsntua/Chordonomicon), [paper](https://arxiv.org/abs/2410.22046) |
+| Chordonomicon | 666,000+ user-generated progressions with genre, decade and structure tags | CC-BY-NC-4.0 (see `datasets/README.md`): fine for personal use, which is Owen's call for Keys today; anything derived from it comes out if Keys is ever sold. The songs behind it are scraped user content as well. | [HF](https://huggingface.co/datasets/ailsntua/Chordonomicon), [paper](https://arxiv.org/abs/2410.22046) |
 | McGill Billboard | Expert chord annotations of ~890 Billboard-chart songs (1958 to 1991) | CC0 (verified via project statement and mirdata loader) | [McGill](https://ddmal.music.mcgill.ca/research/The_McGill_Billboard_Project_(Chord_Analysis_Dataset)) |
 | ChoCo | 20,000+ chord annotations merged from 18 sources, with a conversion workflow | Dual: most subsets CC-BY 4.0, three subsets CC-BY-NC-SA 4.0 (verified); check per subset | [Zenodo](https://zenodo.org/records/7706751) |
 | Weimar Jazz Database | Solos of 456 jazz recordings, with chord annotations | ODbL per ChoCo's metadata page (verified, secondary) | [ChoCo licence page](https://smashub.github.io/docs/choco/metadata_license) |
@@ -89,8 +89,8 @@ All URLs were returned by search or are the canonical project page; licences as 
 **Note for Keys.** A licence on a file does not clear the songs inside it. In practice Keys needs
 chord progressions as bare roman-numeral sequences with no lyrics and no melody, which is the
 position `docs/CHORD_LIBRARY.md` section 7 already takes, so the shippable material is a derived
-statistics table (bigram counts), not the corpus. McGill Billboard (CC0) and Chordonomicon (MIT)
-are the two that allow that with no licence friction. ChoCo is useful but would need a per-subset
+statistics table (bigram counts), not the corpus. McGill Billboard (CC0) is the one that allows that with no licence
+friction; Chordonomicon (CC-BY-NC-4.0) allows it only while Keys stays non-commercial. ChoCo is useful but would need a per-subset
 check. Hooktheory data is off the table.
 
 ---
