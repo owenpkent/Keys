@@ -5,6 +5,15 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed: five library rows retagged against emotion-labelled music
+
+The vi-start loops `vi IV I V` (Axis, vi start) and `I iii vi IV` (Alternative wander) are now
+also Sad, `vi iii IV I V` and `vi ii V` also Melancholic, and the minor-to-major Hope turn trades
+Uplifting for Tender. The library had two Sad rows, while the vi-start major loop is the commonest
+loop in the sad clips of both corpora checked (`docs/MOOD_CHECK.md`). Six more proposals were
+weighed and left alone, because they argued against genre idioms the data cannot see (a minor
+trance build is uplifting; a Mixolydian lift is happy).
+
 ### Added: three dance minor loops in the chord library
 
 `i bVII bVI`, `i bVII iv bVI` and `i bVII bVI iv`, tagged Trance, EDM, House and Progressive
