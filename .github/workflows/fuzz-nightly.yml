@@ -19,6 +19,8 @@ name: Fuzz nightly
 # edited the cron line.
 
 on:
+  push:
+    branches: [feat/typed-chord] # TEMPORARY: one verification run before this lands on main
   schedule:
     - cron: "23 4 * * *"
   workflow_dispatch:
