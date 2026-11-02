@@ -209,3 +209,6 @@ to be wanted.
 Settled: the button says **Modal Interchange** (Owen, 2026-11-02), so measure the source row with
 that string before building; the setting that counts borrowed chords keeps the word Borrowed.
 Open: question 1. Owen, 2026-11-02: "I don't know yet."
+
+Scoped and parked, 2026-11-02 (Owen: "not yet"). When it is built, it goes on a new branch off
+`main`, not on the arp stack.
