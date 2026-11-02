@@ -48,6 +48,17 @@ namespace keys::chords
             { "maj9",  { 0, 2, 4, 7, 11 } }, // Major 9th
             { "m9",    { 0, 2, 3, 7, 10 } }, // Minor 9th
             { "5",     { 0, 7 } },           // Power
+            // Added 2026-11-02 with the six chord types they name. "6/9" is here for a different
+            // reason: without it a played 6/9 (C D E G A) would score highest as maj13, whose
+            // template is the 6/9 plus a 7th, and be misnamed by the very template added for 13ths.
+            { "6/9",     { 0, 2, 4, 7, 9 } },           // 6/9
+            { "m11",     { 0, 2, 3, 5, 7, 10 } },       // Minor 11th
+            { "maj7#11", { 0, 4, 6, 7, 11 } },          // Major 7th #11
+            { "13",      { 0, 2, 4, 7, 9, 10 } },       // Dominant 13th
+            { "maj13",   { 0, 2, 4, 7, 9, 11 } },       // Major 13th
+            { "quartal", { 0, 3, 5, 10 } },             // stacked fourths: root, 4th, b7, b3
+            // No quintal row: stacked fifths (C G D) are the pitch classes of sus2, and a name is
+            // read from pitch classes alone, so it reads "Csus2". Same notes, same sound.
         };
         return t;
     }

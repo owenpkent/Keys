@@ -61,6 +61,9 @@ struct MarkovParseTests : juce::UnitTest
                 { "aug", "Augmented" }, { "sus2", "Sus2" }, { "sus4", "Sus4" }, { "add9", "Add9" },
                 { "6", "Major 6th" }, { "69", "6/9" }, { "9", "Dominant 9th" }, { "M-5", "Diminished" },
                 { "m", "Minor" }, { "M", "Major" },
+                // 2026-11-02
+                { "m11", "Minor 11th" }, { "M7#11", "Major 7th #11" }, { "13", "Dominant 13th" },
+                { "M13", "Major 13th" }, { "q4", "Quartal" }, { "q5", "Quintal" },
             };
             for (const auto& [suffix, typeName] : cases)
             {
@@ -68,6 +71,17 @@ struct MarkovParseTests : juce::UnitTest
                 expect(p.valid, juce::String("suffix \"") + suffix + "\" should parse");
                 expectEquals(p.type, keys::chordgen::typeIndex(typeName), juce::String("suffix \"") + suffix + "\"");
             }
+        }
+
+        beginTest("the new suffixes do not shadow the ones they sit beside");
+        {
+            expectEquals(detail::parseNumeralToken("V13", 0).type, keys::chordgen::typeIndex("Dominant 13th"));
+            expectEquals(detail::parseNumeralToken("V69", 0).type, keys::chordgen::typeIndex("6/9"));
+            expectEquals(detail::parseNumeralToken("V6", 0).type, keys::chordgen::typeIndex("Major 6th"));
+            expectEquals(detail::parseNumeralToken("IVM7#11", 0).type, keys::chordgen::typeIndex("Major 7th #11"));
+            expectEquals(detail::parseNumeralToken("IVM7", 0).type, keys::chordgen::typeIndex("Major 7th"));
+            expectEquals(detail::parseNumeralToken("iim11", 2).rootPc, 4);
+            expect(! detail::parseNumeralToken("Vq3", 0).valid, "q3 is not a suffix");
         }
 
         beginTest("malformed tokens fail to parse rather than silently reinterpreting");

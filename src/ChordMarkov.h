@@ -113,6 +113,11 @@ namespace keys::markov
                 { "m7b5", "Half Diminished" }, { "mM7", "Minor Major 7th" },
                 { "m6", "Minor 6th" }, { "madd9", "Minor Add9" },
                 { "M9", "Major 9th" }, { "m9", "Minor 9th" },
+                // 2026-11-02, the six types appended to chordgen::types(). Exact-match like the rest, so
+                // "13" cannot shadow "69" or "6", nor "M13" "M". Quartal and Quintal have no tradition
+                // of a numeral, so "q4" and "q5" (stacked fourths, stacked fifths) are invented here.
+                { "m11", "Minor 11th" }, { "M7#11", "Major 7th #11" }, { "13", "Dominant 13th" },
+                { "M13", "Major 13th" }, { "q4", "Quartal" }, { "q5", "Quintal" },
             };
             return s;
         }

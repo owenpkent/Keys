@@ -66,6 +66,15 @@ namespace keys::chordgen
             { "Minor 9th",       { 0, 3, 7, 10, 14 },  Family::extended },
             { "Dominant 9th",    { 0, 4, 7, 10, 14 },  Family::extended },
             { "6/9",             { 0, 4, 7, 9, 14 },   Family::extended },
+            // Appended 2026-11-02 (docs/DANCE_HARMONY.md 7.2, docs/IMPRESSIONIST_HARMONY.md part 3).
+            // Quartal and Quintal are the stacked-interval shapes (So What, McCoy Tyner, Debussy);
+            // Quintal's pitch classes are Sus2's, so the namer cannot tell the two apart.
+            { "Minor 11th",      { 0, 3, 7, 10, 14, 17 }, Family::extended },
+            { "Major 7th #11",   { 0, 4, 7, 11, 18 },     Family::extended },
+            { "Dominant 13th",   { 0, 4, 7, 10, 14, 21 }, Family::extended },
+            { "Major 13th",      { 0, 4, 7, 11, 14, 21 }, Family::extended },
+            { "Quartal",         { 0, 5, 10, 15 },        Family::extended },
+            { "Quintal",         { 0, 7, 14 },            Family::extended },
         };
         return t;
     }
@@ -86,9 +95,16 @@ namespace keys::chordgen
         const auto idx = [](const char* n) { return typeIndex(n); };
         static const std::vector<int> maj = { idx("Major"), idx("Major 7th"), idx("Major 9th"), idx("Add9"),
                                               idx("Sus2"), idx("Sus4"), idx("Major 6th"), idx("6/9"),
-                                              idx("Dominant 7th"), idx("Dominant 9th") };
+                                              idx("Dominant 7th"), idx("Dominant 9th"),
+                                              // Appended 2026-11-02. The pool's inScale filter keeps
+                                              // tier 1 diatonic, so a #11 only lands where the scale
+                                              // has it (Lydian I, Ionian IV) and a 13th where its 6th
+                                              // and 7th are both there.
+                                              idx("Major 7th #11"), idx("Major 13th"), idx("Dominant 13th"),
+                                              idx("Quartal"), idx("Quintal") };
         static const std::vector<int> min = { idx("Minor"), idx("Minor 7th"), idx("Minor 9th"), idx("Minor Add9"),
-                                              idx("Minor 6th"), idx("Minor Major 7th"), idx("Sus2"), idx("Sus4") };
+                                              idx("Minor 6th"), idx("Minor Major 7th"), idx("Sus2"), idx("Sus4"),
+                                              idx("Minor 11th"), idx("Quartal"), idx("Quintal") };
         static const std::vector<int> dim = { idx("Diminished"), idx("Diminished 7th"), idx("Half Diminished") };
         static const std::vector<int> aug = { idx("Augmented"), idx("Major 7th"), idx("Dominant 7th") };
         switch (q)
