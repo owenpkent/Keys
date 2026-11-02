@@ -5,6 +5,58 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: a Legato switch on every arp line
+
+**PARAMETER LAYOUT CHANGE.** `arpLegato` (and `arp2Legato`, `arp3Legato`, `arp4Legato`) is
+appended, default **off** - and off is byte-for-byte what the engine did before it existed, so
+every saved session opens sounding exactly as it was saved.
+
+Owen: *"a legato button. So when the density is lower or a note is skipped, it continues
+nicely."*
+
+A step that does not fire - Density turned down, a Chance-lane cell, a mute, a drawn rest, a
+Chain condition that fails - was a silence: the note before it ended at its own gate and nothing
+sounded until the next step that did fire. With **Legato** on, that note is held through the gap
+and released one sample *after* the next fired step's note-on, so the two overlap and a synth in
+legato or glide mode slides across the join instead of restarting its envelope.
+
+**Gate still means what it says.** A note whose next step fires ends at its gate, Legato or not;
+only the gaps are filled. That is only possible because the engine now looks one step ahead -
+whether a note is held or ends at its gate depends on the *next* step, and by the time that step
+is decided a gated note has already ended - so `fireStep` asks the next step's four questions
+(chain, mute, rest, chance) early and keeps the chance draw for when the step arrives. "Every note
+held to the next note-on" was the other reading, and it was turned down: that is mostly Gate at
+100 already.
+
+The rest of the rules: a ratchet holds only its last sub-hit, so the repeats still read as one; a
+held pitch retriggered on itself is closed *before* the new note-on, the tie rule, or the voice
+stacks; releasing the chord, switching the line off or switching Legato off releases whatever it
+was holding, so nothing can ring for good. `tests/ArpTests.cpp` pins all six.
+
+On each macro card's bottom strip beside Dot, Tuplet and Anchor, accessible name
+`Macro legato A`. Card-only, like Mutate, Stray and Lock.
+
+### Changed: Density, on the card, is what Chance was on the Play page
+
+Owen: *"a density knob where it controls, like, how much notes there are."*
+
+The per-line Chance slider - how many of a line's steps fire - has lived on the deep view's Play
+page since Mutate and Lock replaced it on the card (2026-08-18). It is the **tenth knob on the
+macro card** now, between GATE and MUTATE, and it reads **DENSITY** on both surfaces and in the
+host-facing parameter name. **No new parameter**: the id is still `arpChance`, so nothing in a
+saved session moves. The Chance *lane* keeps its name - it is per-step odds, and the knob
+multiplies it - which is why the knob is not called Chance too.
+
+Adding the tenth knob is what found the other thing. The macro card's minimum width was derived
+from the knob strip alone, and the card's bottom strip - Dot, Tuplet, Anchor, Details and the
+chord readout - was already ten pixels wider than that at the detached Arp window's floor, where
+the card is exactly the knob strip wide: Details had been drawing narrower than asked since the
+dice arrived, with nothing on screen to say so, and a fifth chip there would have laid it out at
+zero. The card's floor is the wider of its two rows now, so **the detached Arp window's minimum
+width is 1108 px, up from 970**; the docked editor's 1320 floor is untouched, since its cards had
+the room all along. `tests/LayoutTests.cpp` measures the five chips and the readout at both
+floors, by overlap and containment - the only thing that can see a clamped row.
+
 ### Changed: the track's own MIDI no longer reaches the arpeggiator unless you say so
 
 **PARAMETER LAYOUT CHANGE.** `arpTrackMidi` is appended, default **false**, and a new parameter

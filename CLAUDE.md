@@ -74,6 +74,63 @@ copies the .vst3 to `%USERPROFILE%\Ableton\vst3` (Owen's Ableton custom folder;
 
 Read `docs/ARCHITECTURE.md` first. Load-bearing ideas:
 
+**A line can be thinned from its card, and a thinned line can hold through the gaps
+(2026-09-01).** Owen: *"a density knob where it controls, like, how much notes there are, and also
+a legato button. So when the density is lower or a note is skipped, it continues nicely"* - then,
+shown the choices, took Density as Chance promoted to the card, and Legato as hold-through-skips
+rather than every-note-to-the-next.
+
+- **DENSITY is `arpChance` given a face on the macro card.** No new parameter. The Play page's
+  slider has carried it since Mutate and Lock replaced Chance on the card (2026-08-18), and the
+  card is where you sit and turn things; "how many notes" is the knob Owen reached for there.
+  Renamed **Density on both surfaces** and in the host-facing parameter name (the id does not
+  move), and deliberately *not* the lane's word: the Chance lane is one step's odds, the knob
+  thins the whole line, and one word for two things is the mistake the lane's own rename fixed.
+  `kDensity` sits between `kGate` and `kMutate` - how long, how many, then how the run explores -
+  free because the `Knob` enum is UI indexing. **Ten knobs**, so "a tenth does not fit" below is
+  history: `minMacroWidth()` moved itself when `numKnobs` did, and the docked card at 1320 had
+  the room (614 px against a 462 px strip). The half of the ask that would *add* notes is the
+  Ratchet lane and the harmony voices, which already exist.
+- **`arpLegato`, appended, per line, default off. PARAMETER LAYOUT CHANGE.** Off is byte-for-byte
+  what the engine did. On, a step that does not fire - Density, the Chance lane, a mute, a rest,
+  a failed Chain - no longer leaves a silence: the note before it is held open and released one
+  sample *after* the next fired step's note-on (`emitHit`'s `closeHeld`), the overlap a synth's
+  legato or glide mode needs. **The other way round from the tie branch, on purpose**: a tie is
+  the same pitch and its off must come first or the voice stacks; this is a different pitch and
+  the on must come first or the synth hears a gap. A held pitch retriggered on itself still takes
+  the tie branch.
+  **It looks one step ahead, and that is the whole design.** Whether a note is held or ends at
+  its gate depends on the *next* step, and by the time that step is decided a gated note has
+  already ended - so `fireStep` asks `prerollNext` the same four questions (chain, mute, rest,
+  chance) one step early, keeps the chance draw, and `chanceFails` hands it back when the step
+  arrives. Without it the engine could hold through skips *or* honour Gate, never both, and
+  "every note held to the next note-on" is the reading Owen turned down. The second thing after
+  `lastStepFired` that is not stateless from the playhead; a stale preroll (a transport jump) is
+  discarded and being wrong costs one step either way. `Active::legato` marks a held entry: no
+  due time, skipped by `retireDue` and the due branch, untouched by `advanceBlock`. **The one
+  hang it makes possible is closed at its one exit**: `releaseLegato` runs when the flag goes
+  off and in the bypassed / keys-up branch, since a held note waits for a next step and there is
+  none. A ratchet holds only its last sub-hit. `ArpTests` pins all six, and the gate-kept case
+  is the one that fails against a version without the lookahead.
+- **The card's bottom strip is a floor too, and was already over it.** `minMacroWidth()` took the
+  knob strip alone; the five-chip strip with the chord readout is 508 px against a 462 px knob
+  strip, and at the detached window's width - where the card is exactly the strip wide -
+  Details had been ten pixels short since the dice arrived, with nothing on screen to say so. A
+  fifth chip would have laid it out at zero. The cells are named constants summed into
+  `arpMacroModsW`, the card takes the larger row, the detached floor is 1108 (from 970), and
+  `LayoutTests` measures the five chips and the readout at both floors by overlap and
+  containment, since `takeMod` clamps rather than going negative - the arp bar's own lesson one
+  level down.
+- **`docs/MACRO_KNOBS.md` is the design for the harmony strip's second knob row, proposed and
+  unbuilt** (same day, Owen looking at the strip: *"I feel like we could shrink this area so we
+  can add more knobs. What other knobs could we add?"*, then *"document options. accent? target
+  velocity?"*). The room is eight cells at no height cost - the CHANCE row is already a knob row
+  the width of ten - and the file weighs ten candidates: three faces on parameters that exist
+  (STACK, DRIFT, RAMP), five one-parameter features (REPEAT, STRUM, ACCENT, ECHO, CLIMB) and two
+  held back (GLIDE, RANGE). **ACCENT is a target velocity, not a boost, 0 reads Off**, and the
+  reasoning is in the file. Do not describe any of it as shipping, and read it before adding a
+  knob to a card for any other reason: it is where the second-row layout rules are written.
+
 **The track's own MIDI needs an invitation, and an instance can say which one it is
 (2026-08-27/28).** Owen: *"why do I start recording in Ableton? It starts playing in something
 different"*, then *"we need it to be easier to turn it off, and it's so unclear where that's
@@ -446,6 +503,10 @@ had been spending on them. This supersedes the three-zones bullet above it.
   order that is not free. **Nine is what the 38 px floor was chosen to survive**: 9 knobs plus
   the two rings and eight gaps is 422 px, so every knob still clears the 34 px mouse-only floor.
   **A tenth does not fit and must buy the width** - raise the floors, never starve the row.
+  (**The tenth landed on 2026-09-01**, DENSITY, and bought nothing: the floor is derived from
+  `numKnobs` and moved itself to 462 px of strip, which the docked card's 614 already held. What
+  it *did* find was the card's other row, over its floor all along - see the round at the top of
+  this section.)
   **Zero is its own off switch**, so Stray takes no toggle beside it, the reading that already
   leaves Strum, Lock Influence and Lean without one.
   **"The editor's minimum width" was the wrong floor, and that is the standing lesson**
@@ -2617,11 +2678,14 @@ Four things will bite otherwise:
   `juce::Button` and does offer an InvokePattern, but it is **disabled on every shape but Random
   Once**, and a disabled control is absent from the UIA tree entirely, so "element not found" is
   the expected answer there rather than evidence it is missing),
-  `Macro dot A` / `Macro tuplet A` / `Macro anchor A` (`Macro trip A` until 2026-08-03, when
+  `Macro dot A` / `Macro tuplet A` / `Macro anchor A` / `Macro legato A` (the last from
+  2026-09-01; `Macro trip A` until 2026-08-03, when
   the toggle became the Tuplet **combo**; the band's twin answers to `Arp tuplet`. Being a combo
   it is also reachable by its current text - "Straight", "Triplet", "5-tuplet" - with the usual
   first-match caveat), and `Macro OCT A` / `Macro GATE A` /
-  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **nine from 2026-08-21**, when
+  `Macro VEL A` / `Macro H.TIME A` / ... one per knob heading - **ten from 2026-09-01**, when
+  `Macro DENSITY A` joined the row between GATE and MUTATE (it is `arpChance`, the Play page's
+  slider, under the name it reads as on a card); nine from 2026-08-21, when
   `Macro STRAY A` joined the row between MUTATE and LOCK. It was eight from 2026-08-18:
   `Macro H.VEL A` retired on 2026-08-17 when Humanize Velocity folded into VEL's own ring (see
   the RangeKnob bullet above), and `Macro CHANCE A` was replaced the next day by `Macro MUTATE A`

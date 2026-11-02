@@ -200,6 +200,28 @@ public:
                    "a saved off is not migrated over - the tell is absence, not value");
         }
 
+        beginTest("Legato is appended after Stray and off by default; Density is the Chance parameter");
+        {
+            // Appended, never inserted: a per-line parameter's index is what arpParamId names
+            // it by and what a saved session stores it under - the genSource rule.
+            expectEquals(juce::String(KeysProcessor::arpParamSuffix(KeysProcessor::numArpParams - 1)),
+                         juce::String("Legato"), "Legato is the last per-line parameter");
+            expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apLegato), juce::String("arpLegato"));
+            expectEquals(KeysProcessor::arpParamId(1, KeysProcessor::apLegato), juce::String("arp2Legato"));
+            Host h;
+            for (int line = 0; line < KeysProcessor::numArpLines; ++line)
+                expectWithinAbsoluteError(
+                    paramOf(h.processor, KeysProcessor::arpParamId(line, KeysProcessor::apLegato)),
+                    0.0f, 0.01f, "Legato is off by default, which is what the engine did before it");
+            // The card's DENSITY knob is the Play page's slider: one parameter under one new
+            // name, and the id it is stored under has not moved.
+            expectEquals(KeysProcessor::arpParamId(0, KeysProcessor::apChance), juce::String("arpChance"));
+            auto* chance = h.processor.apvts.getParameter("arpChance");
+            expect(chance != nullptr, "the Chance parameter still registers under its old id");
+            if (chance != nullptr)
+                expect(chance->getName(64).endsWith("Density"), "the host-facing name follows the UI");
+        }
+
         beginTest("migrateStray dates the session before it decides what absence means");
         {
             // The one migration whose tell is two parameters rather than one. Stray's default

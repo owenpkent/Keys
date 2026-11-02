@@ -83,6 +83,167 @@ public:
         auto lp = p;
         lp.usePattern = true;
 
+        // **Legato** (2026-09-01, Owen: "a legato button. So when the density is lower or a
+        // note is skipped, it continues nicely"). Six cases, and the second is the one that
+        // pins the design: a gated note still ends at its gate when the next step *fires*,
+        // which is only possible because fireStep looks one step ahead. Without the lookahead
+        // the engine could hold through a skip or honour the gate, never both - and "every note
+        // held to the next note-on" is the reading Owen turned down.
+        beginTest("legato holds a note through a skipped step and lets it go after the next note-on");
+        {
+            // The Note lane names the entries outright, so the pitches do not depend on how a
+            // skipped step moves the walk: step 0 plays 60, step 2 plays 64, and the Chance
+            // lane silences step 1 for certain.
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneNote][0].store(1);
+            e.lanes.value[ArpEngine::laneNote][2].store(2);
+            e.lanes.value[ArpEngine::laneProbability][1].store(0);
+            auto gp = lp;
+            gp.legato = true;
+            gp.gate = 50; // without Legato, 60 would end 3000 samples in
+            juce::MidiBuffer b0, b1, b2;
+            clock.ppq = 0.0;
+            e.process(gp, clock, block, chordOn({ 60, 64 }), b0);
+            clock.ppq = 0.25;
+            e.process(gp, clock, block, {}, b1);
+            clock.ppq = 0.5;
+            e.process(gp, clock, block, {}, b2);
+            const auto ev0 = collect(b0);
+            const auto ev1 = collect(b1);
+            const auto ev2 = collect(b2);
+            expectEquals((int) ev0.size(), 1, "one note-on and nothing else where the held note starts");
+            expect(! ev0.empty() && ev0[0].on && ev0[0].note == 60, "step 0 plays 60");
+            expect(ev1.empty(), "the skipped step is silent and releases nothing");
+            expectEquals((int) ev2.size(), 3, "the next fired step: its note-on, the release, its own gate end");
+            if (ev2.size() == 3)
+            {
+                expect(ev2[0].on && ev2[0].note == 64 && ev2[0].sample == 0, "the new note-on comes first");
+                expect(! ev2[1].on && ev2[1].note == 60 && ev2[1].sample == 1,
+                       "the held note is released one sample *after* it, so the two overlap");
+                expect(! ev2[2].on && ev2[2].note == 64, "the new note ends at its own gate");
+                expectWithinAbsoluteError(ev2[2].sample, 3000, 2);
+            }
+        }
+
+        beginTest("legato leaves the gate alone when the next step fires");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            auto gp = lp;
+            gp.legato = true;
+            gp.gate = 50;
+            juce::MidiBuffer b0;
+            clock.ppq = 0.0;
+            e.process(gp, clock, block, chordOn({ 60, 64 }), b0);
+            int offs = 0;
+            for (auto& x : collect(b0))
+                if (! x.on && x.note == 60) { ++offs; expectWithinAbsoluteError(x.sample, 3000, 2); }
+            expectEquals(offs, 1, "a note whose successor fires ends at its gate, Legato or not");
+        }
+
+        beginTest("legato closes a held pitch before the same pitch retriggers");
+        {
+            // One note, so step 2 lands on the pitch step 0 is still holding. That is the tie
+            // branch's case and it must win: off first, then on, or the voice stacks.
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneProbability][1].store(0);
+            auto gp = lp;
+            gp.legato = true;
+            gp.gate = 50;
+            juce::MidiBuffer b0, b1, b2;
+            clock.ppq = 0.0;
+            e.process(gp, clock, block, chordOn({ 60 }), b0);
+            clock.ppq = 0.25;
+            e.process(gp, clock, block, {}, b1);
+            clock.ppq = 0.5;
+            e.process(gp, clock, block, {}, b2);
+            const auto ev2 = collect(b2);
+            expect(ev2.size() >= 2 && ! ev2[0].on && ev2[0].note == 60 && ev2[0].sample == 0,
+                   "the held 60 is released first");
+            expect(ev2.size() >= 2 && ev2[1].on && ev2[1].note == 60 && ev2[1].sample == 0,
+                   "then 60 retriggers");
+            int ons = 0;
+            for (auto& x : ev2)
+                if (x.on) ++ons;
+            expectEquals(ons, 1, "one note-on for one pitch");
+        }
+
+        beginTest("releasing the chord releases what legato is holding");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneProbability][1].store(0);
+            auto gp = lp;
+            gp.legato = true;
+            gp.gate = 50;
+            juce::MidiBuffer b0, b1;
+            clock.ppq = 0.0;
+            e.process(gp, clock, block, chordOn({ 60, 64 }), b0);
+            juce::MidiBuffer up;
+            up.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+            up.addEvent(juce::MidiMessage::noteOff(1, 64), 0);
+            clock.ppq = 0.25;
+            e.process(gp, clock, block, up, b1);
+            int offs = 0;
+            for (auto& x : collect(b1))
+                if (! x.on && x.note == 60)
+                {
+                    ++offs;
+                    expectEquals(x.sample, 0, "at the top of the block the keys came up in");
+                }
+            expectEquals(offs, 1, "a held note does not outlive the chord");
+        }
+
+        beginTest("switching legato off releases what it was holding");
+        {
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneProbability][1].store(0);
+            auto gp = lp;
+            gp.legato = true;
+            gp.gate = 50;
+            juce::MidiBuffer b0, b1;
+            clock.ppq = 0.0;
+            e.process(gp, clock, block, chordOn({ 60, 64 }), b0);
+            gp.legato = false;
+            clock.ppq = 0.25;
+            e.process(gp, clock, block, {}, b1);
+            int offs = 0;
+            for (auto& x : collect(b1))
+                if (! x.on && x.note == 60)
+                {
+                    ++offs;
+                    expectEquals(x.sample, 0, "at the top of the block the flag went down in");
+                }
+            expectEquals(offs, 1, "a note held by a switch that is now off is let go");
+        }
+
+        beginTest("legato holds only the last sub-hit of a ratchet");
+        {
+            // Two sub-hits at gate 50: the first ends at its own gate so the ratchet still reads
+            // as one; only the second, which would otherwise leave the gap, is held open.
+            ArpEngine e;
+            e.prepare(sr);
+            e.lanes.value[ArpEngine::laneRatchet][0].store(2);
+            e.lanes.value[ArpEngine::laneProbability][1].store(0);
+            auto gp = lp;
+            gp.legato = true;
+            gp.gate = 50;
+            juce::MidiBuffer b0;
+            clock.ppq = 0.0;
+            e.process(gp, clock, block, chordOn({ 60 }), b0);
+            int ons = 0, offs = 0;
+            for (auto& x : collect(b0))
+            {
+                if (x.on) ++ons;
+                else { ++offs; expectWithinAbsoluteError(x.sample, 1500, 2); }
+            }
+            expectEquals(ons, 2, "both sub-hits sound");
+            expectEquals(offs, 1, "only the first ends inside the step");
+        }
+
         beginTest("lanes are ignored unless usePattern is on");
         {
             ArpEngine e;

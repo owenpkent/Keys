@@ -451,7 +451,9 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // "Pattern", so on a plain shape there was no way to shorten the notes or thin the run
     // out. They multiply the lane value, so the defaults leave an edited pattern untouched.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Gate"), 1 }, nm + " Gate", 5, 200, 100));
-    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Chance"), 1 }, nm + " Chance", 0, 100, 100));
+    // Named Density since 2026-09-01, when it became the macro card's DENSITY knob; the id is
+    // still "Chance", because the id is what every saved session stores it under.
+    layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Chance"), 1 }, nm + " Density", 0, 100, 100));
 
     // The 2026-07-30 expansion, all appended and all defaulting to what the arp did before
     // them, so an older session sounds identical until one of them is moved.
@@ -674,6 +676,21 @@ void KeysProcessor::addArpLineParams(juce::AudioProcessorValueTreeState::Paramet
     // hardens into the part exactly as a mutated one does.
     layout.add(std::make_unique<AudioParameterInt>(ParameterID { id("Stray"), 1 },
                                                    nm + " Stray", 0, 100, 0));
+
+    // **Legato** (2026-09-01, Owen: "a legato button. So when the density is lower or a note
+    // is skipped, it continues nicely"). A step that does not fire - Density turned down, a
+    // Chance-lane cell, a mute, a drawn rest, a Chain condition - is silence today: the note
+    // before it ends at its own gate and nothing sounds until the next step that fires. On,
+    // that note is held open through the gap instead and released just *after* the next fired
+    // step's note-on, which is the overlap a synth's legato or glide mode needs to slide rather
+    // than restart. Gate still means what it says on a step whose successor fires - the engine
+    // looks one step ahead to know which - so this narrows nothing but the silence.
+    //
+    // Default **off**, which is what the engine did before the parameter existed, so a session
+    // that predates it opens sounding exactly as it was saved. It sits on the macro card's
+    // bottom strip beside Dot, Tuplet and Anchor: a per-line switch you flip while listening.
+    layout.add(std::make_unique<AudioParameterBool>(ParameterID { id("Legato"), 1 },
+                                                    nm + " Legato", false));
 }
 
 // The N a choice index means. Off is 0 rather than 1 so "is there a tuplet at all" is one test
@@ -779,7 +796,7 @@ const char* KeysProcessor::arpParamSuffix(int which)
         "OctShift", "Volume", "HumanVel", "VelTrim", "Tuplet", "HumanizeSpan", "HumanVelSpan",
         "Drift", "VelLevel", "Mutate", "MutateLock",
         "Harm1", "Harm1Chance", "Harm2", "Harm2Chance",
-        "Stray"
+        "Stray", "Legato"
     };
     return suffixes[(size_t) juce::jlimit(0, (int) numArpParams - 1, which)];
 }
@@ -2399,6 +2416,7 @@ void KeysProcessor::runArpLines(juce::MidiBuffer& midi, int numSamples)
         ap.harmSemisB[1] = harmonySemisSecondFor((int) arpParam(n, apHarm2));
         ap.harmChance[1] = (int) arpParam(n, apHarm2Chance);
         ap.stray = (int) arpParam(n, apStray);
+        ap.legato = arpParam(n, apLegato) > 0.5f;
         ap.anchored = arpParam(n, apAnchor) > 0.5f;
         ap.direction = (ArpEngine::Direction) (int) arpParam(n, apDirection);
         ap.usePattern = arpParam(n, apPattern) > 0.5f;

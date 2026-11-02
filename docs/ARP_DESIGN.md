@@ -614,6 +614,25 @@ math was adversarially refuted as a pattern to copy. Requirements:
   shape the rest of the suite structurally cannot reach.
 - The end-of-block drain sits **outside** the "arp enabled / notes held" guard, so a note owed
   by the last step before the keys came up still ends on time.
+- **Legato holds a note through the steps that do not fire** (2026-09-01, `Params::legato`,
+  default off). A skipped step - a failed Chance draw or Density, a mute, a rest, a Chain
+  condition - used to leave the note before it ending at its own gate and a silence until the
+  next step that fired. On, that note's `Active` entry is marked `legato`: no due time, skipped
+  by `retireDue` and by `emitHit`'s due branch, untouched by `advanceBlock`, and closed by the
+  next fired step's *first* hit one sample **after** its note-on (`closeHeld`). That ordering is
+  the opposite of the tie branch's, on purpose: a tie is the same pitch and its off must precede
+  the on or the voice stacks; this is a different pitch and the on must precede the off or a
+  synth in legato mode hears a gap and restarts. A held pitch retriggered on itself still takes
+  the tie branch. **It needs one step of lookahead**: whether this step's notes are held or end
+  at their gate depends on what the *next* step does, and by then a gated note has ended - so
+  `fireStep` asks `prerollNext` the same four questions one step early and keeps the chance
+  draw for `chanceFails` to hand back when that step arrives. Without it Gate and hold-through
+  could not both be honoured, and "every note held to the next note-on" is mostly Gate at 100
+  already. This is the second thing in the engine, after `lastStepFired`, that is not stateless
+  from the playhead; a preroll for a step that never arrives is discarded, and the cost of being
+  wrong is bounded to one step. A ratchet holds only its last sub-hit. `releaseLegato` is the one
+  exit for the one hang this makes possible - it runs when the flag goes off and in the
+  bypassed / keys-up branch, since a held note waits for a next step and there is none.
 - The regression tests cover uneven block sizes, since a host may change `numSamples` between
   calls.
 - Track owed note-offs across block boundaries (ratchets, ties, pattern-length

@@ -457,6 +457,95 @@ public:
             }
         }
 
+        beginTest("the macro card's bottom strip fits its five chips and the chord, at either floor");
+        {
+            // Legato joined Dot, Tuplet, Anchor and Details on 2026-09-01, and the arithmetic in
+            // the layout's own comment was two floors out of date: it was measured against the
+            // docked window's card and never the detached Arp window's, where the card is
+            // exactly the knob strip wide and Details was already ten pixels short before the
+            // fifth chip arrived. minMacroWidth() takes the strip's own width against the knob
+            // strip's now; this is what keeps that honest. The overlap and containment passes
+            // are the only part that can see starvation: takeMod clamps the last cell rather
+            // than going negative, so a starved row draws four right-sized chips and a sliver.
+            Host h;
+            ArpPanel panel { h.processor };
+            panel.setMacroView(true);
+            for (const int w : { panelW, detachedPanelW })
+            {
+                panel.setSize(w, panel.preferredHeight());
+                juce::Array<juce::Component*> targets;
+                collectTargets(panel, targets);
+
+                juce::Array<juce::Rectangle<int>> chips;
+                juce::StringArray chipNames;
+                juce::Component* row = nullptr;
+                int seen = 0;
+                for (const char* title : { "Macro dot A", "Macro tuplet A", "Macro anchor A",
+                                           "Macro legato A", "Macro details A" })
+                {
+                    juce::Component* found = nullptr;
+                    for (auto* t : targets)
+                        if (t->getTitle() == title)
+                            found = t;
+                    expect(found != nullptr, juce::String("'") + title + "' is on screen at all");
+                    if (found == nullptr)
+                        continue;
+                    ++seen;
+                    row = found->getParentComponent();
+                    const auto b = found->getBounds();
+                    chips.add(b);
+                    chipNames.add(title);
+                    expect(b.getWidth() >= 34 && b.getHeight() >= 34,
+                           juce::String(title) + " clears the mouse-only floor at " + b.toString()
+                               + " (panel " + juce::String(w) + " px)");
+                    if (auto* button = dynamic_cast<juce::Button*>(found))
+                    {
+                        // GlyphArrangement, never Font::getStringWidth, which under-measures.
+                        juce::GlyphArrangement ga;
+                        const juce::Font font { juce::FontOptions(
+                            (float) juce::jmin(15, b.getHeight() * 3 / 4)) };
+                        ga.addLineOfText(font, button->getButtonText(), 0.0f, 0.0f);
+                        const float text = ga.getBoundingBox(0, -1, true).getRight();
+                        const float needed = text
+                            + (dynamic_cast<juce::ToggleButton*>(button) != nullptr
+                                   ? (float) b.getHeight() : 8.0f);
+                        expect((float) b.getWidth() >= needed,
+                               juce::String(title) + " is " + juce::String(b.getWidth())
+                                   + " px wide at panel " + juce::String(w) + ", too narrow for \""
+                                   + button->getButtonText() + "\" which needs "
+                                   + juce::String(juce::roundToInt(needed)));
+                    }
+                }
+                expectEquals(seen, 5, "the strip lost a chip, or one was renamed");
+
+                for (int i = 0; i < chips.size(); ++i)
+                    for (int j = i + 1; j < chips.size(); ++j)
+                        expect(! chips[i].intersects(chips[j]),
+                               chipNames[i] + " overlaps " + chipNames[j] + " at panel "
+                                   + juce::String(w) + " - the strip has run out of card, and "
+                                   "minMacroWidth() is supposed to ask for what it needs");
+
+                if (row != nullptr)
+                {
+                    for (int i = 0; i < chips.size(); ++i)
+                        expect(row->getLocalBounds().contains(chips[i]),
+                               chipNames[i] + " is inside its card at panel " + juce::String(w));
+                    // And clear of the chord readout at the strip's right end - the one Label on
+                    // the card that shares the strip's rows. It is taken from the right before
+                    // the chips are taken from the left, so it is the chips that would be pushed
+                    // under it, never the other way round.
+                    for (auto* child : row->getChildren())
+                        if (auto* lab = dynamic_cast<juce::Label*>(child))
+                            if (chips.size() > 0 && lab->getBottom() > chips[0].getY()
+                                && lab->getY() < chips[0].getBottom())
+                                for (int i = 0; i < chips.size(); ++i)
+                                    expect(! chips[i].intersects(lab->getBounds()),
+                                           chipNames[i] + " overlaps the chord readout at panel "
+                                               + juce::String(w));
+                }
+            }
+        }
+
         beginTest("the macro knob strip is never clamped, at either window's floor");
         {
             // The starvation sweep above cannot catch this on its own and it is worth saying

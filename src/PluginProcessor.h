@@ -395,7 +395,15 @@ public:
                     // is a control of its own. Default 0 - off - so a session saved before it
                     // opens playing the chord it was saved playing, and Mutate stops being
                     // able to leave that chord at any setting. See ArpEngine's `mutatedPitch`.
-                    apStray, numArpParams };
+                    apStray,
+                    // Appended 2026-09-01 (Owen: "a legato button. So when the density is
+                    // lower or a note is skipped, it continues nicely"). On, a note whose next
+                    // step does not fire - Density, the Chance lane, a mute, a rest, a failed
+                    // Chain - is held open through the gap and released just after the next
+                    // step's note-on, so a synth in legato mode glides instead of restarting.
+                    // Off by default, and off is exactly what the engine did before it existed:
+                    // a skipped step is silence. See ArpEngine::Params::legato.
+                    apLegato, numArpParams };
     static const char* arpParamSuffix(int which);
     // The Tuplet choice list, one copy: the strings the parameter offers and the N each index
     // means. Index 0 is straight; the rest are N-in-the-space-of-ArpEngine::tupletSpace(N).

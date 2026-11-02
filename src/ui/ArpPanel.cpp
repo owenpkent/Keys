@@ -80,6 +80,27 @@ namespace
     constexpr int arpMacroAreaInset = 12; // the panel's inset inside cardBounds()
     constexpr int arpMacroCardInset = 8;  // the card's own inset inside the panel
     constexpr int arpMacroRowInset = 10;  // MacroRow's side inset inside the card
+
+    // The macro card's bottom strip: five fixed cells left to right, a gap after each, and the
+    // chord readout at the right end. Named rather than written into the setBounds calls so
+    // minMacroWidth() can ask what the *row* needs and not only what the knob strip needs
+    // (2026-09-01, when Legato made five). Before that the row's width was asserted in a
+    // comment that was two floors out of date - measured against the docked window's card and
+    // never the detached Arp window's, where the card is exactly the knob strip wide and
+    // Details had been ten pixels short since the dice arrived, with nothing on screen to say
+    // so. A fifth chip there would have laid Details out at zero.
+    constexpr int arpMacroModDot = 62;
+    // 92 where the tick box had 66: a combo showing "5-tuplet" needs the word plus a chevron.
+    constexpr int arpMacroModTuplet = 92;
+    constexpr int arpMacroModAnchor = 84;
+    constexpr int arpMacroModLegato = 84; // "Legato" is "Anchor"'s length: the same cell
+    constexpr int arpMacroModDetails = 76;
+    constexpr int arpMacroModGap = 8;
+    constexpr int arpMacroChordW = 64;    // the held-chord readout; ellipsises gracefully
+    constexpr int arpMacroChordGap = 6;
+    constexpr int arpMacroModsW = arpMacroModDot + arpMacroModTuplet + arpMacroModAnchor
+                                + arpMacroModLegato + arpMacroModDetails + 5 * arpMacroModGap
+                                + arpMacroChordGap + arpMacroChordW;
     // What the *deep* pages need, which is more than the macro view (2026-08-21). Measured
     // rather than derived, and honestly so: the band groups share the width by weight and the
     // lane tabs divide what is left by their count, so there is no clean sum to write here the
@@ -1334,8 +1355,8 @@ void ArpPanel::refreshShape()
     setAllVisible({ &shapeBox, &distanceBox, &retrigBox, &rateLabel, &shapeLabel, &distanceLabel,
                     &retrigLabel, &rateKnob, &rateModeButton, &shapePrev, &shapeNext, &ratePrev,
                     &rateNext, &dotButton, &tupletBox, &tupletLabel, &anchorButton, &octavesSlider,
-                    &swingSlider, &gateSlider, &chanceSlider, &octavesLabel, &swingLabel,
-                    &gateLabel, &chanceLabel, &latchButton, &keysBandButton, &offsetSlider,
+                    &swingSlider, &gateSlider, &densitySlider, &octavesLabel, &swingLabel,
+                    &gateLabel, &densityLabel, &latchButton, &keysBandButton, &offsetSlider,
                     &rampSlider, &rampTimeSlider, &humanSlider, &humanVelSlider, &offsetLabel,
                     &rampLabel, &rampTimeLabel, &humanLabel, &humanVelLabel,
                     &driftSlider, &driftLabel }, ! macroView);
@@ -1786,6 +1807,15 @@ namespace
           "fighting for the same register." },
         { KeysProcessor::apGate, "GATE",
           "How much of each step this line's notes fill. Short gates let another line through." },
+        // DENSITY (2026-09-01, Owen: "a density knob where it controls, like, how much notes
+        // there are"). It is the Chance parameter - the Play page's slider, given a face here -
+        // and it reads as Density on both, because "chance" is what the *lane* is called and
+        // this is the one knob that thins a whole line. The lower half of Owen's ask; the half
+        // that would add notes is the Ratchet lane and the harmony voices, which already exist.
+        { KeysProcessor::apChance, "DENSITY",
+          "How many of this line's steps actually play. At 100 every step fires; turn it down "
+          "and steps drop out at random, thinning the run. Multiplies the Chance lane. With "
+          "LEGATO on, the note before a dropped step holds through it instead of leaving a gap." },
         // MUTATE and LOCK replaced CHANCE here on 2026-08-18 (Owen: "explore the chance knob
         // being a drift instead where it explores other patterns and notes... could be multiple
         // knobs. want notes. mutations"). Chance lost nothing by it: it is still a step lane and
@@ -2006,6 +2036,20 @@ ArpPanel::MacroRow::MacroRow(ArpPanel& o, KeysProcessor& p, int n) : owner(o), p
     dotAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apDot), dotButton);
     tupletAtt = std::make_unique<ComboAtt>(processor.apvts, id(KeysProcessor::apTuplet), tupletBox);
     anchorAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apAnchor), anchorButton);
+
+    // Legato (2026-09-01): the other half of Density's ask. A step that does not fire - Density
+    // turned down, a Chance cell, a mute, a rest, a Chain condition - is a silence with this
+    // off; on, the note before it holds through and is released just after the next fired
+    // step's note-on, the overlap a synth's legato or glide mode needs. Not greyed in Hz or on
+    // any shape: skips happen on every clock and every shape alike.
+    legatoButton.setTitle("Macro legato " + letter);
+    legatoButton.setTooltip("Hold a note through the steps that do not fire - Density turned "
+                            "down, a Chance cell, a mute, a rest - and let it go just after the "
+                            "next note that does, so a synth in legato or glide mode slides "
+                            "instead of restarting. Gate still ends a note when the next step "
+                            "fires; this only fills the gaps.");
+    addAndMakeVisible(legatoButton);
+    legatoAtt = std::make_unique<ButtonAtt>(processor.apvts, id(KeysProcessor::apLegato), legatoButton);
 
     // Opens this line's own detailed view - the band, and the step editor once Shape is
     // Pattern. With the A/B tabs gone as navigation (they are the section bar's On switches
@@ -2796,21 +2840,21 @@ void ArpPanel::MacroRow::resized()
     // held chord sits at the card's bottom-right corner, where a dropped card lands.
     full.removeFromTop(2);
     auto subRow = full.removeFromTop(arpMacroMods);
-    chordLabel.setBounds(centred(subRow.removeFromRight(64)));
-    subRow.removeFromRight(6);
+    chordLabel.setBounds(centred(subRow.removeFromRight(arpMacroChordW)));
+    subRow.removeFromRight(arpMacroChordGap);
     const auto takeMod = [&subRow](int w)
-    { auto c = subRow.removeFromLeft(w); subRow.removeFromLeft(8); return c; };
-    dotButton.setBounds(takeMod(62));
-    // 92 where the tick box had 66: a combo showing "5-tuplet" needs the word plus a chevron,
-    // and this row has the slack to give it (see the arithmetic below) rather than making the
-    // entries ellipsise. Full 34 px height, unlike the band's 28 - the strip is 34 already.
-    tupletBox.setBounds(takeMod(92));
-    anchorButton.setBounds(takeMod(84));
-    // 76, after Anchor: at the editor's minimum width this sub-row is ~479 px wide (the
-    // card's ~499 less its own 10 px side insets), and the four fixed cells plus the chord
-    // readout spend ~416 of it, leaving room without touching chordLabel's 64 px - which
-    // ellipsises gracefully if that arithmetic ever tightens.
-    detailsButton.setBounds(takeMod(76));
+    { auto c = subRow.removeFromLeft(w); subRow.removeFromLeft(arpMacroModGap); return c; };
+    // Every cell is a named constant and their sum is arpMacroModsW, which minMacroWidth()
+    // takes against the knob strip: the row is never asked to fit in less than it needs, so
+    // takeMod's clamp on the last cell - which is what a starved row looks like, Details
+    // drawn as a sliver with nothing to say why - cannot bite at either window's floor.
+    // LayoutTests measures the five chips and the readout at both. Full 34 px height, unlike
+    // the band's 28 - the strip is 34 already.
+    dotButton.setBounds(takeMod(arpMacroModDot));
+    tupletBox.setBounds(takeMod(arpMacroModTuplet));
+    anchorButton.setBounds(takeMod(arpMacroModAnchor));
+    legatoButton.setBounds(takeMod(arpMacroModLegato));
+    detailsButton.setBounds(takeMod(arpMacroModDetails));
 }
 
 // The LineTab class lived here until 2026-08-02, when the A/B/All tabs moved to the ARP
@@ -2927,7 +2971,7 @@ void ArpPanel::buildAttachments()
     keysBandAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apKeys), keysBandButton);
     swingAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apSwing), swingSlider);
     gateAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apGate), gateSlider);
-    chanceAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apChance), chanceSlider);
+    densityAtt = std::make_unique<SliderAtt>(processor.apvts, paramId(KeysProcessor::apChance), densitySlider);
     latchAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apLatch), latchButton);
     linkAtt = std::make_unique<ButtonAtt>(processor.apvts, paramId(KeysProcessor::apLinkLanes), linkButton);
 }
@@ -3123,9 +3167,13 @@ void ArpPanel::buildControls()
          "How much of each step the note sounds for. Over 100% ties into the next step. "
          "Multiplies the Gate lane, so it works on any shape.");
 
-    knob(chanceSlider, chanceLabel, "Chance", 0.0, 100.0, 1.0,
-         "How likely each step is to fire. Multiplies the Probability lane, so it thins a "
-         "run out on any shape.");
+    // "Density" since 2026-09-01, when this parameter grew a face on the macro card under that
+    // name: one parameter, one word on both surfaces. "Chance" is what the *lane* is still
+    // called - a per-step odds - where this is the one knob that thins a whole line.
+    knob(densitySlider, densityLabel, "Density", 0.0, 100.0, 1.0,
+         "How many of this line's steps actually play. At 100 every step fires; lower, and "
+         "steps drop out at random. Multiplies the Chance lane, so it thins a run out on any "
+         "shape. The same knob as DENSITY on the line's card.");
 
     addAndMakeVisible(latchButton);
     latchButton.setTooltip("Ignore note-offs until a new chord arrives.");
@@ -3161,10 +3209,13 @@ void ArpPanel::buildControls()
     buildLaneRow(laneRows[(size_t) ArpEngine::laneVelocity], ArpEngine::laneVelocity, "Velocity");
     buildLaneRow(laneRows[(size_t) ArpEngine::laneGate], ArpEngine::laneGate, "Gate");
     buildLaneRow(laneRows[(size_t) ArpEngine::laneRatchet], ArpEngine::laneRatchet, "Ratchet");
-    // "Chance", not "Prob" (2026-08-14). The knob on the Play page is called CHANCE and the two
+    // "Chance", not "Prob" (2026-08-14). The knob on the Play page was called CHANCE and the two
     // multiply together, so one word for one idea: a lane at 60 under a knob at 100 fires six
     // times in ten. Owen asked for per-step odds to be findable, and two names for the same
-    // thing in two places is most of why they were not.
+    // thing in two places is most of why they were not. **The knob is DENSITY since
+    // 2026-09-01**, when it grew a face on the macro card - and that is a different word on
+    // purpose rather than the old mistake back: the lane is per-step odds, the knob thins the
+    // whole line, and its tooltip on both surfaces says it multiplies this lane.
     buildLaneRow(laneRows[(size_t) ArpEngine::laneProbability], ArpEngine::laneProbability, "Chance");
     // The 2026-07-30 four. "Prob" above shortened with them: ten tabs share the width six
     // used to, and "Probability" is the only old label that will not fit at that size.
@@ -3495,7 +3546,7 @@ void ArpPanel::buildPageLists()
         &rateLabel, &rateKnob, &rateModeButton, &ratePrev, &rateNext,
         &shapeLabel, &shapeBox, &shapePrev, &shapeNext,
         &tupletLabel, &tupletBox, &dotButton,
-        &swingLabel, &swingSlider, &gateLabel, &gateSlider, &chanceLabel, &chanceSlider,
+        &swingLabel, &swingSlider, &gateLabel, &gateSlider, &densityLabel, &densitySlider,
         &retrigLabel, &retrigBox, &keysBandButton, &latchButton, &anchorButton,
         &octavesLabel, &octavesSlider, &distanceLabel, &distanceBox, &offsetLabel, &offsetSlider,
         &rampLabel, &rampSlider, &rampTimeLabel, &rampTimeSlider,
@@ -4004,7 +4055,13 @@ int ArpPanel::minMacroWidth()
     using MR = ArpPanel::MacroRow;
     const int rings = 2 * 2 * arpRingPx;
     const int strip = MR::numKnobs * arpMacroKnobMinW + rings + 6 * (MR::numKnobs - 1);
-    const int card = strip + 2 * arpMacroRowInset;
+    // A card has two rows of fixed-size cells, and the floor is whichever is wider. The knob
+    // strip alone was the floor until 2026-09-01, and the bottom strip - Dot, Tuplet, Anchor,
+    // Details, then Legato - was quietly over it by ten pixels at the detached window's width
+    // before the fifth chip made it sixty. The same shape as the 2026-08-21 lesson one level
+    // up: a view drawn in two windows has two floors, and only the docked one was ever looked
+    // at, because it is the wider one and everything fits there.
+    const int card = juce::jmax(strip, arpMacroModsW) + 2 * arpMacroRowInset;
     return 2 * card + arpMacroCardGap + 2 * arpMacroAreaInset + 2 * arpMacroCardInset;
 }
 
@@ -4312,7 +4369,7 @@ void ArpPanel::resized()
         auto inner = groupInner(groups[1].bounds);
         knobColumn(inner, 50, swingLabel, swingSlider);
         knobColumn(inner, 50, gateLabel, gateSlider);
-        knobColumn(inner, 50, chanceLabel, chanceSlider);
+        knobColumn(inner, 50, densityLabel, densitySlider);
         inner.removeFromLeft(8);
 
         // ~195 px left after the knobs, and every one of these is spent. A toggle needs
