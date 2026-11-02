@@ -201,6 +201,54 @@ testing convention (what to test,
 how to keep it testable) is in
 [okstudio-juce-kit/docs/TESTING.md](../../okstudio-juce-kit/docs/TESTING.md).
 
+## Nightly fuzzing
+
+`Keys_fuzz` (`tests/FuzzTests.cpp`) is the randomised half of the suite: a seeded generator
+draws inputs nobody wrote a case for and checks invariants rather than expected values. Seven
+targets: `chordsym` (the typed-chord parser, whose canonical name must re-parse to the same
+chord), `detect` (a chord's name must not depend on note order or octave), `notemath` (a
+scale-locked key always lands in the scale), `euclid`, `chordgen` (every generated or revoiced
+note is a MIDI note), `arp` (one engine with random parameters, lanes, chord and transport: every
+event inside its block, no note-off for a silent pitch, no second note-on for a sounding one,
+nothing held once the chord is gone) and `state` (a session file with flipped bytes, a truncated
+tail or attributes the UI could never produce must load, play a few blocks, save and load again).
+
+`.github/workflows/fuzz-nightly.yml` builds it with AddressSanitizer and runs it once a day on
+a fresh seed (the run id) with a large budget, so each night explores new space and a failure is
+allowed to be news. It is not a required check and never gates a merge. CI builds the binary on
+every push so it cannot rot, but does not run it. A failure prints the replay:
+
+```
+FAIL  arp case 21: block 2: note-off for a silent 126
+      reproduce: Keys_fuzz --target arp --seed 24301 --case 21
+```
+
+Case `n` of a target seeds its own generator from (seed, target, n), so that one line replays
+the input alone, from `build/Release`. `KEYS_FUZZ_TRACE=1` prints every MIDI event the arp emits
+and the case's parameters; `KEYS_FUZZ_OFF=legato,clock,harm,late,lock,duck,stray,mutate,drift,humanvel,ramp,swing,dividers`
+switches named arp features off on top of the draw, for bisecting. Fix the bug, then add the
+minimal input as a named test in the normal suite.
+
+```powershell
+cmake --build build --config Release --target Keys_fuzz
+.uild\Release\Keys_fuzz.exe                       # fixed seed, 300 cases a target, a few seconds
+.uild\Release\Keys_fuzz.exe --iterations 20000    # about half a minute
+```
+
+**Two findings from the first run (2026-11-02), both open:**
+
+- `Keys_fuzz --target arp --seed 24301 --case 21`: with CLOCK on, a follower's ratchet sub-hits
+  are placed across the source's step length, but the source's fires can be closer than that (a
+  Late lane at 90% then a step at 0%). The next fire then arrives *before* sub-hits already
+  emitted, and `emitHit`'s close-what-you-land-on pass (the tie branch, and Legato's release)
+  emits their note-off at a sample *earlier* than their note-on. Downstream that is an off the
+  synth ignores followed by an on nothing ever ends: a stuck note.
+- `Keys_fuzz --target state --seed 24301 --case 302`: a parameter attribute holding `NaN` in the
+  session XML loads as a NaN parameter value. Nothing clamps it on the way in.
+
+Until those are fixed, `Keys_fuzz` is not registered with `ctest`, since a fixed-seed smoke would
+turn every pull request red for a reason it did not cause (`CMakeLists.txt` says where to add it).
+
 ## CMake options
 
 | Option | Default | Meaning |
@@ -212,6 +260,7 @@ how to keep it testable) is in
 | `KEYS_BUILD_HOST` | `ON` | build Keys Host (an instrument VST3 hosted inside Keys). Turning this off leaves `run.py`'s default target missing |
 | `KEYS_BUILD_MCP_SHIM` | `ON` | build `keys-mcp.exe`, the stdio bridge (see [MCP.md](MCP.md)) |
 | `KEYS_BUILD_MIDI_EFFECT` | `OFF` | also build Keys FX, the MIDI-effect variant Ableton rejects |
+| `KEYS_FUZZ_ASAN` | `OFF` | compile `Keys_fuzz` with AddressSanitizer (the nightly turns it on; needs the MSVC ASan component and its runtime DLL on `PATH`) |
 
 ## Troubleshooting
 

@@ -5,6 +5,17 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: nightly fuzzing
+
+`Keys_fuzz` (`tests/FuzzTests.cpp`), a seeded randomised invariant tester over the pure cores
+(the typed-chord parser, chord naming, scale lock, Euclid, the generator and voicing pipeline, the
+arp engine) and the session loader, with a one-line reproducer per failure. CI builds it;
+`.github/workflows/fuzz-nightly.yml` runs it nightly on a fresh seed under AddressSanitizer, the
+pattern the other OK Studio repos follow. Its first run found two bugs, recorded in
+`docs/BUILD.md` ("Nightly fuzzing") and still open: a stuck note under CLOCK when a follower's
+ratchet sub-hits outlive the source's next fire, and a `NaN` parameter surviving a damaged
+session load.
+
 ### Added: three dance minor loops in the chord library
 
 `i bVII bVI`, `i bVII iv bVI` and `i bVII bVI iv`, tagged Trance, EDM, House and Progressive

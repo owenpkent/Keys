@@ -1,0 +1,100 @@
+name: Fuzz nightly
+
+# Keys_fuzz (tests/FuzzTests.cpp) once a day on a fresh seed with a large budget, under
+# AddressSanitizer. The normal suite never runs it on a seed it did not choose, so a pull request
+# is judged on fixed inputs and never goes red for a reason it did not cause; this job is where
+# new inputs are allowed to surprise us. It is not a required check and never gates a merge.
+#
+# A failure prints the exact replay:
+#
+#     Keys_fuzz --target arp --seed 1234 --case 56
+#
+# Build Keys_fuzz locally (cmake --build build --config Release --target Keys_fuzz), run that
+# line from build/Release, set KEYS_FUZZ_TRACE=1 to see every event, and KEYS_FUZZ_OFF=... to
+# switch arp features off one at a time while bisecting. Fix the bug and add the minimal input as
+# a named test in the normal suite. See "Nightly fuzzing" in docs/BUILD.md.
+#
+# The seed is the run id, so the log and the replay always agree. GitHub stops a schedule after
+# 60 days without a commit; a manual run restarts it. The failure email goes to whoever last
+# edited the cron line.
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Cases per target before each target's cost scaling (default 200000)
+        type: number
+        default: 200000
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Randomised invariants (ASan, fresh seed)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout JUCE
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.8
+          path: juce-sdk
+          persist-credentials: false
+
+      # Same read-only deploy key as ci.yml ("Keys CI (read-only)" on the kit).
+      - name: Checkout okstudio-juce-kit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: owenpkent/okstudio-juce-kit
+          ssh-key: ${{ secrets.KIT_DEPLOY_KEY }}
+          path: okstudio-juce-kit
+          persist-credentials: false
+
+      - name: Configure
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DKEYS_JUCE_PATH="${{ github.workspace }}/juce-sdk"
+          -DOKSTUDIO_KIT_PATH="${{ github.workspace }}/okstudio-juce-kit"
+          -DKEYS_COPY_PLUGIN=OFF
+          -DKEYS_BUILD_HOST=OFF
+          -DKEYS_BUILD_MCP_SHIM=OFF
+          -DKEYS_FUZZ_ASAN=ON
+
+      - name: Build Keys_fuzz
+        run: cmake --build build --config Release --target Keys_fuzz
+
+      # The ASan runtime DLL ships beside the compiler, not beside the exe.
+      - name: Put the MSVC tools (and the ASan runtime) on PATH
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $ver = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          $bin = "$vs\VC\Tools\MSVC\$ver\bin\Hostx64\x64"
+          if (-not (Test-Path "$bin\clang_rt.asan_dynamic-x86_64.dll")) { throw "ASan runtime not found in $bin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
+      - name: Fuzz
+        shell: pwsh
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=0
+          FUZZ_ITERATIONS: ${{ inputs.iterations || 200000 }}
+        run: |
+          .\build\Release\Keys_fuzz.exe --seed ${{ github.run_id }} --iterations $env:FUZZ_ITERATIONS 2>&1 | Tee-Object -FilePath fuzz.log
+          exit $LASTEXITCODE
+
+      - name: Upload the log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fuzz-log
+          path: fuzz.log
+          if-no-files-found: ignore

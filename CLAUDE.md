@@ -147,7 +147,8 @@ reasoning is one search away.
 `KeysHostEditor` owns the window and the instrument chip's menu. `src/mcp/KeysMcp.{h,cpp}`
 registers the tools on the kit's MCP server. `tests/` holds `ArpTests`, `StateTests`,
 `LayoutTests`, `TakeTests`, `ChordSourceTests`, `ChordLibraryTests`, `MarkovTests` and
-`McpTests`, all run from `KeysTests.cpp`.
+`McpTests`, all run from `KeysTests.cpp`, plus `FuzzTests.cpp`, the seeded invariant tester the
+nightly runs (`docs/BUILD.md`, "Nightly fuzzing").
 
 ### The rules
 

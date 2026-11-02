@@ -76,8 +76,10 @@ jobs:
       - name: Build Keys Host and the MCP shim
         run: cmake --build build --config Release --target KeysHost_VST3 keys-mcp
 
+      # Keys_fuzz is built here so it cannot rot, but only the nightly runs it
+      # (.github/workflows/fuzz-nightly.yml): a fresh seed is allowed to fail, a PR check is not.
       - name: Build tests
-        run: cmake --build build --config Release --target Keys_tests
+        run: cmake --build build --config Release --target Keys_tests Keys_fuzz
 
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure

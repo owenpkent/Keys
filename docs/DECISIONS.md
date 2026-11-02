@@ -7,6 +7,27 @@ so the top of the file is the most recent round and the bottom is the oldest thi
 standing. A superseded claim is kept where it sits and marked there rather than deleted, because
 knowing why a rule existed is what stops it being reinvented.
 
+**Nightly fuzzing, like the other repos (2026-11-02).** Owen: *"need nightly fuzzing like other
+repos"*. alpha-osk runs its property tests nightly on an unfixed Hypothesis seed, openmouse and
+polaris run Jazzer; the shape they share is the one Keys takes: **the normal suite is judged on
+fixed inputs and the nightly is where new inputs are allowed to surprise us**. `Keys_fuzz`
+(`tests/FuzzTests.cpp`) is a seeded invariant tester over the pure cores and the session loader,
+not JUCE UnitTest, because what a fuzz run has to report is a reproducer and not a pass count:
+case `n` of a target seeds its own generator from (seed, target, n), so a failure prints one
+command that replays the input alone. The nightly builds it with MSVC's AddressSanitizer on the
+fuzz binary only - the header-only cores it exercises are compiled into that translation unit, so
+they are instrumented where it matters while the plugin and JUCE link as they always do - and
+seeds it with the run id. **Two choices worth recording.** The harness stays inside the product's
+domain, and three of its first failures were the harness leaving it (a generator octave the
+parameter cannot reach, a latched chord expected to let go when Latch turns off when that is
+Hold off's job, a clocked source firing two steps on one sample). Each was checked against the
+code before being called a finding, and the ones that survived are the two the harness found on
+its first in-domain run: a stuck note under CLOCK when a follower's ratchet sub-hits outlive the
+source's next fire, and a `NaN` parameter surviving a damaged session load. Both are open and
+recorded in `docs/BUILD.md`. And **`Keys_fuzz` is built by CI but not registered with `ctest`**
+until those two are fixed: a fixed-seed smoke that is red on day one would turn every pull request
+red for a reason it did not cause, the one thing the shared shape exists to prevent.
+
 **A chord you can type (2026-11-02).** Owen: *"it would be cool if you could type the chord you
 wanted. example, Cmaj7"*. A text field on the Pads bar beside Keep arp, with an **Add** button
 as the click and Enter as the accelerator, since the on-screen keyboard Owen types with has one.

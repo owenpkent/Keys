@@ -165,3 +165,26 @@ if(MSVC)
   target_link_options(Keys_tests PRIVATE /STACK:8388608)
 endif()
 add_test(NAME Keys_tests COMMAND Keys_tests)
+
+# Randomised invariant tests (tests/FuzzTests.cpp): a seeded generator drives the pure cores and
+# the state loader with inputs nobody wrote a case for. CI builds it so it cannot rot; the nightly
+# workflow (.github/workflows/fuzz-nightly.yml) runs it on a fresh seed with a large budget and
+# prints the reproducer. Not registered with ctest yet: its first run found two bugs (see
+# "Nightly fuzzing" in docs/BUILD.md), and until they are fixed a fixed-seed smoke would turn
+# every pull request red for a reason it did not cause. Once they are, add
+# `add_test(NAME Keys_fuzz COMMAND Keys_fuzz --iterations 300)` here.
+add_executable(Keys_fuzz tests/FuzzTests.cpp)
+target_include_directories(Keys_fuzz PRIVATE src)
+target_link_libraries(Keys_fuzz PRIVATE okstudio_kit juce::juce_audio_basics Keys)
+if(MSVC)
+  target_link_options(Keys_fuzz PRIVATE /STACK:8388608)
+endif()
+# AddressSanitizer on the fuzz binary alone (the nightly turns it on). Only this translation
+# unit is instrumented, and that is where the header-only cores it exercises are compiled, so a
+# bad read in ArpEngine or the chord parser is caught where it happens instead of showing up as
+# a crash three calls later. The plugin and JUCE link as they always do.
+option(KEYS_FUZZ_ASAN "Compile Keys_fuzz with AddressSanitizer" OFF)
+if(KEYS_FUZZ_ASAN AND MSVC)
+  target_compile_options(Keys_fuzz PRIVATE /fsanitize=address /Zi)
+  target_link_options(Keys_fuzz PRIVATE /DEBUG)
+endif()
