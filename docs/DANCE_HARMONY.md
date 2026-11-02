@@ -319,3 +319,127 @@ Not added because the library already has them: `vi IV I V` (Trance anthem), `i 
 - MS-20 and Ensoniq chord-memory claims: unverified.
 - Tropical house, afro house, melodic techno, acid, 90s rave and lo-fi house: no usable harmony
   sources in this pass.
+
+---
+
+## 9. What the corpus says (Chordonomicon, 2026-11-02)
+
+**Method.** From `datasets/chordonomicon_v2.csv` (679,807 rows, CC-BY-NC-4.0) I took songs whose `main_genre` is electronic or whose free-text `genres` tag list has a dance tag, matched per tag (so "garage rock" is not garage). Each chord symbol became (root, quality). Key was estimated per song with Krumhansl-Schmuckler templates over chord-tone histograms (root, third, fifth), with the first and last chord counted double so the tonic is favoured; the best of 24 keys decides major or minor. Chords were then written as Keys numerals (fixed major-scale table, so minor's flats are `bIII bVI bVII`). **Loops are triad-level**: 7ths, 9ths, sus and add chords collapse to major, minor, dim or aug, because tabs drop extensions; power chords take the key's diatonic quality. Consecutive repeats are collapsed; a loop is a 2, 3 or 4 chord cycle that occurs twice in a row anywhere in the song, rotation-normalised, **counted once per song**. Percentages are of songs with at least 4 parsable chords. The baseline is a 10% random sample of every non-dance row (66,321 songs). Library comparison treats `ChordLibrary.h` rows as cycles at the same triad level (220 distinct cycles from 355 rows). Full counts: `datasets/derived/chordonomicon_dance_loops.csv`.
+
+### 9.1 Subset sizes (songs; groups overlap)
+
+| Group | Songs | Minor | Borrowed* | Any 7th | 9th or higher |
+| --- | --- | --- | --- | --- | --- |
+| **Dance core (union of all below)** | **6,913** | 37% | 38% | 28% | 9% |
+| electronic (`main_genre`) | 2,814 | 38% | 29% | 22% | 8% |
+| house (any house tag) | 2,265 | 41% | 29% | 22% | 7% |
+| EDM (incl. electro house, big room) | 1,869 | 40% | 23% | 18% | 7% |
+| disco | 1,861 | 28% | 55% | 49% | 15% |
+| trance | 638 | 49% | 34% | 18% | 7% |
+| eurodance | 573 | 38% | 43% | 21% | 5% |
+| garage (UK, speed, house; not rock) | 421 | 34% | 43% | 14% | 4% |
+| techno | 385 | 38% | 39% | 22% | 6% |
+| progressive house | 334 | 45% | 28% | 22% | 9% |
+| dubstep | 238 | 33% | 21% | 24% | 13% |
+| drum and bass | 155 | 46% | 41% | 23% | 8% |
+| synthwave | 111 | 50% | 45% | 26% | 10% |
+| future bass | 107 | 36% | 36% | 47% | 12% |
+| tech house | 90 | 36% | 34% | 31% | 6% |
+| deep house | 72 | 33% | 18% | 24% | 3% |
+| generic "dance pop" (not in core) | 7,597 | 40% | 36% | 24% | 8% |
+| **Baseline (non-dance sample)** | 66,321 | 28% | 43% | 36% | 11% |
+
+*Borrowed: a major-key song using bVI, bVII or iv; a minor-key song using IV or V (major). Minor keys are about a third more common in dance than elsewhere (37% vs 28%); trance and synthwave sit near half. Dance tabs carry fewer 7ths than the baseline, which is the guitar-tab filter and the loop-heavy writing both, not evidence that dance is plain. Under 100 songs (deep house, tech house, future bass, synthwave) the tables below are anecdotes.
+
+### 9.2 Dance core, top loops (6,913 songs)
+
+`!` = not in the library as a cycle. "Base" = the baseline's rate for the same cycle.
+
+| 4-chord loop | Commonest start | Songs | % | Base % | |
+| --- | --- | --- | --- | --- | --- |
+| I V vi IV | vi | 626 | 9.1 | 6.4 | |
+| I vi IV V | I | 202 | 2.9 | 3.0 | |
+| I IV I V | I | 170 | 2.5 | 5.2 | |
+| I vi V IV | IV | 163 | 2.4 | 2.0 | |
+| I IV V vi | IV | 116 | 1.7 | 1.0 | |
+| I IV vi V | I | 109 | 1.6 | 1.7 | |
+| I V IV vi | vi | 102 | 1.5 | 0.9 | ! |
+| I V ii IV | ii | 101 | 1.5 | 1.2 | ! |
+| i bVII iv bVI (written bVI i bVII iv) | iv | 87 | 1.3 | 0.4 | ! |
+| i bVII bVI iv (written bVI iv i bVII) | bVI | 79 | 1.1 | 0.4 | ! |
+
+| 3-chord loop | Start | Songs | % | Base % | |
+| --- | --- | --- | --- | --- | --- |
+| I V IV | IV | 400 | 5.8 | 8.7 | |
+| I IV V | I | 360 | 5.2 | 8.4 | |
+| bVI bVII i | i | 262 | 3.8 | 2.1 | |
+| I vi IV | vi | 218 | 3.2 | 2.8 | |
+| IV V vi | IV | 204 | 3.0 | 2.5 | |
+| i bVII bVI (written bVI i bVII) | bVI | 193 | 2.8 | 1.7 | ! |
+| IV vi V | IV | 150 | 2.2 | 2.3 | ! |
+| I V vi | I | 140 | 2.0 | 1.5 | ! |
+| bVI iv i | i | 95 | 1.4 | 0.7 | |
+| I vi V | I | 95 | 1.4 | 1.6 | ! |
+
+2-chord: I IV 15.1% (base 25.1), I V 7.8, IV V 5.2, bVI i 4.1, i iv 3.6, I vi 3.0, bVII i 2.6, **bVI bVII 2.3 !**, I bVII 2.3, **V vi 2.3 !**. Library coverage of the top ten per length: 8 of 10 (2-chord), 6 of 10 (3), 6 of 10 (4), so **10 of 30 are missing**. Under a key-agnostic merge (a loop read in its relative major or minor counts as one) the Axis is 10.3% of the core, 12.6% of house, 15.5% of EDM and 13.3% of trance.
+
+### 9.3 Top 4-chord loops by subgenre (% of songs; `!` = missing from library)
+
+| # | House (2,265) | Trance (638) | EDM (1,869) | Techno (385) | Disco (1,861) | Electronic (2,814) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | I V vi IV 11.2 | I V vi IV 10.8 | I V vi IV 14.2 | I V vi IV 7.0 | I IV I V 4.7 | I V vi IV 11.7 |
+| 2 | I vi V IV 2.7 | I vi IV V 2.7 | I vi V IV 3.8 | I vi IV V 3.9 | I V vi IV 4.1 | I vi V IV 3.3 |
+| 3 | I IV V vi 2.6 | i bVII bVI iv 2.7 ! | I IV V vi 3.5 | I IV I V 2.1 | I vi IV V 3.1 | I vi IV V 2.9 |
+| 4 | I vi IV V 2.2 | bIII bVII i bVI 2.5 | I V IV vi 2.7 ! | I vi V IV 1.8 | I vi ii V 1.5 | I IV V vi 2.3 |
+| 5 | i bVII iv bVI 2.1 ! | I V IV vi 2.5 ! | I vi IV V 2.6 | I V IV vi 1.8 ! | I IV V IV 1.3 | I V ii IV 2.0 ! |
+| 6 | I V ii IV 2.0 ! | I IV V vi 2.4 | i bVII iv bVI 2.5 ! | I IV V vi 1.6 | I IV I bVII 1.2 | i bVII iv bVI 2.0 ! |
+| 7 | I V IV vi 2.0 ! | IV V vi V 2.0 | I IV vi V 2.2 | I V ii IV 1.6 ! | I IV ii V 1.1 | I IV vi V 2.0 |
+| 8 | I IV I V 1.9 | I vi V IV 1.9 | I V ii IV 2.1 ! | I IV vi V 1.6 | I V IV V 0.9 | I V IV vi 1.9 ! |
+| 9 | I IV vi V 1.8 | i bIII bVI iv 1.9 ! | I iii vi IV 1.7 | I V IV V 1.3 | I vi V IV 0.9 | I IV I V 1.8 |
+| 10 | i bVII bVI iv 1.6 ! | i bVII bVI bVII 1.7 | i bVII bVI iv 1.7 ! | I IV I bVII 1.0 | I IV ii v 0.9 ! | i bVII bVI iv 1.5 ! |
+
+Smaller groups (CSV has all): garage leads with I vi IV V 5.0%; drum and bass, future bass, dubstep, synthwave all lead with I V vi IV (9 to 19%). Top 3-chord loop: trance bVI bVII i 9.6% (library has it), DnB i bVII bVI 7.1% (**missing**), disco I IV V 8.0%.
+
+Reading: dance is the Axis first and everything else a distant second. What is *distinctive* against the baseline is the minor-key family around bVI and bVII (bVI bVII i, i bVII bVI, and loops that add iv) at 2 to 6 times the baseline rate, strongest in trance, EDM and progressive house. The rock shape I IV I V is half as common as in the baseline. Disco is the one subgenre that is not Axis-led.
+
+### 9.4 Check against 7.3
+
+Counts are songs in the dance core as written in that key; "Base" is the baseline rate.
+
+| 7.3 row | Core | House | Base | Verdict |
+| --- | --- | --- | --- | --- |
+| To Be In Love `i bIII v` | 2 | 0 | 27 | Cannot judge. The chords exist (as vi I iii, 1.0% core, 1.2% house vs 0.7%), but the key estimate rarely reads them as minor. |
+| Descent `i v iv` | 11 | 3 | 116 | Rare, no dance lift. |
+| Dorian IV `i IV V` | 6 | 1 | 45 | Not supported. Also needs 7ths, which tabs drop. |
+| Garage `i iidim V` | 0 | 0 | 9 | Cannot judge (m7b5 never tabbed). |
+| Chicago `i iv v` | 37 (0.5%) | 15 (0.7%) | 197 (0.3%) | **Supports**, mildly (about 2x in house, 3x in disco). Already in library. |
+| Amapiano rising `i iv bVII bIII` | 19 | 8 | 160 | Cannot judge; rate equals baseline. |
+| Amapiano descent `i bVI bVII v` | 24 (0.3%) | 11 (0.5%) | 97 (0.1%) | **Supports**, mildly (about 3x). |
+| Liquid `i iv bVI bVII` | 28 (0.4%) | 15 (0.7%) | 100 (0.2%) | **Supports**: trance 0.8%, EDM 0.6%. Not in library as a cycle. |
+| Future bass wash `I V vi IV` | 626 (9.1%) | 253 (11.2%) | 6.4% | **Strongly supports**; it is the Axis. Note the proposed numerals are the Axis in 7ths, already in the library. |
+| French lift `bVI v i IV` | 3 | 0 | 8 | Not supported. |
+| Dorian techno `i IV` | 103 (1.5%) | 26 (1.1%) | 800 (1.2%) | Neutral: common, no dance lift. In library. |
+| Dub techno `im7 im7` | n/a | n/a | n/a | Cannot judge (a one-chord loop is not a loop here). |
+
+Tally: **4 supported** (Chicago, Amapiano descent, Liquid, Future bass wash), **3 rare or unsupported** (Descent, Dorian IV, French lift), **5 cannot judge or neutral**. Eight of the twelve are already in the library as cycles (Descent, Garage, Chicago, both Amapiano rows, Dorian techno, Future bass wash, Dub techno), so 7.3's own "worth adding" is smaller than it reads: the real gaps are To Be In Love, Dorian IV, Liquid and French lift.
+
+### 9.5 Rows worth adding (Keys numerals)
+
+| Numerals | Evidence | Tags |
+| --- | --- | --- |
+| `i bVII bVI` | 2.8% core, 4.8% EDM, 6.3% trance, 7.1% DnB (base 1.7%). Descending cousin of the library's `bVI bVII i`. | Trance, EDM, Drum & Bass |
+| `i bVII iv bVI` | 1.3% core, 2.1% house, 2.5% EDM, 2.7% trance (base 0.4%), the strongest lift of any missing 4-loop | Trance, EDM, House |
+| `i bVII bVI iv` | 1.1% core, 1.6% house, 2.7% trance (base 0.4%) | Trance, Progressive House |
+| `i bIII bVI iv` | 1.9% trance, future bass and synthwave (base 0.4%); small samples | Trance, Synthwave, Future Bass |
+| `i iv bVI bVII` | Liquid row of 7.3, confirmed 2x baseline | Drum & Bass, EDM |
+| `I V IV vi` | 1.5% core, 2.7% EDM, 2.5% trance (base 0.9%) | EDM, Pop |
+
+Check each against `ChordLibrary.h`'s suffix table before entering; none needs a 7th, since the corpus cannot say which 7ths dance uses.
+
+### 9.6 Caveats
+
+- Chordonomicon is scraped from user tabs and is guitar-first. Electronic is under-tagged (2,814 of 679,807 `main_genre` rows are electronic) and the tags are Spotify artist genres, so "house" includes pop artists with a house single. Disco (1,861) is mostly 1970s band songs, not DJ tools, and weighs heavily on the core. Real club tracks are mostly absent.
+- Chord extensions are dropped or simplified, so this is evidence about **roots and triads, not voicings**. It cannot test the 7.3 rows that live on m7, M7 or 9 colour.
+- Key estimation is the weak link. Relative major and minor are often confused (Am C Em reads as vi I iii), which splits one loop across two numeral spellings; counts above are single-reading and so understate such loops. No song-length weighting exists, and tab transposition is unknown.
+- A loop here is a twice-repeated cycle in the chord stream, not a verified hook; sections that merely alternate are counted.
+- Licence: CC-BY-NC-4.0. Derived counts are personal-use evidence; any row added from this must be justified from the canon, or re-derived from a permissive source, if Keys is ever sold.
