@@ -72,7 +72,8 @@ namespace
     {
         return dynamic_cast<const juce::Button*>(&c) != nullptr
             || dynamic_cast<const juce::Slider*>(&c) != nullptr
-            || dynamic_cast<const juce::ComboBox*>(&c) != nullptr;
+            || dynamic_cast<const juce::ComboBox*>(&c) != nullptr
+            || dynamic_cast<const juce::TextEditor*>(&c) != nullptr; // the chord entry field, 2026-11-02
     }
 
     // Every visible thing you could click, wherever it is in the tree.
@@ -201,6 +202,41 @@ public:
                        juce::String(title) + " is " + juce::String(b.getWidth())
                            + " px wide, too narrow for its box plus \""
                            + button->getButtonText() + "\"");
+            }
+        }
+
+        beginTest("the Pads bar still fits the typed-chord field and its Add button at the floor");
+        {
+            // Added 2026-11-02 beside Keep arp, 158 px of bar the day it landed. Same reason as
+            // the test above: a fixed cell taken out of a bar starves its neighbours silently,
+            // and only a measurement sees it.
+            Host h;
+            const juce::ScopedValueSetter<bool> noUpdateCheck(
+                KeysEditor::skipUpdateCheckForTest, true);
+            KeysEditor ed { h.processor };
+            ed.setSize(ed.minWidthForView(), ed.idealHeight());
+
+            juce::Array<juce::Component*> targets;
+            collectTargets(ed, targets);
+
+            juce::Component* entry = nullptr;
+            juce::Component* add = nullptr;
+            for (auto* t : targets)
+            {
+                if (t->getTitle() == "Chord entry")     entry = t;
+                if (t->getTitle() == "Add typed chord") add = t;
+            }
+            expect(entry != nullptr, "the chord entry field is on screen");
+            expect(add != nullptr, "the Add button is on screen");
+            if (entry != nullptr && add != nullptr)
+            {
+                expectEquals(entry->getHeight(), 24, "the field is a bar-height cell");
+                expectEquals(add->getHeight(), 24, "Add is a bar-height chip");
+                expect(entry->getWidth() >= 100, "the field is wide enough to read a symbol");
+                expect(add->getWidth() >= 40, "Add is wide enough for its word");
+                expect(! entry->getBounds().intersects(add->getBounds()),
+                       "the field and Add do not overlap");
+                expect(entry->getRight() <= add->getX(), "Add sits to the right of the field");
             }
         }
 

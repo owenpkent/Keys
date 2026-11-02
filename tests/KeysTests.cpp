@@ -4,6 +4,7 @@
 #include "ChordNumerals.h"
 #include "ChordSuggest.h"
 #include "Chords.h"
+#include "ChordSymbol.h"
 #include "NoteMath.h"
 #include "ScaleModes.h"
 #include <juce_core/juce_core.h>
@@ -67,6 +68,118 @@ struct ChordTests : juce::UnitTest
 };
 
 static ChordTests chordTests;
+
+// The inverse: a typed symbol to notes (2026-11-02). Swept rather than spot-checked, the
+// "+ Octave & 5th" lesson: every row of the quality table has to round-trip through detect()
+// where detect() knows the quality, and the spellings people actually type have to land.
+struct ChordSymbolTests : juce::UnitTest
+{
+    ChordSymbolTests() : juce::UnitTest("keys::chordsym::parse") {}
+
+    static std::vector<int> notesOf(const char* symbol, int octave = 5)
+    {
+        const auto p = keys::chordsym::parse(symbol);
+        return p ? keys::chordsym::notes(*p, octave) : std::vector<int> {};
+    }
+
+    static juce::String show(const std::vector<int>& v)
+    {
+        juce::String s;
+        for (int n : v)
+            s += (s.isEmpty() ? "" : " ") + juce::String(n);
+        return "{" + s + "}";
+    }
+
+    void expectNotes(const char* symbol, std::vector<int> expected, int octave = 5)
+    {
+        const auto got = notesOf(symbol, octave);
+        expect(got == expected, juce::String(symbol) + " gives " + show(got) + ", expected "
+                                    + show(expected));
+    }
+
+    void runTest() override
+    {
+        using namespace keys::chordsym;
+
+        beginTest("the example: Cmaj7");
+        expectNotes("Cmaj7", { 60, 64, 67, 71 });
+        expectEquals(parse("Cmaj7")->name, juce::String("Cmaj7"));
+
+        beginTest("roots: letters, accidentals, either case, Unicode accidentals");
+        expectEquals(parse("F#m")->rootPc, 6);
+        expectEquals(parse("Bb")->rootPc, 10);
+        expectEquals(parse("bb")->rootPc, 10);
+        expectEquals(parse("cm7")->rootPc, 0);
+        expectEquals(parse("Cb")->rootPc, 11);
+        expectEquals(parse(juce::String::fromUTF8("E\xe2\x99\xad" "7"))->rootPc, 3);
+        expectEquals(parse("Bb")->name, juce::String("Bb"));   // the spelling typed, not "A#"
+        expectEquals(parse("f#")->name, juce::String("F#"));
+
+        beginTest("qualities: case decides m against M, and case-insensitive is the fallback");
+        expectNotes("CM7", { 60, 64, 67, 71 });
+        expectNotes("Cm7", { 60, 63, 67, 70 });
+        expectNotes("CMAJ7", { 60, 64, 67, 71 });
+        expectNotes("Cmin7", { 60, 63, 67, 70 });
+        expectNotes("C-7", { 60, 63, 67, 70 });
+        expectNotes("Cm7b5", { 60, 63, 66, 70 });
+        expectNotes("Cdim7", { 60, 63, 66, 69 });
+        expectNotes("C+", { 60, 64, 68 });
+        expectNotes("Csus", { 60, 65, 67 });
+        expectNotes("C7sus4", { 60, 65, 67, 70 });
+        expectNotes("C6/9", { 60, 64, 67, 69, 74 });
+        expectNotes("C5", { 60, 67 });
+        expectNotes("CmMaj7", { 60, 63, 67, 71 });
+        expectEquals(parse("CmMaj7")->name, juce::String("CmMaj7"));
+        expectEquals(parse("Cmin")->name, juce::String("Cm")); // canonical spelling on the pad
+
+        beginTest("slash bass: a chord tone inverts, anything else is added underneath");
+        expectNotes("C/E", { 52, 60, 67 });
+        expectNotes("C/G", { 55, 60, 64 });
+        expectNotes("Bb/D", { 62, 70, 77 });
+        expectNotes("Am7/G", { 67, 69, 72, 76 });
+        expectNotes("C/Bb", { 58, 60, 64, 67 });
+        expectNotes("C/C", { 60, 64, 67 });
+        expectEquals(parse("Bb/D")->name, juce::String("Bb/D"));
+
+        beginTest("spaces are ignored");
+        expectNotes(" C maj 7 ", { 60, 64, 67, 71 });
+
+        beginTest("refusals");
+        expect(! parse("").has_value());
+        expect(! parse("H").has_value());
+        expect(! parse("Cxyz").has_value());
+        expect(! parse("Cmaj7/9").has_value());
+        expect(! parse("7").has_value());
+        expect(! parse("maj7").has_value());
+
+        beginTest("every quality round-trips through detect() where detect() knows it");
+        for (const auto& q : qualities())
+        {
+            for (const auto& tpl : keys::chords::templates())
+            {
+                if (juce::String(tpl.suffix) != q.suffix)
+                    continue;
+                const auto symbol = juce::String("D") + q.suffix;
+                const auto read = keys::chords::detect(notesOf(symbol.toRawUTF8()));
+                expectEquals(read, symbol, "detect() reads back what parse() built for " + symbol);
+            }
+            // Every alias names the quality it is listed under.
+            for (const char* alias : q.aliases)
+            {
+                const auto p = parse(juce::String("D") + alias);
+                expect(p.has_value(), juce::String("alias ") + alias + " parses");
+                if (p)
+                    expect(p->intervals == q.intervals, juce::String("alias ") + alias
+                                                            + " means " + q.suffix);
+            }
+        }
+
+        beginTest("the octave is chordgen's: 4 puts a C root at 48");
+        expectNotes("C", { 48, 52, 55 }, 4);
+    }
+};
+
+static ChordSymbolTests chordSymbolTests;
 
 struct ScaleModeTests : juce::UnitTest
 {

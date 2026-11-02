@@ -5,6 +5,22 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: type a chord
+
+Owen: *"it would be cool if you could type the chord you wanted. example, Cmaj7"*.
+
+A text field on the **Pads bar**, beside Keep arp. Type a chord symbol - `Cmaj7`, `F#m7b5`,
+`Bb/D`, `G7sus4`, `C6/9` - and press Enter or click **Add**: it lands on the first empty pad of
+the current page, in the generator's octave, named the way you spelt it (a typed `Bb` stays
+`Bb`, it is not renamed `A#`). Thirty-five qualities with the spellings people actually use
+(`CM7` is a major seventh, `Cm7` and `Cmin7` and `C-7` are minor ones, `CMAJ7` still lands), and
+a slash bass that inverts the chord when the bass is a chord tone and adds a note underneath
+when it is not. A symbol Keys does not know turns the field red and keeps the text for a second
+try; a full page keeps the text and does nothing, the tray's own rule. Undo covers it, one entry
+per chord. The parser is `ChordSymbol.h`, pure and swept by a test that round-trips every
+quality through the chord namer. Accessible names `Chord entry` and `Add typed chord`; both hide
+with the Pads fold like Play and Keep arp.
+
 ### Added: every arpeggiator line has its own Root, Scale and Scale Lock
 
 **PARAMETER LAYOUT CHANGE.** `arpRoot`, `arpScale` and `arpScaleLock` are appended per line

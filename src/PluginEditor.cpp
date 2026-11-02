@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "Chords.h"
+#include "ChordSymbol.h"
 #include "ScaleModes.h"
 #include "mcp/KeysMcp.h" // showAboutDialog names the port this instance answers on
 #include <okstudio/MouseOnly.h>
@@ -181,13 +182,16 @@ namespace
         constexpr int regenW = 70, fillW = 62, genW = 90, libW = 80;
         constexpr int modeW = 124, keyW = 58;
         constexpr int pageW = 46, playW = 64, keepArpW = 94;
+        // The typed-chord field and its Add button (2026-11-02). 104 px holds "Bbmaj7#11/D"
+        // with room to spare at the bar's 24 px text size.
+        constexpr int chordEntryW = 104, chordAddW = 50;
 
         constexpr int contentWidth()
         {
             return detachWidth
                  + 6 + regenW + 4 + fillW + 6 + genW + 6 + libW + 10 + modeW + 4 + keyW
                  + KeysProcessor::numPadPages * (pageW + 4)
-                 + 10 + playW + 6 + keepArpW + 14;
+                 + 10 + playW + 6 + keepArpW + 14 + chordEntryW + 4 + chordAddW + 14;
         }
     }
 
@@ -850,6 +854,34 @@ void KeysEditor::buildPadsBar()
     padsKeepArpButton.onClick = [this]
     { processor.layout.padsKeepArpRunning = padsKeepArpButton.getToggleState(); };
     addAndMakeVisible(padsKeepArpButton);
+
+    // The typed chord (2026-11-02), beside Keep arp: it fills the same cards the page buttons
+    // page, so it hides with them. Click the field, type "Cmaj7", click Add - or Enter, since
+    // the on-screen keyboard has one. The whole text is selected whenever the field takes
+    // focus, so a second chord replaces the first without a backspace.
+    padChordEntry.setTitle("Chord entry");
+    padChordEntry.setTextToShowWhenEmpty("Type a chord", skin::textFaint);
+    padChordEntry.setSelectAllWhenFocused(true);
+    padChordEntry.setJustification(juce::Justification::centredLeft);
+    padChordEntry.setIndents(6, 0);
+    padChordEntry.setTooltip("Type a chord symbol - Cmaj7, F#m7b5, Bb/D, G7sus4 - and press "
+                             "Enter or click Add. It lands on the first empty pad of this page, "
+                             "in the generator's octave. A symbol Keys does not know turns the "
+                             "field red and keeps your text.");
+    padChordEntry.onReturnKey = [this] { addTypedChord(); };
+    padChordEntry.onEscapeKey = [this] { padChordEntry.clear(); };
+    padChordEntry.onTextChange = [this]
+    {
+        // The red goes the moment the text moves on; the colour was about *that* text.
+        padChordEntry.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+        padChordEntry.removeColour(juce::TextEditor::focusedOutlineColourId);
+    };
+    addAndMakeVisible(padChordEntry);
+
+    padChordAddButton.setTitle("Add typed chord");
+    padChordAddButton.setTooltip("Put the typed chord on the first empty pad of this page.");
+    padChordAddButton.onClick = [this] { addTypedChord(); };
+    addAndMakeVisible(padChordAddButton);
 
     // The generator's bulk actions, on the same bar. They were buttons on a panel that no
     // longer exists, and they had to survive it: a right-click menu is not a left click, so
@@ -2213,6 +2245,8 @@ void KeysEditor::syncSectionControls()
         b.setVisible(lay.pads); // pointless without pads
     padsPlayButton.setVisible(lay.pads); // acts on clicks the fold just hid
     padsKeepArpButton.setVisible(lay.pads); // same: it qualifies a click on those same cards
+    padChordEntry.setVisible(lay.pads);     // fills a card the fold just hid
+    padChordAddButton.setVisible(lay.pads);
     // Fill, Regen, the Generator button and the three combos beside them are deliberately
     // *not* in the list above, and are never hidden: they are the arp On of this bar. Fill and
     // Regen used to hide with the strip, on the reasoning that generating into cards you cannot
@@ -2325,6 +2359,37 @@ int KeysEditor::minWidthForView() const
                          ArpPanel::minPanelWidth() + 2 * editorMargin })
         need = juce::jmax(need, w);
     return need;
+}
+
+void KeysEditor::addTypedChord()
+{
+    // Empty is not a mistake, it is nothing to do; the red is for text that was tried.
+    const auto text = padChordEntry.getText().trim();
+    if (text.isEmpty())
+        return;
+
+    const auto parsed = keys::chordsym::parse(text);
+    if (! parsed)
+    {
+        padChordEntry.setColour(juce::TextEditor::outlineColourId, skin::recordLit);
+        padChordEntry.setColour(juce::TextEditor::focusedOutlineColourId, skin::recordLit);
+        padChordEntry.selectAll();
+        return;
+    }
+
+    // A full page keeps the text and does nothing, the same answer the tray's Send to first
+    // empty pad gives: the page in front of you says why, and the next page is one click away.
+    if (chordPads.firstEmptyPadOnPage() < 0)
+        return;
+
+    KeysProcessor::ChordPad pad;
+    pad.notes = keys::chordsym::notes(
+        *parsed, (int) processor.apvts.getRawParameterValue("genOctave")->load());
+    pad.name = parsed->name;
+    const KeysProcessor::UndoGesture undoable { processor, "Type chord",
+                                                KeysProcessor::UndoScope::pads };
+    chordPads.sendChordToFirstEmptyPad(pad);
+    padChordEntry.clear();
 }
 
 void KeysEditor::applyLayout()
@@ -3610,6 +3675,12 @@ void KeysEditor::resized()
         // plus "Keep arp" - measured against the bar's own slack rather than guessed, and it
         // does not move the editor's floor; see minWidthForView().
         padsKeepArpButton.setBounds(bar.removeFromLeft(keepArpW).withSizeKeepingCentre(92, 24));
+        bar.removeFromLeft(14);
+        // The typed chord and its Add button, after the two switches: it acts on the same cards
+        // and hides with them. Fixed cells, reserved before the caption takes what is left.
+        padChordEntry.setBounds(bar.removeFromLeft(chordEntryW).withSizeKeepingCentre(chordEntryW, 24));
+        bar.removeFromLeft(4);
+        padChordAddButton.setBounds(bar.removeFromLeft(chordAddW).withSizeKeepingCentre(48, 24));
         bar.removeFromLeft(14);
         // Humanize and its velocity range rode this bar from 2026-08-02 to 2026-08-03, when
         // they became a range knob *in the strip* with Strum beside them. They are pad

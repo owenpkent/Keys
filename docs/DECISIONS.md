@@ -7,6 +7,26 @@ so the top of the file is the most recent round and the bottom is the oldest thi
 standing. A superseded claim is kept where it sits and marked there rather than deleted, because
 knowing why a rule existed is what stops it being reinvented.
 
+**A chord you can type (2026-11-02).** Owen: *"it would be cool if you could type the chord you
+wanted. example, Cmaj7"*. A text field on the Pads bar beside Keep arp, with an **Add** button
+as the click and Enter as the accelerator, since the on-screen keyboard Owen types with has one.
+The chord lands on the first empty pad of the current page, the rule the tray's Send to first
+empty pad already follows, in the generator's octave. The parser is `ChordSymbol.h`, pure, the
+inverse of `Chords.h`'s `detect()`: a root in either case with `#` or `b` (and their Unicode
+twins), a quality matched exactly first and case-insensitively second - so `CM7` and `Cm7`
+differ, as they do on paper, while `CMAJ7` still lands - and a slash bass that is only read as
+one when the text after the slash is a whole note name, which is what keeps `C6/9` a 6/9. A
+bass that is a chord tone inverts the chord; any other is a note added underneath. **Three
+choices worth recording.** The pad keeps the spelling typed rather than the namer's sharps, so a
+`Bb` is not read back as `A#`. A symbol Keys does not know turns the field red and keeps the
+text, rather than guessing: a chord you did not ask for on a pad is worse than no chord. And a
+full page keeps the text and does nothing, with no overwrite and no page flip, for the reason
+Regen spares a locked pad. The `#5` alias for augmented was in the table for an hour and came
+out: `D#5` has to be a D# power chord. **Where it did not go**: the pad card's right-click menu
+would have put the chord on the pad you opened it from, but that menu is a closed list, and a
+field on the bar is the left-click path anyway. The field is the one text entry in Keys, and the
+keyboard stays an accelerator here, never the only route.
+
 **A line has its own key, not just its own lock (2026-09-11).** Owen: *"I was saying it'd be
 cool to have scale lock per arpeggiator."* Offered the plain reading (four independent locks over
 the bar's key), the conservative one (a three-state lock per line, the key still global) and the

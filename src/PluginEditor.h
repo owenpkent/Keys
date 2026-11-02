@@ -441,6 +441,16 @@ private:
     // neither answer implies the other and Owen wants both halves at once. See
     // LayoutState::padsKeepArpRunning. Layout tree, like Play, not a parameter.
     juce::ToggleButton padsKeepArpButton { "Keep arp" };
+    // A typed chord (2026-11-02, Owen: "it would be cool if you could type the chord you wanted.
+    // example, Cmaj7"). Type a symbol here, Enter or the Add button beside it, and it lands on
+    // the first empty pad of the current page in the generator's octave - the rule the tray's
+    // Send to first empty pad already follows. Parsed by ChordSymbol.h; a symbol it does not
+    // know turns the field red and keeps the text for a second try. The one text field in
+    // Keys, and the keyboard is an accelerator here rather than the path: the Add button is the
+    // click, and the on-screen keyboard Owen types with has an Enter key of its own.
+    juce::TextEditor padChordEntry;
+    juce::TextButton padChordAddButton { "Add" };
+    void addTypedChord();
 
     // The generator's two bulk actions, riding the Pads bar. They are the fast path into
     // generation, and they are on a bar because a bar is 34 px that already exists: a control

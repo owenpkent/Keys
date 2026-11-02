@@ -12,6 +12,8 @@ src/
 ├── PluginEditor.{h,cpp}      # folding/detaching sections, layout, updater button
 ├── NoteMath.h                # pure note resolution (snap + transpose), unit-tested
 ├── Chords.h                  # pure chord detector (names a note set), unit-tested
+├── ChordSymbol.h            # the inverse: a typed symbol ("Cmaj7", "Bb/D") to notes and the
+│                             # name a pad prints. Pure, swept by KeysTests against detect()
 ├── ScaleModes.h              # 12 modes + a chord quality per degree; emotion lines
 ├── ChordGen.h                # pure chord generation (weighted pool), unit-tested
 ├── ChordSuggest.h            # pure "what could follow this chord", unit-tested

@@ -103,6 +103,8 @@ reasoning is one search away.
   chip prints. Pure, and read from both threads, which is why it is one header and not two copies.
 - `NoteMath.h` - which MIDI note a drawn key sends: the scale-lock snap, then the octave.
 - `Chords.h` - naming a chord from its sounding notes. `ChordSuggest.h` - where one could go next.
+  `ChordSymbol.h` - the other way: a typed symbol (`Cmaj7`, `Bb/D`) to notes and the name a pad
+  prints, for the Pads bar's chord entry field (2026-11-02).
 - `ScaleModes.h` - the modes generation reads. Not the kit's scale table: it answers a quality
   per degree as well as membership.
 - `ChordGen.h` - the weighted pool, tiered by scale compliance. `ChordSources.h` - circle of
