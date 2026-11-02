@@ -144,6 +144,63 @@ From a code map taken the same day; line numbers will drift.
   `numeralDegrees()`, is the chord's actual root (the label must not lie).
 - The first chord is the tonic; the Picardy `I` only ever appears last.
 
+## Scope (2026-11-02)
+
+Two shapes are still on the table (question 1 below), and they share most of the work, so the
+scope is a shared core plus one of two tops.
+
+**What today's research adds.** In minor, the dance loops the corpus favours (`i bVII bVI`) are
+diatonic, not borrowed, so for minor this source's job is the Dorian `IV` and the harmonic `V`
+(`docs/DANCE_HARMONY.md` section 9). In major, pop piano uses borrowed chords as a tension marker
+(7.8% of tense clips against 2.4 to 3% of calm and happy ones) and game music uses them freely when
+heroic (`docs/MOOD_CHECK.md`), which is the case for weighting `bVI` and `bVII` high. The
+impressionists move roots by thirds three times as often as Mozart (`docs/IMPRESSIONIST_HARMONY.md`
+section 2), and `bIII` and `bVI` are third moves, so the weights in section 1 hold.
+
+### Core, needed by either shape
+
+| Work | Where | Size |
+| --- | --- | --- |
+| Candidates from the mode tables, the weight table, `numeral` written per chord | `src/ChordSources.h` | ~80 lines |
+| Append "Modal Interchange" to `genSource`, extend the golden list | `KeysParams.cpp`, `StateTests.cpp` | small |
+| `genBorrowFrom` (Auto plus seven modes), appended. **PARAMETER LAYOUT CHANGE** | `KeysParams.cpp`, `StateTests.cpp`, the panel band | ~40 lines |
+| `case 8` in `generateChords` | `ChordGenMenu.cpp` | small |
+| The ninth source button | `ChordGenPanel.{h,cpp}` | small, but see the risk below |
+| `paintBorrowed`, the two-row diagram | `SourceViz.{h,cpp}` | ~60 lines |
+| Candidate tests: never diatonic at home, always inside From, numeral root equals chord root, swept over every mode and root | `ChordSourceTests.cpp` | ~60 lines |
+| "Eight sources" to nine in seven docs, the changelog | docs | small |
+
+### Top A: a progression (this spec's sections 2 and 3)
+
+The function skeleton, slot matching, the two cadence bonuses, the Picardy rule, and the
+**Borrowed** count stepper, which is a second appended parameter (`genBorrowCount`). About 60 more
+lines of source, 40 of tests, one more stepper pair on the band.
+
+### Top B: a palette
+
+Fill the tray with the candidates themselves, highest weight first, up to `count`; you place them.
+No skeleton and no second parameter. About 15 lines. The catch: the pads' own Fill writes a palette
+too, so a page of pads becomes "every borrowed chord in C major" rather than something that plays
+as a progression, which is what every other source puts on a page.
+
+**A and B are not exclusive.** B is A's candidate list with the placement taken out, so building A
+leaves B one setting away (Borrowed set to "All" could mean "give me the palette") if it turns out
+to be wanted.
+
+### Risks
+
+- **Window width.** The source row is equal-width buttons with a 128 px floor each
+  (`kSourceBtnW`), and the row sets the generator window's minimum width. A ninth button raises
+  that floor by about 134 px, and "Modal Interchange" is the longest label on the row: measure it
+  at the button's font before deciding between a wider floor and a two-line label. Do not shrink
+  the other eight.
+- **Scale Lock on a line** snaps a borrowed chord's outside notes back into the key (see "What it
+  deliberately does not do"). Worth a line in the user guide, since it reads as a bug.
+- **Where it is built.** `feat/arp-line-key` is PR #54, which is stacked on PR #53 (CLOCK) and
+  the review fixes and runs 46 commits ahead of `main`. Building on it ties this source to that
+  unmerged stack. A branch off `main` keeps the source independent, but the docs listing the sources
+  will need a rebase where the two stacks touch the same lines.
+
 ## Open questions for Owen
 
 1. **What it makes.** A progression with borrowed chords placed in it (this spec), or a palette:
