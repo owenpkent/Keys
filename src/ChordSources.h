@@ -39,12 +39,45 @@ namespace keys::sources
         // degree's quality has nothing of that size -- a diminished vii has no diminished
         // 7-note extended voicing in extendedTypes(), and the honest answer is the triad,
         // not silently picking an unrelated size.
+        //
+        // Sizes 5 and 6 (2026-11-02) are the 9th and 11th/13th shapes: a major degree gets the
+        // first 5-note type (Major 9th) or 6-note type (Major 13th), a minor degree Minor 9th or
+        // Minor 11th. A diminished degree has no 5- or 6-note type of its own, and the nearest
+        // sensible answer is Half Diminished, the seventh chord the degree carries in every mode
+        // that has one, rather than a triad that would quietly shrink the chord.
         inline int typeForDegreeSize(modes::Quality q, size_t noteCount)
         {
             for (int t : chordgen::extendedTypes(q))
                 if (chordgen::types()[(size_t) t].ivals.size() == noteCount)
                     return t;
+            if (q == modes::Quality::diminished && noteCount >= 5)
+                return chordgen::typeIndex("Half Diminished");
             return chordgen::baseType(q);
+        }
+
+        // The label for a chord that diatonic planing built by stacking scale steps. The notes
+        // are what sound; this only names them, so it first looks for a type whose intervals are
+        // exactly the notes' (an Ionian I stacked in thirds to the 9th *is* Major 9th), and only
+        // then falls back on the nearest type for the degree's quality and the shape asked for.
+        inline int typeForStack(const std::vector<int>& notes, modes::Quality q, int shapeType)
+        {
+            const auto& all = chordgen::types();
+            std::vector<int> iv;
+            for (int n : notes)
+                iv.push_back(n - notes.front());
+            for (int t = 0; t < (int) all.size(); ++t)
+                if (all[(size_t) t].ivals == iv)
+                    return t;
+
+            const auto name = juce::String(all[(size_t) shapeType].name);
+            if (name == "Quartal" || name == "Quintal")
+                return shapeType; // quality-blind shapes: the stack is the identity
+            if (name == "Add9" || name == "Minor Add9")
+            {
+                const bool minorish = q == modes::Quality::minor || q == modes::Quality::diminished;
+                return chordgen::typeIndex(minorish ? "Minor Add9" : "Add9");
+            }
+            return typeForDegreeSize(q, all[(size_t) shapeType].ivals.size());
         }
 
         // ---- Neo-Riemannian PLR -------------------------------------------------------
@@ -442,8 +475,46 @@ namespace keys::sources
     // parallel harmony), or preserving the exact interval stack and sliding it
     // chromatically regardless of key (Debussy-style planing, where the constant structure
     // is the entire point and bending it to the scale would defeat it).
+    //
+    // The vocabulary grew on 2026-11-02 from seven shapes to thirteen: Major 9th, Minor 9th, Add9,
+    // Minor 11th, Quartal and Quintal at the end (docs/IMPRESSIONIST_HARMONY.md part 3: planing
+    // 9ths and fourths is most of what Debussy and McCoy Tyner do). The first seven behave exactly
+    // as before. The six new ones are the "wide" shapes the comment below warns about, which is
+    // true of them planed chromatically and is why diatonic planing builds them differently:
+    // **by stacking scale steps from each degree** (thirds are every 2nd degree, fourths every
+    // 3rd, fifths every 4th) rather than by quality-matched interval tables. A ninth chord on
+    // every degree of Ionian by interval table has an F# in it on iii; stacked through the scale
+    // it never leaves the key, and in a pentatonic scale it is still a stack of that scale's own
+    // notes. Chromatic planing keeps the exact interval stack, which is the point of it.
+    inline const std::vector<const char*>& planingShapes()
+    {
+        static const std::vector<const char*> s = { "Major", "Minor", "Sus2", "Sus4", "Major 7th", "Minor 7th",
+                                                    "Dominant 7th",
+                                                    "Major 9th", "Minor 9th", "Add9", "Minor 11th",
+                                                    "Quartal", "Quintal" };
+        return s;
+    }
+
+    namespace detail
+    {
+        // Scale steps above the root that a shape stacks in diatonic planing, or empty for the
+        // original seven, which keep their quality-matched types.
+        inline std::vector<int> planingSteps(const juce::String& shape)
+        {
+            if (shape == "Major 9th" || shape == "Minor 9th") return { 0, 2, 4, 6, 8 };
+            if (shape == "Add9")                              return { 0, 2, 4, 8 };
+            if (shape == "Minor 11th")                        return { 0, 2, 4, 6, 8, 10 };
+            if (shape == "Quartal")                           return { 0, 3, 6, 9 };
+            if (shape == "Quintal")                           return { 0, 4, 8 };
+            return {};
+        }
+    }
+
+    // `forceShape` indexes planingShapes(); -1 (the default) picks one at random, which is what
+    // the generator does. It exists so a test can sweep every shape instead of hoping the rng
+    // lands on each.
     inline std::vector<chordgen::Chord> planing(int rootPc, int mode, int octave, int count, bool diatonic,
-                                                juce::Random& rng)
+                                                juce::Random& rng, int forceShape = -1)
     {
         const auto& modeObj = modes::get(mode);
         const int n = (int) modeObj.intervals.size();
@@ -451,11 +522,20 @@ namespace keys::sources
         // A small, playable vocabulary rather than the whole chordgen::types() table: a
         // wide 9th-chord planed chromatically across 16 steps turns to mush fast, and
         // planing's character comes from the shape being recognisable every time it lands.
-        static const char* const shapeNames[] = { "Major", "Minor", "Sus2", "Sus4",
-                                                   "Major 7th", "Minor 7th", "Dominant 7th" };
-        const int shapeType = chordgen::typeIndex(
-            shapeNames[rng.nextInt((int) (sizeof(shapeNames) / sizeof(shapeNames[0])))]);
+        const auto& shapeNames = planingShapes();
+        const int shapeIdx = forceShape >= 0 ? juce::jmin(forceShape, (int) shapeNames.size() - 1)
+                                             : rng.nextInt((int) shapeNames.size());
+        const int shapeType = chordgen::typeIndex(shapeNames[(size_t) shapeIdx]);
         const size_t shapeSize = chordgen::types()[(size_t) shapeType].ivals.size();
+        const auto steps = detail::planingSteps(shapeNames[(size_t) shapeIdx]);
+
+        // The pitch `k` scale steps above the anchor, k any integer: the scale repeated every
+        // octave, so a stack that runs past the top of the scale carries on up it.
+        const auto scaleAt = [&] (int k)
+        {
+            const int deg = ((k % n) + n) % n;
+            return modeObj.intervals[(size_t) deg] + ((k - deg) / n) * 12;
+        };
 
         std::vector<chordgen::Chord> out;
         out.reserve((size_t) count);
@@ -472,13 +552,22 @@ namespace keys::sources
             {
                 const int degree = ((pos % n) + n) % n;
                 const int octaveShift = (pos - degree) / n; // exact: pos - degree is a multiple of n
-                const int type = detail::typeForDegreeSize(modeObj.qualities[(size_t) degree], shapeSize);
+                const auto quality = modeObj.qualities[(size_t) degree];
                 const int absRoot = anchor + modeObj.intervals[(size_t) degree] + octaveShift * 12;
                 c.rootPc = ((anchor + modeObj.intervals[(size_t) degree]) % 12 + 12) % 12;
-                c.type = type;
                 c.degree = degree;
-                for (int iv : chordgen::types()[(size_t) type].ivals)
-                    c.notes.push_back(absRoot + iv);
+                if (steps.empty())
+                {
+                    c.type = detail::typeForDegreeSize(quality, shapeSize);
+                    for (int iv : chordgen::types()[(size_t) c.type].ivals)
+                        c.notes.push_back(absRoot + iv);
+                }
+                else
+                {
+                    for (int st : steps)
+                        c.notes.push_back(anchor + scaleAt(pos + st));
+                    c.type = detail::typeForStack(c.notes, quality, shapeType);
+                }
             }
             else
             {
@@ -492,9 +581,10 @@ namespace keys::sources
             out.push_back(c);
 
             // Steer away from the edges of the keyboard before a step would run off it
-            // (margins wide enough for the widest shape in the vocabulary above, an
-            // 11-semitone Major 7th span), otherwise the occasional reversal that keeps a
-            // long run from reading as one scale sliding off the top.
+            // (margins wide enough for the widest shape in the vocabulary above: 17 semitones
+            // for a Minor 11th, up to 24 for the same stack in a pentatonic scale, where a
+            // single step of drift in the top note is under 7), otherwise the occasional
+            // reversal that keeps a long run from reading as one scale sliding off the top.
             if (! c.notes.empty() && c.notes.back() >= 116)
                 dir = -1;
             else if (! c.notes.empty() && c.notes.front() <= 11)

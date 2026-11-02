@@ -5,6 +5,23 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Added: six chord colours, and planing that slides 9ths, 11ths and fourths
+
+The generator and the weighted pool gain **Minor 11th**, **Major 7th #11**, **Dominant 13th**,
+**Major 13th**, **Quartal** (stacked fourths, the So What shape) and **Quintal** (stacked fifths).
+They are appended to the end of the chord type list, so no saved pad changes. Under full Scale
+Compliance they only land where every note is in the key (a #11 on Lydian I or Ionian IV). The
+played-chord namer reads them (`Cm11`, `Cmaj7#11`, `C13`, `Cmaj13`, `Cquartal`) and a played 6/9 now
+reads `C6/9` where it used to read as a smaller chord. Stacked fifths are the same notes as a sus2,
+so a Quintal chord reads `Csus2`. Progression numerals accept `m11`, `M7#11`, `13`, `M13`, `q4`, `q5`.
+
+Planing has six more shapes, thirteen in all: Major 9th, Minor 9th, Add9, Minor 11th, Quartal and
+Quintal. Chromatic planing keeps the exact intervals. Diatonic planing builds these by stacking
+scale steps from each degree (thirds, fourths or fifths of the scale), so every note stays in the
+key in every mode, and quartal in C major is C F B E rather than C F Bb Eb. Because the weighted
+pool gained entries and planing gained shapes, a seeded Regen produces different chords than before.
+Saved sessions and parameters are unchanged.
+
 ### Changed: five library rows retagged against emotion-labelled music
 
 The vi-start loops `vi IV I V` (Axis, vi start) and `I iii vi IV` (Alternative wander) are now

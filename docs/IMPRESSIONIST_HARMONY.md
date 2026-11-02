@@ -217,8 +217,8 @@ Mapped by reading `src/`, 2026-11-02.
 | Church modes | `ScaleModes.h` has Ionian, Lydian, Mixolydian, Aeolian, Dorian, Phrygian, Locrian, Harmonic and Melodic Minor, Blues, plus Pentatonic Major and Minor. | **Covered** for modal and pentatonic. |
 | Whole-tone and octatonic modes | **Absent from the generator.** `ScaleModes.h` states that Whole Tone and Chromatic exist as kit scales but have no per-degree chord quality, so the generator cannot express them. Octatonic is in neither list. | **Gap** |
 | add9, add6, 6/9, maj9, sus | `ChordGen.h` `types()` has 20 types including Sus2, Sus4, Major 6th, Minor 6th, Add9, Minor Add9, Major 9th, Minor 9th, Dominant 9th, 6/9. | **Covered** for add9, 6th, 6/9, sus, maj9. |
-| 11th, 13th, maj7#11, quartal, quintal, cluster | **None.** No type has an 11th or 13th, no sharp-11, and no stack of fourths. The largest chord is 5 notes. | **Gap** |
-| Planing, diatonic and chromatic | `planing()` in `ChordSources.h`, selected as genSource "Planing". **Seven shapes only**: Major, Minor, Sus2, Sus4, Major 7th, Minor 7th, Dominant 7th. No 9th, add9 or fifth-only shape. | **Partial** (the same gap `DANCE_HARMONY.md` section 7 raised) |
+| 11th, 13th, maj7#11, quartal, quintal, cluster | **None.** No type has an 11th or 13th, no sharp-11, and no stack of fourths. The largest chord is 5 notes. | **Built 2026-11-02** (all but cluster) |
+| Planing, diatonic and chromatic | `planing()` in `ChordSources.h`, selected as genSource "Planing". **Seven shapes only**: Major, Minor, Sus2, Sus4, Major 7th, Minor 7th, Dominant 7th. No 9th, add9 or fifth-only shape. | **Built 2026-11-02**: six more shapes, thirteen in all |
 | Chromatic mediants | Neo-Riemannian PLR source (`neoRiemannian`) covers parsimonious voice-leading; the library has "Chromatic mediant down" and "Hollywood third chain". | **Covered** (PLR's own moves are the one-semitone cases; third-cycles are in the library) |
 | Negative harmony, circle of fifths, Markov, library | Present: eight sources (`Algorithmic`, `Markov`, `Circle of Fifths`, `Neo-Riemannian`, `Progressions`, `Negative Harmony`, `Planing`, `Library`). | n/a |
 | Voicing pipeline | `ChordVoicing.h`: Lean (`applyMajorMinorBias`), `fitVoicing` (root position, note count, inversion), `applyVoiceLeading`. No pass for open spacing, rootless shapes, or a held bass note. | **Gap** |
@@ -234,6 +234,7 @@ machinery has to change. The append-only rules apply to everything that touches 
 `genSource` or `genres()`.
 
 1. **Extended chord types: 11th, 13th, maj7#11, 7sus4, quartal and quintal stacks.**
+   **Built 2026-11-02, except 7sus4 and the 3-note Quartal / "So What" variants:** Minor 11th, Major 7th #11, Dominant 13th, Major 13th, Quartal (4 notes) and Quintal are the last six `chordgen::types()`; numerals `m11`, `M7#11`, `13`, `M13`, `q4`, `q5`.
    Append to `chordgen::types()` (saved pads store the index, so append only; `StateTests` pins
    the list). Suggested additions, in semitones from the root: `Quartal 3` {0, 5, 10},
    `Quartal 4` {0, 5, 10, 15}, `Quintal 3` {0, 7, 14}, `Major 7#11` {0, 4, 7, 11, 18},
@@ -243,6 +244,7 @@ machinery has to change. The append-only rules apply to everything that touches 
    naming: `Chords.h` has to recognise the new shapes on a played chord, and a quartal stack has no
    unique root.
 2. **A planing source that takes the extended shapes, plus a "constant structure" mode.**
+   **Built 2026-11-02:** Major 9th, Minor 9th, Add9, Minor 11th, Quartal and Quintal are planing shapes (diatonic stacks scale steps, so it stays in key); the fifths-only option is the Quintal shape.
    `planing()` picks from seven fixed shapes. Add the new types (the `docs/DANCE_HARMONY.md`
    section 7 gap, same fix: Minor 9, Major 9, Add9, and now Quartal and Quintal) and offer a
    Planing option that is **fifths only** (the "cathedrale" sound). The comment on

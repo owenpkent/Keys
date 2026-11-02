@@ -446,8 +446,9 @@ Andalusian, Royal Road, rhythm changes, Coltrane's major-third cycle) to the cur
 loops it to fill the page; index 0 is Random. **Negative Harmony** mirrors a plain diatonic
 progression about the tonic/dominant axis (C major becomes C minor) and is the one source
 with no band of its own, since Key, Mode and Octave are the whole of what a reflection needs.
-**Planing** takes one chord shape and slides it, diatonically (the quality bends to fit the
-scale) or chromatically (the shape is preserved exactly, the Debussy sound). All five return
+**Planing** takes one chord shape (thirteen of them since 2026-11-02, including 9ths, a Minor 11th,
+Quartal and Quintal) and slides it, diatonically (the quality bends to fit the scale; the six
+newest shapes are built by stacking scale steps so they never leave the key) or chromatically (the shape is preserved exactly, the Debussy sound). All five return
 plain `chordgen::Chord`s, are not scale-compliance-gated and take no lock bias — a source
 like this replaces a whole page in one call, and per-chord lock influence stays the weighted
 pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algorithmic plus
