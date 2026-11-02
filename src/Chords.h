@@ -100,6 +100,14 @@ namespace keys::chords
         if (pcs.size() == 1)
             return juce::String(noteName(*pcs.begin()));
 
+        // Ties go to the root that is actually in the bass. A name is read from pitch classes,
+        // and some sets are two chords at once (A C E G B D is Am11 and Cmaj13); with the roots
+        // tried in pitch order, C used to win every such tie whatever was played under it.
+        int lowestNote = notes.front();
+        for (int n : notes)
+            lowestNote = juce::jmin(lowestNote, n);
+        const int bassPc = pitchClass(lowestNote);
+
         double bestScore = 0.0;
         int bestSize = 0, bestRoot = -1;
         const Template* best = nullptr;
@@ -112,7 +120,7 @@ namespace keys::chords
             {
                 int sz = 0;
                 const double s = scoreMatch(rel, tpl.pcs, sz);
-                if (s > bestScore || (s == bestScore && sz > bestSize))
+                if (s > bestScore || (s == bestScore && (sz > bestSize || (sz == bestSize && root == bassPc))))
                 {
                     bestScore = s;
                     bestSize = sz;

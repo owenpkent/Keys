@@ -55,29 +55,33 @@ namespace keys::sources
             return chordgen::baseType(q);
         }
 
-        // The label for a chord that diatonic planing built by stacking scale steps. The notes
-        // are what sound; this only names them, so it first looks for a type whose intervals are
-        // exactly the notes' (an Ionian I stacked in thirds to the 9th *is* Major 9th), and only
-        // then falls back on the nearest type for the degree's quality and the shape asked for.
-        inline int typeForStack(const std::vector<int>& notes, modes::Quality q, int shapeType)
+        // The type of a chord that diatonic planing built by stacking scale steps, trimming the
+        // stack until it is one. The label has to be the notes: an Ionian I stacked in thirds to
+        // the 9th *is* Major 9th, but the same stack on iii is E G B D F, and F is a minor 9th
+        // above E - calling that "Em9" would be a card that names one chord and plays another.
+        // So a third-stacked shape loses notes off the top until what is left is a type the table
+        // knows, which is the jazz rule anyway (the b9 on iii and vii is the avoid note): Em7 on
+        // iii, the full 9th wherever the scale gives one. A triad always matches, so this ends.
+        // Quartal and Quintal are quality-blind: a diatonic stack of fourths includes the one
+        // tritone the scale owns (F-B in C), and that stack is what "diatonic quartal" means.
+        inline int typeForStack(std::vector<int>& notes, int shapeType)
         {
             const auto& all = chordgen::types();
-            std::vector<int> iv;
-            for (int n : notes)
-                iv.push_back(n - notes.front());
-            for (int t = 0; t < (int) all.size(); ++t)
-                if (all[(size_t) t].ivals == iv)
-                    return t;
-
             const auto name = juce::String(all[(size_t) shapeType].name);
             if (name == "Quartal" || name == "Quintal")
-                return shapeType; // quality-blind shapes: the stack is the identity
-            if (name == "Add9" || name == "Minor Add9")
+                return shapeType;
+            for (;;)
             {
-                const bool minorish = q == modes::Quality::minor || q == modes::Quality::diminished;
-                return chordgen::typeIndex(minorish ? "Minor Add9" : "Add9");
+                std::vector<int> iv;
+                for (int n : notes)
+                    iv.push_back(n - notes.front());
+                for (int t = 0; t < (int) all.size(); ++t)
+                    if (all[(size_t) t].ivals == iv)
+                        return t;
+                if (notes.size() <= 3)
+                    return shapeType; // unreachable for a stack of scale thirds; kept total
+                notes.pop_back();
             }
-            return typeForDegreeSize(q, all[(size_t) shapeType].ivals.size());
         }
 
         // ---- Neo-Riemannian PLR -------------------------------------------------------
@@ -484,8 +488,7 @@ namespace keys::sources
     // **by stacking scale steps from each degree** (thirds are every 2nd degree, fourths every
     // 3rd, fifths every 4th) rather than by quality-matched interval tables. A ninth chord on
     // every degree of Ionian by interval table has an F# in it on iii; stacked through the scale
-    // it never leaves the key, and in a pentatonic scale it is still a stack of that scale's own
-    // notes. Chromatic planing keeps the exact interval stack, which is the point of it.
+    // it never leaves the key. (Seven-note scales only: see the fallback in the loop below.) Chromatic planing keeps the exact interval stack, which is the point of it.
     inline const std::vector<const char*>& planingShapes()
     {
         static const std::vector<const char*> s = { "Major", "Minor", "Sus2", "Sus4", "Major 7th", "Minor 7th",
@@ -556,7 +559,16 @@ namespace keys::sources
                 const int absRoot = anchor + modeObj.intervals[(size_t) degree] + octaveShift * 12;
                 c.rootPc = ((anchor + modeObj.intervals[(size_t) degree]) % 12 + 12) % 12;
                 c.degree = degree;
-                if (steps.empty())
+                // Stacking scale steps only makes thirds in a seven-note scale. In a pentatonic or
+                // the blues scale "every second note" is a stack no chord type describes, so the
+                // third-stacked shapes there fall back on the quality tables the original seven use,
+                // which keeps the label true at the cost of the odd note outside the scale, exactly
+                // as the original seven already behave in those modes. Quartal and Quintal still
+                // stack: they are named for the stack, not for a chord quality.
+                const auto shapeName = juce::String(shapeNames[(size_t) shapeIdx]);
+                const bool stackable = ! steps.empty()
+                                       && (n == 7 || shapeName == "Quartal" || shapeName == "Quintal");
+                if (! stackable)
                 {
                     c.type = detail::typeForDegreeSize(quality, shapeSize);
                     for (int iv : chordgen::types()[(size_t) c.type].ivals)
@@ -566,7 +578,7 @@ namespace keys::sources
                 {
                     for (int st : steps)
                         c.notes.push_back(anchor + scaleAt(pos + st));
-                    c.type = detail::typeForStack(c.notes, quality, shapeType);
+                    c.type = detail::typeForStack(c.notes, shapeType);
                 }
             }
             else

@@ -12,13 +12,19 @@ The generator and the weighted pool gain **Minor 11th**, **Major 7th #11**, **Do
 They are appended to the end of the chord type list, so no saved pad changes. Under full Scale
 Compliance they only land where every note is in the key (a #11 on Lydian I or Ionian IV). The
 played-chord namer reads them (`Cm11`, `Cmaj7#11`, `C13`, `Cmaj13`, `Cquartal`) and a played 6/9 now
-reads `C6/9` where it used to read as a smaller chord. Stacked fifths are the same notes as a sus2,
+reads `C6/9` where it used to read as a smaller chord. When one set of notes is two chords (A C E G
+B D is Am11 and Cmaj13), the note in the bass now decides; it used to be whichever root came first
+from C. Stacked fifths are the same notes as a sus2,
 so a Quintal chord reads `Csus2`. Progression numerals accept `m11`, `M7#11`, `13`, `M13`, `q4`, `q5`.
 
 Planing has six more shapes, thirteen in all: Major 9th, Minor 9th, Add9, Minor 11th, Quartal and
 Quintal. Chromatic planing keeps the exact intervals. Diatonic planing builds these by stacking
 scale steps from each degree (thirds, fourths or fifths of the scale), so every note stays in the
-key in every mode, and quartal in C major is C F B E rather than C F Bb Eb. Because the weighted
+key in any seven-note mode, and quartal in C major is C F B E rather than C F Bb Eb. **A card names
+what it plays**: where the scale has no such chord on a degree, the stack loses notes off the top
+until it is one, so a Minor 9th planed through C major plays Em7 on iii (whose ninth would be F, a
+minor ninth, the jazz avoid note) and Am9 on vi. In the pentatonic and blues scales the 9th and 11th
+shapes use the same per-degree chords the original seven shapes always have there. Because the weighted
 pool gained entries and planing gained shapes, a seeded Regen produces different chords than before.
 Saved sessions and parameters are unchanged.
 

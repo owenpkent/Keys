@@ -380,7 +380,7 @@ struct WidePlaningTests : juce::UnitTest
                 expectEquals(juce::String(shapes[i]), juce::String(golden[i]));
         }
 
-        beginTest("diatonic planing with a new shape never leaves the scale, every mode and root");
+        beginTest("diatonic planing with a new shape names what it plays, and stays in any seven-note scale");
         {
             for (int shape = firstNew; shape < (int) shapes.size(); ++shape)
                 for (int mode = 0; mode < modes::count(); ++mode)
@@ -393,15 +393,30 @@ struct WidePlaningTests : juce::UnitTest
                             inKey.insert((root + iv) % 12);
                         const auto chords = sources::planing(root, mode, 4, 24, true, rng, shape);
                         expectEquals((int) chords.size(), 24);
-                        const size_t want = chords.front().notes.size();
+                        const auto shapeName = juce::String(shapes[(size_t) shape]);
+                        const bool quartalOrQuintal = shapeName == "Quartal" || shapeName == "Quintal";
+                        const size_t want = chordgen::types()[(size_t) chordgen::typeIndex(shapeName)].ivals.size();
                         for (const auto& c : chords)
                         {
-                            const auto ctx = juce::String(shapes[(size_t) shape]) + " mode " + juce::String(mode)
+                            const auto ctx = shapeName + " mode " + juce::String(mode)
                                              + " root " + juce::String(root);
-                            expectEquals((int) c.notes.size(), (int) want, "note count drifted, " + ctx);
+                            // A third-stacked shape may be trimmed where the scale has no such
+                            // chord on that degree (the b9 on iii), never grown, never below a triad.
+                            expect(c.notes.size() <= want && c.notes.size() >= 3, "note count out of range, " + ctx);
+                            if (quartalOrQuintal)
+                                expectEquals((int) c.notes.size(), (int) want, "quartal stack trimmed, " + ctx);
+                            else
+                            {
+                                // The label is the notes: what the card names is what it plays.
+                                std::vector<int> iv;
+                                for (int note : c.notes)
+                                    iv.push_back(note - c.notes.front());
+                                expect(iv == chordgen::types()[(size_t) c.type].ivals, "label lies, " + ctx);
+                            }
                             expect(ascendingStrict(c.notes) && allInRange(c.notes), "bad register, " + ctx);
-                            for (int note : c.notes)
-                                expect(inKey.count(((note % 12) + 12) % 12) == 1, "out-of-key note, " + ctx);
+                            if (m.intervals.size() == 7 || quartalOrQuintal)
+                                for (int note : c.notes)
+                                    expect(inKey.count(((note % 12) + 12) % 12) == 1, "out-of-key note, " + ctx);
                         }
                     }
         }
@@ -573,6 +588,19 @@ struct ChordTypeTableTests : juce::UnitTest
 
         beginTest("played voicings of the new chords are named sensibly");
         {
+            // A C E G B D is Am11 and Cmaj13 at once; the bass decides.
+            expectEquals(chords::detect({ 57, 60, 64, 67, 71, 74 }), juce::String("Am11"));
+            expectEquals(chords::detect({ 48, 57, 64, 67, 71, 74 }), juce::String("Cmaj13"));
+            // The diatonic 9th on iii in C trims to Em7 rather than playing Em(b9) as "Em9".
+            {
+                juce::Random rng(7);
+                const int minor9 = (int) (std::find_if(sources::planingShapes().begin(), sources::planingShapes().end(),
+                                                       [] (const char* n) { return juce::String(n) == "Minor 9th"; })
+                                          - sources::planingShapes().begin());
+                for (const auto& c : sources::planing(0, 0, 4, 14, true, rng, minor9))
+                    if (c.degree == 2)
+                        expectEquals(juce::String(chordgen::types()[(size_t) c.type].name), juce::String("Minor 7th"));
+            }
             expectEquals(chords::detect({ 60, 63, 67, 70, 74, 77 }), juce::String("Cm11"));
             expectEquals(chords::detect({ 60, 63, 70, 74, 77 }), juce::String("Cm11")); // no fifth
             expectEquals(chords::detect({ 60, 65, 70, 75 }), juce::String("Cquartal")); // C F Bb Eb
