@@ -231,8 +231,8 @@ minimal input as a named test in the normal suite.
 
 ```powershell
 cmake --build build --config Release --target Keys_fuzz
-.uild\Release\Keys_fuzz.exe                       # fixed seed, 300 cases a target, a few seconds
-.uild\Release\Keys_fuzz.exe --iterations 20000    # about half a minute
+.\build\Release\Keys_fuzz.exe                       # fixed seed, 300 cases a target, a few seconds
+.\build\Release\Keys_fuzz.exe --iterations 20000    # about half a minute
 ```
 
 **Two findings from the first run (2026-11-02), both open:**

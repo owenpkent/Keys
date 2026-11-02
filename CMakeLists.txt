@@ -187,4 +187,10 @@ option(KEYS_FUZZ_ASAN "Compile Keys_fuzz with AddressSanitizer" OFF)
 if(KEYS_FUZZ_ASAN AND MSVC)
   target_compile_options(Keys_fuzz PRIVATE /fsanitize=address /Zi)
   target_link_options(Keys_fuzz PRIVATE /DEBUG)
+  # Partial instrumentation and the STL's container annotations do not mix: an instrumented TU
+  # turns them on, every uninstrumented object in Keys_SharedCode has them off, and the linker
+  # refuses the mismatch (LNK2038 annotate_string / annotate_vector / annotate_optional). Off
+  # here means the heap and stack checks still run; only the containers' spare-capacity checks go.
+  target_compile_definitions(Keys_fuzz PRIVATE _DISABLE_STL_ANNOTATION _DISABLE_STRING_ANNOTATION
+                                               _DISABLE_VECTOR_ANNOTATION)
 endif()
