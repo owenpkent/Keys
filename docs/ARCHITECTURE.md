@@ -20,7 +20,7 @@ src/
 ├── ChordSources.h            # circle of fifths, Neo-Riemannian PLR, progression templates,
 │                             # negative harmony, planing, voice-leading as a post-pass
 │                             # (tests/ChordSourceTests.cpp). Wired to the UI since 2026-08-01
-├── ChordLibrary.h            # 355 named progressions tagged by mood, genre and function,
+├── ChordLibrary.h            # 358 named progressions tagged by mood, genre and function,
 │                             # stored as roman numerals (tests/ChordLibraryTests.cpp, which
 │                             # spellchecks the table on every build). The eighth Source, and
 │                             # the only one that looks a sequence up rather than computing it
@@ -446,8 +446,9 @@ Andalusian, Royal Road, rhythm changes, Coltrane's major-third cycle) to the cur
 loops it to fill the page; index 0 is Random. **Negative Harmony** mirrors a plain diatonic
 progression about the tonic/dominant axis (C major becomes C minor) and is the one source
 with no band of its own, since Key, Mode and Octave are the whole of what a reflection needs.
-**Planing** takes one chord shape and slides it, diatonically (the quality bends to fit the
-scale) or chromatically (the shape is preserved exactly, the Debussy sound). All five return
+**Planing** takes one chord shape (thirteen of them since 2026-11-02, including 9ths, a Minor 11th,
+Quartal and Quintal) and slides it, diatonically (the quality bends to fit the scale; the six
+newest shapes are built by stacking scale steps so they never leave the key) or chromatically (the shape is preserved exactly, the Debussy sound). All five return
 plain `chordgen::Chord`s, are not scale-compliance-gated and take no lock bias — a source
 like this replaces a whole page in one call, and per-chord lock influence stays the weighted
 pool's job. `ChordGenMenu::generateChords(count)` is the one dispatcher for Algorithmic plus
@@ -465,7 +466,7 @@ scripts/corpus/               # what was actually run against them: the MIT pack
 ```
 
 `ChordLibrary.h` added the eighth on 2026-08-18 and it is the odd one out: **Library** does not
-compute a chord sequence, it looks one up. 355 named progressions, each stored as a roman-numeral
+compute a chord sequence, it looks one up. 358 named progressions, each stored as a roman-numeral
 string in the grammar `ChordMarkov.h` already parses (so one row serves twelve keys, and the
 storage format is the notation the cards print in their corner) and tagged on three axes: mood and
 genre, which are Scaler 3's own vocabularies plus five words Keys already used, and **function** -

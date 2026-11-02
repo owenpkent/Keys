@@ -32,3 +32,11 @@ datasets/*.parquet
 datasets/*.pkl
 datasets/*.zip
 datasets/*.jsonl
+# Every downloaded corpus lives in its own subfolder; only README.md is tracked.
+datasets/*/
+datasets/*.tar.gz
+datasets/*.tar.xz
+datasets/*.tar.bz2
+datasets/*.txt
+datasets/*.json
+datasets/*.lab

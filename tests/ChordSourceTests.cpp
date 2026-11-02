@@ -1,12 +1,15 @@
 // Unit tests for keys::sources (ChordSources.h). JUCE UnitTest framework, self-registering
 // statics only -- tests/KeysTests.cpp owns the runner's main(), same as MarkovTests.cpp.
 #include "ChordGen.h"
+#include "Chords.h"
 #include "ChordSources.h"
 #include "ScaleModes.h"
 #include <juce_core/juce_core.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <map>
+#include <string>
 #include <set>
 #include <vector>
 
@@ -356,6 +359,259 @@ struct PlaningTests : juce::UnitTest
     }
 };
 static PlaningTests planingTests;
+
+// The wide shapes added 2026-11-02, and the six chord types behind them.
+struct WidePlaningTests : juce::UnitTest
+{
+    WidePlaningTests() : juce::UnitTest("keys::sources::planing wide shapes") {}
+
+    void runTest() override
+    {
+        using namespace keys;
+        const auto& shapes = sources::planingShapes();
+        const int firstNew = 7; // the original seven keep their quality-matched types
+
+        beginTest("the planing vocabulary only grows at the end");
+        {
+            const char* golden[] = { "Major", "Minor", "Sus2", "Sus4", "Major 7th", "Minor 7th", "Dominant 7th",
+                                     "Major 9th", "Minor 9th", "Add9", "Minor 11th", "Quartal", "Quintal" };
+            expectEquals((int) shapes.size(), (int) (sizeof(golden) / sizeof(golden[0])));
+            for (size_t i = 0; i < shapes.size(); ++i)
+                expectEquals(juce::String(shapes[i]), juce::String(golden[i]));
+        }
+
+        beginTest("diatonic planing with a new shape names what it plays, and stays in any seven-note scale");
+        {
+            for (int shape = firstNew; shape < (int) shapes.size(); ++shape)
+                for (int mode = 0; mode < modes::count(); ++mode)
+                    for (int root = 0; root < 12; ++root)
+                    {
+                        juce::Random rng(1000 + shape * 100 + mode);
+                        const auto& m = modes::get(mode);
+                        std::set<int> inKey;
+                        for (int iv : m.intervals)
+                            inKey.insert((root + iv) % 12);
+                        const auto chords = sources::planing(root, mode, 4, 24, true, rng, shape);
+                        expectEquals((int) chords.size(), 24);
+                        const auto shapeName = juce::String(shapes[(size_t) shape]);
+                        const bool quartalOrQuintal = shapeName == "Quartal" || shapeName == "Quintal";
+                        const size_t want = chordgen::types()[(size_t) chordgen::typeIndex(shapeName)].ivals.size();
+                        for (const auto& c : chords)
+                        {
+                            const auto ctx = shapeName + " mode " + juce::String(mode)
+                                             + " root " + juce::String(root);
+                            // A third-stacked shape may be trimmed where the scale has no such
+                            // chord on that degree (the b9 on iii), never grown, never below a triad.
+                            expect(c.notes.size() <= want && c.notes.size() >= 3, "note count out of range, " + ctx);
+                            if (quartalOrQuintal)
+                                expectEquals((int) c.notes.size(), (int) want, "quartal stack trimmed, " + ctx);
+                            else
+                            {
+                                // The label is the notes: what the card names is what it plays.
+                                std::vector<int> iv;
+                                for (int note : c.notes)
+                                    iv.push_back(note - c.notes.front());
+                                expect(iv == chordgen::types()[(size_t) c.type].ivals, "label lies, " + ctx);
+                            }
+                            expect(ascendingStrict(c.notes) && allInRange(c.notes), "bad register, " + ctx);
+                            if (m.intervals.size() == 7 || quartalOrQuintal)
+                                for (int note : c.notes)
+                                    expect(inKey.count(((note % 12) + 12) % 12) == 1, "out-of-key note, " + ctx);
+                        }
+                    }
+        }
+
+        beginTest("chromatic planing of every shape preserves the shape's exact intervals");
+        {
+            for (int shape = 0; shape < (int) shapes.size(); ++shape)
+            {
+                juce::Random rng(2000 + shape);
+                const auto want = chordgen::types()[(size_t) chordgen::typeIndex(shapes[(size_t) shape])].ivals;
+                for (const auto& c : sources::planing(0, 0, 4, 24, false, rng, shape))
+                {
+                    std::vector<int> ivals;
+                    for (int note : c.notes)
+                        ivals.push_back(note - c.notes.front());
+                    expect(ivals == want, juce::String("chromatic ") + shapes[(size_t) shape] + " drifted");
+                    expect(allInRange(c.notes), "chromatic planing ran off the keyboard");
+                }
+            }
+        }
+
+        beginTest("diatonic quartal is scale-step fourths and quintal scale-step fifths");
+        {
+            // Every step the stack climbs is 3 degrees (a fourth) or 4 (a fifth) of the mode.
+            for (int mode = 0; mode < modes::count(); ++mode)
+                for (int which = 0; which < 2; ++which)
+                {
+                    const int shape = which == 0 ? 11 : 12;
+                    const int stride = which == 0 ? 3 : 4;
+                    const auto& m = modes::get(mode);
+                    const int n = (int) m.intervals.size();
+                    juce::Random rng(3000 + mode);
+                    for (const auto& c : sources::planing(0, mode, 4, 24, true, rng, shape))
+                    {
+                        expectEquals((int) c.notes.size(), which == 0 ? 4 : 3);
+                        for (size_t k = 1; k < c.notes.size(); ++k)
+                        {
+                            const int lo = sources::detail::degreeOf(0, m, c.notes[k - 1]);
+                            const int hi = sources::detail::degreeOf(0, m, c.notes[k]);
+                            expect(lo >= 0 && hi >= 0 && (hi - lo + n) % n == stride % n,
+                                   "not a scale-step stack in mode " + juce::String(mode));
+                        }
+                    }
+                }
+            // In plain C major that gives the textbook quartal chord on I: C F B E, not C F Bb Eb.
+            juce::Random rng(1);
+            const auto q = sources::planing(0, 0, 4, 1, true, rng, 11);
+            expectEquals(q.front().degree, 0);
+            expect(q.front().notes == std::vector<int>({ 48, 53, 59, 64 }), "I quartal in C major");
+        }
+
+        beginTest("original shapes behave as they did: constant count when diatonic");
+        {
+            for (int shape = 0; shape < firstNew; ++shape)
+            {
+                juce::Random rng(4000 + shape);
+                const auto chords = sources::planing(0, 0, 4, 16, true, rng, shape);
+                for (const auto& c : chords)
+                    expectEquals((int) c.notes.size(), (int) chords.front().notes.size());
+            }
+        }
+
+        beginTest("typeForDegreeSize: 9ths and 11ths by quality, diminished falls to Half Diminished");
+        {
+            using Q = modes::Quality;
+            const auto name = [](int t) { return juce::String(chordgen::types()[(size_t) t].name); };
+            expectEquals(name(sources::detail::typeForDegreeSize(Q::major, 5)), juce::String("Major 9th"));
+            expectEquals(name(sources::detail::typeForDegreeSize(Q::minor, 5)), juce::String("Minor 9th"));
+            expectEquals(name(sources::detail::typeForDegreeSize(Q::minor, 6)), juce::String("Minor 11th"));
+            expectEquals(name(sources::detail::typeForDegreeSize(Q::major, 6)), juce::String("Major 13th"));
+            expectEquals(name(sources::detail::typeForDegreeSize(Q::diminished, 5)), juce::String("Half Diminished"));
+            expectEquals(name(sources::detail::typeForDegreeSize(Q::diminished, 3)), juce::String("Diminished"));
+        }
+    }
+};
+static WidePlaningTests widePlaningTests;
+
+struct ChordTypeTableTests : juce::UnitTest
+{
+    ChordTypeTableTests() : juce::UnitTest("keys::chordgen::types (append-only)") {}
+
+    void runTest() override
+    {
+        using namespace keys;
+        struct Row { const char* name; std::vector<int> ivals; };
+        const std::vector<Row> golden = {
+            { "Major", { 0, 4, 7 } }, { "Minor", { 0, 3, 7 } }, { "Diminished", { 0, 3, 6 } },
+            { "Augmented", { 0, 4, 8 } }, { "Sus2", { 0, 2, 7 } }, { "Sus4", { 0, 5, 7 } },
+            { "Major 7th", { 0, 4, 7, 11 } }, { "Minor 7th", { 0, 3, 7, 10 } },
+            { "Dominant 7th", { 0, 4, 7, 10 } }, { "Diminished 7th", { 0, 3, 6, 9 } },
+            { "Half Diminished", { 0, 3, 6, 10 } }, { "Minor Major 7th", { 0, 3, 7, 11 } },
+            { "Major 6th", { 0, 4, 7, 9 } }, { "Minor 6th", { 0, 3, 7, 9 } },
+            { "Add9", { 0, 4, 7, 14 } }, { "Minor Add9", { 0, 3, 7, 14 } },
+            { "Major 9th", { 0, 4, 7, 11, 14 } }, { "Minor 9th", { 0, 3, 7, 10, 14 } },
+            { "Dominant 9th", { 0, 4, 7, 10, 14 } }, { "6/9", { 0, 4, 7, 9, 14 } },
+            // 2026-11-02
+            { "Minor 11th", { 0, 3, 7, 10, 14, 17 } }, { "Major 7th #11", { 0, 4, 7, 11, 18 } },
+            { "Dominant 13th", { 0, 4, 7, 10, 14, 21 } }, { "Major 13th", { 0, 4, 7, 11, 14, 21 } },
+            { "Quartal", { 0, 5, 10, 15 } }, { "Quintal", { 0, 7, 14 } },
+        };
+
+        beginTest("the type table is append-only: saved pads store the index");
+        {
+            const auto& t = chordgen::types();
+            expectEquals((int) t.size(), (int) golden.size());
+            for (size_t i = 0; i < golden.size() && i < t.size(); ++i)
+            {
+                expectEquals(juce::String(t[i].name), juce::String(golden[i].name));
+                expect(t[i].ivals == golden[i].ivals, juce::String("intervals changed for ") + golden[i].name);
+            }
+        }
+
+        beginTest("the namer reads every type back, at every root");
+        {
+            // Pitch classes decide a name, so the two symmetric chords (diminished 7th repeats at
+            // the minor third, augmented at the major third) can be named from any of their notes
+            // and only the suffix is checked. Quintal is the sus2 pitch-class set by construction.
+            const std::map<std::string, std::string> suffix = {
+                { "Major", "" }, { "Minor", "m" }, { "Diminished", "dim" }, { "Augmented", "aug" },
+                { "Sus2", "sus2" }, { "Sus4", "sus4" }, { "Major 7th", "maj7" }, { "Minor 7th", "m7" },
+                { "Dominant 7th", "7" }, { "Diminished 7th", "dim7" }, { "Half Diminished", "m7b5" },
+                { "Minor Major 7th", "mMaj7" }, { "Major 6th", "6" }, { "Minor 6th", "m6" },
+                { "Add9", "add9" }, { "Major 9th", "maj9" }, { "Minor 9th", "m9" },
+                { "Dominant 9th", "9" }, { "6/9", "6/9" },
+                { "Minor 11th", "m11" }, { "Major 7th #11", "maj7#11" }, { "Dominant 13th", "13" },
+                { "Major 13th", "maj13" }, { "Quartal", "quartal" }, { "Quintal", "sus2" },
+            };
+            for (int t = 0; t < (int) chordgen::types().size(); ++t)
+            {
+                const juce::String tname = chordgen::types()[(size_t) t].name;
+                if (tname == "Minor Add9")
+                    continue; // no template of its own, and none was added
+                const auto it = suffix.find(tname.toStdString());
+                expect(it != suffix.end(), "no expected suffix for " + tname);
+                if (it == suffix.end())
+                    continue;
+                // At C the name is exact. At the other roots a pitch-class set can be two chords
+                // (Am7 is C6, Csus4 is Fsus2, Am11 is Cmaj13), so the check there is a round
+                // trip: whatever root and suffix come back must rebuild the same pitch classes.
+                // Only the new types whose sets are unambiguous are held to the exact name at every root (Minor 11th and Major 13th are one set, a minor third apart, so only C is exact).
+                expectEquals(chords::detect(chordgen::chordNotes(0, t, 4)),
+                             juce::String("C") + it->second.c_str(), tname + " at C");
+                const bool isNew = t >= 20 && tname != "Quintal" && tname != "Minor 11th" && tname != "Major 13th";
+                for (int root = 0; root < 12; ++root)
+                {
+                    const auto notes = chordgen::chordNotes(root, t, 4);
+                    const auto got = chords::detect(notes);
+                    if (isNew)
+                        expectEquals(got, juce::String(chords::noteName(root)) + it->second.c_str(),
+                                     tname + " at root " + juce::String(root));
+
+                    const int rootLen = got.length() > 1 && got[1] == '#' ? 2 : 1;
+                    int gotRoot = -1;
+                    for (int pc = 0; pc < 12; ++pc)
+                        if (got.substring(0, rootLen) == chords::noteName(pc))
+                            gotRoot = pc;
+                    const auto sfx = got.substring(rootLen);
+                    std::set<int> rebuilt, played;
+                    for (const auto& tpl : chords::templates())
+                        if (sfx == tpl.suffix)
+                            for (int p : tpl.pcs)
+                                rebuilt.insert((gotRoot + p) % 12);
+                    for (int note : notes)
+                        played.insert(chords::pitchClass(note));
+                    expect(gotRoot >= 0 && rebuilt == played, tname + " at root " + juce::String(root) + " read " + got);
+                }
+            }
+        }
+
+        beginTest("played voicings of the new chords are named sensibly");
+        {
+            // A C E G B D is Am11 and Cmaj13 at once; the bass decides.
+            expectEquals(chords::detect({ 57, 60, 64, 67, 71, 74 }), juce::String("Am11"));
+            expectEquals(chords::detect({ 48, 57, 64, 67, 71, 74 }), juce::String("Cmaj13"));
+            // The diatonic 9th on iii in C trims to Em7 rather than playing Em(b9) as "Em9".
+            {
+                juce::Random rng(7);
+                const int minor9 = (int) (std::find_if(sources::planingShapes().begin(), sources::planingShapes().end(),
+                                                       [] (const char* n) { return juce::String(n) == "Minor 9th"; })
+                                          - sources::planingShapes().begin());
+                for (const auto& c : sources::planing(0, 0, 4, 14, true, rng, minor9))
+                    if (c.degree == 2)
+                        expectEquals(juce::String(chordgen::types()[(size_t) c.type].name), juce::String("Minor 7th"));
+            }
+            expectEquals(chords::detect({ 60, 63, 67, 70, 74, 77 }), juce::String("Cm11"));
+            expectEquals(chords::detect({ 60, 63, 70, 74, 77 }), juce::String("Cm11")); // no fifth
+            expectEquals(chords::detect({ 60, 65, 70, 75 }), juce::String("Cquartal")); // C F Bb Eb
+            expectEquals(chords::detect({ 60, 64, 67, 71, 78 }), juce::String("Cmaj7#11"));
+            expectEquals(chords::detect({ 60, 64, 67, 70, 74, 81 }), juce::String("C13"));
+            expectEquals(chords::detect({ 60, 64, 67, 71, 74, 81 }), juce::String("Cmaj13"));
+            expectEquals(chords::detect({ 60, 67, 74 }), juce::String("Csus2")); // stacked fifths
+        }
+    }
+};
+static ChordTypeTableTests chordTypeTableTests;
 
 struct ProgressionNamesTests : juce::UnitTest
 {
