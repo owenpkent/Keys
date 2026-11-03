@@ -11,6 +11,8 @@
 // layout and `setStateInformation`. `Keys_tests` therefore links `Keys_SharedCode`, and each
 // test constructs a processor of its own so nothing leaks between them.
 
+#include <cmath>
+#include <limits>
 #include "../src/PluginProcessor.h"
 #include <juce_events/juce_events.h>
 
@@ -66,6 +68,39 @@ public:
 
     void runTest() override
     {
+        // A parameter attribute reading "nan" (a damaged file; found by the fuzz harness,
+        // 2026-11-02). The text parses to NaN, the range's clamp lets NaN through, and the
+        // parameter held a value nothing could read. It now takes its default, as an absent
+        // parameter would.
+        beginTest("a NaN parameter value in a session loads as the default, not as NaN");
+        {
+            Host h;
+            const juce::String id = "humanizeTime";
+            const float fallback = h.processor.apvts.getParameter(id)->convertFrom0to1(
+                h.processor.apvts.getParameter(id)->getDefaultValue());
+            setParam(h.processor, id, 20.0f); // the live value is not the default either
+            juce::MemoryBlock block;
+            h.processor.getStateInformation(block);
+            auto xml = juce::AudioProcessor::getXmlFromBinary(block.getData(), (int) block.getSize());
+            auto root = juce::ValueTree::fromXml(*xml);
+            auto params = root.getChildWithName(h.processor.apvts.state.getType());
+            bool poisoned = false;
+            for (int i = 0; i < params.getNumChildren(); ++i)
+                if (params.getChild(i).getProperty("id").toString() == id)
+                {
+                    params.getChild(i).setProperty("value", std::numeric_limits<double>::quiet_NaN(), nullptr);
+                    poisoned = true;
+                }
+            expect(poisoned, "the parameter is in the saved tree");
+            juce::MemoryBlock damaged;
+            if (auto edited = root.createXml())
+                juce::AudioProcessor::copyXmlToBinary(*edited, damaged);
+            h.processor.setStateInformation(damaged.getData(), (int) damaged.getSize());
+            const float got = paramOf(h.processor, id);
+            expect(std::isfinite(got), "the loaded value is a number");
+            expectWithinAbsoluteError(got, fallback, 0.001f, "and it is the default");
+        }
+
         beginTest("the absence tell works at all: a dropped parameter is absent in onExtra");
         {
             // The whole mechanism in one assertion. Before the kit fix this failed - the

@@ -5,6 +5,15 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: a damaged session can no longer load a NaN parameter
+
+A session file saying `nan` where a parameter's number should be used to load: the text parses
+to NaN, the range's clamp compares false both ways and passes it through, a float parameter then
+held NaN and an int or bool one held 0 instead of its default. `setStateInformation` now drops any
+parameter entry whose value is not a finite number before the state reaches the APVTS, so it is
+reset to its default exactly as an absent parameter is. Found by the fuzz harness on its first
+run (2026-11-02); the regression test is in `StateTests`.
+
 ### Changed: the track's own MIDI no longer reaches the arpeggiator unless you say so
 
 **PARAMETER LAYOUT CHANGE.** `arpTrackMidi` is appended, default **false**, and a new parameter

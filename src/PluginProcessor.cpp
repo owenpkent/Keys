@@ -4229,6 +4229,39 @@ void KeysProcessor::getStateInformation(juce::MemoryBlock& destData)
 
 void KeysProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
+    // A damaged session can say "nan" where a parameter's number should be, and nothing on the
+    // way in refuses it (found by the fuzz harness, 2026-11-02): the text parses to NaN, the
+    // range's clamp compares false both ways and passes it through, a float parameter then holds
+    // NaN and an int or bool one holds whatever NaN rounds to, which is 0 rather than its default.
+    // It has to be caught *before* replaceState, because by the time a parameter has the value
+    // there is no telling 0 from a real 0. Dropping the entry is enough: an absent parameter is
+    // reset to its default, which is exactly what an unreadable one should take.
+    juce::MemoryBlock repaired;
+    if (const auto xml = juce::AudioProcessor::getXmlFromBinary(data, sizeInBytes))
+    {
+        auto root = juce::ValueTree::fromXml(*xml);
+        auto params = root.getChildWithName(apvts.state.getType());
+        bool changed = false;
+        for (int i = params.getNumChildren(); --i >= 0;)
+        {
+            const auto child = params.getChild(i);
+            if (child.hasProperty("value") && ! std::isfinite((double) child.getProperty("value")))
+            {
+                params.removeChild(i, nullptr);
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            if (const auto fixed = root.createXml())
+            {
+                juce::AudioProcessor::copyXmlToBinary(*fixed, repaired);
+                data = repaired.getData();
+                sizeInBytes = (int) repaired.getSize();
+            }
+        }
+    }
+
     okstudio::state::load(apvts, data, sizeInBytes, [this](const juce::ValueTree& root)
     {
         restoreSharedState(root);
