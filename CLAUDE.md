@@ -2468,6 +2468,11 @@ what is no longer true lives here in one place:
 - **Audio thread**: no allocation, no locks. It drains the collector, notes what came
   in on the MIDI input (display only), and runs the arp stage.
 - Parameter-layout changes break saved sessions — changelog loudly.
+- **A session value that is not a finite number never reaches a parameter** (2026-11-02, found
+  by the fuzz harness on `feat/typed-chord`). `setStateInformation` drops the entry before the
+  kit's `okstudio::state::load` runs, so the parameter takes its default as an absent one does.
+  It has to happen on the tree: once loaded, a NaN rounded to 0 looks like a real 0. The kit's
+  loader should grow the same guard for the siblings; it has not yet.
 - **Updater contract** lives in the kit (`docs/AUTO_UPDATE.md`): releases repo is
   `okstudio1/keys-releases`; assets named exactly `KeysSetup-<version>.exe`, tag
   `v<version>`; every verification gate stays fail-closed. **`docs/RELEASE.md` is the

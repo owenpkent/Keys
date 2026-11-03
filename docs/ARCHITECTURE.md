@@ -1286,7 +1286,12 @@ config into every note surface and the live chord into the pads. `getStateInform
 `setStateInformation` persist the APVTS via `okstudio::state`, plus the captured chord
 pads as an extra state tree (notes, name, lock, the generator metadata a pad carries,
 and the Markov `numeral` when it has one),
-so the whole setup saves with the DAW session. Pads saved before the generator existed
+so the whole setup saves with the DAW session. Before the kit's loader sees the tree,
+`setStateInformation` drops any parameter entry whose `value` is not a finite number
+(2026-11-02): a damaged file saying `nan` parsed to NaN and got through the range's clamp,
+leaving a float parameter at NaN and an int or bool one at 0 rather than its default; an
+absent entry is reset to the default, which is the right answer for an unreadable one too.
+The kit's `okstudio::state::load` is the shared place for that guard and does not have it yet. Pads saved before the generator existed
 load fine: the missing metadata reads back as -1, which means "hand-captured", and the
 suggestion menu works the chord out from its notes instead.
 
