@@ -13,6 +13,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Claude Code's per-machine MCP wiring. It names the keys-mcp.exe shim by absolute path, so it
+# is this machine's and not the repo's; docs/MCP.md says how to wire the shim anywhere.
+.mcp.json
+
 # Python bytecode. run.py is a module as well as a script (tooling imports it to reuse
 # close_running and find_cmake), so importing it leaves a cache directory behind.
 __pycache__/
@@ -32,3 +36,11 @@ datasets/*.parquet
 datasets/*.pkl
 datasets/*.zip
 datasets/*.jsonl
+# Every downloaded corpus lives in its own subfolder; only README.md is tracked.
+datasets/*/
+datasets/*.tar.gz
+datasets/*.tar.xz
+datasets/*.tar.bz2
+datasets/*.txt
+datasets/*.json
+datasets/*.lab

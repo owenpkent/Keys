@@ -3,9 +3,14 @@
 ## About the Owner
 
 Owen is a wheelchair user with muscular dystrophy who produces music with a single
-mouse. Typing is hard — be proactive, make decisions, offer A/B/C choices so he can
-answer with one letter. Mouse-only operability is not a preference here, it is the
-product.
+mouse. Typing costs him real effort and the pointer is cheap, so he works mouse-first.
+Be proactive: make the call yourself on small or reversible things instead of asking for
+confirmation. Ask only when the answer changes the outcome, and then end the turn with 2
+to 4 lettered options (A/B/C), marking the one you recommend, so he can answer with one
+character; never end on an open question that needs typed prose. Keep replies short. His
+prompts are often dictated, so names may be mistranscribed: check a plausible proper
+noun against the repo before treating it as something new. Mouse-only operability is not
+a preference here, it is the product.
 
 ## What This Is
 
@@ -98,12 +103,14 @@ reasoning is one search away.
   chip prints. Pure, and read from both threads, which is why it is one header and not two copies.
 - `NoteMath.h` - which MIDI note a drawn key sends: the scale-lock snap, then the octave.
 - `Chords.h` - naming a chord from its sounding notes. `ChordSuggest.h` - where one could go next.
+  `ChordSymbol.h` - the other way: a typed symbol (`Cmaj7`, `Bb/D`) to notes and the name a pad
+  prints, for the Pads bar's chord entry field (2026-11-02).
 - `ScaleModes.h` - the modes generation reads. Not the kit's scale table: it answers a quality
   per degree as well as membership.
 - `ChordGen.h` - the weighted pool, tiered by scale compliance. `ChordSources.h` - circle of
   fifths, Neo-Riemannian PLR, progression templates, negative harmony, planing, and
   `applyVoiceLeading`. `ChordMarkov.h` with `MarkovData.h` - the bigram chain and its 88
-  mood-tagged progressions. `ChordLibrary.h` - 355 named progressions stored as roman numerals.
+  mood-tagged progressions. `ChordLibrary.h` - 358 named progressions stored as roman numerals.
 - `ChordVoicing.h` - the three voicing passes (`applyMajorMinorBias`, `fitVoicing`,
   `applyVoicingPipeline`), pure, so a test reaches them without a live processor.
 - `ChordNumerals.h` - the roman numeral a card prints, in one place rather than one per surface.
@@ -140,7 +147,8 @@ reasoning is one search away.
 `KeysHostEditor` owns the window and the instrument chip's menu. `src/mcp/KeysMcp.{h,cpp}`
 registers the tools on the kit's MCP server. `tests/` holds `ArpTests`, `StateTests`,
 `LayoutTests`, `TakeTests`, `ChordSourceTests`, `ChordLibraryTests`, `MarkovTests` and
-`McpTests`, all run from `KeysTests.cpp`.
+`McpTests`, all run from `KeysTests.cpp`, plus `FuzzTests.cpp`, the seeded invariant tester the
+nightly runs (`docs/BUILD.md`, "Nightly fuzzing").
 
 ### The rules
 
