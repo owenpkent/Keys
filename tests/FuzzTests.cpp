@@ -317,7 +317,11 @@ void fuzzChordGen(juce::Random& r)
 // second note-on for one that is, and nothing still held once the chord is gone and Latch is off.
 struct ArpOutputState
 {
-    std::map<int, int> active; // pitch -> sounding count
+    // (channel, pitch) -> sounding count. Keyed by channel as well as pitch because the engine
+    // keeps a held note's channel and ties per channel: the same pitch on two channels is two
+    // voices to a synth, not one.
+    std::map<int, int> active;
+    static int key(const juce::MidiMessage& m) { return m.getChannel() * 128 + m.getNoteNumber(); }
 };
 
 void checkArpBlock(const juce::MidiBuffer& out, int numSamples, ArpOutputState& st, const juce::String& where)
@@ -343,14 +347,16 @@ void checkArpBlock(const juce::MidiBuffer& out, int numSamples, ArpOutputState& 
             const int n = m.getNoteNumber();
             check(n >= 0 && n <= 127, where + ": note-on out of range " + juce::String(n));
             check(m.getVelocity() > 0, where + ": note-on with velocity 0 for " + juce::String(n));
-            check(st.active[n] == 0, where + ": second note-on for a sounding " + juce::String(n));
-            st.active[n] += 1;
+            check(st.active[ArpOutputState::key(m)] == 0, where + ": second note-on for a sounding " + juce::String(n)
+                                                              + " on channel " + juce::String(m.getChannel()));
+            st.active[ArpOutputState::key(m)] += 1;
         }
         else if (m.isNoteOff())
         {
             const int n = m.getNoteNumber();
-            check(st.active[n] > 0, where + ": note-off for a silent " + juce::String(n));
-            st.active[n] -= 1;
+            check(st.active[ArpOutputState::key(m)] > 0, where + ": note-off for a silent " + juce::String(n)
+                                                             + " on channel " + juce::String(m.getChannel()));
+            st.active[ArpOutputState::key(m)] -= 1;
         }
     }
 }
@@ -579,17 +585,20 @@ void fuzzArp(juce::Random& r)
     check(e.heldNoteCount() == 0, "the engine still holds " + juce::String(e.heldNoteCount())
                                       + " notes after every note-off with Latch off");
 
-    // Whatever the drain did not finish, a transport jump must flush: that is the engine's own
-    // rule for owed note-offs.
+    // Whatever the drain did not finish, a flush must end: the engine flushes every owed
+    // note-off on a transport jump in Sync, and on a change of rate mode in either, so both are
+    // asked for. A gate can legitimately outlast the drain (16 bars at 20 bpm, doubled), which is
+    // why the drain alone is not the test.
     clock.playing = true;
     clock.hasPpq = true;
     clock.ppq += 1000.0;
+    p.rateFree = ! p.rateFree;
     p.enabled = false;
     juce::MidiBuffer out;
     e.process(p, clock, 512, {}, out);
     checkArpBlock(out, 512, st, "flush block");
-    for (const auto& [note, count] : st.active)
-        check(count == 0, "note " + juce::String(note) + " still sounding after the chord was released and the clock jumped");
+    for (const auto& [key, count] : st.active)
+        check(count == 0, "note " + juce::String(key % 128) + " on channel " + juce::String(key / 128) + " still sounding after the chord was released and the clock jumped");
 }
 
 // ---------------------------------------------------------------------------------------------

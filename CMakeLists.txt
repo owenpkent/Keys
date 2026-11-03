@@ -161,24 +161,27 @@ target_link_libraries(Keys_tests PRIVATE okstudio_kit juce::juce_audio_basics Ke
 # any one test: heap-allocating the new engines would have left the next person to add a
 # beginTest block to rediscover this from the same symptomless crash. Nothing about the product
 # needs it - in the plugin an ArpEngine is a member of the processor, never a local.
+# 16 MB since 2026-11-02, when the engine's pending queue grew from 96 to 256 hits and the same
+# frame tipped over 8 MB the same silent way.
 if(MSVC)
-  target_link_options(Keys_tests PRIVATE /STACK:8388608)
+  target_link_options(Keys_tests PRIVATE /STACK:16777216)
 endif()
 add_test(NAME Keys_tests COMMAND Keys_tests)
 
 # Randomised invariant tests (tests/FuzzTests.cpp): a seeded generator drives the pure cores and
 # the state loader with inputs nobody wrote a case for. CI builds it so it cannot rot; the nightly
 # workflow (.github/workflows/fuzz-nightly.yml) runs it on a fresh seed with a large budget and
-# prints the reproducer. Not registered with ctest yet: its first run found two bugs (see
-# "Nightly fuzzing" in docs/BUILD.md), and until they are fixed a fixed-seed smoke would turn
-# every pull request red for a reason it did not cause. Once they are, add
-# `add_test(NAME Keys_fuzz COMMAND Keys_fuzz --iterations 300)` here.
+# prints the reproducer. Registered with ctest on a fixed seed and a small budget, so a pull
+# request is judged on a fixed set of inputs: its first run found two bugs (see "Nightly fuzzing"
+# in docs/BUILD.md), and it was kept out of ctest until both were fixed, because a fixed-seed
+# smoke that is red on day one turns every pull request red for a reason it did not cause.
 add_executable(Keys_fuzz tests/FuzzTests.cpp)
 target_include_directories(Keys_fuzz PRIVATE src)
 target_link_libraries(Keys_fuzz PRIVATE okstudio_kit juce::juce_audio_basics Keys)
 if(MSVC)
   target_link_options(Keys_fuzz PRIVATE /STACK:8388608)
 endif()
+add_test(NAME Keys_fuzz COMMAND Keys_fuzz --iterations 300)
 # AddressSanitizer on the fuzz binary alone (the nightly turns it on). Only this translation
 # unit is instrumented, and that is where the header-only cores it exercises are compiled, so a
 # bad read in ArpEngine or the chord parser is caught where it happens instead of showing up as

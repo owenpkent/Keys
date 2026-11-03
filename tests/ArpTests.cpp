@@ -492,6 +492,53 @@ public:
                    "and so does 4");
         }
 
+        // **Emission order is time order** (2026-11-02, found by the fuzz harness). A clocked
+        // follower spreads a step's ratchet sub-hits over the source's step length; when the
+        // source's next fire comes sooner than that, the new step used to reach emitHit *after*
+        // sub-hits that sound later than it, and its close-what-you-land-on pass put their
+        // note-off before their note-on. Every hit now goes through the pending queue, drained
+        // by time before each step and at the block's end, so the off is always after the on.
+        beginTest("a note-off never precedes its note-on, even when the next step comes before this one's sub-hits");
+        {
+            ArpEngine b;
+            b.prepare(sr);
+            ArpEngine::LineRecord source;
+            source.stepSamples = 6000.0; // the source says its steps are 6000 apart...
+            source.firedCount = 2;       // ...and then fires twice 100 samples apart
+            source.firedAt[0] = 0;
+            source.firedAt[1] = 100;
+            source.sounding = true;
+            for (int s = 0; s < 8; ++s)
+                b.lanes.value[ArpEngine::laneRatchet][s].store(4); // sub-hits at 0, 1500, 3000, 4500
+            auto bp = lp;
+            bp.follow = &source;
+            bp.clockFollow = true;
+            bp.gate = 100;
+            juce::MidiBuffer out;
+            b.process(bp, clock, block, chordOn({ 60 }), out); // one pitch, so every hit ties
+            std::map<int, int> sounding;
+            bool ordered = true;
+            int ons = 0;
+            for (const auto meta : out)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOn())
+                {
+                    ++ons;
+                    sounding[m.getNoteNumber()] += 1;
+                }
+                else if (m.isNoteOff())
+                {
+                    if (sounding[m.getNoteNumber()] <= 0)
+                        ordered = false;
+                    else
+                        sounding[m.getNoteNumber()] -= 1;
+                }
+            }
+            expect(ordered, "no note-off arrives for a pitch that is not sounding");
+            expectEquals(ons, 8, "both steps' four sub-hits all sound");
+        }
+
         // **Phase three of the line bus** (2026-09-02): CLOCK. B stops reading its own clock
         // and steps once per step A fires, so A's rhythm - swung, thinned, ratcheted - becomes
         // B's, and B's own Rate, Swing, Dot, Tuplet and Anchor are never consulted at all.
