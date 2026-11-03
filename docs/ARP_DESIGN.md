@@ -633,6 +633,18 @@ math was adversarially refuted as a pattern to copy. Requirements:
   wrong is bounded to one step. A ratchet holds only its last sub-hit. `releaseLegato` is the one
   exit for the one hang this makes possible - it runs when the flag goes off and in the
   bypassed / keys-up branch, since a held note waits for a next step and there is none.
+- **Every hit leaves through the pending queue, drained in time order** (2026-11-02, from the
+  fuzz harness's first night). `emitHit`'s close-what-you-land-on pass places each off from the
+  offset of the hit it is handling, so a hit reaching it out of time order could close a note
+  whose own on sat later in the buffer: an off the synth drops, an on nothing ends. Four routes
+  did that (a CLOCKed follower's sub-hits spread past the source's next fire, Late pushing a
+  sub-hit past the next step, two humanised sub-hits of one pitch swapping, Legato's release
+  landing before a held note's own on). Now `emitStepHits` parks every hit, `firePendingBefore`
+  sorts by time then arrival and drains before each step and at the block's end, `Active::onAt`
+  floors every off at its note's own on, and a hit with no tracking slot is dropped rather than
+  sounded untracked. The two passages below that say out-of-order hits are the one thing the
+  rule cannot survive predate this; they are still true of `emitHit` alone, and the queue is
+  what spares it.
 - The regression tests cover uneven block sizes, since a host may change `numSamples` between
   calls.
 - Track owed note-offs across block boundaries (ratchets, ties, pattern-length
@@ -847,7 +859,8 @@ the 2026-08-19 section near the top of this file) - the knob still never rushes 
 the grid, but it can now land either louder or quieter than the face's own level. **The nudge is clamped to 40% of the gap to the next sub-hit**,
 because unbounded it can carry one ratchet sub-hit past the next, and two hits of one pitch
 arriving out of order is the one thing `emitHit`'s close-what-you-land-on rule cannot
-survive. At 0 the engine draws no random numbers at all, which is also what keeps the older
+survive (since 2026-11-02 the pending queue drains by time so it never has to; the clamp stays
+because a ratchet that crosses itself is also not a ratchet). At 0 the engine draws no random numbers at all, which is also what keeps the older
 tests deterministic.
 
 ### Four more lanes (the same round)
@@ -859,7 +872,7 @@ saved session.
 | Lane | Range | Notes |
 |------|-------|-------|
 | Transpose | -7..+7 | **Scale degrees.** Everyone else's transpose lane is chromatic, which makes it a machine for leaving the key; the degree version reuses the same `shiftByDegrees` + scale mask the Distance control brought in, and a chromatic mask makes it chromatic again for free. |
-| Late | 0..90% | Per-step delay, Cthulhu's lane and Kirnu's Shift. **Late only.** An early half would mean two steps could swap order, and out-of-order hits of one pitch are the one thing `emitHit`'s close-what-you-land-on rule cannot survive. Swing already offers early. |
+| Late | 0..90% | Per-step delay, Cthulhu's lane and Kirnu's Shift. **Late only.** An early half would mean two steps could swap order, and out-of-order hits of one pitch were the one thing `emitHit`'s close-what-you-land-on rule could not survive (the time-ordered drain of 2026-11-02 removes that reason; the musical one stands). Swing already offers early. |
 | Harmony | 0..7 | A second voice that many *sequence entries* above the note played, so it stays inside the chord; running off the top adds an octave rather than folding onto a note already sounding. Cthulhu's harmony. |
 | Chord | 0..12 | The step plays the chord in that arp **slot** instead of a note of the held set. Kirnu Cream's Chordmem, except the memories are the twelve slots Keys already has, so a progression can be drawn into a lane without a second copy of it. |
 

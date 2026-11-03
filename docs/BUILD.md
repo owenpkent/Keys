@@ -236,19 +236,28 @@ cmake --build build --config Release --target Keys_fuzz
 .\build\Release\Keys_fuzz.exe --iterations 20000    # about half a minute
 ```
 
-**Two findings from the first run (2026-11-02), both open:**
+**Two findings from the first run (2026-11-02), both fixed the same day:**
 
-- `Keys_fuzz --target arp --seed 24301 --case 21`: with CLOCK on, a follower's ratchet sub-hits
-  are placed across the source's step length, but the source's fires can be closer than that (a
-  Late lane at 90% then a step at 0%). The next fire then arrives *before* sub-hits already
-  emitted, and `emitHit`'s close-what-you-land-on pass (the tie branch, and Legato's release)
-  emits their note-off at a sample *earlier* than their note-on. Downstream that is an off the
-  synth ignores followed by an on nothing ever ends: a stuck note.
-- `Keys_fuzz --target state --seed 24301 --case 302`: a parameter attribute holding `NaN` in the
-  session XML loads as a NaN parameter value. Nothing clamps it on the way in.
+- `Keys_fuzz --target arp --seed 24301 --case 21`: a note-off before its note-on, a stuck note
+  downstream. `emitHit` closes whatever a hit lands on top of and works out *where* from the
+  offset it is given, so any hit reaching it out of time order could close a note whose own
+  note-on sat later in the buffer. Four ways that happened: a clocked follower's ratchet sub-hits
+  spread over the source's step length while the source's next fire came sooner; the Late lane
+  pushing a sub-hit past the next step; two humanised sub-hits of one pitch drawing lateness in
+  the wrong order; and a legato-held note released by a hit on another channel before the held
+  note's own on. The fix (`fix/arp-emit-order`): every hit goes through the pending queue, which
+  is drained by time before every step and at the block's end; a note remembers the sample its
+  on went out at and no off for it is ever placed earlier; and a hit with no tracking slot left
+  is dropped rather than sounded untracked. Regression test in `ArpTests`; 350000 fuzz cases
+  across seven seeds clean.
+- `Keys_fuzz --target state --seed 24301 --case 302`: a parameter attribute holding `NaN` loads
+  as a NaN parameter value (or 0 for an int or bool, where NaN rounds to 0), never its default.
+  The fix (`fix/state-nan-params`, off `main`): `setStateInformation` drops any parameter entry
+  whose value is not finite before the APVTS sees it, and the absent-parameter path resets it.
 
-Until those are fixed, `Keys_fuzz` is not registered with `ctest`, since a fixed-seed smoke would
-turn every pull request red for a reason it did not cause (`CMakeLists.txt` says where to add it).
+With both fixed, `Keys_fuzz` is registered with `ctest` on its fixed seed (300 cases a target), so
+every pull request runs the same few seconds of inputs; the nightly is still where new ones come
+from.
 
 ## CMake options
 

@@ -7,6 +7,32 @@ so the top of the file is the most recent round and the bottom is the oldest thi
 standing. A superseded claim is kept where it sits and marked there rather than deleted, because
 knowing why a rule existed is what stops it being reinvented.
 
+**The arp's MIDI leaves in time order, and the harness found the four ways it did not
+(2026-11-02).** The first nightly's one engine finding, fixed the same day on
+`fix/arp-emit-order`. `emitHit` closes whatever a hit lands on top of - the tie branch for the
+same pitch, the due branch for anything already owed, Legato's release - and places each off
+from the offset it is given, which is only right when hits reach it in the order they sound. Four
+routes broke that, found one at a time by replaying cases: a CLOCKed follower's ratchet sub-hits
+spread over the source's step length while the source fired again sooner; the Late lane pushing a
+sub-hit past the next step in the plain path; two humanised sub-hits of one pitch at a fast rate
+drawing lateness in the wrong order; and Legato's release landing before a held note's own on,
+when a hit on another channel released it. Each put a note-off *before* the note-on it closed,
+which a synth drops, leaving an on nothing ends. **The fix is one rule rather than four
+patches**: every hit goes into the pending queue (which already existed for sub-hits past the
+block's end) and `firePendingBefore` drains it by time, then by arrival, before every step and at
+the block's end; an `Active` entry remembers the sample its on went out at (`onAt`) and neither
+the tie branch nor the legato release places an off earlier than that; and a hit with no tracking
+slot left is dropped rather than sounded untracked, since the old edge-of-block fallback was
+unseen by the close pass and let a second hit of the pitch stack on it. `maxPending` went 96 to
+256 because every hit now passes through, and `Keys_tests`' stack 8 to 16 MB for the reason the
+8 MB entry below records. **Two things the harness itself got wrong on the way**, both the
+engine's real domain and both now in the harness: notes are per channel as well as pitch, and a
+gate can outlast any drain, so the final check asks for the engine's own flush. 350000 cases over
+seven seeds clean after; the regression test in `ArpTests` fails before. The Late lane's
+"Late only, never early" rationale and the H.Time nudge's 40% clamp in `ARP_DESIGN.md` were
+both written to keep hits from crossing because the engine could not survive it; the queue means
+it now can, and they stay for the musical reasons they also gave.
+
 **Nightly fuzzing, like the other repos (2026-11-02).** Owen: *"need nightly fuzzing like other
 repos"*. alpha-osk runs its property tests nightly on an unfixed Hypothesis seed, openmouse and
 polaris run Jazzer; the shape they share is the one Keys takes: **the normal suite is judged on
@@ -23,10 +49,12 @@ parameter cannot reach, a latched chord expected to let go when Latch turns off 
 Hold off's job, a clocked source firing two steps on one sample). Each was checked against the
 code before being called a finding, and the ones that survived are the two the harness found on
 its first in-domain run: a stuck note under CLOCK when a follower's ratchet sub-hits outlive the
-source's next fire, and a `NaN` parameter surviving a damaged session load. Both are open and
-recorded in `docs/BUILD.md`. And **`Keys_fuzz` is built by CI but not registered with `ctest`**
-until those two are fixed: a fixed-seed smoke that is red on day one would turn every pull request
-red for a reason it did not cause, the one thing the shared shape exists to prevent.
+source's next fire, and a `NaN` parameter surviving a damaged session load. Both were fixed the
+same day (the entry above, and `fix/state-nan-params` off `main`) and are recorded in
+`docs/BUILD.md`. And **`Keys_fuzz` was built by CI but not registered with `ctest`** until those
+two were fixed: a fixed-seed smoke that is red on day one would turn every pull request red for a
+reason it did not cause, the one thing the shared shape exists to prevent. *(Superseded the same
+day: with both fixed it is registered, 300 cases a target.)*
 
 **A chord you can type (2026-11-02).** Owen: *"it would be cool if you could type the chord you
 wanted. example, Cmaj7"*. A text field on the Pads bar beside Keep arp, with an **Add** button

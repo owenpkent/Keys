@@ -5,6 +5,20 @@ All notable changes to Keys are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed: the arpeggiator could put a note-off before its note-on, leaving a stuck note
+
+Four routes, one cause: a hit reaching `emitHit` out of time order could close a note whose own
+note-on sat later in the buffer, and the synth, ignoring an off for a note it is not playing,
+then held the on for good. The routes: a CLOCKed follower's ratchet sub-hits spread over the
+source's step length while the source fired again sooner; the Late lane pushing a sub-hit past
+the next step; two humanised sub-hits of one pitch at a fast rate drawing lateness in the wrong
+order; and Legato's release landing before a held note's own on. Every hit now goes through the
+pending queue, drained by time before each step and at the block's end; a sounding note remembers
+where its on went out and no off for it is placed earlier; and a hit with no tracking slot left is
+dropped rather than sounded untracked (it used to end at the block's edge, unseen by the close
+pass, so a second hit of the pitch stacked on it). Found by the fuzz harness on its first run;
+`Keys_fuzz` now also runs under `ctest` on its fixed seed.
+
 ### Added: nightly fuzzing
 
 `Keys_fuzz` (`tests/FuzzTests.cpp`), a seeded randomised invariant tester over the pure cores

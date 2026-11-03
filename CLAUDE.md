@@ -200,6 +200,16 @@ that was agreed; a lane wanting more state than that needs a different design, n
 cache. (DECISIONS.md: **Three lanes appended, and one of them is not stateless**, and
 **`arpLegato`, appended, per line, default off. PARAMETER LAYOUT CHANGE.**)
 
+**The arp's MIDI leaves through one queue, in time order.** `emitStepHits` never emits a hit
+on the spot: every hit is parked in `pending`, and `firePendingBefore` drains it sorted by time
+then arrival, before every step fires and at the block's end. That is what makes `emitHit`'s
+close-what-you-land-on pass correct, because it places each note-off from the offset of the hit
+it is handling and a hit arriving out of order would put an off before the on it closes, which a
+synth drops. An `Active` entry carries `onAt`, and no off for it is ever placed earlier. A hit
+with no tracking slot left is dropped, not sounded untracked. Anything new that emits a note from
+the engine goes through `pending`, never straight into `out`. (DECISIONS.md: **The arp's MIDI
+leaves in time order, and the harness found the four ways it did not**)
+
 **Track MIDI is held aside in `processBlock`, not gated in `runArpLines`.** With the global
 `arpTrackMidi` off, the incoming stream is moved into `trackMidiAside` before the collector
 merges and put back after the lines have run, note-offs included: by the time `runArpLines` sees

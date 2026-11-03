@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <limits>
@@ -1115,7 +1116,7 @@ private:
     // closeHeld and fireStep's lookahead). While set, `samplesLeft` is not a due time - neither
     // retireDue nor emitHit's due branch may end the note, and advanceBlock leaves it alone -
     // so a note held for an hour cannot count its way into the negative.
-    struct Active { int note; int channel; int samplesLeft; bool legato; };
+    struct Active { int note; int channel; int samplesLeft; bool legato;  int onAt; };
     // A ratchet sub-hit whose fire time landed past the end of the block that decided it.
     // `at` is in the same frame as Active::samplesLeft and is rebased by the same
     // advanceBlock(); see the contract note below.
@@ -1123,7 +1124,7 @@ private:
     // emitHit directly: a step's first hit closes what Legato was holding *when it fires*, and
     // if that hit is parked for a later block the release has to wait with it.
     struct PendingHit { int note; int channel; float velocity; int at; int durSamples;
-                        bool hold; bool closeHeld; };
+                        bool hold; bool closeHeld; unsigned seq; };
 
     double stepLengthBeats(const Params& p) const
     {
@@ -2330,11 +2331,21 @@ private:
                     record.lastNote = note;
                     record.lastVelocity = juce::jmax(1, juce::roundToInt(vel * 127.0f));
                 }
-                if (on < numSamples)
-                    emitHit(note, hit.chan, vel, on, durSamples, numSamples, out, hold, closeHeld);
-                else if (pendingCount < maxPending)
+                // **Every hit is parked, never emitted on the spot** (2026-11-02). Emission order
+                // has to be time order, because emitHit closes whatever it lands on top of and
+                // works out *where* from the offset it is given: a note-off it emits for a hit
+                // whose own note-on sits later in the buffer lands before that note-on, the
+                // synth drops the off and the on is never ended. Three ways a later hit used to
+                // reach emitHit first, all found by the fuzz harness: a clocked follower's
+                // ratchet sub-hits spread over the source's step length while the source's next
+                // fire came sooner; the Late lane pushing a sub-hit past the next step; and two
+                // humanised sub-hits of one pitch drawing lateness in the wrong order at a fast
+                // rate. The pending queue already existed for sub-hits past the block's end, and
+                // firePendingBefore drains it before every step and at the block's end, so
+                // sending every hit through it and draining by time is the whole fix.
+                if (pendingCount < maxPending)
                     pending[(size_t) pendingCount++] = { note, hit.chan, vel, on, durSamples,
-                                                         hold, closeHeld };
+                                                         hold, closeHeld, pendingSeq++ };
                 // else: out of carry slots, and the hit is dropped rather than mistimed. The
                 // capacity is a chord's worth of ratchets over several steps; a step's carry is
                 // drained before the next step fires, so nothing that fits reaches it.
@@ -2466,12 +2477,29 @@ private:
             }
             else if (a.note == note && a.channel == channel)
             {
-                out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, on - 1));
+                // Just before the retrigger - but never before the note-on it is closing. Two
+                // hits of one pitch can land on one sample (Stray moving two notes onto one, a
+                // harmony voice meeting its source), and `on - 1` then sat before the first
+                // note-on, an off the synth drops and an on nothing ends (2026-11-02, from the
+                // fuzz harness). At the same sample the buffer keeps insertion order, so the off
+                // still sits between the two ons.
+                out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, juce::jmax(a.onAt, on - 1)));
                 a = active[(size_t) --activeCount];
             }
             else
                 ++i;
         }
+
+        // Out of tracking slots: the hit is dropped, on and off together (2026-11-02). It used to
+        // sound and end at the edge of the block instead, untracked - and untracked is the
+        // problem, because the close loop above could not see it, so a second hit of the same
+        // pitch in the same block stacked a second note-on with nothing between them. A voice
+        // this engine cannot account for is a voice it must not start. Reachable in earnest: a
+        // sixteen-note chord with two harmony voices at a fast rate and a long gate is past 128
+        // active notes in two steps.
+        if (activeCount >= maxActive)
+            return;
+
         out.addEvent(juce::MidiMessage::noteOn(channel, note, vel), on);
 
         // Legato's release: every note it was holding ends one sample *after* this note-on -
@@ -2489,7 +2517,23 @@ private:
                 auto& a = active[(size_t) i];
                 if (a.legato)
                 {
-                    out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note), juce::jmax(0, offAt));
+                    // ...unless this very step strikes the held pitch again at this sample or
+                    // the next: then the overlap would stack two note-ons of one pitch, and the
+                    // held one ends *at* this hit instead, inserted after this note-on and before
+                    // that one (2026-11-02, from the fuzz harness). The drain is in time order, so
+                    // the hits still to come are the queue from `drainFrom` on.
+                    bool restruck = false;
+                    for (int j = drainFrom; j < pendingCount && pending[(size_t) j].at <= on + 1; ++j)
+                        if (pending[(size_t) j].note == a.note && pending[(size_t) j].channel == a.channel)
+                            restruck = true;
+                    // Never before the held note's own note-on: its on can sit later in this
+                    // block than this release point (a different-channel hit closing it), and an
+                    // off ahead of that on is dropped by the synth, the held note then never ends
+                    // (2026-11-02, the same fuzz harness, one in ~40000). At or after onAt the
+                    // buffer's insertion order keeps the off after the on already emitted there.
+                    const int at = restruck ? on : offAt;
+                    out.addEvent(juce::MidiMessage::noteOff(a.channel, a.note),
+                                 juce::jlimit(0, juce::jmax(0, numSamples - 1), juce::jmax(a.onAt, at)));
                     a = active[(size_t) --activeCount];
                 }
                 else
@@ -2501,7 +2545,6 @@ private:
         // the frame active[] is kept in all the way through process(); advanceBlock()
         // rebases the survivors once, at the very end.
         const int offAt = on + durSamples;
-        if (activeCount < maxActive)
         {
             // Park it whatever its length. Emitting a short note's off straight into the
             // buffer looks like a harmless shortcut and is not: it hides the note from
@@ -2515,14 +2558,7 @@ private:
             // gate (the due branch) or, if it is a tie, pulls it back under the retrigger
             // (the tie branch), and retireDue() at the end of process() emits whatever is
             // still owed inside this block.
-            active[(size_t) activeCount++] = { note, channel, hold ? 0 : offAt, hold };
-        }
-        else
-        {
-            // Out of tracking slots: end it no later than the edge of this block, rather
-            // than stamping an event past the end of the buffer.
-            out.addEvent(juce::MidiMessage::noteOff(channel, note),
-                         juce::jmax(0, juce::jmin(offAt, numSamples - 1)));
+            active[(size_t) activeCount++] = { note, channel, hold ? 0 : offAt, hold, on };
         }
     }
 
@@ -2532,13 +2568,24 @@ private:
     // rule in emitHit depends on.
     void firePendingBefore(int limit, int numSamples, juce::MidiBuffer& out)
     {
+        // By time, then by arrival: a step's hits are parked in k order but humanised apart, and
+        // emitHit's close-what-you-land-on pass is only right when it sees them in the order
+        // they sound. std::sort over a fixed array of PODs allocates nothing; the sequence
+        // number is the tie-break that keeps equal offsets in arrival order.
+        std::sort(pending.begin(), pending.begin() + pendingCount, [](const PendingHit& a, const PendingHit& b)
+        {
+            return a.at != b.at ? a.at < b.at : a.seq < b.seq;
+        });
         int kept = 0;
         for (int i = 0; i < pendingCount; ++i)
         {
-            const auto& h = pending[(size_t) i];
+            const auto h = pending[(size_t) i]; // a copy: emitHit reads the queue past this entry
             if (h.at < limit)
+            {
+                drainFrom = i + 1;
                 emitHit(h.note, h.channel, h.velocity, h.at, h.durSamples, numSamples, out,
                         h.hold, h.closeHeld);
+            }
             else
                 pending[(size_t) kept++] = h; // shift down: pending stays in time order
         }
@@ -2576,8 +2623,11 @@ private:
     void advanceBlock(int numSamples) noexcept
     {
         for (int i = 0; i < activeCount; ++i)
+        {
             if (! active[(size_t) i].legato) // a held note has no due time to rebase
                 active[(size_t) i].samplesLeft -= numSamples;
+            active[(size_t) i].onAt -= numSamples;
+        }
         // Carried ratchet hits live in the same frame and rebase with it. firePendingBefore
         // has already fired everything below numSamples, so every survivor stays >= 0.
         for (int i = 0; i < pendingCount; ++i)
@@ -2607,9 +2657,13 @@ private:
     // Sub-hits carried into a later block. Sized for the worst case the Chord shape makes
     // reachable - every note of a spread chord ratcheting at once - rather than the single
     // note's three the old sixteen covered.
-    static constexpr int maxPending = 96;
+    // 256 since 2026-11-02, when every hit started passing through here: a spread chord of
+    // sixteen with two harmony voices ratcheting four times is 192 in one step.
+    static constexpr int maxPending = 256;
     std::array<PendingHit, maxPending> pending {};
     int pendingCount = 0;
+    unsigned pendingSeq = 0; // arrival order, the drain's tie-break
+    int drainFrom = 0;       // while draining: the first queue entry not yet emitted
     std::array<SeqEntry, maxHeld * 4> seq {};
     int seqCount = 0;
     long long stepCounter = 0;

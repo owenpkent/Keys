@@ -718,7 +718,12 @@ otherwise leave a gap - Density, the Chance lane, a mute, a rest, a failed Chain
 instead of ending it at its gate: the note before a skip stays open and closes one sample after
 the next fired step's note-on (`emitHit`'s `closeHeld`), the opposite order from the tie branch
 on purpose, since a tie is the same pitch and must go off first while this is a different pitch
-that must not gap. It works by looking one step ahead: `fireStep` asks `prerollNext` the same
+that must not gap - never earlier than the held note's own `onAt`, though, and at the new hit's
+own sample when that same step strikes the held pitch again (2026-11-02). Both closes, and the
+due branch, are only right because hits reach `emitHit` in time order: since 2026-11-02 every hit
+is parked in `pending` and `firePendingBefore` drains it sorted by time before each step and at
+the block's end, where before a sub-hit or a late hit could be emitted ahead of a step that
+sounded sooner and have its off placed before its on. It works by looking one step ahead: `fireStep` asks `prerollNext` the same
 four questions (chain, mute, rest, chance) one step early and keeps the chance draw, so
 `chanceFails` hands the identical answer back when that step actually arrives. `Active::legato`
 marks a held entry - no due time, skipped by the ordinary due path - and `releaseLegato` closes
